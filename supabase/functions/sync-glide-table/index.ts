@@ -66,9 +66,6 @@ async function pickPrimaryKey(row: GlideRow, field?: string): Promise<string> {
     if (typeof value === "boolean") return value ? "true" : "false";
   }
 
-  const rid = row["$rowID"];
-  if (typeof rid === "string" && rid.length > 0) return rid;
-
   const candidates = ["rowID", "rowId", "id", "_rowId", "_id"];
   for (const candidate of candidates) {
     const value = row[candidate];

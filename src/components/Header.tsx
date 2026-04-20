@@ -12,9 +12,18 @@ export function Header() {
     });
   }, []);
 
+  const isActive = (path: string) => {
+    if (path === "/") {
+      return (
+        location.pathname === "/" || location.pathname.startsWith("/tables")
+      );
+    }
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+  };
+
   const linkClass = (path: string) =>
     `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-      location.pathname === path || (path === "/" && location.pathname.startsWith("/tables"))
+      isActive(path)
         ? "bg-indigo-100 text-indigo-700"
         : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
     }`;
@@ -31,6 +40,9 @@ export function Header() {
           </Link>
           <Link to="/logs" className={linkClass("/logs")}>
             Sync Log
+          </Link>
+          <Link to="/dashboard" className={linkClass("/dashboard")}>
+            Dashboard
           </Link>
         </div>
         <div className="flex items-center gap-4">

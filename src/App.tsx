@@ -5,6 +5,7 @@ import { Login } from "./pages/Login.tsx";
 import { Tables } from "./pages/Tables.tsx";
 import { TableDetail } from "./pages/TableDetail.tsx";
 import { SyncLog } from "./pages/SyncLog.tsx";
+import { Dashboard } from "./pages/Dashboard.tsx";
 
 export function App() {
   return (
@@ -21,6 +22,7 @@ export function App() {
                   <Route index element={<Tables />} />
                   <Route path="tables/:glideTableId" element={<TableDetail />} />
                   <Route path="logs" element={<SyncLog />} />
+                  <Route path="dashboard" element={<Dashboard />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </main>
