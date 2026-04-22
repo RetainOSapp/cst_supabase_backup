@@ -8,7 +8,16 @@ import {
   useState,
 } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ActiveClientsKpi } from "../components/dashboard/kpis/ActiveClientsKpi.tsx";
+import { BackEndClientsKpi } from "../components/dashboard/kpis/BackEndClientsKpi.tsx";
+import { ChurnPercentageKpi } from "../components/dashboard/kpis/ChurnPercentageKpi.tsx";
+import { FrontEndClientsKpi } from "../components/dashboard/kpis/FrontEndClientsKpi.tsx";
+import { OffBoardedClientsKpi } from "../components/dashboard/kpis/OffBoardedClientsKpi.tsx";
+import { RetainedClientsKpi } from "../components/dashboard/kpis/RetainedClientsKpi.tsx";
+import { RetentionPercentageKpi } from "../components/dashboard/kpis/RetentionPercentageKpi.tsx";
+import { UpForRenewalKpi } from "../components/dashboard/kpis/UpForRenewalKpi.tsx";
 import { supabase } from "../lib/supabase.ts";
+import { type DashboardKpiSqlParams } from "../lib/dashboardKpiSql.ts";
 
 const MONTH_OPTIONS_COUNT = 25;
 
@@ -18,7 +27,50 @@ const SECONDARY_ASSIGNEE_QUERY_KEY = "secondaryAssigneeId";
 const PROGRAM_QUERY_KEY = "program";
 const DETAIL_PAGE_SIZE = 25;
 
-type KpiDetailKey = "active" | "front-end" | "back-end";
+type KpiDetailKey =
+  | "active"
+  | "front-end"
+  | "back-end"
+  | "off-boarded"
+  | "retained"
+  | "churned"
+  | "renewing"
+  | "active-renewing";
+
+interface DashboardRpcFilterParams {
+  p_company_id: string;
+  p_csm_id: string | null;
+  p_secondary_assignee_id: string | null;
+  p_program_value: string | null;
+  p_client_start_date_from: string | null;
+  p_client_start_date_to: string | null;
+  p_date_range_start: string | null;
+  p_date_range_end: string | null;
+}
+
+interface PrimaryKpiCountsRow {
+  active_clients: number | null;
+  front_end_clients: number | null;
+  back_end_clients: number | null;
+  off_boarded_clients: number | null;
+  churned_clients: number | null;
+  churn_percentage: number | string | null;
+}
+
+interface RetentionKpiCountsRow {
+  retained_clients: number | null;
+  renewing_clients: number | null;
+  retention_percentage: number | string | null;
+  active_renewing_clients: number | null;
+}
+
+interface ClientsListRow {
+  glide_row_id: string;
+  client_name: string | null;
+  client_image: string | null;
+  csm_team_member_id: string | null;
+  total_count: number | string | null;
+}
 
 interface Company {
   glide_row_id: string;
@@ -87,13 +139,6 @@ function listMonthOptionsDescending() {
   return out;
 }
 
-function getNextDateIso(dateIso: string) {
-  const d = new Date(`${dateIso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return "";
-  d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
 interface MonthDateFilterState {
   monthKey: string | null;
   startDate: string;
@@ -111,6 +156,36 @@ function clearedMonthDateFilter(): MonthDateFilterState {
     dropdownOpen: false,
     search: "",
     editingCustom: false,
+  };
+}
+
+interface DashboardFilters {
+  companyId: string;
+  csmId: string;
+  secondaryAssigneeId: string;
+  program: string;
+  dateRange: MonthDateFilterState;
+  clientStartDate: MonthDateFilterState;
+}
+
+function emptyDashboardFilters(): DashboardFilters {
+  return {
+    companyId: "",
+    csmId: "",
+    secondaryAssigneeId: "",
+    program: "",
+    dateRange: clearedMonthDateFilter(),
+    clientStartDate: clearedMonthDateFilter(),
+  };
+}
+
+function dashboardFiltersFromSearchParams(searchParams: URLSearchParams): DashboardFilters {
+  return {
+    ...emptyDashboardFilters(),
+    companyId: searchParams.get(COMPANY_QUERY_KEY) ?? "",
+    csmId: searchParams.get(CSM_QUERY_KEY) ?? "",
+    secondaryAssigneeId: searchParams.get(SECONDARY_ASSIGNEE_QUERY_KEY) ?? "",
+    program: searchParams.get(PROGRAM_QUERY_KEY) ?? "",
   };
 }
 
@@ -364,14 +439,6 @@ function MonthDateRangeFilter({ label, state, onChange }: MonthDateRangeFilterPr
   );
 }
 
-interface KpiCardProps {
-  label: string;
-  value: string | number;
-  description?: string;
-  loading?: boolean;
-  onClick?: () => void;
-}
-
 function getInitials(name: string | null) {
   if (!name) return "--";
 
@@ -384,52 +451,15 @@ function getInitials(name: string | null) {
     .join("");
 }
 
-function KpiCard({ label, value, description, loading, onClick }: KpiCardProps) {
-  const content = (
-    <>
-      <div className="flex items-start justify-between gap-3">
-        <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-          {label}
-        </div>
-        {onClick && (
-          <span className="text-xs font-medium text-indigo-600">View list</span>
-        )}
-      </div>
-      <div className="mt-2 text-3xl font-semibold text-gray-900 tabular-nums">
-        {loading ? (
-          <span className="inline-block h-8 w-20 rounded bg-gray-100 animate-pulse" />
-        ) : (
-          value
-        )}
-      </div>
-      {description && (
-        <div className="mt-1 text-sm text-gray-500">{description}</div>
-      )}
-    </>
-  );
-
-  if (!onClick) {
-    return <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5">{content}</div>;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 text-left transition-all hover:border-indigo-300 hover:shadow-md cursor-pointer"
-    >
-      {content}
-    </button>
-  );
-}
-
 export function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedCompanyId = searchParams.get(COMPANY_QUERY_KEY) ?? "";
-  const selectedCsmId = searchParams.get(CSM_QUERY_KEY) ?? "";
-  const selectedSecondaryAssigneeId =
-    searchParams.get(SECONDARY_ASSIGNEE_QUERY_KEY) ?? "";
-  const selectedProgram = searchParams.get(PROGRAM_QUERY_KEY) ?? "";
+  const [pendingFilters, setPendingFilters] = useState(() =>
+    dashboardFiltersFromSearchParams(searchParams),
+  );
+  const [appliedFilters, setAppliedFilters] = useState(() =>
+    dashboardFiltersFromSearchParams(searchParams),
+  );
+  const [reportVersion, setReportVersion] = useState(0);
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
@@ -441,18 +471,28 @@ export function Dashboard() {
   const [activeClients, setActiveClients] = useState<number | null>(null);
   const [frontEndClients, setFrontEndClients] = useState<number | null>(null);
   const [backEndClients, setBackEndClients] = useState<number | null>(null);
-  const [kpiLoading, setKpiLoading] = useState(false);
+  const [offBoardedClients, setOffBoardedClients] = useState<number | null>(null);
+  const [retainedClients, setRetainedClients] = useState<number | null>(null);
+  const [churnedClientsCount, setChurnedClientsCount] = useState<number | null>(null);
+  const [churnPercentage, setChurnPercentage] = useState<number | null>(null);
+  const [renewingClientsCount, setRenewingClientsCount] = useState<number | null>(null);
+  const [retentionPercentage, setRetentionPercentage] = useState<number | null>(null);
+  const [activeRenewingClients, setActiveRenewingClients] = useState<number | null>(null);
+  const [primaryKpiLoading, setPrimaryKpiLoading] = useState(false);
+  const [retentionKpiLoading, setRetentionKpiLoading] = useState(false);
+  const kpiLoading = primaryKpiLoading || retentionKpiLoading;
   const [activeDetailKey, setActiveDetailKey] = useState<KpiDetailKey | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
   const [detailPage, setDetailPage] = useState(1);
   const [detailRows, setDetailRows] = useState<ClientRow[]>([]);
   const [detailTotalCount, setDetailTotalCount] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
-
-  const [dateRangeFilter, setDateRangeFilter] = useState(clearedMonthDateFilter);
-  const [clientStartDateFilter, setClientStartDateFilter] = useState(
-    clearedMonthDateFilter,
-  );
+  const [kpiInfoModal, setKpiInfoModal] = useState<{
+    title: string;
+    description: string;
+    sql: string;
+  } | null>(null);
+  const [kpiInfoSqlCopied, setKpiInfoSqlCopied] = useState(false);
 
   const updateSearchParams = (updates: Record<string, string | null>) => {
     setSearchParams(
@@ -471,23 +511,58 @@ export function Dashboard() {
   };
 
   const clearAllFilters = () => {
+    const cleared = emptyDashboardFilters();
+    setPendingFilters(cleared);
+    setAppliedFilters(cleared);
+    setReportVersion((v) => v + 1);
     setSearchParams({}, { replace: true });
-    setDateRangeFilter(clearedMonthDateFilter());
-    setClientStartDateFilter(clearedMonthDateFilter());
   };
 
-  const setSelectedCompanyId = (id: string) => {
+  const applyFilters = () => {
+    if (!pendingFilters.companyId) return;
+    const next = structuredClone(pendingFilters);
+    setAppliedFilters(next);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next.companyId) p.set(COMPANY_QUERY_KEY, next.companyId);
+        else p.delete(COMPANY_QUERY_KEY);
+        if (next.csmId) p.set(CSM_QUERY_KEY, next.csmId);
+        else p.delete(CSM_QUERY_KEY);
+        if (next.secondaryAssigneeId) p.set(SECONDARY_ASSIGNEE_QUERY_KEY, next.secondaryAssigneeId);
+        else p.delete(SECONDARY_ASSIGNEE_QUERY_KEY);
+        if (next.program) p.set(PROGRAM_QUERY_KEY, next.program);
+        else p.delete(PROGRAM_QUERY_KEY);
+        return p;
+      },
+      { replace: true },
+    );
+    setReportVersion((v) => v + 1);
+  };
+
+  useEffect(() => {
+    if (pendingFilters.companyId) return;
+    setAppliedFilters(emptyDashboardFilters());
     updateSearchParams({
-      [COMPANY_QUERY_KEY]: id || null,
+      [COMPANY_QUERY_KEY]: null,
       [CSM_QUERY_KEY]: null,
       [SECONDARY_ASSIGNEE_QUERY_KEY]: null,
-      ...(id ? {} : { [PROGRAM_QUERY_KEY]: null }),
+      [PROGRAM_QUERY_KEY]: null,
     });
-  };
+  }, [pendingFilters.companyId]);
 
-  const selectedCompany = useMemo(
-    () => companies.find((company) => company.glide_row_id === selectedCompanyId) ?? null,
-    [companies, selectedCompanyId],
+  const pendingCompany = useMemo(
+    () =>
+      companies.find((company) => company.glide_row_id === pendingFilters.companyId) ??
+      null,
+    [companies, pendingFilters.companyId],
+  );
+
+  const appliedCompany = useMemo(
+    () =>
+      companies.find((company) => company.glide_row_id === appliedFilters.companyId) ??
+      null,
+    [companies, appliedFilters.companyId],
   );
 
   const availableTeamMembers = useMemo(
@@ -500,9 +575,9 @@ export function Dashboard() {
     [teamMembers],
   );
 
-  const showCompanyScopedFilters = Boolean(selectedCompanyId);
+  const showCompanyScopedFilters = Boolean(pendingFilters.companyId);
   const showSecondaryAssigneeFilter =
-    selectedCompany?.enable_secondary_assignee === true;
+    pendingCompany?.enable_secondary_assignee === true;
 
   const teamMemberNameById = useMemo(
     () =>
@@ -521,16 +596,16 @@ export function Dashboard() {
 
           if (
             choice.program_value === "paused" &&
-            selectedCompany?.program_paused_override
+            pendingCompany?.program_paused_override
           ) {
-            displayLabel = selectedCompany.program_paused_override;
+            displayLabel = pendingCompany.program_paused_override;
           }
 
           if (
             choice.program_value === "suspended" &&
-            selectedCompany?.program_suspended_override
+            pendingCompany?.program_suspended_override
           ) {
-            displayLabel = selectedCompany.program_suspended_override;
+            displayLabel = pendingCompany.program_suspended_override;
           }
 
           return {
@@ -540,13 +615,18 @@ export function Dashboard() {
               : displayLabel,
           };
         }),
-    [baseProgramChoices, selectedCompany],
+    [baseProgramChoices, pendingCompany],
   );
 
   const detailTitle = useMemo(() => {
     if (activeDetailKey === "active") return "Active Clients";
     if (activeDetailKey === "front-end") return "Front-end Clients";
     if (activeDetailKey === "back-end") return "Back-end Clients";
+    if (activeDetailKey === "off-boarded") return "Off-boarded Clients";
+    if (activeDetailKey === "retained") return "Retained Clients";
+    if (activeDetailKey === "churned") return "Churned Clients";
+    if (activeDetailKey === "renewing") return "Clients Up For Renewal";
+    if (activeDetailKey === "active-renewing") return "Active Clients Up For Renewal";
     return "";
   }, [activeDetailKey]);
 
@@ -566,85 +646,113 @@ export function Dashboard() {
     setDetailPage(1);
   };
 
-  const buildClientQuery = (
-    programFilter: KpiDetailKey | string[],
-    options?: {
-      includeRows?: boolean;
-      search?: string;
-      page?: number;
-      pageSize?: number;
-    },
+  const openKpiInfoModal = (title: string, description: string, sql: string) => {
+    setKpiInfoModal({ title, description, sql });
+    setKpiInfoSqlCopied(false);
+  };
+
+  const closeKpiInfoModal = () => {
+    setKpiInfoModal(null);
+    setKpiInfoSqlCopied(false);
+  };
+
+  const copyKpiSql = async () => {
+    if (!kpiInfoModal?.sql) return;
+    try {
+      await navigator.clipboard.writeText(kpiInfoModal.sql);
+      setKpiInfoSqlCopied(true);
+    } catch (error) {
+      console.error("Failed to copy KPI SQL:", error);
+      setKpiInfoSqlCopied(false);
+    }
+  };
+
+  const appliedShowSecondaryFilter =
+    appliedCompany?.enable_secondary_assignee === true;
+
+  const rpcFilterParams = useMemo<DashboardRpcFilterParams>(
+    () => ({
+      p_company_id: appliedFilters.companyId,
+      p_csm_id: appliedFilters.csmId || null,
+      p_secondary_assignee_id: appliedShowSecondaryFilter
+        ? appliedFilters.secondaryAssigneeId || null
+        : null,
+      p_program_value: appliedFilters.program || null,
+      p_client_start_date_from: appliedFilters.clientStartDate.startDate || null,
+      p_client_start_date_to: appliedFilters.clientStartDate.endDate || null,
+      p_date_range_start: appliedFilters.dateRange.startDate || null,
+      p_date_range_end: appliedFilters.dateRange.endDate || null,
+    }),
+    [
+      appliedFilters.clientStartDate.endDate,
+      appliedFilters.clientStartDate.startDate,
+      appliedFilters.dateRange.endDate,
+      appliedFilters.dateRange.startDate,
+      appliedFilters.companyId,
+      appliedFilters.csmId,
+      appliedFilters.program,
+      appliedFilters.secondaryAssigneeId,
+      appliedShowSecondaryFilter,
+    ],
+  );
+
+  const kpiSqlParams = useMemo<DashboardKpiSqlParams>(
+    () => ({
+      companyId: appliedFilters.companyId,
+      csmId: appliedFilters.csmId,
+      secondaryAssigneeId: appliedShowSecondaryFilter
+        ? appliedFilters.secondaryAssigneeId
+        : "",
+      programValue: appliedFilters.program,
+      clientStartDateFrom: appliedFilters.clientStartDate.startDate,
+      clientStartDateTo: appliedFilters.clientStartDate.endDate,
+      dateRangeStart: appliedFilters.dateRange.startDate,
+      dateRangeEnd: appliedFilters.dateRange.endDate,
+    }),
+    [
+      appliedFilters.clientStartDate.endDate,
+      appliedFilters.clientStartDate.startDate,
+      appliedFilters.dateRange.startDate,
+      appliedFilters.dateRange.endDate,
+      appliedFilters.companyId,
+      appliedFilters.csmId,
+      appliedFilters.program,
+      appliedFilters.secondaryAssigneeId,
+      appliedShowSecondaryFilter,
+    ],
+  );
+
+  const appliedReportKey = useMemo(
+    () =>
+      JSON.stringify({
+        companyId: appliedFilters.companyId,
+        csmId: appliedFilters.csmId,
+        secondaryAssigneeId: appliedFilters.secondaryAssigneeId,
+        program: appliedFilters.program,
+        drs: appliedFilters.dateRange.startDate,
+        dre: appliedFilters.dateRange.endDate,
+        csf: appliedFilters.clientStartDate.startDate,
+        cst: appliedFilters.clientStartDate.endDate,
+        sec: appliedShowSecondaryFilter,
+      }),
+    [appliedFilters, appliedShowSecondaryFilter],
+  );
+
+  const setPendingDateRange: Dispatch<SetStateAction<MonthDateFilterState>> = (action) => {
+    setPendingFilters((prev) => ({
+      ...prev,
+      dateRange: typeof action === "function" ? action(prev.dateRange) : action,
+    }));
+  };
+
+  const setPendingClientStartDate: Dispatch<SetStateAction<MonthDateFilterState>> = (
+    action,
   ) => {
-    const includeRows = options?.includeRows ?? false;
-
-    let query = supabase
-      .from("backup_company_clients")
-      .select(
-        includeRows
-          ? "glide_row_id,client_name,client_image,csm_team_member_id"
-          : "*",
-        { count: "exact", head: !includeRows },
-      )
-      .eq("company_id", selectedCompanyId);
-
-    if (selectedCsmId) {
-      query = query.eq("csm_team_member_id", selectedCsmId);
-    }
-
-    if (showSecondaryAssigneeFilter && selectedSecondaryAssigneeId) {
-      query = query.eq("csm_secondary_assignee_id", selectedSecondaryAssigneeId);
-    }
-
-    if (selectedProgram) {
-      query = query.eq("program_status_value", selectedProgram);
-    }
-
-    if (clientStartDateFilter.startDate) {
-      query = query.gte(
-        "client_age_date_onboarded",
-        `${clientStartDateFilter.startDate}T00:00:00`,
-      );
-    }
-
-    if (clientStartDateFilter.endDate) {
-      const endExclusive = getNextDateIso(clientStartDateFilter.endDate);
-      if (endExclusive) {
-        query = query.lt("client_age_date_onboarded", `${endExclusive}T00:00:00`);
-      }
-    }
-
-    // Date Range contributes an additional cutoff filter:
-    // keep clients onboarded before the selected range end date.
-    if (dateRangeFilter.endDate) {
-      query = query.lt(
-        "client_age_date_onboarded",
-        `${dateRangeFilter.endDate}T00:00:00`,
-      );
-    }
-
-    if (Array.isArray(programFilter)) {
-      query = query.in("program_status_value", programFilter);
-    } else if (programFilter === "active") {
-      query = query.in("program_status_value", ["front-end", "back-end"]);
-    } else {
-      query = query.eq("program_status_value", programFilter);
-    }
-
-    const search = options?.search?.trim();
-    if (search) {
-      query = query.ilike("client_name", `%${search}%`);
-    }
-
-    if (includeRows) {
-      const page = options?.page ?? 1;
-      const pageSize = options?.pageSize ?? DETAIL_PAGE_SIZE;
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-
-      query = query.order("client_name", { ascending: true }).range(from, to);
-    }
-
-    return query;
+    setPendingFilters((prev) => ({
+      ...prev,
+      clientStartDate:
+        typeof action === "function" ? action(prev.clientStartDate) : action,
+    }));
   };
 
   useEffect(() => {
@@ -671,7 +779,7 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!selectedCompanyId) {
+    if (!pendingFilters.companyId) {
       setTeamMembers([]);
       setTeamMembersLoading(false);
       return;
@@ -685,7 +793,7 @@ export function Dashboard() {
       const { data, error } = await supabase
         .from("backup_company_team")
         .select("glide_row_id, name, is_archived, role_hide_from_csm_list")
-        .eq("company_id", selectedCompanyId)
+        .eq("company_id", pendingFilters.companyId)
         .order("name", { ascending: true });
 
       if (cancelled) return;
@@ -705,10 +813,10 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [selectedCompanyId]);
+  }, [pendingFilters.companyId]);
 
   useEffect(() => {
-    if (!selectedCompanyId || baseProgramChoices.length > 0) return;
+    if (!pendingFilters.companyId || baseProgramChoices.length > 0) return;
 
     let cancelled = false;
 
@@ -738,16 +846,23 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [baseProgramChoices.length, selectedCompanyId]);
+  }, [baseProgramChoices.length, pendingFilters.companyId]);
 
   useEffect(() => {
-    if (companiesLoading || !selectedCompanyId) return;
+    if (companiesLoading || !pendingFilters.companyId) return;
 
     const validCompany = companies.some(
-      (company) => company.glide_row_id === selectedCompanyId,
+      (company) => company.glide_row_id === pendingFilters.companyId,
     );
 
     if (!validCompany) {
+      setPendingFilters((prev) => ({
+        ...prev,
+        companyId: "",
+        csmId: "",
+        secondaryAssigneeId: "",
+        program: "",
+      }));
       updateSearchParams({
         [COMPANY_QUERY_KEY]: null,
         [CSM_QUERY_KEY]: null,
@@ -755,117 +870,143 @@ export function Dashboard() {
         [PROGRAM_QUERY_KEY]: null,
       });
     }
-  }, [companies, companiesLoading, selectedCompanyId]);
+  }, [companies, companiesLoading, pendingFilters.companyId]);
 
   useEffect(() => {
-    if (!selectedCsmId) return;
+    if (!pendingFilters.csmId) return;
 
     const isValidCsm = availableTeamMembers.some(
-      (member) => member.glide_row_id === selectedCsmId,
+      (member) => member.glide_row_id === pendingFilters.csmId,
     );
 
     if (!isValidCsm) {
-      updateSearchParams({ [CSM_QUERY_KEY]: null });
+      setPendingFilters((prev) => ({ ...prev, csmId: "" }));
     }
-  }, [availableTeamMembers, selectedCsmId]);
+  }, [availableTeamMembers, pendingFilters.csmId]);
 
   useEffect(() => {
-    if (!selectedSecondaryAssigneeId) return;
+    if (!pendingFilters.secondaryAssigneeId) return;
 
     if (!showSecondaryAssigneeFilter) {
-      updateSearchParams({ [SECONDARY_ASSIGNEE_QUERY_KEY]: null });
+      setPendingFilters((prev) => ({ ...prev, secondaryAssigneeId: "" }));
       return;
     }
 
     const isValidSecondaryAssignee = availableTeamMembers.some(
-      (member) => member.glide_row_id === selectedSecondaryAssigneeId,
+      (member) => member.glide_row_id === pendingFilters.secondaryAssigneeId,
     );
 
     if (!isValidSecondaryAssignee) {
-      updateSearchParams({ [SECONDARY_ASSIGNEE_QUERY_KEY]: null });
+      setPendingFilters((prev) => ({ ...prev, secondaryAssigneeId: "" }));
     }
   }, [
     availableTeamMembers,
-    selectedSecondaryAssigneeId,
+    pendingFilters.secondaryAssigneeId,
     showSecondaryAssigneeFilter,
   ]);
 
   useEffect(() => {
-    if (!selectedProgram) return;
+    if (!pendingFilters.program) return;
 
     const isValidProgram = programChoices.some(
-      (choice) => choice.value === selectedProgram,
+      (choice) => choice.value === pendingFilters.program,
     );
 
     if (!isValidProgram) {
-      updateSearchParams({ [PROGRAM_QUERY_KEY]: null });
+      setPendingFilters((prev) => ({ ...prev, program: "" }));
     }
-  }, [programChoices, selectedProgram]);
+  }, [programChoices, pendingFilters.program]);
 
   useEffect(() => {
-    if (!selectedCompanyId) {
+    if (!appliedFilters.companyId) {
       setActiveClients(null);
       setFrontEndClients(null);
       setBackEndClients(null);
+      setOffBoardedClients(null);
+      setRetainedClients(null);
+      setChurnedClientsCount(null);
+      setChurnPercentage(null);
+      setRenewingClientsCount(null);
+      setRetentionPercentage(null);
+      setActiveRenewingClients(null);
       closeDetailDrawer();
       return;
     }
 
     let cancelled = false;
 
-    async function loadKpis() {
-      setKpiLoading(true);
+    async function loadPrimaryKpis() {
+      setPrimaryKpiLoading(true);
 
-      const [activeRes, frontRes, backRes] = await Promise.all([
-        buildClientQuery("active"),
-        buildClientQuery("front-end"),
-        buildClientQuery("back-end"),
-      ]);
+      const { data, error } = await supabase.rpc(
+        "dashboard_kpi_counts_primary",
+        rpcFilterParams,
+      );
 
       if (cancelled) return;
 
-      if (activeRes.error) {
-        console.error("Failed to load active clients:", activeRes.error);
+      if (error) {
+        console.error("Failed to load primary dashboard KPIs:", error);
         setActiveClients(null);
-      } else {
-        setActiveClients(activeRes.count ?? 0);
-      }
-
-      if (frontRes.error) {
-        console.error("Failed to load front-end clients:", frontRes.error);
         setFrontEndClients(null);
-      } else {
-        setFrontEndClients(frontRes.count ?? 0);
-      }
-
-      if (backRes.error) {
-        console.error("Failed to load back-end clients:", backRes.error);
         setBackEndClients(null);
+        setOffBoardedClients(null);
+        setChurnedClientsCount(null);
+        setChurnPercentage(null);
       } else {
-        setBackEndClients(backRes.count ?? 0);
+        const row = ((data ?? []) as PrimaryKpiCountsRow[])[0] ?? null;
+        setActiveClients(Number(row?.active_clients ?? 0));
+        setFrontEndClients(Number(row?.front_end_clients ?? 0));
+        setBackEndClients(Number(row?.back_end_clients ?? 0));
+        setOffBoardedClients(Number(row?.off_boarded_clients ?? 0));
+        setChurnedClientsCount(Number(row?.churned_clients ?? 0));
+        setChurnPercentage(
+          row?.churn_percentage == null ? 0 : Number(row.churn_percentage),
+        );
       }
 
-      setKpiLoading(false);
+      setPrimaryKpiLoading(false);
     }
 
-    loadKpis();
+    async function loadRetentionKpis() {
+      setRetentionKpiLoading(true);
+
+      const { data, error } = await supabase.rpc(
+        "dashboard_kpi_counts_retention",
+        rpcFilterParams,
+      );
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Failed to load retention dashboard KPIs:", error);
+        setRetainedClients(null);
+        setRenewingClientsCount(null);
+        setRetentionPercentage(null);
+        setActiveRenewingClients(null);
+      } else {
+        const row = ((data ?? []) as RetentionKpiCountsRow[])[0] ?? null;
+        setRetainedClients(Number(row?.retained_clients ?? 0));
+        setRenewingClientsCount(Number(row?.renewing_clients ?? 0));
+        setRetentionPercentage(
+          row?.retention_percentage == null ? 0 : Number(row.retention_percentage),
+        );
+        setActiveRenewingClients(Number(row?.active_renewing_clients ?? 0));
+      }
+
+      setRetentionKpiLoading(false);
+    }
+
+    loadPrimaryKpis();
+    loadRetentionKpis();
 
     return () => {
       cancelled = true;
     };
-  }, [
-    selectedCompanyId,
-    selectedCsmId,
-    selectedProgram,
-    selectedSecondaryAssigneeId,
-    showSecondaryAssigneeFilter,
-    clientStartDateFilter.startDate,
-    clientStartDateFilter.endDate,
-    dateRangeFilter.endDate,
-  ]);
+  }, [appliedReportKey, appliedFilters.companyId, reportVersion, rpcFilterParams]);
 
   useEffect(() => {
-    if (!activeDetailKey || !selectedCompanyId) {
+    if (!activeDetailKey || !appliedFilters.companyId) {
       setDetailRows([]);
       setDetailTotalCount(0);
       setDetailLoading(false);
@@ -878,10 +1019,12 @@ export function Dashboard() {
     async function loadDetailRows() {
       setDetailLoading(true);
 
-      const { data, count, error } = await buildClientQuery(detailKey, {
-        includeRows: true,
-        search: detailSearch,
-        page: detailPage,
+      const { data, error } = await supabase.rpc("dashboard_clients_list", {
+        ...rpcFilterParams,
+        p_detail_key: detailKey,
+        p_search: detailSearch || null,
+        p_limit: DETAIL_PAGE_SIZE,
+        p_offset: (detailPage - 1) * DETAIL_PAGE_SIZE,
       });
 
       if (cancelled) return;
@@ -891,8 +1034,17 @@ export function Dashboard() {
         setDetailRows([]);
         setDetailTotalCount(0);
       } else {
-        setDetailRows(((data ?? []) as unknown) as ClientRow[]);
-        setDetailTotalCount(count ?? 0);
+        const rows = ((data ?? []) as ClientsListRow[]);
+        const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
+        setDetailRows(
+          rows.map((row) => ({
+            glide_row_id: row.glide_row_id,
+            client_name: row.client_name,
+            client_image: row.client_image,
+            csm_team_member_id: row.csm_team_member_id,
+          })),
+        );
+        setDetailTotalCount(totalCount);
       }
 
       setDetailLoading(false);
@@ -905,16 +1057,10 @@ export function Dashboard() {
     };
   }, [
     activeDetailKey,
+    appliedFilters.companyId,
     detailPage,
     detailSearch,
-    selectedCompanyId,
-    selectedCsmId,
-    selectedProgram,
-    selectedSecondaryAssigneeId,
-    showSecondaryAssigneeFilter,
-    clientStartDateFilter.startDate,
-    clientStartDateFilter.endDate,
-    dateRangeFilter.endDate,
+    rpcFilterParams,
   ]);
 
   useEffect(() => {
@@ -940,8 +1086,17 @@ export function Dashboard() {
             </label>
             <select
               id="company-filter"
-              value={selectedCompanyId}
-              onChange={(e) => setSelectedCompanyId(e.target.value)}
+              value={pendingFilters.companyId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setPendingFilters((p) => ({
+                  ...p,
+                  companyId: id,
+                  csmId: "",
+                  secondaryAssigneeId: "",
+                  ...(id ? {} : { program: "" }),
+                }));
+              }}
               disabled={companiesLoading}
               className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
             >
@@ -967,9 +1122,9 @@ export function Dashboard() {
                 </label>
                 <select
                   id="csm-filter"
-                  value={selectedCsmId}
+                  value={pendingFilters.csmId}
                   onChange={(e) =>
-                    updateSearchParams({ [CSM_QUERY_KEY]: e.target.value || null })
+                    setPendingFilters((p) => ({ ...p, csmId: e.target.value }))
                   }
                   disabled={teamMembersLoading}
                   className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
@@ -995,11 +1150,12 @@ export function Dashboard() {
                   </label>
                   <select
                     id="secondary-assignee-filter"
-                    value={selectedSecondaryAssigneeId}
+                    value={pendingFilters.secondaryAssigneeId}
                     onChange={(e) =>
-                      updateSearchParams({
-                        [SECONDARY_ASSIGNEE_QUERY_KEY]: e.target.value || null,
-                      })
+                      setPendingFilters((p) => ({
+                        ...p,
+                        secondaryAssigneeId: e.target.value,
+                      }))
                     }
                     disabled={teamMembersLoading}
                     className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
@@ -1027,11 +1183,9 @@ export function Dashboard() {
                 </label>
                 <select
                   id="program-filter"
-                  value={selectedProgram}
+                  value={pendingFilters.program}
                   onChange={(e) =>
-                    updateSearchParams({
-                      [PROGRAM_QUERY_KEY]: e.target.value || null,
-                    })
+                    setPendingFilters((p) => ({ ...p, program: e.target.value }))
                   }
                   disabled={programChoicesLoading}
                   className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
@@ -1049,19 +1203,27 @@ export function Dashboard() {
 
               <MonthDateRangeFilter
                 label="Date Range"
-                state={dateRangeFilter}
-                onChange={setDateRangeFilter}
+                state={pendingFilters.dateRange}
+                onChange={setPendingDateRange}
               />
               <MonthDateRangeFilter
                 label="Client Start Date"
-                state={clientStartDateFilter}
-                onChange={setClientStartDateFilter}
+                state={pendingFilters.clientStartDate}
+                onChange={setPendingClientStartDate}
               />
             </>
           )}
         </div>
 
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={applyFilters}
+            disabled={!pendingFilters.companyId || kpiLoading}
+            className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
+          >
+            Apply filters
+          </button>
           <button
             type="button"
             onClick={clearAllFilters}
@@ -1078,33 +1240,91 @@ export function Dashboard() {
         </h2>
       </div>
 
-      {!selectedCompanyId ? (
+      {!pendingFilters.companyId ? (
         <div className="bg-white rounded-lg border border-dashed border-gray-300 p-10 text-center text-gray-500">
-          <p>Select a company above to load filters and KPI counts.</p>
+          <p>Select a company above to configure filters, then click Apply filters to load KPIs.</p>
+        </div>
+      ) : !appliedFilters.companyId ? (
+        <div className="bg-white rounded-lg border border-dashed border-amber-200 bg-amber-50/50 p-10 text-center text-amber-900">
+          <p className="font-medium">Filters are set</p>
+          <p className="mt-2 text-sm text-amber-800/90">
+            Click <span className="font-semibold">Apply filters</span> to run the report and
+            load KPI counts.
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            label="Active Clients 🎫"
-            value={activeClients !== null ? activeClients.toLocaleString() : "--"}
-            description="clients in front end or back end"
-            loading={kpiLoading}
-            onClick={() => openDetailDrawer("active")}
-          />
-          <KpiCard
-            label="Front End Clients 🥇"
-            value={frontEndClients !== null ? frontEndClients.toLocaleString() : "--"}
-            description="clients in front end"
-            loading={kpiLoading}
-            onClick={() => openDetailDrawer("front-end")}
-          />
-          <KpiCard
-            label="Back End Clients 🥈"
-            value={backEndClients !== null ? backEndClients.toLocaleString() : "--"}
-            description="clients in back end"
-            loading={kpiLoading}
-            onClick={() => openDetailDrawer("back-end")}
-          />
+        <div className="space-y-4">
+          {/* Row 1: Active, Front End, Back End; fourth column intentionally empty */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <ActiveClientsKpi
+              value={activeClients}
+              loading={primaryKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("active")}
+            />
+            <FrontEndClientsKpi
+              value={frontEndClients}
+              loading={primaryKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("front-end")}
+            />
+            <BackEndClientsKpi
+              value={backEndClients}
+              loading={primaryKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("back-end")}
+            />
+            <div className="hidden lg:block" aria-hidden="true" />
+          </div>
+
+          {/* Row 2: Retained, Retention %, Off-boarded, Churn */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <RetainedClientsKpi
+              value={retainedClients}
+              loading={retentionKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("retained")}
+            />
+            <RetentionPercentageKpi
+              percentage={retentionPercentage}
+              renewingClientsCount={renewingClientsCount}
+              loading={retentionKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("renewing")}
+            />
+            <OffBoardedClientsKpi
+              value={offBoardedClients}
+              loading={primaryKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("off-boarded")}
+            />
+            <ChurnPercentageKpi
+              percentage={churnPercentage}
+              churnedClientsCount={churnedClientsCount}
+              loading={primaryKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("churned")}
+            />
+          </div>
+
+          {/* Row 3: first column empty on large screens; Up for Renewal in second column */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="hidden lg:block" aria-hidden="true" />
+            <UpForRenewalKpi
+              value={activeRenewingClients}
+              loading={retentionKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("active-renewing")}
+            />
+          </div>
         </div>
       )}
 
@@ -1265,6 +1485,65 @@ export function Dashboard() {
               </div>
             </div>
           </aside>
+        </div>
+      )}
+
+      {kpiInfoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close KPI info dialog"
+            onClick={closeKpiInfoModal}
+            className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative w-full max-w-lg rounded-xl border border-gray-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">{kpiInfoModal.title}</h3>
+                <p className="mt-1 text-sm text-gray-500">Calculation details</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeKpiInfoModal}
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L10 8.94l4.72-4.72a.75.75 0 1 1 1.06 1.06L11.06 10l4.72 4.72a.75.75 0 1 1-1.06 1.06L10 11.06l-4.72 4.72a.75.75 0 1 1-1.06-1.06L8.94 10 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
+                </svg>
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <p className="text-sm leading-6 text-gray-700 whitespace-pre-line">
+                {kpiInfoModal.description}
+              </p>
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                    SQL Query
+                  </p>
+                  <button
+                    type="button"
+                    onClick={copyKpiSql}
+                    className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 cursor-pointer transition-colors"
+                  >
+                    {kpiInfoSqlCopied ? "Copied" : "Copy SQL"}
+                  </button>
+                </div>
+                <pre className="max-h-72 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-5 text-gray-800">
+                  <code>{kpiInfoModal.sql}</code>
+                </pre>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

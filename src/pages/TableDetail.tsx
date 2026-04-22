@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase.ts";
+import { isJobBackedGlideTable } from "../lib/jobBackedGlideTables.ts";
+import { JobProgressPanel } from "../components/JobProgressPanel.tsx";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -86,6 +88,8 @@ export function TableDetail() {
         return;
       }
       console.error("Error loading preview:", error);
+      setRows([]);
+      setColumns([]);
       setLoading(false);
       return;
     }
@@ -94,10 +98,16 @@ export function TableDetail() {
     setRows(rowData);
     setNotSynced(false);
 
-    const { count } = await supabase
-      .from(bTable)
-      .select("*", { count: "exact", head: true });
-    setTotalRows(count);
+    const { data: estimate, error: estErr } = await supabase.rpc(
+      "get_table_row_estimate",
+      { p_table: bTable },
+    );
+    if (estErr) {
+      setTotalRows(null);
+    } else {
+      const num = typeof estimate === "number" ? estimate : Number(estimate);
+      setTotalRows(Number.isFinite(num) ? num : null);
+    }
 
     const colSet = new Set<string>();
     for (const r of rowData) {
@@ -112,6 +122,8 @@ export function TableDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const usesServerSyncJob = isJobBackedGlideTable(glideTableId);
 
   async function handleSync() {
     if (!glideTableId) return;
@@ -165,13 +177,15 @@ export function TableDetail() {
             ({rows.length}{totalRows != null ? ` of ${totalRows.toLocaleString()}` : ""} rows shown)
           </span>
         </div>
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          className="px-4 py-2 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition-colors"
-        >
-          {syncing ? "Syncing..." : "Sync Now"}
-        </button>
+        {!usesServerSyncJob && (
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="px-4 py-2 text-sm rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition-colors"
+          >
+            {syncing ? "Syncing..." : "Sync Now"}
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mb-4 text-xs text-gray-500">
@@ -191,7 +205,17 @@ export function TableDetail() {
         )}
       </div>
 
-      {lastSyncStatus === "error" && lastSyncError && (
+      {usesServerSyncJob && glideTableId && (
+        <div className="mb-6">
+          <JobProgressPanel
+            glideTableId={glideTableId}
+            backupTableName={backupTable}
+            onAnyChange={load}
+          />
+        </div>
+      )}
+
+      {!usesServerSyncJob && lastSyncStatus === "error" && lastSyncError && (
         <div className="mb-6 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
           <div className="flex items-start gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-red-500 shrink-0 mt-0.5">
@@ -211,15 +235,30 @@ export function TableDetail() {
         <div className="text-center py-16 text-gray-500">
           <p>This table has not been synced yet.</p>
           <p className="text-sm mt-1">
-            Click <strong>Sync Now</strong> above to create the backup table and
-            populate data.
+            {usesServerSyncJob ? (
+              <>
+                Use <strong>Start full sync</strong> in the server-side job panel above to create the backup table and populate data.
+              </>
+            ) : (
+              <>
+                Click <strong>Sync Now</strong> above to create the backup table and populate data.
+              </>
+            )}
           </p>
         </div>
       ) : rows.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <p>No rows synced for this table yet.</p>
           <p className="text-sm mt-1">
-            Click <strong>Sync Now</strong> above to populate data.
+            {usesServerSyncJob ? (
+              <>
+                Use <strong>Start full sync</strong> in the server-side job panel above to populate data.
+              </>
+            ) : (
+              <>
+                Click <strong>Sync Now</strong> above to populate data.
+              </>
+            )}
           </p>
         </div>
       ) : (

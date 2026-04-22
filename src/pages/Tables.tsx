@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase.ts";
+import { isJobBackedGlideTable } from "../lib/jobBackedGlideTables.ts";
 import { StatusBadge } from "../components/StatusBadge.tsx";
 
 interface SyncTableRow {
@@ -56,15 +57,24 @@ export function Tables() {
     await Promise.all(
       syncedRows.map(async (t) => {
         try {
-          const { count } = await supabase
-            .from(t.backup_table_name!)
-            .select("*", { count: "exact", head: true });
+          const [estimateResp, sampleResp] = await Promise.all([
+            supabase.rpc("get_table_row_estimate", {
+              p_table: t.backup_table_name!,
+            }),
+            supabase.from(t.backup_table_name!).select("*").limit(1),
+          ]);
 
-          const { data: sample } = await supabase
-            .from(t.backup_table_name!)
-            .select("*")
-            .limit(1);
+          if (estimateResp.error || sampleResp.error) return;
 
+          const estimate = estimateResp.data;
+          const rows =
+            typeof estimate === "number"
+              ? estimate
+              : Number.isFinite(Number(estimate))
+                ? Number(estimate)
+                : 0;
+
+          const sample = sampleResp.data;
           const fields =
             sample && sample.length > 0
               ? Object.keys(sample[0]).filter(
@@ -72,7 +82,7 @@ export function Tables() {
                 ).length
               : 0;
 
-          results[t.glide_table_id] = { rows: count ?? 0, fields };
+          results[t.glide_table_id] = { rows, fields };
         } catch {
           // backup table might not exist yet
         }
@@ -340,10 +350,19 @@ export function Tables() {
                           <div className="flex items-center justify-end gap-2">
                             <button
                               onClick={(e) => handleSync(e, t.glide_table_id)}
-                              disabled={syncing[t.glide_table_id]}
+                              disabled={syncing[t.glide_table_id] || isJobBackedGlideTable(t.glide_table_id)}
+                              title={
+                                isJobBackedGlideTable(t.glide_table_id)
+                                  ? "Open this table to use the server-side sync job (pg_cron)"
+                                  : undefined
+                              }
                               className="px-3 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition-colors"
                             >
-                              {syncing[t.glide_table_id] ? "Syncing..." : "Sync"}
+                              {isJobBackedGlideTable(t.glide_table_id)
+                                ? "Server job"
+                                : syncing[t.glide_table_id]
+                                  ? "Syncing..."
+                                  : "Sync"}
                             </button>
                             <button
                               onClick={(e) => toggleHidden(e, t.id, t.hidden)}
