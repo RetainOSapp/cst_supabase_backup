@@ -18,7 +18,9 @@ export function Header() {
         location.pathname === "/" || location.pathname.startsWith("/tables")
       );
     }
-    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+    return (
+      location.pathname === path || location.pathname.startsWith(`${path}/`)
+    );
   };
 
   const linkClass = (path: string) =>
@@ -43,6 +45,9 @@ export function Header() {
           </Link>
           <Link to="/dashboard" className={linkClass("/dashboard")}>
             Dashboard
+          </Link>
+          <Link to="/clients" className={linkClass("/clients")}>
+            Clients
           </Link>
         </div>
         <div className="flex items-center gap-4">

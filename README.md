@@ -54,6 +54,8 @@ A Postgres function `exec_sql` is used by the Edge Function to run dynamic DDL (
 
 ## Getting Started
 
+For a shorter local collaboration checklist, see [`LOCAL_DEV.md`](./LOCAL_DEV.md).
+
 ### Prerequisites
 
 - A [Supabase](https://supabase.com) project
