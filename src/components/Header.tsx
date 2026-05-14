@@ -49,6 +49,9 @@ export function Header() {
           <Link to="/clients" className={linkClass("/clients")}>
             Clients
           </Link>
+          <Link to="/tasks" className={linkClass("/tasks")}>
+            Tasks
+          </Link>
         </div>
         <div className="flex items-center gap-4">
           {email && (

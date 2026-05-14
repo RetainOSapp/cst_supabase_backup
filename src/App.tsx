@@ -8,6 +8,7 @@ import { SyncLog } from "./pages/SyncLog.tsx";
 import { Dashboard } from "./pages/Dashboard.tsx";
 import { Clients } from "./pages/Clients.tsx";
 import { ClientDetail } from "./pages/ClientDetail.tsx";
+import { Tasks } from "./pages/Tasks.tsx";
 
 export function App() {
   return (
@@ -30,6 +31,7 @@ export function App() {
                   <Route path="dashboard" element={<Dashboard />} />
                   <Route path="clients" element={<Clients />} />
                   <Route path="clients/:clientId" element={<ClientDetail />} />
+                  <Route path="tasks" element={<Tasks />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </main>

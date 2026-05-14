@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  ProgramStatusPill,
+  type ProgramChoice,
+} from "../lib/clientDisplay.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 const PAGE_SIZE = 12;
@@ -23,11 +27,6 @@ interface TeamMember {
   is_archived: boolean | null;
   role_hide_from_csm_list: boolean | null;
 }
-interface ProgramChoice {
-  program_value: string | null;
-  program_label: string | null;
-  program_emoji: string | null;
-}
 interface ClientFilters {
   companyId: string;
   csmId: string;
@@ -44,6 +43,34 @@ const emptyFilters: ClientFilters = {
   clientName: "",
   lastContact: "",
 };
+const CLIENTS_CACHE_KEY = "cst.clientsRosterState.v1";
+
+interface ClientsCacheState {
+  filters: ClientFilters;
+  appliedFilters: ClientFilters;
+  page: number;
+  viewMode: ViewMode;
+}
+
+function readClientsCache(): ClientsCacheState | null {
+  try {
+    const raw = window.sessionStorage.getItem(CLIENTS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ClientsCacheState>;
+    return {
+      filters: { ...emptyFilters, ...(parsed.filters ?? {}) },
+      appliedFilters: { ...emptyFilters, ...(parsed.appliedFilters ?? {}) },
+      page: Math.max(1, Number(parsed.page) || 1),
+      viewMode: parsed.viewMode === "card" ? "card" : "list",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeClientsCache(state: ClientsCacheState) {
+  window.sessionStorage.setItem(CLIENTS_CACHE_KEY, JSON.stringify(state));
+}
 const lastContactColumns = [
   "csm_date_of_last_contact",
   "last_contact",
@@ -159,6 +186,13 @@ function fuzzyValueFromObject(
     if (!isPresent(value)) continue;
     const normalizedKey = normalizeKey(key);
     if (
+      candidates.some((candidate) => normalizeKey(candidate).includes("milestone")) &&
+      normalizedKey.includes("offer") &&
+      normalizedKey.endsWith("offer_id")
+    ) {
+      continue;
+    }
+    if (
       directCandidates.some(
         (candidate) =>
           normalizedKey === candidate || normalizedKey.includes(candidate),
@@ -211,6 +245,144 @@ function formatValue(value: unknown) {
     return String(value);
   return JSON.stringify(value);
 }
+const displayNameKeys = [
+  "name",
+  "title",
+  "label",
+  "program_label",
+  "pathway_name",
+  "milestone_name",
+  "pathways_milestones_name",
+  "pathways_and_milestones",
+  "pathway",
+  "milestone",
+];
+
+function displayValue(value: unknown, lookup = new Map<string, string>()): string {
+  if (value === null || value === undefined || value === "") return "--";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const mapped = lookup.get(trimmed);
+    if (mapped) return mapped;
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return displayValue(JSON.parse(trimmed), lookup);
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => displayValue(item, lookup))
+      .filter((item) => item !== "--");
+    return parts.length > 0 ? parts.join(", ") : "--";
+  }
+  if (typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    for (const key of displayNameKeys) {
+      const candidate = row[key];
+      if (isPresent(candidate)) return displayValue(candidate, lookup);
+    }
+    const id = row.glide_row_id ?? row.id;
+    if (typeof id === "string") {
+      const mapped = lookup.get(id);
+      if (mapped) return mapped;
+    }
+  }
+  return formatValue(value);
+}
+
+function extractGlideIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  const visit = (next: unknown) => {
+    if (!isPresent(next)) return;
+    if (typeof next === "string") {
+      const trimmed = next.trim();
+      if (
+        (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+        (trimmed.startsWith("[") && trimmed.endsWith("]"))
+      ) {
+        try {
+          visit(JSON.parse(trimmed));
+          return;
+        } catch {
+          // Keep checking the raw string below.
+        }
+      }
+      if (/^[A-Za-z0-9_.-]{12,}$/.test(trimmed)) ids.add(trimmed);
+      return;
+    }
+    if (Array.isArray(next)) {
+      next.forEach(visit);
+      return;
+    }
+    if (typeof next === "object") {
+      Object.values(next as Record<string, unknown>).forEach(visit);
+    }
+  };
+  visit(value);
+  return [...ids];
+}
+
+function bestDisplayName(row: Record<string, unknown>) {
+  for (const key of displayNameKeys) {
+    const value = row[key];
+    if (isPresent(value)) return displayValue(value);
+  }
+  const rawData = row.data;
+  if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
+    for (const key of displayNameKeys) {
+      const value = (rawData as Record<string, unknown>)[key];
+      if (isPresent(value)) return displayValue(value);
+    }
+  }
+  return null;
+}
+
+async function resolveRelationNames(ids: string[]) {
+  const uniqueIds = [...new Set(ids)].filter(Boolean);
+  const resolved = new Map<string, string>();
+  if (uniqueIds.length === 0) return resolved;
+
+  const tables = [
+    "backup_company_offers",
+    "backup_company_offer_milestones",
+    "backup_company_clients_pathways_and_milestones",
+    "backup_company_pathways_and_milestones",
+    "backup_pathways_and_milestones",
+    "backup_pathways_milestones",
+    "backup_company_client_pathways",
+    "backup_company_pathways",
+    "backup_pathways",
+    "backup_company_milestones",
+    "backup_milestones",
+    "backup_choices",
+  ];
+
+  for (const table of tables) {
+    const remaining = uniqueIds.filter((id) => !resolved.has(id));
+    if (remaining.length === 0) break;
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .in("glide_row_id", remaining);
+    if (error) continue;
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      const id = row.glide_row_id;
+      const name = bestDisplayName(row);
+      if (typeof id === "string" && name) resolved.set(id, name);
+    }
+  }
+
+  return resolved;
+}
 function formatDate(value: unknown) {
   if (!value) return "--";
   const date = new Date(String(value));
@@ -246,7 +418,7 @@ function sanitizeHtml(value: string) {
     .replace(/javascript:/gi, "");
 }
 function RichValue({ value }: { value: unknown }) {
-  const text = formatValue(value);
+  const text = displayValue(value);
   if (text === "--") return <>{text}</>;
   const hasHtml = /<\/?[a-z][\s\S]*>/i.test(text);
   const html = hasHtml
@@ -271,31 +443,6 @@ function getInitials(name: string | null | undefined) {
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? "")
       .join("") || "--"
-  );
-}
-function StatusPill({ value }: { value: string | null | undefined }) {
-  const label = value
-    ? value
-        .split("-")
-        .map((part) => part[0]?.toUpperCase() + part.slice(1))
-        .join(" ")
-    : "Unknown";
-  const color =
-    value === "front-end"
-      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-      : value === "back-end"
-        ? "bg-blue-50 text-blue-700 border-blue-200"
-        : value === "off-boarded"
-          ? "bg-slate-50 text-slate-700 border-slate-200"
-          : value === "paused" || value === "suspended"
-            ? "bg-amber-50 text-amber-700 border-amber-200"
-            : "bg-gray-50 text-gray-600 border-gray-200";
-  return (
-    <span
-      className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${color}`}
-    >
-      {label}
-    </span>
   );
 }
 function OutcomePill({ value }: { value: unknown }) {
@@ -327,11 +474,14 @@ function ReadOnlyField({
   label,
   value,
   display = "plain",
+  lookup,
 }: {
   label: string;
   value: unknown;
   display?: "plain" | "rich" | "outcome";
+  lookup?: Map<string, string>;
 }) {
+  const shownValue = lookup ? displayValue(value, lookup) : value;
   return (
     <div>
       <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -339,11 +489,11 @@ function ReadOnlyField({
       </div>
       <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800">
         {display === "rich" ? (
-          <RichValue value={value} />
+          <RichValue value={shownValue} />
         ) : display === "outcome" ? (
           <OutcomePill value={value} />
         ) : (
-          formatValue(value)
+          displayValue(shownValue)
         )}
       </div>
     </div>
@@ -356,6 +506,21 @@ function QuickUpdateModal({
   client: ClientRow;
   onClose: () => void;
 }) {
+  const [relationLookup, setRelationLookup] = useState(new Map<string, string>());
+  const pathwayValue = valueFrom(client, pathwayColumns);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRelationNames() {
+      const lookup = await resolveRelationNames(extractGlideIds(pathwayValue));
+      if (!cancelled) setRelationLookup(lookup);
+    }
+    void loadRelationNames();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathwayValue]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
@@ -406,8 +571,9 @@ function QuickUpdateModal({
           </div>
           <ReadOnlyField
             label="Pathways & Milestones"
-            value={valueFrom(client, pathwayColumns)}
+            value={pathwayValue}
             display="rich"
+            lookup={relationLookup}
           />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <ReadOnlyField
@@ -526,14 +692,18 @@ function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
 export function Clients() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [filters, setFilters] = useState<ClientFilters>(() => ({
-    ...emptyFilters,
-    companyId: searchParams.get("companyId") ?? "",
-  }));
-  const [appliedFilters, setAppliedFilters] = useState<ClientFilters>(() => ({
-    ...emptyFilters,
-    companyId: searchParams.get("companyId") ?? "",
-  }));
+  const cachedState = useMemo(() => readClientsCache(), []);
+  const initialCompanyId = searchParams.get("companyId");
+  const [filters, setFilters] = useState<ClientFilters>(() =>
+    initialCompanyId
+      ? { ...emptyFilters, companyId: initialCompanyId }
+      : (cachedState?.filters ?? emptyFilters),
+  );
+  const [appliedFilters, setAppliedFilters] = useState<ClientFilters>(() =>
+    initialCompanyId
+      ? { ...emptyFilters, companyId: initialCompanyId }
+      : (cachedState?.appliedFilters ?? emptyFilters),
+  );
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -544,8 +714,10 @@ export function Clients() {
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [totalClients, setTotalClients] = useState(0);
-  const [page, setPage] = useState(1);
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [page, setPage] = useState(cachedState?.page ?? 1);
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    cachedState?.viewMode ?? "list",
+  );
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const [quickUpdateClient, setQuickUpdateClient] = useState<ClientRow | null>(
     null,
@@ -580,6 +752,9 @@ export function Clients() {
   const totalPages = Math.max(1, Math.ceil(totalClients / PAGE_SIZE));
   const pageStart = totalClients === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(page * PAGE_SIZE, totalClients);
+  useEffect(() => {
+    writeClientsCache({ filters, appliedFilters, page, viewMode });
+  }, [appliedFilters, filters, page, viewMode]);
   useEffect(() => {
     async function loadCompanies() {
       const { data, error } = await supabase
@@ -715,6 +890,7 @@ export function Clients() {
     setClients([]);
     setTotalClients(0);
     setPage(1);
+    window.sessionStorage.removeItem(CLIENTS_CACHE_KEY);
     setSearchParams({}, { replace: true });
   }
   const renderClientAvatar = (client: ClientRow, size = "h-9 w-9") =>
@@ -1007,6 +1183,7 @@ export function Clients() {
           ) : viewMode === "list" ? (
             <ClientTable
               clients={clients}
+              programChoices={programChoices}
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
@@ -1018,6 +1195,7 @@ export function Clients() {
           ) : (
             <ClientCards
               clients={clients}
+              programChoices={programChoices}
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
@@ -1070,6 +1248,7 @@ export function Clients() {
 }
 function ClientTable({
   clients,
+  programChoices,
   teamMemberNameById,
   renderClientAvatar,
   clientMeta,
@@ -1077,6 +1256,7 @@ function ClientTable({
   onQuickUpdate,
 }: {
   clients: ClientRow[];
+  programChoices: ProgramChoice[];
   teamMemberNameById: Map<string, string>;
   renderClientAvatar: (client: ClientRow) => React.ReactNode;
   clientMeta: (client: ClientRow) => {
@@ -1139,7 +1319,10 @@ function ClientTable({
                     "Unassigned"}
                 </td>
                 <td className="px-4 py-3">
-                  <StatusPill value={client.program_status_value} />
+                  <ProgramStatusPill
+                    value={client.program_status_value}
+                    choices={programChoices}
+                  />
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
                   {formatDate(meta.last)}
@@ -1175,6 +1358,7 @@ function ClientTable({
 }
 function ClientCards({
   clients,
+  programChoices,
   teamMemberNameById,
   renderClientAvatar,
   clientMeta,
@@ -1182,6 +1366,7 @@ function ClientCards({
   onQuickUpdate,
 }: {
   clients: ClientRow[];
+  programChoices: ProgramChoice[];
   teamMemberNameById: Map<string, string>;
   renderClientAvatar: (client: ClientRow, size?: string) => React.ReactNode;
   clientMeta: (client: ClientRow) => {
@@ -1224,7 +1409,10 @@ function ClientCards({
                   </div>
                 </div>
               </div>
-              <StatusPill value={client.program_status_value} />
+              <ProgramStatusPill
+                value={client.program_status_value}
+                choices={programChoices}
+              />
             </div>
             <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               <MiniMeta label="Buy In" value={<OutcomePill value={meta.buyIn} />} />
@@ -1233,7 +1421,7 @@ function ClientCards({
                 value={<OutcomePill value={meta.progress} />}
               />
               <MiniMeta label="Last Contact" value={formatDate(meta.last)} />
-              <MiniMeta label="Pathway" value={formatValue(meta.pathway)} />
+              <MiniMeta label="Pathway" value={displayValue(meta.pathway)} />
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button
