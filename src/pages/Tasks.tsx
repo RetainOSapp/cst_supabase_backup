@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ProgramStatusPill } from "../lib/clientDisplay.tsx";
+import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 type ViewMode = "board" | "list";
@@ -309,9 +310,10 @@ function TaskListTable({
 
 export function Tasks() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { viewAsCompanyId, setViewAsCompanyId } = useAccountContext();
   const cached = useMemo(() => readTasksCache(), []);
   const [companyId, setCompanyId] = useState(
-    searchParams.get("companyId") ?? cached?.companyId ?? "",
+    searchParams.get("companyId") ?? cached?.companyId ?? viewAsCompanyId,
   );
   const [csmId, setCsmId] = useState(
     searchParams.get("csmId") ?? cached?.csmId ?? "",
@@ -363,6 +365,12 @@ export function Tasks() {
     if (csmId) next.set("csmId", csmId);
     setSearchParams(next, { replace: true });
   }, [companyId, csmId, search, setSearchParams, statusMode, viewMode]);
+
+  useEffect(() => {
+    if (!viewAsCompanyId || viewAsCompanyId === companyId) return;
+    setCompanyId(viewAsCompanyId);
+    setCsmId("");
+  }, [companyId, viewAsCompanyId]);
 
   useEffect(() => {
     async function loadCompanies() {
@@ -536,6 +544,7 @@ export function Tasks() {
               id="tasks-company"
               value={companyId}
               onChange={(event) => {
+                setViewAsCompanyId(event.target.value);
                 setCompanyId(event.target.value);
                 setCsmId("");
               }}

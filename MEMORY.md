@@ -149,3 +149,197 @@ Recent work added:
 - Top-level user/CSM-based tasks page.
 - Navigation entry for Tasks.
 - Session memory for client roster and tasks page filters.
+
+Latest committed checkpoint:
+
+- Commit: `8bcd555 Build client task and contract views`
+- Author/committer: `retainOS <retainOS@users.noreply.github.com>`
+- Branch: `local-dev-setup`
+- Branch is ahead of `origin/local-dev-setup` by 1 commit.
+
+## Dashboard Work In Progress
+
+There is uncommitted dashboard work in:
+
+`src/pages/Dashboard.tsx`
+
+This was started from the dashboard low-fidelity wireframe. It is not committed yet.
+
+Current dashboard direction:
+
+- Keep `/dashboard` as the executive command center, not a task workspace.
+- Preserve the existing company/CSM/secondary/program/date filters.
+- Add dashboard tabs:
+  - `Overview`
+  - `Charts`
+  - `AI Insights`
+- `Overview` keeps the existing KPI cards and KPI detail drawer, grouped into clearer sections:
+  - Client Health
+  - Contracts & Retention
+- `Charts` adds Supabase-backed aggregate visualizations:
+  - Program Distribution
+  - Buy-in
+  - Progress
+  - Clients By Offer
+  - Tasks By Status
+  - CSM Workload
+- Chart data is loaded from:
+  - `backup_company_clients`
+  - `backup_company_clients_tasks`
+  - `backup_company_offers`
+- `AI Insights` is currently a read-only placeholder with a disabled `Generate AI Insights` button. Do not wire OpenAI or write paths until explicitly requested.
+
+Dashboard work status:
+
+- `npm run build` passed after the dashboard tab/chart changes.
+- The dashboard changes are still uncommitted and should be reviewed/tested in-browser before committing.
+- Only known uncommitted tracked file at last handoff was `src/pages/Dashboard.tsx`.
+- The untracked `old glide project test/` folder remains intentionally excluded.
+
+Suggested next step after context reset:
+
+1. Run `git status --short --branch`.
+2. Run `npm run build`.
+3. Start or confirm Vite dev server.
+4. Open `/dashboard`, test filters, Overview, Charts, and AI Insights.
+5. Refine UI/data if needed.
+6. Commit dashboard work as `retainOS`.
+
+## Super Admin / Login Hierarchy Planning
+
+The current company dropdowns across Dashboard, Clients, and Tasks are temporary workarounds. The intended hierarchy is:
+
+- **Super Admin** users: internal RetainOS/admin/dev users such as Joao, Ben, and devs.
+- Super Admins can manage SaaS clients, meaning the companies in `backup_companies`.
+- Super Admins can choose a company to **View As** and then interact with that company account as a full-access admin for support/debugging.
+- Company-scoped users should eventually see only their own company data and should not need a company dropdown.
+
+Initial safe implementation idea:
+
+- Add a frontend role/context layer for authenticated users.
+- Define Super Admin by a temporary email allowlist, likely from env such as `VITE_SUPER_ADMIN_EMAILS`.
+- Add a persistent selected company / `viewAsCompanyId` in `sessionStorage`.
+- Existing pages should use `viewAsCompanyId` as their default company context.
+- Keep write actions disabled/read-only until an explicit write-mode plan and Supabase security path are approved.
+
+## Super Admin Low-Fi Screens / Product Notes
+
+Screens provided:
+
+- Login screen:
+  - High-fidelity direction shows RetainOS branding.
+  - Email/password and Google login are shown in the low-fi.
+  - Current app uses Supabase email OTP flow; do not switch auth mode without explicit request.
+
+- SuperAdmin > SaaS Clients:
+  - A SaaS client is a company/account in `backup_companies`.
+  - Super Admin can view SaaS clients as cards/list.
+  - Filters/statuses shown: Active, Paused, Archived.
+  - Search should eventually search SaaS user names, client names, tasks, and SaaS companies.
+  - Card actions planned: Edit, Pause/Offboard, Archive.
+  - Pause should preserve data but restrict access for non-super-admins and notify director.
+  - Archive/offboard should preserve data but remove company access and remove it from normal screen view.
+  - Read-only mode note: screens can be built/opened for testing, but Submit/Save must be disabled until write mode is approved.
+
+- Add New SaaS Client modal:
+  - Fields shown:
+    - Company Name
+    - Director Name
+    - Director Email
+    - Logo optional
+    - Subscription tier
+  - Company ID should be auto-generated when Super Admin creates a new SaaS account.
+  - Logo/image is not required at Super Admin creation time; Director can upload during onboarding later.
+  - Tier options:
+    - Starter
+    - Growth
+    - Pro/Enterprise/DFY
+  - Tier should eventually drive SaaS permissions and limitations.
+  - For now, modal can be present but Submit disabled/read-only.
+
+- SaaS Client Details:
+  - Shows company ID, company name, created date, and edit SaaS details action.
+  - Super Admin can select this company to **View As** for support.
+  - Details tabs:
+    - Team
+    - Customization
+    - Pathways & Milestones
+    - Company Settings
+  - For the near term, only Team is planned. The other tabs are future work.
+
+- Team tab:
+  - Uses company members/team data from company/team tables.
+  - Sections by role:
+    - Director
+    - CSM
+    - Support
+    - Viewer
+  - New Team Member modal:
+    - Name
+    - Email
+    - Profile picture
+    - Role: Director, CSM, Support, Viewer
+    - Optional checkbox: assigned person does not manage clients
+  - Role semantics from low-fi:
+    - Director: can see all clients and manage team members.
+    - CSM: can only see assigned clients.
+    - Support: can see all clients and CSM performance.
+    - Viewer: read-oriented access, exact permissions TBD.
+  - The “does not manage clients” checkbox appears for Director or Support roles; when checked, they should not appear in client assignment dropdowns or dashboard filters.
+  - Current `backup_company_team.role_hide_from_csm_list` likely maps to this behavior.
+
+- Team member cards:
+  - Display user name, email, and capacity percent pill.
+  - Card actions planned:
+    - Edit capacity
+    - Remove user from SaaS client
+  - Capacity tooltip note:
+    - Displays % capacity forecast for next 30 days.
+    - Capacity logic varies by company/team member.
+    - Low-fi formula: `30 days - active clients minus clients that will expire this month / total capacity for that team member`.
+    - This formula needs clarification before implementation.
+  - On-demand AI prompt editing is only Super Admin and only available in Pro/Enterprise tiers later.
+
+Future tabs not yet building:
+
+- Customization:
+  - AI custom prompts
+  - Custom fields
+  - Outcome definitions
+  - Churn reasons
+- Pathways & Milestones.
+- Company Settings.
+
+## Super Admin Implementation Checkpoint
+
+Initial read-only implementation added:
+
+- Shared frontend account context: `src/lib/accountContext.tsx`.
+- Persistent Super Admin **View as company** state stored in `localStorage` under `retainOS.viewAsCompanyId.v1`.
+- Temporary Super Admin detection:
+  - Uses `VITE_SUPER_ADMIN_EMAILS` as a comma-separated allowlist when present.
+  - If no allowlist is configured, every signed-in user is treated as Super Admin for the local read-only preview.
+- Header now exposes `SaaS Clients` for Super Admins and shows when a View As context is active.
+- New routes:
+  - `/saas-clients`: read-only SaaS Clients/company account view.
+  - `/saas-clients/:companyId`: read-only SaaS Client details, currently focused on the Team tab.
+- `/dashboard`, `/clients`, and `/tasks` now default to the persisted View As company and update that context when the company selector changes.
+
+SaaS Clients page notes:
+
+- Reads companies from `backup_companies`.
+- Reads team/director preview data from `backup_company_team`.
+- Active/Archived filters use `backup_companies.archived`.
+- Paused is a placeholder count/filter until there is a confirmed pause/status field.
+- Add New SaaS Client modal opens for UX testing but Submit is disabled.
+
+SaaS Client details notes:
+
+- Team tab reads `backup_company_team`.
+- Role labels are inferred for now:
+  - `role_is_saa_s_admin` -> Director.
+  - `role_read_only_user` -> Viewer.
+  - `role_hide_from_csm_list` -> Support.
+  - Otherwise -> CSM.
+- New Team Member modal opens for UX testing but Submit is disabled.
+- Edit/offboard/team member actions remain disabled while the app is in read-only mode.

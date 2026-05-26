@@ -1,5 +1,6 @@
 import {
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
   useEffect,
   useId,
@@ -18,6 +19,7 @@ import { RetentionPercentageKpi } from "../components/dashboard/kpis/RetentionPe
 import { UpForRenewalKpi } from "../components/dashboard/kpis/UpForRenewalKpi.tsx";
 import { supabase } from "../lib/supabase.ts";
 import { type DashboardKpiSqlParams } from "../lib/dashboardKpiSql.ts";
+import { useAccountContext } from "../lib/accountContext.tsx";
 
 const MONTH_OPTIONS_COUNT = 25;
 
@@ -26,6 +28,8 @@ const CSM_QUERY_KEY = "csmId";
 const SECONDARY_ASSIGNEE_QUERY_KEY = "secondaryAssigneeId";
 const PROGRAM_QUERY_KEY = "program";
 const DETAIL_PAGE_SIZE = 25;
+
+type DashboardTab = "overview" | "charts" | "ai";
 
 type KpiDetailKey =
   | "active"
@@ -99,6 +103,34 @@ interface ClientRow {
   client_image: string | null;
   csm_team_member_id: string | null;
 }
+
+interface ChartDatum {
+  label: string;
+  value: number;
+}
+
+interface DashboardChartData {
+  programDistribution: ChartDatum[];
+  buyInDistribution: ChartDatum[];
+  progressDistribution: ChartDatum[];
+  clientsByOffer: ChartDatum[];
+  tasksByStatus: ChartDatum[];
+  csmWorkload: ChartDatum[];
+}
+
+type ChartClientRow = Record<string, unknown> & {
+  glide_row_id: string;
+  program_status_value: string | null;
+  outcomes_buy_in_for_filtering: string | null;
+  outcomes_progress_for_filtering: string | null;
+  offer_milestones_current_offer_id: string | null;
+  csm_team_member_id: string | null;
+};
+
+type ChartTaskRow = {
+  status_value: string | null;
+  assigned_to_id: string | null;
+};
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -179,10 +211,13 @@ function emptyDashboardFilters(): DashboardFilters {
   };
 }
 
-function dashboardFiltersFromSearchParams(searchParams: URLSearchParams): DashboardFilters {
+function dashboardFiltersFromSearchParams(
+  searchParams: URLSearchParams,
+  fallbackCompanyId = "",
+): DashboardFilters {
   return {
     ...emptyDashboardFilters(),
-    companyId: searchParams.get(COMPANY_QUERY_KEY) ?? "",
+    companyId: searchParams.get(COMPANY_QUERY_KEY) ?? fallbackCompanyId,
     csmId: searchParams.get(CSM_QUERY_KEY) ?? "",
     secondaryAssigneeId: searchParams.get(SECONDARY_ASSIGNEE_QUERY_KEY) ?? "",
     program: searchParams.get(PROGRAM_QUERY_KEY) ?? "",
@@ -451,15 +486,189 @@ function getInitials(name: string | null) {
     .join("");
 }
 
+function displayLabel(value: unknown) {
+  if (value === null || value === undefined || value === "") return "Not set";
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === "x") return "Not set";
+  return text
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function countBy<T>(
+  rows: T[],
+  getKey: (row: T) => string | null | undefined,
+  labelMap = new Map<string, string>(),
+) {
+  const counts = new Map<string, number>();
+  rows.forEach((row) => {
+    const raw = getKey(row);
+    const key = raw && String(raw).trim() ? String(raw).trim() : "not-set";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+
+  return [...counts.entries()]
+    .map(([key, value]) => ({
+      label: labelMap.get(key) ?? displayLabel(key),
+      value,
+    }))
+    .sort((a, b) => b.value - a.value);
+}
+
+function chartTotal(data: ChartDatum[]) {
+  return data.reduce((sum, item) => sum + item.value, 0);
+}
+
+function DonutChart({ data }: { data: ChartDatum[] }) {
+  const total = chartTotal(data);
+  const palette = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#60a5fa"];
+  let offset = 25;
+
+  if (total === 0) {
+    return (
+      <div className="flex h-36 items-center justify-center rounded-lg border border-dashed border-gray-200 text-sm text-gray-500">
+        No data
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-5">
+      <svg viewBox="0 0 42 42" className="h-32 w-32 shrink-0 -rotate-90">
+        <circle
+          cx="21"
+          cy="21"
+          r="15.915"
+          fill="transparent"
+          stroke="#e5e7eb"
+          strokeWidth="7"
+        />
+        {data.slice(0, 5).map((item, index) => {
+          const dash = (item.value / total) * 100;
+          const circle = (
+            <circle
+              key={item.label}
+              cx="21"
+              cy="21"
+              r="15.915"
+              fill="transparent"
+              stroke={palette[index % palette.length]}
+              strokeWidth="7"
+              strokeDasharray={`${dash} ${100 - dash}`}
+              strokeDashoffset={offset}
+            />
+          );
+          offset -= dash;
+          return circle;
+        })}
+      </svg>
+      <div className="min-w-0 flex-1 space-y-2">
+        {data.slice(0, 5).map((item, index) => (
+          <div key={item.label} className="flex items-center justify-between gap-3 text-sm">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: palette[index % palette.length] }}
+              />
+              <span className="truncate text-gray-700">{item.label}</span>
+            </div>
+            <span className="font-medium text-gray-900">{item.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BarChart({ data }: { data: ChartDatum[] }) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  if (data.length === 0) {
+    return (
+      <div className="flex h-36 items-center justify-center rounded-lg border border-dashed border-gray-200 text-sm text-gray-500">
+        No data
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.slice(0, 8).map((item) => (
+        <div key={item.label}>
+          <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+            <span className="truncate text-gray-700">{item.label}</span>
+            <span className="font-medium text-gray-900">{item.value}</span>
+          </div>
+          <div className="h-2 rounded-full bg-gray-100">
+            <div
+              className="h-2 rounded-full bg-indigo-500"
+              style={{ width: `${Math.max(4, (item.value / max) * 100)}%` }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChartCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+        {subtitle && <p className="mt-1 text-xs text-gray-500">{subtitle}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function DashboardTabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${
+        active
+          ? "border-indigo-600 text-indigo-600"
+          : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { viewAsCompanyId, setViewAsCompanyId } = useAccountContext();
   const [pendingFilters, setPendingFilters] = useState(() =>
-    dashboardFiltersFromSearchParams(searchParams),
+    dashboardFiltersFromSearchParams(searchParams, viewAsCompanyId),
   );
   const [appliedFilters, setAppliedFilters] = useState(() =>
-    dashboardFiltersFromSearchParams(searchParams),
+    dashboardFiltersFromSearchParams(searchParams, viewAsCompanyId),
   );
   const [reportVersion, setReportVersion] = useState(0);
+  const [activeDashboardTab, setActiveDashboardTab] =
+    useState<DashboardTab>("overview");
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
@@ -493,6 +702,15 @@ export function Dashboard() {
     sql: string;
   } | null>(null);
   const [kpiInfoSqlCopied, setKpiInfoSqlCopied] = useState(false);
+  const [chartData, setChartData] = useState<DashboardChartData>({
+    programDistribution: [],
+    buyInDistribution: [],
+    progressDistribution: [],
+    clientsByOffer: [],
+    tasksByStatus: [],
+    csmWorkload: [],
+  });
+  const [chartsLoading, setChartsLoading] = useState(false);
 
   const updateSearchParams = (updates: Record<string, string | null>) => {
     setSearchParams(
@@ -539,6 +757,31 @@ export function Dashboard() {
     );
     setReportVersion((v) => v + 1);
   };
+
+  useEffect(() => {
+    if (!viewAsCompanyId || viewAsCompanyId === pendingFilters.companyId) return;
+    setPendingFilters((prev) => ({
+      ...prev,
+      companyId: viewAsCompanyId,
+      csmId: "",
+      secondaryAssigneeId: "",
+      program: "",
+    }));
+    setAppliedFilters((prev) => ({
+      ...prev,
+      companyId: viewAsCompanyId,
+      csmId: "",
+      secondaryAssigneeId: "",
+      program: "",
+    }));
+    setReportVersion((v) => v + 1);
+    updateSearchParams({
+      [COMPANY_QUERY_KEY]: viewAsCompanyId,
+      [CSM_QUERY_KEY]: null,
+      [SECONDARY_ASSIGNEE_QUERY_KEY]: null,
+      [PROGRAM_QUERY_KEY]: null,
+    });
+  }, [pendingFilters.companyId, viewAsCompanyId]);
 
   useEffect(() => {
     if (pendingFilters.companyId) return;
@@ -1064,6 +1307,149 @@ export function Dashboard() {
   ]);
 
   useEffect(() => {
+    if (!appliedFilters.companyId) {
+      setChartData({
+        programDistribution: [],
+        buyInDistribution: [],
+        progressDistribution: [],
+        clientsByOffer: [],
+        tasksByStatus: [],
+        csmWorkload: [],
+      });
+      setChartsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCharts() {
+      setChartsLoading(true);
+
+      let clientsQuery = supabase
+        .from("backup_company_clients")
+        .select(
+          "glide_row_id, program_status_value, outcomes_buy_in_for_filtering, outcomes_progress_for_filtering, offer_milestones_current_offer_id, csm_team_member_id, csm_secondary_assignee_id, client_age_date_onboarded",
+        )
+        .eq("company_id", appliedFilters.companyId)
+        .range(0, 4999);
+
+      if (appliedFilters.csmId) {
+        clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
+      }
+      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+        clientsQuery = clientsQuery.eq(
+          "csm_secondary_assignee_id",
+          appliedFilters.secondaryAssigneeId,
+        );
+      }
+      if (appliedFilters.program) {
+        clientsQuery = clientsQuery.eq("program_status_value", appliedFilters.program);
+      }
+      if (appliedFilters.clientStartDate.startDate) {
+        clientsQuery = clientsQuery.gte(
+          "client_age_date_onboarded",
+          `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
+        );
+      }
+      if (appliedFilters.clientStartDate.endDate) {
+        clientsQuery = clientsQuery.lte(
+          "client_age_date_onboarded",
+          `${appliedFilters.clientStartDate.endDate}T23:59:59.999Z`,
+        );
+      }
+
+      let tasksQuery = supabase
+        .from("backup_company_clients_tasks")
+        .select("status_value, assigned_to_id")
+        .eq("company_id", appliedFilters.companyId)
+        .range(0, 4999);
+      if (appliedFilters.csmId) {
+        tasksQuery = tasksQuery.eq("assigned_to_id", appliedFilters.csmId);
+      }
+
+      const [{ data: clientRows, error: clientsError }, { data: taskRows, error: tasksError }] =
+        await Promise.all([clientsQuery, tasksQuery]);
+
+      if (cancelled) return;
+
+      if (clientsError) {
+        console.error("Failed to load dashboard chart clients:", clientsError);
+      }
+      if (tasksError) {
+        console.error("Failed to load dashboard chart tasks:", tasksError);
+      }
+
+      const clients = ((clientRows ?? []) as ChartClientRow[]);
+      const tasks = ((taskRows ?? []) as ChartTaskRow[]);
+      const offerIds = [
+        ...new Set(
+          clients
+            .map((client) => client.offer_milestones_current_offer_id)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      let offerNameById = new Map<string, string>();
+
+      if (offerIds.length > 0) {
+        const { data: offers, error: offersError } = await supabase
+          .from("backup_company_offers")
+          .select("glide_row_id, name")
+          .in("glide_row_id", offerIds);
+        if (!cancelled) {
+          if (offersError) console.error("Failed to load offer labels:", offersError);
+          offerNameById = new Map(
+            ((offers ?? []) as { glide_row_id: string; name: string | null }[]).map(
+              (offer) => [offer.glide_row_id, offer.name ?? offer.glide_row_id],
+            ),
+          );
+        }
+      }
+
+      if (cancelled) return;
+
+      setChartData({
+        programDistribution: countBy(clients, (client) => client.program_status_value),
+        buyInDistribution: countBy(
+          clients,
+          (client) => client.outcomes_buy_in_for_filtering,
+        ),
+        progressDistribution: countBy(
+          clients,
+          (client) => client.outcomes_progress_for_filtering,
+        ),
+        clientsByOffer: countBy(
+          clients,
+          (client) => client.offer_milestones_current_offer_id,
+          offerNameById,
+        ),
+        tasksByStatus: countBy(tasks, (task) => task.status_value),
+        csmWorkload: countBy(
+          tasks,
+          (task) => task.assigned_to_id,
+          teamMemberNameById,
+        ),
+      });
+      setChartsLoading(false);
+    }
+
+    void loadCharts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appliedFilters.clientStartDate.endDate,
+    appliedFilters.clientStartDate.startDate,
+    appliedFilters.companyId,
+    appliedFilters.csmId,
+    appliedFilters.program,
+    appliedFilters.secondaryAssigneeId,
+    appliedShowSecondaryFilter,
+    teamMemberNameById,
+    reportVersion,
+  ]);
+
+  useEffect(() => {
     if (detailPage > detailPageCount) {
       setDetailPage(detailPageCount);
     }
@@ -1089,6 +1475,7 @@ export function Dashboard() {
               value={pendingFilters.companyId}
               onChange={(e) => {
                 const id = e.target.value;
+                setViewAsCompanyId(id);
                 setPendingFilters((p) => ({
                   ...p,
                   companyId: id,
@@ -1234,27 +1621,48 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="mb-3">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
-          KPIs
-        </h2>
+      <div className="mb-5 border-b border-gray-200">
+        <nav className="-mb-px flex gap-6 overflow-x-auto" aria-label="Dashboard sections">
+          <DashboardTabButton
+            active={activeDashboardTab === "overview"}
+            onClick={() => setActiveDashboardTab("overview")}
+          >
+            Overview
+          </DashboardTabButton>
+          <DashboardTabButton
+            active={activeDashboardTab === "charts"}
+            onClick={() => setActiveDashboardTab("charts")}
+          >
+            Charts
+          </DashboardTabButton>
+          <DashboardTabButton
+            active={activeDashboardTab === "ai"}
+            onClick={() => setActiveDashboardTab("ai")}
+          >
+            AI Insights
+          </DashboardTabButton>
+        </nav>
       </div>
 
       {!pendingFilters.companyId ? (
         <div className="bg-white rounded-lg border border-dashed border-gray-300 p-10 text-center text-gray-500">
-          <p>Select a company above to configure filters, then click Apply filters to load KPIs.</p>
+          <p>Select a company above to configure filters, then click Apply filters to load the dashboard.</p>
         </div>
       ) : !appliedFilters.companyId ? (
         <div className="bg-white rounded-lg border border-dashed border-amber-200 bg-amber-50/50 p-10 text-center text-amber-900">
           <p className="font-medium">Filters are set</p>
           <p className="mt-2 text-sm text-amber-800/90">
             Click <span className="font-semibold">Apply filters</span> to run the report and
-            load KPI counts.
+            load dashboard data.
           </p>
         </div>
-      ) : (
+      ) : activeDashboardTab === "overview" ? (
         <div className="space-y-4">
-          {/* Row 1: Active, Front End, Back End; fourth column intentionally empty */}
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+              Client Health
+            </h2>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <ActiveClientsKpi
               value={activeClients}
@@ -1277,10 +1685,20 @@ export function Dashboard() {
               onOpenInfo={openKpiInfoModal}
               onOpenList={() => openDetailDrawer("back-end")}
             />
-            <div className="hidden lg:block" aria-hidden="true" />
+            <OffBoardedClientsKpi
+              value={offBoardedClients}
+              loading={primaryKpiLoading}
+              sqlParams={kpiSqlParams}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={() => openDetailDrawer("off-boarded")}
+            />
           </div>
 
-          {/* Row 2: Retained, Retention %, Off-boarded, Churn */}
+          <div className="pt-2">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+              Contracts & Retention
+            </h2>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <RetainedClientsKpi
               value={retainedClients}
@@ -1297,12 +1715,12 @@ export function Dashboard() {
               onOpenInfo={openKpiInfoModal}
               onOpenList={() => openDetailDrawer("renewing")}
             />
-            <OffBoardedClientsKpi
-              value={offBoardedClients}
-              loading={primaryKpiLoading}
+            <UpForRenewalKpi
+              value={activeRenewingClients}
+              loading={retentionKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("off-boarded")}
+              onOpenList={() => openDetailDrawer("active-renewing")}
             />
             <ChurnPercentageKpi
               percentage={churnPercentage}
@@ -1313,18 +1731,156 @@ export function Dashboard() {
               onOpenList={() => openDetailDrawer("churned")}
             />
           </div>
-
-          {/* Row 3: first column empty on large screens; Up for Renewal in second column */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="hidden lg:block" aria-hidden="true" />
-            <UpForRenewalKpi
-              value={activeRenewingClients}
-              loading={retentionKpiLoading}
-              sqlParams={kpiSqlParams}
-              onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("active-renewing")}
-            />
+        </div>
+      ) : activeDashboardTab === "charts" ? (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <div className="text-xs uppercase tracking-wider text-gray-500">
+                Visible Clients
+              </div>
+              <div className="mt-1 text-sm font-semibold text-gray-900">
+                {chartTotal(chartData.programDistribution).toLocaleString()}
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <div className="text-xs uppercase tracking-wider text-gray-500">
+                Visible Tasks
+              </div>
+              <div className="mt-1 text-sm font-semibold text-gray-900">
+                {chartTotal(chartData.tasksByStatus).toLocaleString()}
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+              <div className="text-xs uppercase tracking-wider text-gray-500">
+                Report
+              </div>
+              <div className="mt-1 text-sm font-semibold text-gray-900">
+                {chartsLoading ? "Loading charts..." : "Ready"}
+              </div>
+            </div>
           </div>
+
+          {chartsLoading ? (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-64 rounded-lg border border-gray-200 bg-white shadow-sm"
+                >
+                  <div className="h-full animate-pulse rounded-lg bg-gray-50" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <ChartCard
+                title="Program Distribution"
+                subtitle="Clients grouped by current program status"
+              >
+                <DonutChart data={chartData.programDistribution} />
+              </ChartCard>
+              <ChartCard
+                title="Buy-in"
+                subtitle="Client outcome buy-in distribution"
+              >
+                <DonutChart data={chartData.buyInDistribution} />
+              </ChartCard>
+              <ChartCard
+                title="Progress"
+                subtitle="Client outcome progress distribution"
+              >
+                <DonutChart data={chartData.progressDistribution} />
+              </ChartCard>
+              <ChartCard
+                title="Clients By Offer"
+                subtitle="Top current offers for filtered clients"
+              >
+                <BarChart data={chartData.clientsByOffer} />
+              </ChartCard>
+              <ChartCard
+                title="Tasks By Status"
+                subtitle="Client tasks for the selected company"
+              >
+                <BarChart data={chartData.tasksByStatus} />
+              </ChartCard>
+              <ChartCard
+                title="CSM Workload"
+                subtitle="Tasks grouped by assigned CSM"
+              >
+                <BarChart data={chartData.csmWorkload} />
+              </ChartCard>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  AI Insights
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Read-only placeholder until we wire an approved AI generation path.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white opacity-50"
+              >
+                Generate AI Insights
+              </button>
+            </div>
+            <div className="mt-6 space-y-4 text-sm leading-6 text-gray-700">
+              <p>
+                The selected report currently has{" "}
+                <span className="font-semibold text-gray-900">
+                  {activeClients?.toLocaleString() ?? "0"} active clients
+                </span>
+                , with{" "}
+                <span className="font-semibold text-gray-900">
+                  {frontEndClients?.toLocaleString() ?? "0"} front-end
+                </span>{" "}
+                and{" "}
+                <span className="font-semibold text-gray-900">
+                  {backEndClients?.toLocaleString() ?? "0"} back-end
+                </span>{" "}
+                clients.
+              </p>
+              <p>
+                Retention and renewal signals should be reviewed alongside the
+                Charts tab, especially CSM workload, client buy-in, and progress
+                distribution. These are the first places to look for operational
+                constraints before drawing conclusions from churn or renewal rates.
+              </p>
+              <p>
+                Once AI generation is approved, this panel can summarize trend
+                changes, highlight unusual segments, and suggest follow-up questions
+                for the selected company, CSM, program, and date range.
+              </p>
+            </div>
+          </section>
+          <aside className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+              Inputs For Future AI
+            </h3>
+            <div className="mt-4 space-y-3 text-sm text-gray-700">
+              <div className="rounded-md bg-gray-50 px-3 py-2">
+                KPI snapshot
+              </div>
+              <div className="rounded-md bg-gray-50 px-3 py-2">
+                Chart aggregates
+              </div>
+              <div className="rounded-md bg-gray-50 px-3 py-2">
+                Date range and CSM filters
+              </div>
+              <div className="rounded-md bg-gray-50 px-3 py-2">
+                Client/task operational signals
+              </div>
+            </div>
+          </aside>
         </div>
       )}
 

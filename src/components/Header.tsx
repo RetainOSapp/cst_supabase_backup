@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 export function Header() {
   const [email, setEmail] = useState<string | null>(null);
   const location = useLocation();
+  const { isSuperAdmin, viewAsCompanyId } = useAccountContext();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -52,8 +54,18 @@ export function Header() {
           <Link to="/tasks" className={linkClass("/tasks")}>
             Tasks
           </Link>
+          {isSuperAdmin && (
+            <Link to="/saas-clients" className={linkClass("/saas-clients")}>
+              SaaS Clients
+            </Link>
+          )}
         </div>
         <div className="flex items-center gap-4">
+          {isSuperAdmin && viewAsCompanyId && (
+            <span className="hidden rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 md:inline">
+              View as active
+            </span>
+          )}
           {email && (
             <span className="text-sm text-gray-500 hidden sm:inline">
               {email}

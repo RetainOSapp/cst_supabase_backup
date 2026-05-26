@@ -4,6 +4,7 @@ import {
   ProgramStatusPill,
   type ProgramChoice,
 } from "../lib/clientDisplay.tsx";
+import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 const PAGE_SIZE = 12;
@@ -692,8 +693,12 @@ function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
 export function Clients() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { viewAsCompanyId, setViewAsCompanyId } = useAccountContext();
   const cachedState = useMemo(() => readClientsCache(), []);
-  const initialCompanyId = searchParams.get("companyId");
+  const initialCompanyId =
+    searchParams.get("companyId") ??
+    cachedState?.filters.companyId ??
+    viewAsCompanyId;
   const [filters, setFilters] = useState<ClientFilters>(() =>
     initialCompanyId
       ? { ...emptyFilters, companyId: initialCompanyId }
@@ -755,6 +760,25 @@ export function Clients() {
   useEffect(() => {
     writeClientsCache({ filters, appliedFilters, page, viewMode });
   }, [appliedFilters, filters, page, viewMode]);
+  useEffect(() => {
+    if (!viewAsCompanyId || searchParams.get("companyId") === viewAsCompanyId) {
+      return;
+    }
+    setFilters((prev) => ({
+      ...prev,
+      companyId: viewAsCompanyId,
+      csmId: "",
+      secondaryAssigneeId: "",
+    }));
+    setAppliedFilters((prev) => ({
+      ...prev,
+      companyId: viewAsCompanyId,
+      csmId: "",
+      secondaryAssigneeId: "",
+    }));
+    setPage(1);
+    setSearchParams({ companyId: viewAsCompanyId }, { replace: true });
+  }, [searchParams, setSearchParams, viewAsCompanyId]);
   useEffect(() => {
     async function loadCompanies() {
       const { data, error } = await supabase
@@ -934,14 +958,15 @@ export function Clients() {
             <select
               id="clients-company-filter"
               value={filters.companyId}
-              onChange={(e) =>
+              onChange={(e) => {
+                setViewAsCompanyId(e.target.value);
                 setFilters((prev) => ({
                   ...prev,
                   companyId: e.target.value,
                   csmId: "",
                   secondaryAssigneeId: "",
-                }))
-              }
+                }));
+              }}
               disabled={companiesLoading}
               className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
             >
