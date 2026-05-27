@@ -27,6 +27,7 @@ const COMPANY_QUERY_KEY = "companyId";
 const CSM_QUERY_KEY = "csmId";
 const SECONDARY_ASSIGNEE_QUERY_KEY = "secondaryAssigneeId";
 const PROGRAM_QUERY_KEY = "program";
+const OFFER_QUERY_KEY = "offerId";
 const DETAIL_PAGE_SIZE = 25;
 
 type DashboardTab = "overview" | "charts" | "ai";
@@ -91,6 +92,11 @@ interface TeamMember {
   role_hide_from_csm_list: boolean | null;
 }
 
+interface Offer {
+  glide_row_id: string;
+  name: string | null;
+}
+
 interface ProgramChoice {
   program_value: string | null;
   program_label: string | null;
@@ -131,6 +137,31 @@ type ChartTaskRow = {
   status_value: string | null;
   assigned_to_id: string | null;
 };
+
+type OfferKpiClientRow = Record<string, unknown> & {
+  glide_row_id: string;
+  client_name: string | null;
+  client_image: string | null;
+  csm_team_member_id: string | null;
+  csm_secondary_assignee_id: string | null;
+  program_status_value: string | null;
+  offer_milestones_current_offer_id: string | null;
+  client_age_date_onboarded: string | null;
+  client_age_date_offboarded: string | null;
+  client_age_date_offboarded_for_filtering: string | null;
+  current_contract_start_date: string | null;
+  current_contract_of_days: number | null;
+  current_contract_end_date: string | null;
+};
+
+interface OfferKpiHistoryRow {
+  client_id: string | null;
+}
+
+interface OfferKpiContractRow {
+  client_id: string | null;
+  end_date: string | null;
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -195,6 +226,7 @@ interface DashboardFilters {
   companyId: string;
   csmId: string;
   secondaryAssigneeId: string;
+  offerId: string;
   program: string;
   dateRange: MonthDateFilterState;
   clientStartDate: MonthDateFilterState;
@@ -205,6 +237,7 @@ function emptyDashboardFilters(): DashboardFilters {
     companyId: "",
     csmId: "",
     secondaryAssigneeId: "",
+    offerId: "",
     program: "",
     dateRange: clearedMonthDateFilter(),
     clientStartDate: clearedMonthDateFilter(),
@@ -220,6 +253,7 @@ function dashboardFiltersFromSearchParams(
     companyId: searchParams.get(COMPANY_QUERY_KEY) ?? fallbackCompanyId,
     csmId: searchParams.get(CSM_QUERY_KEY) ?? "",
     secondaryAssigneeId: searchParams.get(SECONDARY_ASSIGNEE_QUERY_KEY) ?? "",
+    offerId: searchParams.get(OFFER_QUERY_KEY) ?? "",
     program: searchParams.get(PROGRAM_QUERY_KEY) ?? "",
   };
 }
@@ -521,6 +555,67 @@ function chartTotal(data: ChartDatum[]) {
   return data.reduce((sum, item) => sum + item.value, 0);
 }
 
+function dateFromValue(value: unknown) {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function dayStart(value: string) {
+  return value ? new Date(`${value}T00:00:00.000Z`) : null;
+}
+
+function dayAfter(value: string) {
+  return value ? new Date(`${value}T00:00:00.000Z`) : null;
+}
+
+function isInDateRange(value: unknown, startDate: string, endDate: string) {
+  const date = dateFromValue(value);
+  if (!date) return false;
+  const start = dayStart(startDate);
+  const end = endDate ? addDays(new Date(`${endDate}T00:00:00.000Z`), 1) : null;
+  return (!start || date >= start) && (!end || date < end);
+}
+
+function passesReportEndDate(client: OfferKpiClientRow, endDate: string) {
+  if (!endDate) return true;
+  const onboarded = dateFromValue(client.client_age_date_onboarded);
+  const end = dayAfter(endDate);
+  return !onboarded || !end || onboarded < end;
+}
+
+function calculatedContractEndDate(client: OfferKpiClientRow) {
+  const explicitEnd = dateFromValue(client.current_contract_end_date);
+  if (explicitEnd) return explicitEnd;
+  const start = dateFromValue(
+    client.current_contract_start_date ?? client.client_age_date_onboarded,
+  );
+  if (!start || client.current_contract_of_days == null) return null;
+  return addDays(start, Number(client.current_contract_of_days));
+}
+
+function calculatedOffboardedDate(client: OfferKpiClientRow) {
+  return (
+    dateFromValue(client.client_age_date_offboarded) ??
+    dateFromValue(client.client_age_date_offboarded_for_filtering) ??
+    calculatedContractEndDate(client)
+  );
+}
+
+function isChurnedClient(client: OfferKpiClientRow, startDate: string, endDate: string) {
+  if (client.program_status_value !== "off-boarded") return false;
+  const offboarded = calculatedOffboardedDate(client);
+  const contractEnd = calculatedContractEndDate(client);
+  if (!offboarded || !contractEnd || offboarded >= contractEnd) return false;
+  return isInDateRange(offboarded, startDate, endDate);
+}
+
 function DonutChart({ data }: { data: ChartDatum[] }) {
   const total = chartTotal(data);
   const palette = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#60a5fa"];
@@ -674,6 +769,8 @@ export function Dashboard() {
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [offersLoading, setOffersLoading] = useState(false);
   const [baseProgramChoices, setBaseProgramChoices] = useState<ProgramChoice[]>([]);
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
 
@@ -749,6 +846,8 @@ export function Dashboard() {
         else p.delete(CSM_QUERY_KEY);
         if (next.secondaryAssigneeId) p.set(SECONDARY_ASSIGNEE_QUERY_KEY, next.secondaryAssigneeId);
         else p.delete(SECONDARY_ASSIGNEE_QUERY_KEY);
+        if (next.offerId) p.set(OFFER_QUERY_KEY, next.offerId);
+        else p.delete(OFFER_QUERY_KEY);
         if (next.program) p.set(PROGRAM_QUERY_KEY, next.program);
         else p.delete(PROGRAM_QUERY_KEY);
         return p;
@@ -765,6 +864,7 @@ export function Dashboard() {
       companyId: viewAsCompanyId,
       csmId: "",
       secondaryAssigneeId: "",
+      offerId: "",
       program: "",
     }));
     setAppliedFilters((prev) => ({
@@ -772,6 +872,7 @@ export function Dashboard() {
       companyId: viewAsCompanyId,
       csmId: "",
       secondaryAssigneeId: "",
+      offerId: "",
       program: "",
     }));
     setReportVersion((v) => v + 1);
@@ -779,6 +880,7 @@ export function Dashboard() {
       [COMPANY_QUERY_KEY]: viewAsCompanyId,
       [CSM_QUERY_KEY]: null,
       [SECONDARY_ASSIGNEE_QUERY_KEY]: null,
+      [OFFER_QUERY_KEY]: null,
       [PROGRAM_QUERY_KEY]: null,
     });
   }, [pendingFilters.companyId, viewAsCompanyId]);
@@ -790,6 +892,7 @@ export function Dashboard() {
       [COMPANY_QUERY_KEY]: null,
       [CSM_QUERY_KEY]: null,
       [SECONDARY_ASSIGNEE_QUERY_KEY]: null,
+      [OFFER_QUERY_KEY]: null,
       [PROGRAM_QUERY_KEY]: null,
     });
   }, [pendingFilters.companyId]);
@@ -816,6 +919,15 @@ export function Dashboard() {
           member.role_hide_from_csm_list !== true,
       ),
     [teamMembers],
+  );
+
+  const offerOptions = useMemo(
+    () =>
+      offers.map((offer) => ({
+        value: offer.glide_row_id,
+        label: offer.name ?? "(unnamed)",
+      })),
+    [offers],
   );
 
   const showCompanyScopedFilters = Boolean(pendingFilters.companyId);
@@ -947,6 +1059,7 @@ export function Dashboard() {
         ? appliedFilters.secondaryAssigneeId
         : "",
       programValue: appliedFilters.program,
+      offerId: appliedFilters.offerId,
       clientStartDateFrom: appliedFilters.clientStartDate.startDate,
       clientStartDateTo: appliedFilters.clientStartDate.endDate,
       dateRangeStart: appliedFilters.dateRange.startDate,
@@ -972,6 +1085,7 @@ export function Dashboard() {
         csmId: appliedFilters.csmId,
         secondaryAssigneeId: appliedFilters.secondaryAssigneeId,
         program: appliedFilters.program,
+        offerId: appliedFilters.offerId,
         drs: appliedFilters.dateRange.startDate,
         dre: appliedFilters.dateRange.endDate,
         csf: appliedFilters.clientStartDate.startDate,
@@ -1059,6 +1173,43 @@ export function Dashboard() {
   }, [pendingFilters.companyId]);
 
   useEffect(() => {
+    if (!pendingFilters.companyId) {
+      setOffers([]);
+      setOffersLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadOffers() {
+      setOffersLoading(true);
+
+      const { data, error } = await supabase
+        .from("backup_company_offers")
+        .select("glide_row_id, name")
+        .eq("company_id", pendingFilters.companyId)
+        .order("name", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Failed to load offers:", error);
+        setOffers([]);
+      } else {
+        setOffers((data ?? []) as Offer[]);
+      }
+
+      setOffersLoading(false);
+    }
+
+    loadOffers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingFilters.companyId]);
+
+  useEffect(() => {
     if (!pendingFilters.companyId || baseProgramChoices.length > 0) return;
 
     let cancelled = false;
@@ -1104,12 +1255,14 @@ export function Dashboard() {
         companyId: "",
         csmId: "",
         secondaryAssigneeId: "",
+        offerId: "",
         program: "",
       }));
       updateSearchParams({
         [COMPANY_QUERY_KEY]: null,
         [CSM_QUERY_KEY]: null,
         [SECONDARY_ASSIGNEE_QUERY_KEY]: null,
+        [OFFER_QUERY_KEY]: null,
         [PROGRAM_QUERY_KEY]: null,
       });
     }
@@ -1149,6 +1302,18 @@ export function Dashboard() {
   ]);
 
   useEffect(() => {
+    if (!pendingFilters.offerId) return;
+
+    const isValidOffer = offerOptions.some(
+      (offer) => offer.value === pendingFilters.offerId,
+    );
+
+    if (!isValidOffer) {
+      setPendingFilters((prev) => ({ ...prev, offerId: "" }));
+    }
+  }, [offerOptions, pendingFilters.offerId]);
+
+  useEffect(() => {
     if (!pendingFilters.program) return;
 
     const isValidProgram = programChoices.some(
@@ -1177,6 +1342,216 @@ export function Dashboard() {
     }
 
     let cancelled = false;
+
+    async function loadOfferFilteredKpis() {
+      setPrimaryKpiLoading(true);
+      setRetentionKpiLoading(true);
+
+      let clientsQuery = supabase
+        .from("backup_company_clients")
+        .select(
+          [
+            "glide_row_id",
+            "client_name",
+            "client_image",
+            "csm_team_member_id",
+            "csm_secondary_assignee_id",
+            "program_status_value",
+            "offer_milestones_current_offer_id",
+            "client_age_date_onboarded",
+            "client_age_date_offboarded",
+            "client_age_date_offboarded_for_filtering",
+            "current_contract_start_date",
+            "current_contract_of_days",
+            "current_contract_end_date",
+          ].join(", "),
+        )
+        .eq("company_id", appliedFilters.companyId)
+        .eq("offer_milestones_current_offer_id", appliedFilters.offerId)
+        .range(0, 4999);
+
+      if (appliedFilters.csmId) {
+        clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
+      }
+      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+        clientsQuery = clientsQuery.eq(
+          "csm_secondary_assignee_id",
+          appliedFilters.secondaryAssigneeId,
+        );
+      }
+      if (appliedFilters.program) {
+        clientsQuery = clientsQuery.eq("program_status_value", appliedFilters.program);
+      }
+      if (appliedFilters.clientStartDate.startDate) {
+        clientsQuery = clientsQuery.gte(
+          "client_age_date_onboarded",
+          `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
+        );
+      }
+      if (appliedFilters.clientStartDate.endDate) {
+        clientsQuery = clientsQuery.lt(
+          "client_age_date_onboarded",
+          addDays(
+            new Date(`${appliedFilters.clientStartDate.endDate}T00:00:00.000Z`),
+            1,
+          ).toISOString(),
+        );
+      }
+
+      const { data: clientRows, error: clientsError } = await clientsQuery;
+      if (cancelled) return;
+
+      if (clientsError) {
+        console.error("Failed to load offer-filtered dashboard KPIs:", clientsError);
+        setActiveClients(null);
+        setFrontEndClients(null);
+        setBackEndClients(null);
+        setOffBoardedClients(null);
+        setChurnedClientsCount(null);
+        setChurnPercentage(null);
+        setRetainedClients(null);
+        setRenewingClientsCount(null);
+        setRetentionPercentage(null);
+        setActiveRenewingClients(null);
+        setPrimaryKpiLoading(false);
+        setRetentionKpiLoading(false);
+        return;
+      }
+
+      const clients = (clientRows ?? []) as unknown as OfferKpiClientRow[];
+      const reportClients = clients.filter((client) =>
+        passesReportEndDate(client, appliedFilters.dateRange.endDate),
+      );
+      const clientIds = reportClients.map((client) => client.glide_row_id);
+      const clientById = new Map(reportClients.map((client) => [client.glide_row_id, client]));
+
+      const active = reportClients.filter((client) =>
+        ["front-end", "back-end"].includes(client.program_status_value ?? ""),
+      );
+      const frontEnd = reportClients.filter(
+        (client) => client.program_status_value === "front-end",
+      );
+      const backEnd = reportClients.filter(
+        (client) => client.program_status_value === "back-end",
+      );
+      const offBoarded = clients.filter(
+        (client) =>
+          client.program_status_value === "off-boarded" &&
+          isInDateRange(
+            client.client_age_date_offboarded_for_filtering,
+            appliedFilters.dateRange.startDate,
+            appliedFilters.dateRange.endDate,
+          ),
+      );
+      const churned = reportClients.filter((client) =>
+        isChurnedClient(
+          client,
+          appliedFilters.dateRange.startDate,
+          appliedFilters.dateRange.endDate,
+        ),
+      );
+
+      setActiveClients(active.length);
+      setFrontEndClients(frontEnd.length);
+      setBackEndClients(backEnd.length);
+      setOffBoardedClients(offBoarded.length);
+      setChurnedClientsCount(churned.length);
+      const churnBase = frontEnd.length + backEnd.length + offBoarded.length;
+      setChurnPercentage(churnBase === 0 ? 0 : Math.round((churned.length / churnBase) * 100));
+      setPrimaryKpiLoading(false);
+
+      if (clientIds.length === 0) {
+        setRetainedClients(0);
+        setRenewingClientsCount(0);
+        setRetentionPercentage(0);
+        setActiveRenewingClients(0);
+        setRetentionKpiLoading(false);
+        return;
+      }
+
+      const [historyResult, contractsResult] = await Promise.all([
+        supabase
+          .from("backup_company_clients_history")
+          .select("client_id")
+          .in("client_id", clientIds)
+          .eq("change_type_code", "program-status")
+          .eq("value", "back-end")
+          .in("original_value", ["front-end", "back-end"])
+          .gte(
+            "modified_date",
+            appliedFilters.dateRange.startDate
+              ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+              : "0001-01-01T00:00:00.000Z",
+          )
+          .lt(
+            "modified_date",
+            appliedFilters.dateRange.endDate
+              ? addDays(new Date(`${appliedFilters.dateRange.endDate}T00:00:00.000Z`), 1).toISOString()
+              : "9999-12-31T00:00:00.000Z",
+          ),
+        supabase
+          .from("backup_company_clients_contracts")
+          .select("client_id, end_date")
+          .in("client_id", clientIds)
+          .not("end_date", "is", null),
+      ]);
+
+      if (cancelled) return;
+
+      if (historyResult.error) {
+        console.error("Failed to load offer-filtered retained history:", historyResult.error);
+      }
+      if (contractsResult.error) {
+        console.error("Failed to load offer-filtered contract history:", contractsResult.error);
+      }
+
+      const retainedIds = new Set(
+        ((historyResult.data ?? []) as OfferKpiHistoryRow[])
+          .map((row) => row.client_id)
+          .filter((id): id is string => Boolean(id)),
+      );
+      const churnedIds = new Set(churned.map((client) => client.glide_row_id));
+      const renewingIds = new Set<string>();
+
+      reportClients.forEach((client) => {
+        if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+        if (churnedIds.has(client.glide_row_id)) return;
+        const contractEnd = calculatedContractEndDate(client);
+        if (contractEnd && isInDateRange(contractEnd, appliedFilters.dateRange.startDate, appliedFilters.dateRange.endDate)) {
+          renewingIds.add(client.glide_row_id);
+        }
+      });
+
+      ((contractsResult.data ?? []) as OfferKpiContractRow[]).forEach((contract) => {
+        if (!contract.client_id || !contract.end_date) return;
+        const client = clientById.get(contract.client_id);
+        if (!client) return;
+        if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+        if (churnedIds.has(contract.client_id)) return;
+        if (isInDateRange(contract.end_date, appliedFilters.dateRange.startDate, appliedFilters.dateRange.endDate)) {
+          renewingIds.add(contract.client_id);
+        }
+      });
+
+      setRetainedClients(retainedIds.size);
+      setRenewingClientsCount(renewingIds.size);
+      setRetentionPercentage(
+        renewingIds.size === 0
+          ? 0
+          : Math.round((retainedIds.size / renewingIds.size) * 100),
+      );
+      setActiveRenewingClients(
+        [...renewingIds].filter((id) => {
+          const client = clientById.get(id);
+          return (
+            client &&
+            ["front-end", "back-end"].includes(client.program_status_value ?? "") &&
+            !retainedIds.has(id)
+          );
+        }).length,
+      );
+      setRetentionKpiLoading(false);
+    }
 
     async function loadPrimaryKpis() {
       setPrimaryKpiLoading(true);
@@ -1240,13 +1615,31 @@ export function Dashboard() {
       setRetentionKpiLoading(false);
     }
 
-    loadPrimaryKpis();
-    loadRetentionKpis();
+    if (appliedFilters.offerId) {
+      void loadOfferFilteredKpis();
+    } else {
+      loadPrimaryKpis();
+      loadRetentionKpis();
+    }
 
     return () => {
       cancelled = true;
     };
-  }, [appliedReportKey, appliedFilters.companyId, reportVersion, rpcFilterParams]);
+  }, [
+    appliedReportKey,
+    appliedFilters.clientStartDate.endDate,
+    appliedFilters.clientStartDate.startDate,
+    appliedFilters.companyId,
+    appliedFilters.csmId,
+    appliedFilters.dateRange.endDate,
+    appliedFilters.dateRange.startDate,
+    appliedFilters.offerId,
+    appliedFilters.program,
+    appliedFilters.secondaryAssigneeId,
+    appliedShowSecondaryFilter,
+    reportVersion,
+    rpcFilterParams,
+  ]);
 
   useEffect(() => {
     if (!activeDetailKey || !appliedFilters.companyId) {
@@ -1345,6 +1738,12 @@ export function Dashboard() {
       if (appliedFilters.program) {
         clientsQuery = clientsQuery.eq("program_status_value", appliedFilters.program);
       }
+      if (appliedFilters.offerId) {
+        clientsQuery = clientsQuery.eq(
+          "offer_milestones_current_offer_id",
+          appliedFilters.offerId,
+        );
+      }
       if (appliedFilters.clientStartDate.startDate) {
         clientsQuery = clientsQuery.gte(
           "client_age_date_onboarded",
@@ -1442,6 +1841,7 @@ export function Dashboard() {
     appliedFilters.clientStartDate.startDate,
     appliedFilters.companyId,
     appliedFilters.csmId,
+    appliedFilters.offerId,
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
     appliedShowSecondaryFilter,
@@ -1481,6 +1881,7 @@ export function Dashboard() {
                   companyId: id,
                   csmId: "",
                   secondaryAssigneeId: "",
+                  offerId: "",
                   ...(id ? {} : { program: "" }),
                 }));
               }}
@@ -1583,6 +1984,33 @@ export function Dashboard() {
                   {programChoices.map((choice) => (
                     <option key={choice.value} value={choice.value}>
                       {choice.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="offer-filter"
+                  className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1"
+                >
+                  Offer
+                </label>
+                <select
+                  id="offer-filter"
+                  value={pendingFilters.offerId}
+                  onChange={(e) =>
+                    setPendingFilters((p) => ({ ...p, offerId: e.target.value }))
+                  }
+                  disabled={offersLoading}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  <option value="">
+                    {offersLoading ? "Loading offers..." : "All offers"}
+                  </option>
+                  {offerOptions.map((offer) => (
+                    <option key={offer.value} value={offer.value}>
+                      {offer.label}
                     </option>
                   ))}
                 </select>

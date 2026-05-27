@@ -95,6 +95,27 @@ Example found during debugging:
 - Aarin Siler had `offer_milestones_current_offer_id = Nr-eQzWuQoKZnRBNBR-I1Q`, which resolves to `Inner Circle - 6 Months` in `backup_company_offers`.
 - Aaron Grant had offer `Inner Circle - 3 Months`; its configured milestone was `8 Week Diagnostic`.
 
+## Offer Filters
+
+Dashboard and Clients include an Offer filter that mirrors the CSM-dependent pattern:
+
+- Offers load from `backup_company_offers`, filtered by `company_id`.
+- Offer labels use `backup_company_offers.name`.
+- Client rows store the selected/current offer id in `backup_company_clients.offer_milestones_current_offer_id`.
+- `/clients` filters directly with `offer_milestones_current_offer_id`.
+- `/dashboard` includes `offerId` in URL/search state and chart filters.
+- Dashboard KPI RPCs do not currently accept offer as an argument, so when an offer is selected the dashboard uses a client-side KPI fallback for the KPI cards. The normal no-offer dashboard path still uses the existing Supabase RPCs.
+
+## Client Roster Sorting
+
+`/clients` supports server-side sorting:
+
+- Client name (`client_name`).
+- Onboarded date (`client_age_date_onboarded`).
+- Renewal date (`current_contract_end_date_for_filtering`).
+
+Sort state is stored with the existing client roster session cache under `cst.clientsRosterState.v1`. The list and card views display onboarded and renewal dates so the sort is visible to users.
+
 ## Task Wiring
 
 Client Detail > Tasks and top-level `/tasks` use:

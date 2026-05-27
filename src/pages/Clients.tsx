@@ -9,6 +9,8 @@ import { supabase } from "../lib/supabase.ts";
 
 const PAGE_SIZE = 12;
 type ViewMode = "list" | "card";
+type SortField = "client_name" | "onboarded" | "renewal";
+type SortDirection = "asc" | "desc";
 type ClientRow = Record<string, unknown> & {
   glide_row_id: string;
   client_name?: string | null;
@@ -28,10 +30,15 @@ interface TeamMember {
   is_archived: boolean | null;
   role_hide_from_csm_list: boolean | null;
 }
+interface Offer {
+  glide_row_id: string;
+  name: string | null;
+}
 interface ClientFilters {
   companyId: string;
   csmId: string;
   secondaryAssigneeId: string;
+  offerId: string;
   programs: string[];
   clientName: string;
   lastContact: string;
@@ -40,6 +47,7 @@ const emptyFilters: ClientFilters = {
   companyId: "",
   csmId: "",
   secondaryAssigneeId: "",
+  offerId: "",
   programs: [],
   clientName: "",
   lastContact: "",
@@ -51,6 +59,8 @@ interface ClientsCacheState {
   appliedFilters: ClientFilters;
   page: number;
   viewMode: ViewMode;
+  sortField: SortField;
+  sortDirection: SortDirection;
 }
 
 function readClientsCache(): ClientsCacheState | null {
@@ -63,6 +73,11 @@ function readClientsCache(): ClientsCacheState | null {
       appliedFilters: { ...emptyFilters, ...(parsed.appliedFilters ?? {}) },
       page: Math.max(1, Number(parsed.page) || 1),
       viewMode: parsed.viewMode === "card" ? "card" : "list",
+      sortField:
+        parsed.sortField === "onboarded" || parsed.sortField === "renewal"
+          ? parsed.sortField
+          : "client_name",
+      sortDirection: parsed.sortDirection === "desc" ? "desc" : "asc",
     };
   } catch {
     return null;
@@ -156,6 +171,19 @@ const buyInColumns = [
   "client_buy_in",
   "client_buy_in_value",
 ];
+const onboardedColumns = ["client_age_date_onboarded", "date_onboarded"];
+const renewalColumns = [
+  "current_contract_end_date_for_filtering",
+  "current_contract_end_date",
+  "renewal_date",
+  "next_renewal_date",
+];
+
+function sortColumnFor(field: SortField) {
+  if (field === "onboarded") return "client_age_date_onboarded";
+  if (field === "renewal") return "current_contract_end_date_for_filtering";
+  return "client_name";
+}
 
 function normalizeKey(value: string) {
   return value
@@ -713,6 +741,8 @@ export function Clients() {
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [offersLoading, setOffersLoading] = useState(false);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
   const [clients, setClients] = useState<ClientRow[]>([]);
@@ -722,6 +752,12 @@ export function Clients() {
   const [page, setPage] = useState(cachedState?.page ?? 1);
   const [viewMode, setViewMode] = useState<ViewMode>(
     cachedState?.viewMode ?? "list",
+  );
+  const [sortField, setSortField] = useState<SortField>(
+    cachedState?.sortField ?? "client_name",
+  );
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    cachedState?.sortDirection ?? "asc",
   );
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const [quickUpdateClient, setQuickUpdateClient] = useState<ClientRow | null>(
@@ -758,8 +794,15 @@ export function Clients() {
   const pageStart = totalClients === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(page * PAGE_SIZE, totalClients);
   useEffect(() => {
-    writeClientsCache({ filters, appliedFilters, page, viewMode });
-  }, [appliedFilters, filters, page, viewMode]);
+    writeClientsCache({
+      filters,
+      appliedFilters,
+      page,
+      viewMode,
+      sortField,
+      sortDirection,
+    });
+  }, [appliedFilters, filters, page, sortDirection, sortField, viewMode]);
   useEffect(() => {
     if (!viewAsCompanyId || searchParams.get("companyId") === viewAsCompanyId) {
       return;
@@ -769,12 +812,14 @@ export function Clients() {
       companyId: viewAsCompanyId,
       csmId: "",
       secondaryAssigneeId: "",
+      offerId: "",
     }));
     setAppliedFilters((prev) => ({
       ...prev,
       companyId: viewAsCompanyId,
       csmId: "",
       secondaryAssigneeId: "",
+      offerId: "",
     }));
     setPage(1);
     setSearchParams({ companyId: viewAsCompanyId }, { replace: true });
@@ -816,6 +861,37 @@ export function Clients() {
       cancelled = true;
     };
   }, [filters.companyId]);
+  useEffect(() => {
+    if (!filters.companyId) {
+      setOffers([]);
+      setOffersLoading(false);
+      return;
+    }
+    let cancelled = false;
+    async function loadOffers() {
+      setOffersLoading(true);
+      const { data, error } = await supabase
+        .from("backup_company_offers")
+        .select("glide_row_id, name")
+        .eq("company_id", filters.companyId)
+        .order("name", { ascending: true });
+      if (cancelled) return;
+      if (error) console.error("Failed to load offers:", error);
+      const rows = (data ?? []) as Offer[];
+      setOffers(rows);
+      if (
+        filters.offerId &&
+        !rows.some((offer) => offer.glide_row_id === filters.offerId)
+      ) {
+        setFilters((prev) => ({ ...prev, offerId: "" }));
+      }
+      setOffersLoading(false);
+    }
+    void loadOffers();
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.companyId, filters.offerId]);
   useEffect(() => {
     if (!filters.companyId || programChoices.length > 0) return;
     let cancelled = false;
@@ -864,6 +940,8 @@ export function Clients() {
         "csm_secondary_assignee_id",
         appliedFilters.secondaryAssigneeId,
       );
+    if (appliedFilters.offerId)
+      query = query.eq("offer_milestones_current_offer_id", appliedFilters.offerId);
     if (appliedFilters.programs.length > 0)
       query = query.in("program_status_value", appliedFilters.programs);
     if (appliedFilters.lastContact) {
@@ -877,7 +955,12 @@ export function Clients() {
         .gte("csm_date_of_last_contact", dayStart)
         .lte("csm_date_of_last_contact", dayEnd);
     }
-    query = query.order("client_name", { ascending: true, nullsFirst: false });
+    query = query
+      .order(sortColumnFor(sortField), {
+        ascending: sortDirection === "asc",
+        nullsFirst: false,
+      })
+      .order("client_name", { ascending: true, nullsFirst: false });
     const { data, error, count } = await query;
     if (error) {
       console.error("Failed to load clients:", error);
@@ -890,7 +973,7 @@ export function Clients() {
       setTotalClients(count ?? rows.length);
     }
     setClientsLoading(false);
-  }, [appliedFilters, page]);
+  }, [appliedFilters, page, sortDirection, sortField]);
   useEffect(() => {
     void loadClients();
   }, [loadClients]);
@@ -914,6 +997,8 @@ export function Clients() {
     setClients([]);
     setTotalClients(0);
     setPage(1);
+    setSortField("client_name");
+    setSortDirection("asc");
     window.sessionStorage.removeItem(CLIENTS_CACHE_KEY);
     setSearchParams({}, { replace: true });
   }
@@ -937,6 +1022,8 @@ export function Clients() {
     buyIn: valueFrom(client, buyInColumns),
     pathway: valueFrom(client, pathwayColumns),
     progress: valueFrom(client, progressColumns),
+    onboarded: valueFrom(client, onboardedColumns),
+    renewal: valueFrom(client, renewalColumns),
   });
   return (
     <div>
@@ -965,6 +1052,7 @@ export function Clients() {
                   companyId: e.target.value,
                   csmId: "",
                   secondaryAssigneeId: "",
+                  offerId: "",
                 }));
               }}
               disabled={companiesLoading}
@@ -1090,6 +1178,32 @@ export function Clients() {
                   ))}
                 </select>
               </div>
+              <div>
+                <label
+                  htmlFor="clients-offer-filter"
+                  className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+                >
+                  Offer
+                </label>
+                <select
+                  id="clients-offer-filter"
+                  value={filters.offerId}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, offerId: e.target.value }))
+                  }
+                  disabled={offersLoading}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  <option value="">
+                    {offersLoading ? "Loading offers..." : "All offers"}
+                  </option>
+                  {offers.map((offer) => (
+                    <option key={offer.glide_row_id} value={offer.glide_row_id}>
+                      {offer.name ?? "(unnamed)"}
+                    </option>
+                  ))}
+                </select>
+              </div>
               {showSecondaryAssigneeFilter && (
                 <div>
                   <label
@@ -1194,6 +1308,45 @@ export function Clients() {
                 Cards
               </ViewButton>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label
+                htmlFor="clients-sort-field"
+                className="text-xs font-medium uppercase tracking-wider text-gray-500"
+              >
+                Sort
+              </label>
+              <select
+                id="clients-sort-field"
+                value={sortField}
+                onChange={(event) => {
+                  setSortField(event.target.value as SortField);
+                  setPage(1);
+                }}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="client_name">Client name</option>
+                <option value="onboarded">Onboarded date</option>
+                <option value="renewal">Renewal date</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setSortDirection((direction) =>
+                    direction === "asc" ? "desc" : "asc",
+                  );
+                  setPage(1);
+                }}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                {sortField === "client_name"
+                  ? sortDirection === "asc"
+                    ? "A-Z"
+                    : "Z-A"
+                  : sortDirection === "asc"
+                    ? "Oldest first"
+                    : "Newest first"}
+              </button>
+            </div>
           </div>
           {clientsError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -1287,6 +1440,8 @@ function ClientTable({
   clientMeta: (client: ClientRow) => {
     last: unknown;
     next: unknown;
+    onboarded: unknown;
+    renewal: unknown;
     buyIn: unknown;
     progress: unknown;
   };
@@ -1302,6 +1457,8 @@ function ClientTable({
               "Client",
               "CSM",
               "Status",
+              "Onboarded",
+              "Renewal",
               "Last Contact",
               "Next Contact",
               "Buy In",
@@ -1348,6 +1505,12 @@ function ClientTable({
                     value={client.program_status_value}
                     choices={programChoices}
                   />
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700">
+                  {formatDate(meta.onboarded)}
+                </td>
+                <td className="px-4 py-3 text-sm text-gray-700">
+                  {formatDate(meta.renewal)}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
                   {formatDate(meta.last)}
@@ -1397,6 +1560,8 @@ function ClientCards({
   clientMeta: (client: ClientRow) => {
     last: unknown;
     pathway: unknown;
+    onboarded: unknown;
+    renewal: unknown;
     buyIn: unknown;
     progress: unknown;
   };
@@ -1446,6 +1611,8 @@ function ClientCards({
                 value={<OutcomePill value={meta.progress} />}
               />
               <MiniMeta label="Last Contact" value={formatDate(meta.last)} />
+              <MiniMeta label="Onboarded" value={formatDate(meta.onboarded)} />
+              <MiniMeta label="Renewal" value={formatDate(meta.renewal)} />
               <MiniMeta label="Pathway" value={displayValue(meta.pathway)} />
             </div>
             <div className="mt-4 flex justify-end gap-2">

@@ -2,6 +2,7 @@ export interface DashboardKpiSqlParams {
   companyId: string;
   csmId: string;
   secondaryAssigneeId: string;
+  offerId: string;
   programValue: string;
   clientStartDateFrom: string;
   clientStartDateTo: string;
@@ -31,6 +32,7 @@ function buildKpiSql(
     ${sqlTextLiteral(params.companyId)} AS company_id,
     ${sqlTextLiteral(params.csmId)} AS csm_id,
     ${sqlTextLiteral(params.secondaryAssigneeId)} AS secondary_assignee_id,
+    ${sqlTextLiteral(params.offerId)} AS offer_id,
     ${sqlTextLiteral(params.programValue)} AS program_value,
     ${sqlDateLiteral(params.clientStartDateFrom)} AS client_start_date_from,
     ${sqlDateLiteral(params.clientStartDateTo)} AS client_start_date_to,
@@ -46,7 +48,8 @@ WHERE c.company_id = p.company_id
     p.secondary_assignee_id IS NULL
     OR c.csm_secondary_assignee_id = p.secondary_assignee_id
   )
-  AND (p.program_value IS NULL OR c.program_status_value = p.program_value)
+  AND (p.offer_id IS NULL OR c.offer_milestones_current_offer_id = p.offer_id)
+    AND (p.program_value IS NULL OR c.program_status_value = p.program_value)
   AND (
     p.client_start_date_from IS NULL
     OR c.client_age_date_onboarded >= p.client_start_date_from::timestamp
@@ -92,6 +95,7 @@ export function getOffBoardedClientsSql(params: DashboardKpiSqlParams) {
     ${sqlTextLiteral(params.companyId)} AS company_id,
     ${sqlTextLiteral(params.csmId)} AS csm_id,
     ${sqlTextLiteral(params.secondaryAssigneeId)} AS secondary_assignee_id,
+    ${sqlTextLiteral(params.offerId)} AS offer_id,
     ${sqlTextLiteral(params.programValue)} AS program_value,
     ${sqlDateLiteral(params.clientStartDateFrom)} AS client_start_date_from,
     ${sqlDateLiteral(params.clientStartDateTo)} AS client_start_date_to,
@@ -108,6 +112,7 @@ filtered_clients AS (
       p.secondary_assignee_id IS NULL
       OR c.csm_secondary_assignee_id = p.secondary_assignee_id
     )
+    AND (p.offer_id IS NULL OR c.offer_milestones_current_offer_id = p.offer_id)
     AND (p.program_value IS NULL OR c.program_status_value = p.program_value)
     AND (
       p.client_start_date_from IS NULL
@@ -138,6 +143,7 @@ export function getChurnPercentageSql(params: DashboardKpiSqlParams) {
     ${sqlTextLiteral(params.companyId)} AS company_id,
     ${sqlTextLiteral(params.csmId)} AS csm_id,
     ${sqlTextLiteral(params.secondaryAssigneeId)} AS secondary_assignee_id,
+    ${sqlTextLiteral(params.offerId)} AS offer_id,
     ${sqlTextLiteral(params.programValue)} AS program_value,
     ${sqlDateLiteral(params.clientStartDateFrom)} AS client_start_date_from,
     ${sqlDateLiteral(params.clientStartDateTo)} AS client_start_date_to,
@@ -179,6 +185,7 @@ base_filtered_clients AS (
       p.secondary_assignee_id IS NULL
       OR c.csm_secondary_assignee_id = p.secondary_assignee_id
     )
+    AND (p.offer_id IS NULL OR c.offer_milestones_current_offer_id = p.offer_id)
     AND (p.program_value IS NULL OR c.program_status_value = p.program_value)
     AND (
       p.client_start_date_from IS NULL
@@ -239,6 +246,7 @@ export function getRetainedClientsSql(params: DashboardKpiSqlParams) {
     ${sqlTextLiteral(params.companyId)} AS company_id,
     ${sqlTextLiteral(params.csmId)} AS csm_id,
     ${sqlTextLiteral(params.secondaryAssigneeId)} AS secondary_assignee_id,
+    ${sqlTextLiteral(params.offerId)} AS offer_id,
     ${sqlTextLiteral(params.programValue)} AS program_value,
     ${sqlDateLiteral(params.clientStartDateFrom)} AS client_start_date_from,
     ${sqlDateLiteral(params.clientStartDateTo)} AS client_start_date_to,
@@ -255,6 +263,7 @@ base_filtered_clients AS (
       p.secondary_assignee_id IS NULL
       OR c.csm_secondary_assignee_id = p.secondary_assignee_id
     )
+    AND (p.offer_id IS NULL OR c.offer_milestones_current_offer_id = p.offer_id)
     AND (p.program_value IS NULL OR c.program_status_value = p.program_value)
     AND (
       p.client_start_date_from IS NULL
@@ -297,6 +306,7 @@ export function getRetentionPercentageSql(params: DashboardKpiSqlParams) {
     ${sqlTextLiteral(params.companyId)} AS company_id,
     ${sqlTextLiteral(params.csmId)} AS csm_id,
     ${sqlTextLiteral(params.secondaryAssigneeId)} AS secondary_assignee_id,
+    ${sqlTextLiteral(params.offerId)} AS offer_id,
     ${sqlTextLiteral(params.programValue)} AS program_value,
     ${sqlDateLiteral(params.clientStartDateFrom)} AS client_start_date_from,
     ${sqlDateLiteral(params.clientStartDateTo)} AS client_start_date_to,
@@ -338,6 +348,7 @@ base_filtered_clients AS (
       p.secondary_assignee_id IS NULL
       OR c.csm_secondary_assignee_id = p.secondary_assignee_id
     )
+    AND (p.offer_id IS NULL OR c.offer_milestones_current_offer_id = p.offer_id)
     AND (p.program_value IS NULL OR c.program_status_value = p.program_value)
     AND (
       p.client_start_date_from IS NULL
@@ -432,6 +443,7 @@ export function getUpForRenewalSql(params: DashboardKpiSqlParams) {
     ${sqlTextLiteral(params.companyId)} AS company_id,
     ${sqlTextLiteral(params.csmId)} AS csm_id,
     ${sqlTextLiteral(params.secondaryAssigneeId)} AS secondary_assignee_id,
+    ${sqlTextLiteral(params.offerId)} AS offer_id,
     ${sqlTextLiteral(params.programValue)} AS program_value,
     ${sqlDateLiteral(params.clientStartDateFrom)} AS client_start_date_from,
     ${sqlDateLiteral(params.clientStartDateTo)} AS client_start_date_to,
@@ -473,6 +485,7 @@ base_filtered_clients AS (
       p.secondary_assignee_id IS NULL
       OR c.csm_secondary_assignee_id = p.secondary_assignee_id
     )
+    AND (p.offer_id IS NULL OR c.offer_milestones_current_offer_id = p.offer_id)
     AND (p.program_value IS NULL OR c.program_status_value = p.program_value)
     AND (
       p.client_start_date_from IS NULL
