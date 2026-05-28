@@ -14,6 +14,22 @@ The untracked `old glide project test/` folder is a downloaded/reference copy an
 - Header navigation lives in `src/components/Header.tsx`.
 - Local dev server usually runs at `http://localhost:5174/` because `5173` has often been occupied.
 
+## Git / Deploy Workflow
+
+- Vercel deploys from `main`, so validated work must be committed and pushed to `origin/main`.
+- This repo should use the local git identity:
+  - `retainOS`
+  - `retainOS@users.noreply.github.com`
+- GitHub auth for this repo should be the `retainOS` account.
+- If push/auth starts failing or GitHub appears to use the wrong account, run:
+
+```bash
+gh auth switch -u retainOS
+```
+
+- The user's other project may use `atlas-thebrain`; do not confuse that identity with this RetainOS repo.
+- Keep the untracked `old glide project test/` reference folder out of commits unless explicitly requested.
+
 Useful commands:
 
 ```bash
@@ -230,7 +246,7 @@ Suggested next step after context reset:
 
 The current company dropdowns across Dashboard, Clients, and Tasks are temporary workarounds. The intended hierarchy is:
 
-- **Super Admin** users: internal RetainOS/admin/dev users such as Joao, Ben, and devs.
+- **Super Admin** users: `jay@ethicalscaling.com`, `ben@ethicalscaling.com`, and `darren@amblemind.com`.
 - Super Admins can manage SaaS clients, meaning the companies in `backup_companies`.
 - Super Admins can choose a company to **View As** and then interact with that company account as a full-access admin for support/debugging.
 - Company-scoped users should eventually see only their own company data and should not need a company dropdown.
@@ -238,7 +254,7 @@ The current company dropdowns across Dashboard, Clients, and Tasks are temporary
 Initial safe implementation idea:
 
 - Add a frontend role/context layer for authenticated users.
-- Define Super Admin by a temporary email allowlist, likely from env such as `VITE_SUPER_ADMIN_EMAILS`.
+- Define Super Admin by `VITE_SUPER_ADMIN_EMAILS=jay@ethicalscaling.com,ben@ethicalscaling.com,darren@amblemind.com`.
 - Add a persistent selected company / `viewAsCompanyId` in `sessionStorage`.
 - Existing pages should use `viewAsCompanyId` as their default company context.
 - Keep write actions disabled/read-only until an explicit write-mode plan and Supabase security path are approved.
@@ -333,18 +349,37 @@ Future tabs not yet building:
 
 ## Super Admin Implementation Checkpoint
 
-Initial read-only implementation added:
+Login hierarchy implementation checkpoint:
 
 - Shared frontend account context: `src/lib/accountContext.tsx`.
 - Persistent Super Admin **View as company** state stored in `localStorage` under `retainOS.viewAsCompanyId.v1`.
-- Temporary Super Admin detection:
-  - Uses `VITE_SUPER_ADMIN_EMAILS` as a comma-separated allowlist when present.
-  - If no allowlist is configured, every signed-in user is treated as Super Admin for the local read-only preview.
-- Header now exposes `SaaS Clients` for Super Admins and shows when a View As context is active.
+- Super Admin detection uses `VITE_SUPER_ADMIN_EMAILS` as a required comma-separated allowlist.
+  - Current intended allowlist: `jay@ethicalscaling.com`, `ben@ethicalscaling.com`, `darren@amblemind.com`.
+  - Super Admin is global and is not tied to `backup_company_team`.
+- Company users resolve from active `backup_company_team` rows by signed-in email.
+  - `role_id = 1` -> Director.
+  - `role_id = 2` -> Support.
+  - `role_id = 3` -> CSM.
+  - `role_read_only_user = true` -> Viewer override.
+  - Multiple active company memberships currently block login so access can be cleaned up manually.
+- Header navigation is gated by account capabilities.
+  - `SaaS Clients`, `Tables`, and `Sync Log` are Super Admin only.
+  - Dashboard/Clients/Tasks appear by role capability.
+- Dashboard, Clients, Tasks, and Client Detail now use account-scoped company context.
+  - Super Admin uses the selected View As company for company-scoped pages.
+  - Company users use their assigned company and cannot switch companies.
+  - CSMs are scoped to their own clients/tasks.
+  - Viewer is read-only and does not get Quick Update/actions.
+- Support can view/filter company-wide dashboard KPIs but cannot access AI Insights.
+- Login OTP now uses the `prepare-login` Supabase Edge Function before calling `signInWithOtp`.
+  - The function checks whether the email is either in the Super Admin allowlist or active in `backup_company_team`.
+  - If allowed, it creates the Supabase Auth user just-in-time with the service role key, then the normal OTP flow sends the code with `shouldCreateUser: false`.
+  - This avoids manually creating every existing company user in Supabase Auth.
+  - The function must be deployed to Supabase before company-user OTP login works outside local code.
+  - Supabase Edge Function secrets should include `SUPER_ADMIN_EMAILS=jay@ethicalscaling.com,ben@ethicalscaling.com,darren@amblemind.com`.
 - New routes:
   - `/saas-clients`: read-only SaaS Clients/company account view.
   - `/saas-clients/:companyId`: read-only SaaS Client details, currently focused on the Team tab.
-- `/dashboard`, `/clients`, and `/tasks` now default to the persisted View As company and update that context when the company selector changes.
 
 SaaS Clients page notes:
 

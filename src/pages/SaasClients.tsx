@@ -22,6 +22,7 @@ interface TeamRow {
   name: string | null;
   email: string | null;
   photo: string | null;
+  role_id: number | null;
   role_is_saa_s_admin: boolean | null;
   role_hide_from_csm_list: boolean | null;
   role_read_only_user: boolean | null;
@@ -53,8 +54,10 @@ function formatDate(value: string | null | undefined) {
 }
 
 function roleLabel(member: TeamRow) {
-  if (member.role_is_saa_s_admin) return "Director";
   if (member.role_read_only_user) return "Viewer";
+  if (member.role_id === 1 || member.role_is_saa_s_admin) return "Director";
+  if (member.role_id === 2) return "Support";
+  if (member.role_id === 3) return "CSM";
   if (member.role_hide_from_csm_list) return "Support";
   return "CSM";
 }
@@ -195,7 +198,7 @@ export function SaasClients() {
         const { data: team, error: teamError } = await supabase
           .from("backup_company_team")
           .select(
-            "glide_row_id, company_id, name, email, photo, role_is_saa_s_admin, role_hide_from_csm_list, role_read_only_user, is_archived",
+            "glide_row_id, company_id, name, email, photo, role_id, role_is_saa_s_admin, role_hide_from_csm_list, role_read_only_user, is_archived",
           )
           .in("company_id", companyIds)
           .limit(5000);

@@ -721,12 +721,16 @@ function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
 export function Clients() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { viewAsCompanyId, setViewAsCompanyId } = useAccountContext();
+  const {
+    capabilities,
+    effectiveCompanyId,
+    setViewAsCompanyId,
+    teamMemberId,
+  } = useAccountContext();
   const cachedState = useMemo(() => readClientsCache(), []);
   const initialCompanyId =
-    searchParams.get("companyId") ??
-    cachedState?.filters.companyId ??
-    viewAsCompanyId;
+    effectiveCompanyId ||
+    (searchParams.get("companyId") ?? cachedState?.filters.companyId ?? "");
   const [filters, setFilters] = useState<ClientFilters>(() =>
     initialCompanyId
       ? { ...emptyFilters, companyId: initialCompanyId }
@@ -793,6 +797,11 @@ export function Clients() {
   const totalPages = Math.max(1, Math.ceil(totalClients / PAGE_SIZE));
   const pageStart = totalClients === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(page * PAGE_SIZE, totalClients);
+  const assignedTeamMemberId = capabilities.canViewOnlyAssignedClients
+    ? teamMemberId
+    : "";
+  const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
+
   useEffect(() => {
     writeClientsCache({
       filters,
@@ -804,39 +813,43 @@ export function Clients() {
     });
   }, [appliedFilters, filters, page, sortDirection, sortField, viewMode]);
   useEffect(() => {
-    if (!viewAsCompanyId || searchParams.get("companyId") === viewAsCompanyId) {
+    if (!effectiveCompanyId || searchParams.get("companyId") === effectiveCompanyId) {
       return;
     }
     setFilters((prev) => ({
       ...prev,
-      companyId: viewAsCompanyId,
-      csmId: "",
+      companyId: effectiveCompanyId,
+      csmId: assignedTeamMemberId,
       secondaryAssigneeId: "",
       offerId: "",
     }));
     setAppliedFilters((prev) => ({
       ...prev,
-      companyId: viewAsCompanyId,
-      csmId: "",
+      companyId: effectiveCompanyId,
+      csmId: assignedTeamMemberId,
       secondaryAssigneeId: "",
       offerId: "",
     }));
     setPage(1);
-    setSearchParams({ companyId: viewAsCompanyId }, { replace: true });
-  }, [searchParams, setSearchParams, viewAsCompanyId]);
+    setSearchParams({ companyId: effectiveCompanyId }, { replace: true });
+  }, [assignedTeamMemberId, effectiveCompanyId, searchParams, setSearchParams]);
   useEffect(() => {
     async function loadCompanies() {
-      const { data, error } = await supabase
+      let query = supabase
         .from("backup_companies")
         .select("glide_row_id, name, enable_secondary_assignee")
         .or("archived.is.null,archived.eq.false")
         .order("name", { ascending: true });
+      if (!canUseCompanySwitcher && effectiveCompanyId) {
+        query = query.eq("glide_row_id", effectiveCompanyId);
+      }
+      const { data, error } = await query;
       if (error) console.error("Failed to load companies:", error);
       setCompanies((data ?? []) as Company[]);
       setCompaniesLoading(false);
     }
     void loadCompanies();
-  }, []);
+  }, [canUseCompanySwitcher, effectiveCompanyId]);
   useEffect(() => {
     if (!filters.companyId) {
       setTeamMembers([]);
@@ -933,8 +946,13 @@ export function Clients() {
         "client_name",
         `%${appliedFilters.clientName.trim()}%`,
       );
-    if (appliedFilters.csmId)
+    if (assignedTeamMemberId) {
+      query = query.or(
+        `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+      );
+    } else if (appliedFilters.csmId) {
       query = query.eq("csm_team_member_id", appliedFilters.csmId);
+    }
     if (appliedFilters.secondaryAssigneeId)
       query = query.eq(
         "csm_secondary_assignee_id",
@@ -973,7 +991,7 @@ export function Clients() {
       setTotalClients(count ?? rows.length);
     }
     setClientsLoading(false);
-  }, [appliedFilters, page, sortDirection, sortField]);
+  }, [appliedFilters, assignedTeamMemberId, page, sortDirection, sortField]);
   useEffect(() => {
     void loadClients();
   }, [loadClients]);
@@ -981,6 +999,8 @@ export function Clients() {
     if (!filters.companyId) return;
     const next = {
       ...filters,
+      companyId: effectiveCompanyId || filters.companyId,
+      csmId: assignedTeamMemberId || filters.csmId,
       secondaryAssigneeId: showSecondaryAssigneeFilter
         ? filters.secondaryAssigneeId
         : "",
@@ -992,15 +1012,22 @@ export function Clients() {
     });
   }
   function clearFilters() {
-    setFilters(emptyFilters);
-    setAppliedFilters(emptyFilters);
+    const baseFilters = {
+      ...emptyFilters,
+      companyId: effectiveCompanyId,
+      csmId: assignedTeamMemberId,
+    };
+    setFilters(baseFilters);
+    setAppliedFilters(baseFilters);
     setClients([]);
     setTotalClients(0);
     setPage(1);
     setSortField("client_name");
     setSortDirection("asc");
     window.sessionStorage.removeItem(CLIENTS_CACHE_KEY);
-    setSearchParams({}, { replace: true });
+    setSearchParams(effectiveCompanyId ? { companyId: effectiveCompanyId } : {}, {
+      replace: true,
+    });
   }
   const renderClientAvatar = (client: ClientRow, size = "h-9 w-9") =>
     client.client_image ? (
@@ -1046,7 +1073,7 @@ export function Clients() {
               id="clients-company-filter"
               value={filters.companyId}
               onChange={(e) => {
-                setViewAsCompanyId(e.target.value);
+                if (canUseCompanySwitcher) setViewAsCompanyId(e.target.value);
                 setFilters((prev) => ({
                   ...prev,
                   companyId: e.target.value,
@@ -1055,7 +1082,7 @@ export function Clients() {
                   offerId: "",
                 }));
               }}
-              disabled={companiesLoading}
+              disabled={companiesLoading || !canUseCompanySwitcher}
               className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
             >
               <option value="">
@@ -1149,35 +1176,37 @@ export function Clients() {
                   </div>
                 )}
               </fieldset>
-              <div>
-                <label
-                  htmlFor="clients-csm-filter"
-                  className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
-                >
-                  CSM
-                </label>
-                <select
-                  id="clients-csm-filter"
-                  value={filters.csmId}
-                  onChange={(e) =>
-                    setFilters((prev) => ({ ...prev, csmId: e.target.value }))
-                  }
-                  disabled={teamMembersLoading}
-                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-                >
-                  <option value="">
-                    {teamMembersLoading ? "Loading team..." : "All CSMs"}
-                  </option>
-                  {availableTeamMembers.map((member) => (
-                    <option
-                      key={member.glide_row_id}
-                      value={member.glide_row_id}
-                    >
-                      {member.name ?? "(unnamed)"}
+              {!capabilities.canViewOnlyAssignedClients && (
+                <div>
+                  <label
+                    htmlFor="clients-csm-filter"
+                    className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+                  >
+                    CSM
+                  </label>
+                  <select
+                    id="clients-csm-filter"
+                    value={filters.csmId}
+                    onChange={(e) =>
+                      setFilters((prev) => ({ ...prev, csmId: e.target.value }))
+                    }
+                    disabled={teamMembersLoading}
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  >
+                    <option value="">
+                      {teamMembersLoading ? "Loading team..." : "All CSMs"}
                     </option>
-                  ))}
-                </select>
-              </div>
+                    {availableTeamMembers.map((member) => (
+                      <option
+                        key={member.glide_row_id}
+                        value={member.glide_row_id}
+                      >
+                        {member.name ?? "(unnamed)"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label
                   htmlFor="clients-offer-filter"
@@ -1368,7 +1397,9 @@ export function Clients() {
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
-              onQuickUpdate={setQuickUpdateClient}
+              onQuickUpdate={
+                capabilities.canQuickUpdate ? setQuickUpdateClient : undefined
+              }
             />
           ) : (
             <ClientCards
@@ -1380,7 +1411,9 @@ export function Clients() {
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
-              onQuickUpdate={setQuickUpdateClient}
+              onQuickUpdate={
+                capabilities.canQuickUpdate ? setQuickUpdateClient : undefined
+              }
             />
           )}
           {!clientsLoading && totalClients > 0 && (
@@ -1446,7 +1479,7 @@ function ClientTable({
     progress: unknown;
   };
   onOpenClient: (id: string) => void;
-  onQuickUpdate: (client: ClientRow) => void;
+  onQuickUpdate?: (client: ClientRow) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -1525,16 +1558,20 @@ function ClientTable({
                   <OutcomePill value={meta.progress} />
                 </td>
                 <td className="px-4 py-3 text-sm">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onQuickUpdate(client);
-                    }}
-                    className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 cursor-pointer"
-                  >
-                    Quick Update
-                  </button>
+                  {onQuickUpdate ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onQuickUpdate(client);
+                      }}
+                      className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 cursor-pointer"
+                    >
+                      Quick Update
+                    </button>
+                  ) : (
+                    <span className="text-xs text-gray-400">Read-only</span>
+                  )}
                 </td>
               </tr>
             );
@@ -1566,7 +1603,7 @@ function ClientCards({
     progress: unknown;
   };
   onOpenClient: (id: string) => void;
-  onQuickUpdate: (client: ClientRow) => void;
+  onQuickUpdate?: (client: ClientRow) => void;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1615,18 +1652,20 @@ function ClientCards({
               <MiniMeta label="Renewal" value={formatDate(meta.renewal)} />
               <MiniMeta label="Pathway" value={displayValue(meta.pathway)} />
             </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onQuickUpdate(client);
-                }}
-                className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 cursor-pointer"
-              >
-                Quick Update
-              </button>
-            </div>
+            {onQuickUpdate && (
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onQuickUpdate(client);
+                  }}
+                  className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 cursor-pointer"
+                >
+                  Quick Update
+                </button>
+              </div>
+            )}
           </div>
         );
       })}

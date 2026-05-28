@@ -6,7 +6,7 @@ import { supabase } from "../lib/supabase.ts";
 export function Header() {
   const [email, setEmail] = useState<string | null>(null);
   const location = useLocation();
-  const { isSuperAdmin, viewAsCompanyId } = useAccountContext();
+  const { capabilities, isSuperAdmin, role, viewAsCompanyId } = useAccountContext();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -36,25 +36,35 @@ export function Header() {
     <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14">
         <div className="flex items-center gap-1">
-          <Link to="/" className="text-lg font-semibold text-gray-900 mr-6">
-            Glide Sync
+          <Link to="/dashboard" className="text-lg font-semibold text-gray-900 mr-6">
+            RetainOS
           </Link>
-          <Link to="/" className={linkClass("/")}>
-            Tables
-          </Link>
-          <Link to="/logs" className={linkClass("/logs")}>
-            Sync Log
-          </Link>
-          <Link to="/dashboard" className={linkClass("/dashboard")}>
-            Dashboard
-          </Link>
-          <Link to="/clients" className={linkClass("/clients")}>
-            Clients
-          </Link>
-          <Link to="/tasks" className={linkClass("/tasks")}>
-            Tasks
-          </Link>
-          {isSuperAdmin && (
+          {capabilities.canAccessTables && (
+            <>
+              <Link to="/tables" className={linkClass("/tables")}>
+                Tables
+              </Link>
+              <Link to="/logs" className={linkClass("/logs")}>
+                Sync Log
+              </Link>
+            </>
+          )}
+          {capabilities.canAccessDashboard && (
+            <Link to="/dashboard" className={linkClass("/dashboard")}>
+              Dashboard
+            </Link>
+          )}
+          {capabilities.canAccessClients && (
+            <Link to="/clients" className={linkClass("/clients")}>
+              Clients
+            </Link>
+          )}
+          {capabilities.canAccessTasks && (
+            <Link to="/tasks" className={linkClass("/tasks")}>
+              Tasks
+            </Link>
+          )}
+          {capabilities.canAccessSaasClients && (
             <Link to="/saas-clients" className={linkClass("/saas-clients")}>
               SaaS Clients
             </Link>
@@ -64,6 +74,11 @@ export function Header() {
           {isSuperAdmin && viewAsCompanyId && (
             <span className="hidden rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 md:inline">
               View as active
+            </span>
+          )}
+          {role && (
+            <span className="hidden rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium capitalize text-gray-600 md:inline">
+              {role.replace("_", " ")}
             </span>
           )}
           {email && (

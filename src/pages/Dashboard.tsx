@@ -754,12 +754,17 @@ function DashboardTabButton({
 
 export function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { viewAsCompanyId, setViewAsCompanyId } = useAccountContext();
+  const {
+    capabilities,
+    effectiveCompanyId,
+    setViewAsCompanyId,
+    teamMemberId,
+  } = useAccountContext();
   const [pendingFilters, setPendingFilters] = useState(() =>
-    dashboardFiltersFromSearchParams(searchParams, viewAsCompanyId),
+    dashboardFiltersFromSearchParams(searchParams, effectiveCompanyId),
   );
   const [appliedFilters, setAppliedFilters] = useState(() =>
-    dashboardFiltersFromSearchParams(searchParams, viewAsCompanyId),
+    dashboardFiltersFromSearchParams(searchParams, effectiveCompanyId),
   );
   const [reportVersion, setReportVersion] = useState(0);
   const [activeDashboardTab, setActiveDashboardTab] =
@@ -826,16 +831,27 @@ export function Dashboard() {
   };
 
   const clearAllFilters = () => {
-    const cleared = emptyDashboardFilters();
+    const cleared = {
+      ...emptyDashboardFilters(),
+      companyId: effectiveCompanyId,
+      csmId: assignedTeamMemberId,
+    };
     setPendingFilters(cleared);
     setAppliedFilters(cleared);
     setReportVersion((v) => v + 1);
-    setSearchParams({}, { replace: true });
+    const next = new URLSearchParams();
+    if (effectiveCompanyId) next.set(COMPANY_QUERY_KEY, effectiveCompanyId);
+    if (assignedTeamMemberId) next.set(CSM_QUERY_KEY, assignedTeamMemberId);
+    setSearchParams(next, { replace: true });
   };
 
   const applyFilters = () => {
     if (!pendingFilters.companyId) return;
-    const next = structuredClone(pendingFilters);
+    const next = {
+      ...structuredClone(pendingFilters),
+      companyId: effectiveCompanyId || pendingFilters.companyId,
+      csmId: assignedTeamMemberId || pendingFilters.csmId,
+    };
     setAppliedFilters(next);
     setSearchParams(
       (prev) => {
@@ -857,33 +873,44 @@ export function Dashboard() {
     setReportVersion((v) => v + 1);
   };
 
+  const assignedTeamMemberId = capabilities.canViewOnlyAssignedClients
+    ? teamMemberId
+    : "";
+  const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
+
   useEffect(() => {
-    if (!viewAsCompanyId || viewAsCompanyId === pendingFilters.companyId) return;
+    if (activeDashboardTab === "ai" && !capabilities.canTriggerAiInsights) {
+      setActiveDashboardTab("overview");
+    }
+  }, [activeDashboardTab, capabilities.canTriggerAiInsights]);
+
+  useEffect(() => {
+    if (!effectiveCompanyId || effectiveCompanyId === pendingFilters.companyId) return;
     setPendingFilters((prev) => ({
       ...prev,
-      companyId: viewAsCompanyId,
-      csmId: "",
+      companyId: effectiveCompanyId,
+      csmId: assignedTeamMemberId,
       secondaryAssigneeId: "",
       offerId: "",
       program: "",
     }));
     setAppliedFilters((prev) => ({
       ...prev,
-      companyId: viewAsCompanyId,
-      csmId: "",
+      companyId: effectiveCompanyId,
+      csmId: assignedTeamMemberId,
       secondaryAssigneeId: "",
       offerId: "",
       program: "",
     }));
     setReportVersion((v) => v + 1);
     updateSearchParams({
-      [COMPANY_QUERY_KEY]: viewAsCompanyId,
-      [CSM_QUERY_KEY]: null,
+      [COMPANY_QUERY_KEY]: effectiveCompanyId,
+      [CSM_QUERY_KEY]: assignedTeamMemberId || null,
       [SECONDARY_ASSIGNEE_QUERY_KEY]: null,
       [OFFER_QUERY_KEY]: null,
       [PROGRAM_QUERY_KEY]: null,
     });
-  }, [pendingFilters.companyId, viewAsCompanyId]);
+  }, [assignedTeamMemberId, effectiveCompanyId, pendingFilters.companyId]);
 
   useEffect(() => {
     if (pendingFilters.companyId) return;
@@ -1114,13 +1141,17 @@ export function Dashboard() {
 
   useEffect(() => {
     async function loadCompanies() {
-      const { data, error } = await supabase
+      let query = supabase
         .from("backup_companies")
         .select(
           "glide_row_id, name, enable_secondary_assignee, program_paused_override, program_suspended_override",
         )
         .or("archived.is.null,archived.eq.false")
         .order("name", { ascending: true });
+      if (!canUseCompanySwitcher && effectiveCompanyId) {
+        query = query.eq("glide_row_id", effectiveCompanyId);
+      }
+      const { data, error } = await query;
 
       if (error) {
         console.error("Failed to load companies:", error);
@@ -1133,7 +1164,7 @@ export function Dashboard() {
     }
 
     loadCompanies();
-  }, []);
+  }, [canUseCompanySwitcher, effectiveCompanyId]);
 
   useEffect(() => {
     if (!pendingFilters.companyId) {
@@ -1370,7 +1401,11 @@ export function Dashboard() {
         .eq("offer_milestones_current_offer_id", appliedFilters.offerId)
         .range(0, 4999);
 
-      if (appliedFilters.csmId) {
+      if (assignedTeamMemberId) {
+        clientsQuery = clientsQuery.or(
+          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+        );
+      } else if (appliedFilters.csmId) {
         clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
       }
       if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
@@ -1639,6 +1674,7 @@ export function Dashboard() {
     appliedShowSecondaryFilter,
     reportVersion,
     rpcFilterParams,
+    assignedTeamMemberId,
   ]);
 
   useEffect(() => {
@@ -1726,7 +1762,11 @@ export function Dashboard() {
         .eq("company_id", appliedFilters.companyId)
         .range(0, 4999);
 
-      if (appliedFilters.csmId) {
+      if (assignedTeamMemberId) {
+        clientsQuery = clientsQuery.or(
+          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+        );
+      } else if (appliedFilters.csmId) {
         clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
       }
       if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
@@ -1762,7 +1802,9 @@ export function Dashboard() {
         .select("status_value, assigned_to_id")
         .eq("company_id", appliedFilters.companyId)
         .range(0, 4999);
-      if (appliedFilters.csmId) {
+      if (assignedTeamMemberId) {
+        tasksQuery = tasksQuery.eq("assigned_to_id", assignedTeamMemberId);
+      } else if (appliedFilters.csmId) {
         tasksQuery = tasksQuery.eq("assigned_to_id", appliedFilters.csmId);
       }
 
@@ -1845,6 +1887,7 @@ export function Dashboard() {
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
     appliedShowSecondaryFilter,
+    assignedTeamMemberId,
     teamMemberNameById,
     reportVersion,
   ]);
@@ -1875,17 +1918,17 @@ export function Dashboard() {
               value={pendingFilters.companyId}
               onChange={(e) => {
                 const id = e.target.value;
-                setViewAsCompanyId(id);
+                if (canUseCompanySwitcher) setViewAsCompanyId(id);
                 setPendingFilters((p) => ({
                   ...p,
                   companyId: id,
-                  csmId: "",
+                  csmId: assignedTeamMemberId,
                   secondaryAssigneeId: "",
                   offerId: "",
                   ...(id ? {} : { program: "" }),
                 }));
               }}
-              disabled={companiesLoading}
+              disabled={companiesLoading || !canUseCompanySwitcher}
               className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
             >
               <option value="">
@@ -1901,34 +1944,37 @@ export function Dashboard() {
 
           {showCompanyScopedFilters && (
             <>
-              <div>
-                <label
-                  htmlFor="csm-filter"
-                  className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1"
-                >
-                  CSM
-                </label>
-                <select
-                  id="csm-filter"
-                  value={pendingFilters.csmId}
-                  onChange={(e) =>
-                    setPendingFilters((p) => ({ ...p, csmId: e.target.value }))
-                  }
-                  disabled={teamMembersLoading}
-                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-                >
-                  <option value="">
-                    {teamMembersLoading ? "Loading team..." : "All CSMs"}
-                  </option>
-                  {availableTeamMembers.map((member) => (
-                    <option key={member.glide_row_id} value={member.glide_row_id}>
-                      {member.name ?? "(unnamed)"}
+              {!capabilities.canViewOnlyAssignedClients && (
+                <div>
+                  <label
+                    htmlFor="csm-filter"
+                    className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1"
+                  >
+                    CSM
+                  </label>
+                  <select
+                    id="csm-filter"
+                    value={pendingFilters.csmId}
+                    onChange={(e) =>
+                      setPendingFilters((p) => ({ ...p, csmId: e.target.value }))
+                    }
+                    disabled={teamMembersLoading}
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  >
+                    <option value="">
+                      {teamMembersLoading ? "Loading team..." : "All CSMs"}
                     </option>
-                  ))}
-                </select>
-              </div>
+                    {availableTeamMembers.map((member) => (
+                      <option key={member.glide_row_id} value={member.glide_row_id}>
+                        {member.name ?? "(unnamed)"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-              {showSecondaryAssigneeFilter && (
+              {showSecondaryAssigneeFilter &&
+                !capabilities.canViewOnlyAssignedClients && (
                 <div>
                   <label
                     htmlFor="secondary-assignee-filter"
@@ -2063,12 +2109,14 @@ export function Dashboard() {
           >
             Charts
           </DashboardTabButton>
-          <DashboardTabButton
-            active={activeDashboardTab === "ai"}
-            onClick={() => setActiveDashboardTab("ai")}
-          >
-            AI Insights
-          </DashboardTabButton>
+          {capabilities.canTriggerAiInsights && (
+            <DashboardTabButton
+              active={activeDashboardTab === "ai"}
+              onClick={() => setActiveDashboardTab("ai")}
+            >
+              AI Insights
+            </DashboardTabButton>
+          )}
         </nav>
       </div>
 

@@ -310,13 +310,20 @@ function TaskListTable({
 
 export function Tasks() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { viewAsCompanyId, setViewAsCompanyId } = useAccountContext();
+  const {
+    capabilities,
+    effectiveCompanyId,
+    setViewAsCompanyId,
+    teamMemberId,
+  } = useAccountContext();
   const cached = useMemo(() => readTasksCache(), []);
   const [companyId, setCompanyId] = useState(
-    searchParams.get("companyId") ?? cached?.companyId ?? viewAsCompanyId,
+    effectiveCompanyId || searchParams.get("companyId") || cached?.companyId || "",
   );
   const [csmId, setCsmId] = useState(
-    searchParams.get("csmId") ?? cached?.csmId ?? "",
+    capabilities.canViewOnlyAssignedClients
+      ? teamMemberId
+      : searchParams.get("csmId") ?? cached?.csmId ?? "",
   );
   const [statusMode, setStatusMode] = useState<StatusMode>(
     cached?.statusMode ?? "open",
@@ -333,6 +340,11 @@ export function Tasks() {
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
+
+  const assignedTeamMemberId = capabilities.canViewOnlyAssignedClients
+    ? teamMemberId
+    : "";
+  const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
 
   const availableTeamMembers = useMemo(
     () =>
@@ -367,24 +379,28 @@ export function Tasks() {
   }, [companyId, csmId, search, setSearchParams, statusMode, viewMode]);
 
   useEffect(() => {
-    if (!viewAsCompanyId || viewAsCompanyId === companyId) return;
-    setCompanyId(viewAsCompanyId);
-    setCsmId("");
-  }, [companyId, viewAsCompanyId]);
+    if (!effectiveCompanyId || effectiveCompanyId === companyId) return;
+    setCompanyId(effectiveCompanyId);
+    setCsmId(assignedTeamMemberId);
+  }, [assignedTeamMemberId, companyId, effectiveCompanyId]);
 
   useEffect(() => {
     async function loadCompanies() {
-      const { data, error } = await supabase
+      let query = supabase
         .from("backup_companies")
         .select("glide_row_id, name")
         .or("archived.is.null,archived.eq.false")
         .order("name", { ascending: true });
+      if (!canUseCompanySwitcher && effectiveCompanyId) {
+        query = query.eq("glide_row_id", effectiveCompanyId);
+      }
+      const { data, error } = await query;
       if (error) console.error("Failed to load companies:", error);
       setCompanies((data ?? []) as Company[]);
       setLoadingCompanies(false);
     }
     void loadCompanies();
-  }, []);
+  }, [canUseCompanySwitcher, effectiveCompanyId]);
 
   useEffect(() => {
     if (!companyId) {
@@ -404,7 +420,11 @@ export function Tasks() {
       if (error) console.error("Failed to load team members:", error);
       const rows = (data ?? []) as TeamMember[];
       setTeamMembers(rows);
-      if (csmId && !rows.some((member) => member.glide_row_id === csmId)) {
+      if (
+        csmId &&
+        !assignedTeamMemberId &&
+        !rows.some((member) => member.glide_row_id === csmId)
+      ) {
         setCsmId("");
       }
       setLoadingTeam(false);
@@ -413,7 +433,7 @@ export function Tasks() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, csmId]);
+  }, [assignedTeamMemberId, companyId, csmId]);
 
   useEffect(() => {
     if (!companyId) {
@@ -430,7 +450,8 @@ export function Tasks() {
         .select("*")
         .eq("company_id", companyId);
 
-      if (csmId) query = query.eq("assigned_to_id", csmId);
+      if (assignedTeamMemberId) query = query.eq("assigned_to_id", assignedTeamMemberId);
+      else if (csmId) query = query.eq("assigned_to_id", csmId);
       if (search.trim()) {
         const q = `%${search.trim()}%`;
         query = query.or(`task_name.ilike.${q},task_description.ilike.${q}`);
@@ -484,7 +505,7 @@ export function Tasks() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, csmId, search, statusMode]);
+  }, [assignedTeamMemberId, companyId, csmId, search, statusMode]);
 
   const columns = useMemo(() => {
     const todo = tasks.filter(
@@ -544,11 +565,11 @@ export function Tasks() {
               id="tasks-company"
               value={companyId}
               onChange={(event) => {
-                setViewAsCompanyId(event.target.value);
+                if (canUseCompanySwitcher) setViewAsCompanyId(event.target.value);
                 setCompanyId(event.target.value);
-                setCsmId("");
+                setCsmId(assignedTeamMemberId);
               }}
-              disabled={loadingCompanies}
+              disabled={loadingCompanies || !canUseCompanySwitcher}
               className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             >
               <option value="">
@@ -562,30 +583,32 @@ export function Tasks() {
             </select>
           </div>
 
-          <div>
-            <label
-              htmlFor="tasks-csm"
-              className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
-            >
-              View As
-            </label>
-            <select
-              id="tasks-csm"
-              value={csmId}
-              onChange={(event) => setCsmId(event.target.value)}
-              disabled={!companyId || loadingTeam}
-              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-            >
-              <option value="">
-                {loadingTeam ? "Loading CSMs..." : "All CSMs"}
-              </option>
-              {availableTeamMembers.map((member) => (
-                <option key={member.glide_row_id} value={member.glide_row_id}>
-                  {member.name ?? "(unnamed)"}
+          {!capabilities.canViewOnlyAssignedClients && (
+            <div>
+              <label
+                htmlFor="tasks-csm"
+                className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+              >
+                View As
+              </label>
+              <select
+                id="tasks-csm"
+                value={csmId}
+                onChange={(event) => setCsmId(event.target.value)}
+                disabled={!companyId || loadingTeam}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                <option value="">
+                  {loadingTeam ? "Loading CSMs..." : "All CSMs"}
                 </option>
-              ))}
-            </select>
-          </div>
+                {availableTeamMembers.map((member) => (
+                  <option key={member.glide_row_id} value={member.glide_row_id}>
+                    {member.name ?? "(unnamed)"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label

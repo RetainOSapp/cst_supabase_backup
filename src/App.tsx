@@ -1,7 +1,8 @@
 import { Routes, Route, Navigate } from "react-router-dom";
+import type { ReactNode } from "react";
 import { AuthGuard } from "./components/AuthGuard.tsx";
 import { Header } from "./components/Header.tsx";
-import { AccountProvider } from "./lib/accountContext.tsx";
+import { AccountProvider, useAccountContext } from "./lib/accountContext.tsx";
 import { Login } from "./pages/Login.tsx";
 import { Tables } from "./pages/Tables.tsx";
 import { TableDetail } from "./pages/TableDetail.tsx";
@@ -13,6 +14,145 @@ import { Tasks } from "./pages/Tasks.tsx";
 import { SaasClients } from "./pages/SaasClients.tsx";
 import { SaasClientDetail } from "./pages/SaasClientDetail.tsx";
 
+function NoPermission() {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm">
+      <h1 className="text-lg font-semibold text-gray-900">You do not have access here</h1>
+      <p className="mt-2 text-sm text-gray-600">
+        This area is not available for your current RetainOS role.
+      </p>
+    </div>
+  );
+}
+
+function RequireCapability({
+  allowed,
+  children,
+}: {
+  allowed: boolean;
+  children: ReactNode;
+}) {
+  return allowed ? <>{children}</> : <NoPermission />;
+}
+
+function DefaultRoute() {
+  const { capabilities } = useAccountContext();
+  if (capabilities.canAccessDashboard) return <Navigate to="/dashboard" replace />;
+  if (capabilities.canAccessClients) return <Navigate to="/clients" replace />;
+  if (capabilities.canAccessTasks) return <Navigate to="/tasks" replace />;
+  if (capabilities.canAccessSaasClients) return <Navigate to="/saas-clients" replace />;
+  return <NoPermission />;
+}
+
+function AccountShell() {
+  const { capabilities, status, accessIssue } = useAccountContext();
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-600" />
+      </div>
+    );
+  }
+
+  if (status === "no_access") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-gray-900">Access not configured</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            {accessIssue ?? "Your account does not have RetainOS access yet."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header />
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6 sm:px-6 lg:px-8">
+        <Routes>
+          <Route index element={<DefaultRoute />} />
+          <Route
+            path="tables"
+            element={
+              <RequireCapability allowed={capabilities.canAccessTables}>
+                <Tables />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="tables/:glideTableId"
+            element={
+              <RequireCapability allowed={capabilities.canAccessTables}>
+                <TableDetail />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="logs"
+            element={
+              <RequireCapability allowed={capabilities.canAccessTables}>
+                <SyncLog />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="dashboard"
+            element={
+              <RequireCapability allowed={capabilities.canAccessDashboard}>
+                <Dashboard />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="clients"
+            element={
+              <RequireCapability allowed={capabilities.canAccessClients}>
+                <Clients />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="clients/:clientId"
+            element={
+              <RequireCapability allowed={capabilities.canAccessClients}>
+                <ClientDetail />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="tasks"
+            element={
+              <RequireCapability allowed={capabilities.canAccessTasks}>
+                <Tasks />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="saas-clients"
+            element={
+              <RequireCapability allowed={capabilities.canAccessSaasClients}>
+                <SaasClients />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="saas-clients/:companyId"
+            element={
+              <RequireCapability allowed={capabilities.canAccessSaasClients}>
+                <SaasClientDetail />
+              </RequireCapability>
+            }
+          />
+          <Route path="*" element={<DefaultRoute />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
 export function App() {
   return (
     <Routes>
@@ -22,29 +162,7 @@ export function App() {
         element={
           <AuthGuard>
             <AccountProvider>
-              <div className="min-h-screen flex flex-col">
-                <Header />
-                <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6 sm:px-6 lg:px-8">
-                  <Routes>
-                    <Route index element={<Tables />} />
-                    <Route
-                      path="tables/:glideTableId"
-                      element={<TableDetail />}
-                    />
-                    <Route path="logs" element={<SyncLog />} />
-                    <Route path="dashboard" element={<Dashboard />} />
-                    <Route path="clients" element={<Clients />} />
-                    <Route path="clients/:clientId" element={<ClientDetail />} />
-                    <Route path="tasks" element={<Tasks />} />
-                    <Route path="saas-clients" element={<SaasClients />} />
-                    <Route
-                      path="saas-clients/:companyId"
-                      element={<SaasClientDetail />}
-                    />
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </main>
-              </div>
+              <AccountShell />
             </AccountProvider>
           </AuthGuard>
         }

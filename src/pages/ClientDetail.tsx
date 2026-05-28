@@ -4,6 +4,7 @@ import {
   ProgramStatusPill,
   type ProgramChoice,
 } from "../lib/clientDisplay.tsx";
+import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 type ClientRow = Record<string, unknown> & {
@@ -12,6 +13,7 @@ type ClientRow = Record<string, unknown> & {
   client_image?: string | null;
   company_id?: string | null;
   csm_team_member_id?: string | null;
+  csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
 };
 interface TeamMember {
@@ -1124,6 +1126,7 @@ function TasksSection({
 }
 export function ClientDetail() {
   const { clientId } = useParams<{ clientId: string }>();
+  const { capabilities, effectiveCompanyId, teamMemberId } = useAccountContext();
   const [client, setClient] = useState<ClientRow | null>(null);
   const [contracts, setContracts] = useState<ContractRow[]>([]);
   const [clientMilestones, setClientMilestones] = useState<ClientMilestoneRow[]>([]);
@@ -1154,6 +1157,22 @@ export function ClientDetail() {
         return;
       }
       const nextClient = data as ClientRow;
+      if (effectiveCompanyId && nextClient.company_id !== effectiveCompanyId) {
+        setError("This client is outside your current company access.");
+        setClient(null);
+        setLoading(false);
+        return;
+      }
+      if (
+        capabilities.canViewOnlyAssignedClients &&
+        nextClient.csm_team_member_id !== teamMemberId &&
+        nextClient.csm_secondary_assignee_id !== teamMemberId
+      ) {
+        setError("This client is not assigned to your account.");
+        setClient(null);
+        setLoading(false);
+        return;
+      }
       setClient(nextClient);
       const relationIds = pathwayFields.flatMap(([, candidates]) =>
         extractGlideIds(valueFrom(nextClient, candidates)),
@@ -1225,7 +1244,7 @@ export function ClientDetail() {
     return () => {
       cancelled = true;
     };
-  }, [clientId]);
+  }, [capabilities.canViewOnlyAssignedClients, clientId, effectiveCompanyId, teamMemberId]);
   const csmName = useMemo(() => {
     if (!client?.csm_team_member_id) return "Unassigned";
     return (
@@ -1264,10 +1283,13 @@ export function ClientDetail() {
         </div>
       </div>
     );
+  const visibleProgramFields = capabilities.canViewDirectorNotes
+    ? programFields
+    : programFields.filter(([label]) => label !== "Director Notes");
   const tabs = [
     { key: "details", label: "Client Details", fields: basicInfoFields },
     { key: "contract", label: "Contract", fields: contractFields },
-    { key: "program", label: "Program", fields: programFields },
+    { key: "program", label: "Program", fields: visibleProgramFields },
     { key: "outcomes", label: "Outcomes", fields: outcomeFields },
     { key: "pathways", label: "Pathways & Milestones", fields: pathwayFields },
   ];
