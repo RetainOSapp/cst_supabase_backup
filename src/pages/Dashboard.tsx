@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ActiveClientsKpi } from "../components/dashboard/kpis/ActiveClientsKpi.tsx";
 import { BackEndClientsKpi } from "../components/dashboard/kpis/BackEndClientsKpi.tsx";
 import { ChurnPercentageKpi } from "../components/dashboard/kpis/ChurnPercentageKpi.tsx";
@@ -29,6 +29,8 @@ const SECONDARY_ASSIGNEE_QUERY_KEY = "secondaryAssigneeId";
 const PROGRAM_QUERY_KEY = "program";
 const OFFER_QUERY_KEY = "offerId";
 const DETAIL_PAGE_SIZE = 25;
+const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
+const PROFILE_UPKEEP_FRESHNESS_DAYS = 14;
 
 type DashboardTab = "overview" | "charts" | "ai";
 
@@ -85,11 +87,26 @@ interface Company {
   program_suspended_override: string | null;
 }
 
+interface AppCompany {
+  id: string;
+  legacy_glide_row_id: string | null;
+  migration_status: string | null;
+}
+
 interface TeamMember {
-  glide_row_id: string;
+  id?: string | null;
+  legacy_glide_row_id?: string | null;
+  glide_row_id?: string | null;
   name: string | null;
+  email?: string | null;
   is_archived: boolean | null;
+  role?: string | null;
+  role_id?: number | null;
+  role_read_only_user?: boolean | null;
   role_hide_from_csm_list: boolean | null;
+  hide_from_csm_list?: boolean | null;
+  status?: string | null;
+  capacity_number?: number | null;
 }
 
 interface Offer {
@@ -111,6 +128,7 @@ interface ClientRow {
 }
 
 interface ChartDatum {
+  key: string;
   label: string;
   value: number;
 }
@@ -124,14 +142,66 @@ interface DashboardChartData {
   csmWorkload: ChartDatum[];
 }
 
+interface CapacityRow {
+  id: string;
+  name: string;
+  activeClients: number;
+  capacity: number | null;
+}
+
 type ChartClientRow = Record<string, unknown> & {
   glide_row_id: string;
+  client_name: string | null;
+  client_image?: string | null;
   program_status_value: string | null;
   outcomes_buy_in_for_filtering: string | null;
   outcomes_progress_for_filtering: string | null;
+  next_steps_value?: string | null;
+  csm_date_of_last_contact?: string | null;
+  csm_date_of_next_contact?: string | null;
+  offer_milestones_current_milestone_id?: string | null;
+  offer_milestones_current_milestone_change_date?: string | null;
+  outcomes_progress_date?: string | null;
+  outcomes_buy_in_date?: string | null;
   offer_milestones_current_offer_id: string | null;
   csm_team_member_id: string | null;
+  csm_secondary_assignee_id?: string | null;
+  client_age_date_onboarded?: string | null;
 };
+
+interface ProfileUpkeepHistoryRow {
+  legacy_client_glide_row_id: string | null;
+  event_type: string | null;
+  next_steps: string | null;
+  last_contact_at: string | null;
+  next_contact_at: string | null;
+  progress_status: string | null;
+  buy_in_status: string | null;
+  created_at: string | null;
+}
+
+type ProfileUpkeepFieldKey =
+  | "nextSteps"
+  | "milestone"
+  | "lastContact"
+  | "nextContact"
+  | "progress"
+  | "buyIn";
+
+interface ProfileUpkeepSummary {
+  clientCount: number;
+  checkedFieldCount: number;
+  freshFieldCount: number;
+  averageScore: number;
+  completeClientCount: number;
+  fieldScores: Record<ProfileUpkeepFieldKey, number>;
+  clients: Array<{
+    client: ChartClientRow;
+    score: number;
+    complete: boolean;
+    fields: Record<ProfileUpkeepFieldKey, boolean>;
+  }>;
+}
 
 type ChartTaskRow = {
   status_value: string | null;
@@ -156,6 +226,12 @@ type OfferKpiClientRow = Record<string, unknown> & {
 
 interface OfferKpiHistoryRow {
   client_id: string | null;
+}
+
+interface AppKpiHistoryRow {
+  legacy_client_glide_row_id: string | null;
+  event_type: string | null;
+  payload: Record<string, unknown> | null;
 }
 
 interface OfferKpiContractRow {
@@ -256,6 +332,22 @@ function dashboardFiltersFromSearchParams(
     offerId: searchParams.get(OFFER_QUERY_KEY) ?? "",
     program: searchParams.get(PROGRAM_QUERY_KEY) ?? "",
   };
+}
+
+function programValuesFromFilter(value: string) {
+  return value
+    .split(",")
+    .map((program) => program.trim())
+    .filter(Boolean);
+}
+
+function programFilterFromValues(values: string[]) {
+  return [...new Set(values.filter(Boolean))].join(",");
+}
+
+function chartKey(value: string | null | undefined) {
+  const raw = value && String(value).trim() ? String(value).trim() : "";
+  return raw || "not-set";
 }
 
 interface MonthDateRangeFilterProps {
@@ -508,6 +600,123 @@ function MonthDateRangeFilter({ label, state, onChange }: MonthDateRangeFilterPr
   );
 }
 
+function MultiSelectDropdown({
+  label,
+  values,
+  options,
+  loading,
+  loadingLabel,
+  allLabel,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  options: { value: string; label: string }[];
+  loading: boolean;
+  loadingLabel: string;
+  allLabel: string;
+  onChange: (values: string[]) => void;
+}) {
+  const baseId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const selectedLabels = options
+    .filter((option) => values.includes(option.value))
+    .map((option) => option.label);
+  const summary =
+    loading
+      ? loadingLabel
+      : selectedLabels.length === 0
+        ? allLabel
+        : selectedLabels.length <= 2
+          ? selectedLabels.join(", ")
+          : `${selectedLabels.slice(0, 2).join(", ")} +${selectedLabels.length - 2}`;
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: MouseEvent) {
+      const el = rootRef.current;
+      if (!el || !(event.target instanceof Node) || el.contains(event.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
+  function toggleValue(value: string, checked: boolean) {
+    if (checked) {
+      onChange([...values, value]);
+    } else {
+      onChange(values.filter((selected) => selected !== value));
+    }
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <label
+        htmlFor={`${baseId}-trigger`}
+        className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1"
+      >
+        {label}
+      </label>
+      <button
+        id={`${baseId}-trigger`}
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        disabled={loading}
+        className="flex w-full items-center justify-between gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+      >
+        <span className="truncate">{summary}</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          className="h-4 w-4 shrink-0 text-gray-400"
+        >
+          <path
+            fillRule="evenodd"
+            d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+
+      {open ? (
+        <div className="absolute z-40 mt-1 w-full min-w-[16rem] rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-700 hover:bg-gray-50">
+            <input
+              type="checkbox"
+              checked={values.length === 0}
+              onChange={() => onChange([])}
+              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            {allLabel}
+          </label>
+          <div className="my-1 border-t border-gray-100" />
+          <div className="max-h-56 overflow-y-auto">
+            {options.map((option) => (
+              <label
+                key={option.value}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={values.includes(option.value)}
+                  onChange={(event) =>
+                    toggleValue(option.value, event.target.checked)
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="truncate">{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function getInitials(name: string | null) {
   if (!name) return "--";
 
@@ -531,6 +740,37 @@ function displayLabel(value: unknown) {
     .join(" ");
 }
 
+function teamMemberOptionId(member: TeamMember) {
+  return member.glide_row_id || member.legacy_glide_row_id || member.id || "";
+}
+
+function managesClients(member: TeamMember) {
+  if (!teamMemberOptionId(member)) return false;
+  if (member.is_archived === true) return false;
+  if (member.status && member.status !== "active") return false;
+  if (member.hide_from_csm_list === true) return false;
+  if (member.role_hide_from_csm_list === true) return false;
+  if (member.role_read_only_user === true) return false;
+  if (member.role === "viewer") return false;
+  return true;
+}
+
+function isActiveClientStatus(value: string | null | undefined) {
+  return ACTIVE_CLIENT_STATUSES.has(value ?? "");
+}
+
+function mapAppChartClientRow(row: Record<string, unknown>): ChartClientRow {
+  return {
+    ...row,
+    outcomes_buy_in_for_filtering:
+      (row.outcomes_buy_in_for_filtering as string | null | undefined) ??
+      null,
+    outcomes_progress_for_filtering:
+      (row.outcomes_progress_for_filtering as string | null | undefined) ??
+      null,
+  } as ChartClientRow;
+}
+
 function countBy<T>(
   rows: T[],
   getKey: (row: T) => string | null | undefined,
@@ -539,12 +779,13 @@ function countBy<T>(
   const counts = new Map<string, number>();
   rows.forEach((row) => {
     const raw = getKey(row);
-    const key = raw && String(raw).trim() ? String(raw).trim() : "not-set";
+    const key = chartKey(raw);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   });
 
   return [...counts.entries()]
     .map(([key, value]) => ({
+      key,
       label: labelMap.get(key) ?? displayLabel(key),
       value,
     }))
@@ -583,6 +824,124 @@ function isInDateRange(value: unknown, startDate: string, endDate: string) {
   return (!start || date >= start) && (!end || date < end);
 }
 
+function isFreshDate(value: unknown, freshnessStart: Date) {
+  const date = dateFromValue(value);
+  return Boolean(date && date >= freshnessStart);
+}
+
+function hasText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function calculateProfileUpkeep(
+  clients: ChartClientRow[],
+  historyRows: ProfileUpkeepHistoryRow[],
+  freshnessStart: Date,
+): ProfileUpkeepSummary {
+  const activeClients = clients.filter((client) =>
+    isActiveClientStatus(client.program_status_value),
+  );
+  const historyByClientId = new Map<string, ProfileUpkeepHistoryRow[]>();
+
+  historyRows.forEach((row) => {
+    if (!row.legacy_client_glide_row_id) return;
+    const existing = historyByClientId.get(row.legacy_client_glide_row_id) ?? [];
+    existing.push(row);
+    historyByClientId.set(row.legacy_client_glide_row_id, existing);
+  });
+
+  const fieldFreshCounts: Record<ProfileUpkeepFieldKey, number> = {
+    nextSteps: 0,
+    milestone: 0,
+    lastContact: 0,
+    nextContact: 0,
+    progress: 0,
+    buyIn: 0,
+  };
+  let completeClientCount = 0;
+  const clientScores: ProfileUpkeepSummary["clients"] = [];
+
+  activeClients.forEach((client) => {
+    const clientHistory = historyByClientId.get(client.glide_row_id) ?? [];
+    const hasRecentHistory = (predicate: (row: ProfileUpkeepHistoryRow) => boolean) =>
+      clientHistory.some((row) => isFreshDate(row.created_at, freshnessStart) && predicate(row));
+    const fieldFreshness: Record<ProfileUpkeepFieldKey, boolean> = {
+      nextSteps: hasRecentHistory((row) => hasText(row.next_steps)),
+      milestone:
+        hasRecentHistory((row) =>
+          [
+            "client_pathway_changed",
+            "client_milestone_started",
+            "client_milestone_completed",
+          ].includes(row.event_type ?? ""),
+        ) ||
+        (hasText(client.offer_milestones_current_milestone_id) &&
+          isFreshDate(
+            client.offer_milestones_current_milestone_change_date,
+            freshnessStart,
+          )),
+      lastContact:
+        hasRecentHistory((row) => Boolean(row.last_contact_at)) ||
+        isFreshDate(client.csm_date_of_last_contact, freshnessStart),
+      nextContact:
+        hasRecentHistory((row) => Boolean(row.next_contact_at)) ||
+        isFreshDate(client.csm_date_of_next_contact, freshnessStart),
+      progress:
+        hasRecentHistory((row) => hasText(row.progress_status)) ||
+        isFreshDate(client.outcomes_progress_date, freshnessStart),
+      buyIn:
+        hasRecentHistory((row) => hasText(row.buy_in_status)) ||
+        isFreshDate(client.outcomes_buy_in_date, freshnessStart),
+    };
+
+    const freshForClient = Object.entries(fieldFreshness).filter(([, fresh]) => fresh);
+    freshForClient.forEach(([field]) => {
+      fieldFreshCounts[field as ProfileUpkeepFieldKey] += 1;
+    });
+    if (freshForClient.length === Object.keys(fieldFreshness).length) {
+      completeClientCount += 1;
+    }
+    clientScores.push({
+      client,
+      score: Math.round(
+        (freshForClient.length / Object.keys(fieldFreshness).length) * 100,
+      ),
+      complete: freshForClient.length === Object.keys(fieldFreshness).length,
+      fields: fieldFreshness,
+    });
+  });
+
+  const fieldKeys = Object.keys(fieldFreshCounts) as ProfileUpkeepFieldKey[];
+  const checkedFieldCount = activeClients.length * fieldKeys.length;
+  const freshFieldCount = fieldKeys.reduce(
+    (sum, field) => sum + fieldFreshCounts[field],
+    0,
+  );
+
+  return {
+    clientCount: activeClients.length,
+    checkedFieldCount,
+    freshFieldCount,
+    averageScore:
+      checkedFieldCount === 0
+        ? 0
+        : Math.round((freshFieldCount / checkedFieldCount) * 100),
+    completeClientCount,
+    fieldScores: fieldKeys.reduce((scores, field) => {
+      scores[field] =
+        activeClients.length === 0
+          ? 0
+          : Math.round((fieldFreshCounts[field] / activeClients.length) * 100);
+      return scores;
+    }, {} as Record<ProfileUpkeepFieldKey, number>),
+    clients: clientScores.sort(
+      (a, b) =>
+        a.score - b.score ||
+        (a.client.client_name ?? "").localeCompare(b.client.client_name ?? ""),
+    ),
+  };
+}
+
 function passesReportEndDate(client: OfferKpiClientRow, endDate: string) {
   if (!endDate) return true;
   const onboarded = dateFromValue(client.client_age_date_onboarded);
@@ -616,7 +975,25 @@ function isChurnedClient(client: OfferKpiClientRow, startDate: string, endDate: 
   return isInDateRange(offboarded, startDate, endDate);
 }
 
-function DonutChart({ data }: { data: ChartDatum[] }) {
+function stringFromPayload(payload: Record<string, unknown> | null, key: string) {
+  const value = payload?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function isRetainedStatusTransition(fromStatus: string | null, toStatus: string | null) {
+  return (
+    Boolean(fromStatus && ACTIVE_CLIENT_STATUSES.has(fromStatus)) &&
+    Boolean(toStatus && ACTIVE_CLIENT_STATUSES.has(toStatus))
+  );
+}
+
+function DonutChart({
+  data,
+  onItemClick,
+}: {
+  data: ChartDatum[];
+  onItemClick?: (item: ChartDatum) => void;
+}) {
   const total = chartTotal(data);
   const palette = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#60a5fa"];
   let offset = 25;
@@ -644,7 +1021,7 @@ function DonutChart({ data }: { data: ChartDatum[] }) {
           const dash = (item.value / total) * 100;
           const circle = (
             <circle
-              key={item.label}
+              key={item.key}
               cx="21"
               cy="21"
               r="15.915"
@@ -653,6 +1030,8 @@ function DonutChart({ data }: { data: ChartDatum[] }) {
               strokeWidth="7"
               strokeDasharray={`${dash} ${100 - dash}`}
               strokeDashoffset={offset}
+              onClick={() => onItemClick?.(item)}
+              className={onItemClick ? "cursor-pointer" : ""}
             />
           );
           offset -= dash;
@@ -661,7 +1040,13 @@ function DonutChart({ data }: { data: ChartDatum[] }) {
       </svg>
       <div className="min-w-0 flex-1 space-y-2">
         {data.slice(0, 5).map((item, index) => (
-          <div key={item.label} className="flex items-center justify-between gap-3 text-sm">
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onItemClick?.(item)}
+            disabled={!onItemClick}
+            className="flex w-full items-center justify-between gap-3 rounded-sm text-left text-sm disabled:cursor-default enabled:cursor-pointer enabled:hover:text-indigo-700"
+          >
             <div className="flex min-w-0 items-center gap-2">
               <span
                 className="h-2.5 w-2.5 rounded-full"
@@ -670,14 +1055,20 @@ function DonutChart({ data }: { data: ChartDatum[] }) {
               <span className="truncate text-gray-700">{item.label}</span>
             </div>
             <span className="font-medium text-gray-900">{item.value}</span>
-          </div>
+          </button>
         ))}
       </div>
     </div>
   );
 }
 
-function BarChart({ data }: { data: ChartDatum[] }) {
+function BarChart({
+  data,
+  onItemClick,
+}: {
+  data: ChartDatum[];
+  onItemClick?: (item: ChartDatum) => void;
+}) {
   const max = Math.max(...data.map((item) => item.value), 1);
 
   if (data.length === 0) {
@@ -691,7 +1082,13 @@ function BarChart({ data }: { data: ChartDatum[] }) {
   return (
     <div className="space-y-3">
       {data.slice(0, 8).map((item) => (
-        <div key={item.label}>
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => onItemClick?.(item)}
+          disabled={!onItemClick}
+          className="block w-full rounded-sm text-left disabled:cursor-default enabled:cursor-pointer enabled:hover:text-indigo-700"
+        >
           <div className="mb-1 flex items-center justify-between gap-3 text-sm">
             <span className="truncate text-gray-700">{item.label}</span>
             <span className="font-medium text-gray-900">{item.value}</span>
@@ -702,7 +1099,7 @@ function BarChart({ data }: { data: ChartDatum[] }) {
               style={{ width: `${Math.max(4, (item.value / max) * 100)}%` }}
             />
           </div>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -771,6 +1168,9 @@ export function Dashboard() {
     useState<DashboardTab>("overview");
 
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [appCompanyByLegacyId, setAppCompanyByLegacyId] = useState(
+    new Map<string, AppCompany>(),
+  );
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
@@ -812,6 +1212,22 @@ export function Dashboard() {
     tasksByStatus: [],
     csmWorkload: [],
   });
+  const [capacityRows, setCapacityRows] = useState<CapacityRow[]>([]);
+  const [chartClients, setChartClients] = useState<ChartClientRow[]>([]);
+  const [profileUpkeep, setProfileUpkeep] =
+    useState<ProfileUpkeepSummary | null>(null);
+  const [profileUpkeepDetail, setProfileUpkeepDetail] = useState<{
+    title: string;
+    summary: string;
+    updatedLabel: string;
+    missingLabel: string;
+    updated: ProfileUpkeepSummary["clients"];
+    missing: ProfileUpkeepSummary["clients"];
+  } | null>(null);
+  const [chartDetail, setChartDetail] = useState<{
+    title: string;
+    rows: ChartClientRow[];
+  } | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
 
   const updateSearchParams = (updates: Record<string, string | null>) => {
@@ -938,14 +1354,29 @@ export function Dashboard() {
     [companies, appliedFilters.companyId],
   );
 
+  const appliedAppCompany = appliedFilters.companyId
+    ? appCompanyByLegacyId.get(appliedFilters.companyId) ?? null
+    : null;
+  const appliedUsesAppClients =
+    appliedAppCompany?.migration_status === "pilot" ||
+    appliedAppCompany?.migration_status === "migrated";
+  const pendingProgramValues = useMemo(
+    () => programValuesFromFilter(pendingFilters.program),
+    [pendingFilters.program],
+  );
+  const appliedProgramValues = useMemo(
+    () => programValuesFromFilter(appliedFilters.program),
+    [appliedFilters.program],
+  );
+
   const availableTeamMembers = useMemo(
-    () =>
-      teamMembers.filter(
-        (member) =>
-          member.is_archived !== true &&
-          member.role_hide_from_csm_list !== true,
-      ),
+    () => teamMembers.filter(managesClients),
     [teamMembers],
+  );
+
+  const activeManagerIds = useMemo(
+    () => new Set(availableTeamMembers.map(teamMemberOptionId).filter(Boolean)),
+    [availableTeamMembers],
   );
 
   const offerOptions = useMemo(
@@ -962,10 +1393,20 @@ export function Dashboard() {
     pendingCompany?.enable_secondary_assignee === true;
 
   const teamMemberNameById = useMemo(
-    () =>
-      new Map(
-        teamMembers.map((member) => [member.glide_row_id, member.name ?? "Unassigned"]),
-      ),
+    () => {
+      const map = new Map<string, string>();
+      for (const member of teamMembers) {
+        const name = member.name ?? "Unassigned";
+        for (const id of [
+          member.glide_row_id,
+          member.legacy_glide_row_id,
+          member.id,
+        ]) {
+          if (id) map.set(id, name);
+        }
+      }
+      return map;
+    },
     [teamMembers],
   );
 
@@ -1038,6 +1479,48 @@ export function Dashboard() {
     setKpiInfoSqlCopied(false);
   };
 
+  const openChartDetail = (
+    title: string,
+    item: ChartDatum,
+    getKey: (client: ChartClientRow) => string | null | undefined,
+  ) => {
+    setChartDetail({
+      title: `${title}: ${item.label}`,
+      rows: chartClients.filter((client) => chartKey(getKey(client)) === item.key),
+    });
+  };
+
+  const openProfileUpkeepFieldDetail = (
+    field: ProfileUpkeepFieldKey,
+    label: string,
+  ) => {
+    if (!profileUpkeep) return;
+    const updated = profileUpkeep.clients.filter((row) => row.fields[field]);
+    const missing = profileUpkeep.clients.filter((row) => !row.fields[field]);
+    setProfileUpkeepDetail({
+      title: `Profile Upkeep: ${label}`,
+      summary: `${updated.length.toLocaleString()} updated · ${missing.length.toLocaleString()} not updated`,
+      updatedLabel: `${label} updated`,
+      missingLabel: `${label} not updated`,
+      updated,
+      missing,
+    });
+  };
+
+  const openProfileUpkeepCompleteDetail = () => {
+    if (!profileUpkeep) return;
+    const complete = profileUpkeep.clients.filter((row) => row.complete);
+    const incomplete = profileUpkeep.clients.filter((row) => !row.complete);
+    setProfileUpkeepDetail({
+      title: "Profile Upkeep: Complete Profiles",
+      summary: `${complete.length.toLocaleString()} complete · ${incomplete.length.toLocaleString()} incomplete`,
+      updatedLabel: "Complete profiles",
+      missingLabel: "Incomplete profiles",
+      updated: complete,
+      missing: incomplete,
+    });
+  };
+
   const copyKpiSql = async () => {
     if (!kpiInfoModal?.sql) return;
     try {
@@ -1059,7 +1542,8 @@ export function Dashboard() {
       p_secondary_assignee_id: appliedShowSecondaryFilter
         ? appliedFilters.secondaryAssigneeId || null
         : null,
-      p_program_value: appliedFilters.program || null,
+      p_program_value:
+        appliedProgramValues.length === 1 ? appliedProgramValues[0] : null,
       p_client_start_date_from: appliedFilters.clientStartDate.startDate || null,
       p_client_start_date_to: appliedFilters.clientStartDate.endDate || null,
       p_date_range_start: appliedFilters.dateRange.startDate || null,
@@ -1072,7 +1556,7 @@ export function Dashboard() {
       appliedFilters.dateRange.startDate,
       appliedFilters.companyId,
       appliedFilters.csmId,
-      appliedFilters.program,
+      appliedProgramValues,
       appliedFilters.secondaryAssigneeId,
       appliedShowSecondaryFilter,
     ],
@@ -1085,7 +1569,8 @@ export function Dashboard() {
       secondaryAssigneeId: appliedShowSecondaryFilter
         ? appliedFilters.secondaryAssigneeId
         : "",
-      programValue: appliedFilters.program,
+      programValue:
+        appliedProgramValues.length === 1 ? appliedProgramValues[0] : "",
       offerId: appliedFilters.offerId,
       clientStartDateFrom: appliedFilters.clientStartDate.startDate,
       clientStartDateTo: appliedFilters.clientStartDate.endDate,
@@ -1099,7 +1584,7 @@ export function Dashboard() {
       appliedFilters.dateRange.endDate,
       appliedFilters.companyId,
       appliedFilters.csmId,
-      appliedFilters.program,
+      appliedProgramValues,
       appliedFilters.secondaryAssigneeId,
       appliedShowSecondaryFilter,
     ],
@@ -1151,13 +1636,33 @@ export function Dashboard() {
       if (!canUseCompanySwitcher && effectiveCompanyId) {
         query = query.eq("glide_row_id", effectiveCompanyId);
       }
-      const { data, error } = await query;
+      const [backupResult, appResult] = await Promise.all([
+        query,
+        supabase
+          .from("companies")
+          .select("id, legacy_glide_row_id, migration_status"),
+      ]);
 
-      if (error) {
-        console.error("Failed to load companies:", error);
+      if (backupResult.error) {
+        console.error("Failed to load companies:", backupResult.error);
         setCompanies([]);
       } else {
-        setCompanies((data ?? []) as Company[]);
+        setCompanies((backupResult.data ?? []) as Company[]);
+      }
+
+      if (appResult.error) {
+        console.error("Failed to load app companies:", appResult.error);
+      } else {
+        setAppCompanyByLegacyId(
+          new Map(
+            ((appResult.data ?? []) as AppCompany[])
+              .filter((company) => company.legacy_glide_row_id)
+              .map((company) => [
+                company.legacy_glide_row_id as string,
+                company,
+              ]),
+          ),
+        );
       }
 
       setCompaniesLoading(false);
@@ -1178,19 +1683,65 @@ export function Dashboard() {
     async function loadTeamMembers() {
       setTeamMembersLoading(true);
 
-      const { data, error } = await supabase
+      const appCompany = appCompanyByLegacyId.get(pendingFilters.companyId);
+      const appTeamQuery = appCompany
+        ? supabase
+            .from("company_members")
+            .select(
+              "id, legacy_glide_row_id, name, email, role, hide_from_csm_list, capacity_number, status",
+            )
+            .eq("company_id", appCompany.id)
+            .eq("status", "active")
+            .order("name", { ascending: true })
+        : Promise.resolve({ data: [], error: null });
+      const backupTeamQuery = supabase
         .from("backup_company_team")
-        .select("glide_row_id, name, is_archived, role_hide_from_csm_list")
+        .select(
+          "glide_row_id, name, email, is_archived, role_id, role_read_only_user, role_hide_from_csm_list, capacity_number",
+        )
         .eq("company_id", pendingFilters.companyId)
         .order("name", { ascending: true });
 
+      const [appResult, backupResult] = await Promise.all([
+        appTeamQuery,
+        backupTeamQuery,
+      ]);
+
       if (cancelled) return;
 
-      if (error) {
-        console.error("Failed to load team members:", error);
+      if (appResult.error) console.error("Failed to load app team members:", appResult.error);
+      if (backupResult.error) console.error("Failed to load team members:", backupResult.error);
+
+      if (backupResult.error && appResult.error) {
         setTeamMembers([]);
       } else {
-        setTeamMembers((data ?? []) as TeamMember[]);
+        const backupRows = ((backupResult.data ?? []) as unknown as TeamMember[]).map(
+          (member) => ({ ...member, glide_row_id: member.glide_row_id ?? "" }),
+        );
+        const backupByLegacyId = new Map(
+          backupRows.map((member) => [member.glide_row_id, member]),
+        );
+        const merged: TeamMember[] = ((appResult.data ?? []) as unknown as TeamMember[]).map(
+          (member) => {
+            const legacyId = member.legacy_glide_row_id ?? "";
+            const backup = backupByLegacyId.get(legacyId);
+            return {
+              ...backup,
+              ...member,
+              glide_row_id: legacyId || member.id || "",
+              name: member.name || backup?.name || "Unassigned",
+              email: member.email || backup?.email || null,
+              capacity_number:
+                member.capacity_number ?? backup?.capacity_number ?? null,
+              is_archived: false,
+            };
+          },
+        );
+        const legacyIds = new Set(merged.map((member) => member.glide_row_id ?? ""));
+        for (const member of backupRows) {
+          if (!legacyIds.has(member.glide_row_id ?? "")) merged.push(member);
+        }
+        setTeamMembers(merged);
       }
 
       setTeamMembersLoading(false);
@@ -1201,7 +1752,7 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [pendingFilters.companyId]);
+  }, [appCompanyByLegacyId, pendingFilters.companyId]);
 
   useEffect(() => {
     if (!pendingFilters.companyId) {
@@ -1303,7 +1854,7 @@ export function Dashboard() {
     if (!pendingFilters.csmId) return;
 
     const isValidCsm = availableTeamMembers.some(
-      (member) => member.glide_row_id === pendingFilters.csmId,
+      (member) => teamMemberOptionId(member) === pendingFilters.csmId,
     );
 
     if (!isValidCsm) {
@@ -1320,7 +1871,7 @@ export function Dashboard() {
     }
 
     const isValidSecondaryAssignee = availableTeamMembers.some(
-      (member) => member.glide_row_id === pendingFilters.secondaryAssigneeId,
+      (member) => teamMemberOptionId(member) === pendingFilters.secondaryAssigneeId,
     );
 
     if (!isValidSecondaryAssignee) {
@@ -1345,16 +1896,20 @@ export function Dashboard() {
   }, [offerOptions, pendingFilters.offerId]);
 
   useEffect(() => {
-    if (!pendingFilters.program) return;
+    if (pendingProgramValues.length === 0) return;
 
-    const isValidProgram = programChoices.some(
-      (choice) => choice.value === pendingFilters.program,
+    const validProgramValues = new Set(programChoices.map((choice) => choice.value));
+    const validSelectedPrograms = pendingProgramValues.filter((value) =>
+      validProgramValues.has(value),
     );
 
-    if (!isValidProgram) {
-      setPendingFilters((prev) => ({ ...prev, program: "" }));
+    if (validSelectedPrograms.length !== pendingProgramValues.length) {
+      setPendingFilters((prev) => ({
+        ...prev,
+        program: programFilterFromValues(validSelectedPrograms),
+      }));
     }
-  }, [programChoices, pendingFilters.program]);
+  }, [pendingProgramValues, programChoices]);
 
   useEffect(() => {
     if (!appliedFilters.companyId) {
@@ -1374,17 +1929,24 @@ export function Dashboard() {
 
     let cancelled = false;
 
-    async function loadOfferFilteredKpis() {
+    async function loadClientSideFilteredKpis() {
       setPrimaryKpiLoading(true);
       setRetentionKpiLoading(true);
 
+      const clientSourceTable = appliedUsesAppClients
+        ? "clients"
+        : "backup_company_clients";
+      const companyColumn = appliedUsesAppClients
+        ? "company_glide_row_id"
+        : "company_id";
       let clientsQuery = supabase
-        .from("backup_company_clients")
+        .from(clientSourceTable)
         .select(
           [
             "glide_row_id",
             "client_name",
             "client_image",
+            ...(appliedUsesAppClients ? ["company_glide_row_id"] : []),
             "csm_team_member_id",
             "csm_secondary_assignee_id",
             "program_status_value",
@@ -1397,10 +1959,15 @@ export function Dashboard() {
             "current_contract_end_date",
           ].join(", "),
         )
-        .eq("company_id", appliedFilters.companyId)
-        .eq("offer_milestones_current_offer_id", appliedFilters.offerId)
+        .eq(companyColumn, appliedFilters.companyId)
         .range(0, 4999);
 
+      if (appliedFilters.offerId) {
+        clientsQuery = clientsQuery.eq(
+          "offer_milestones_current_offer_id",
+          appliedFilters.offerId,
+        );
+      }
       if (assignedTeamMemberId) {
         clientsQuery = clientsQuery.or(
           `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
@@ -1414,8 +1981,10 @@ export function Dashboard() {
           appliedFilters.secondaryAssigneeId,
         );
       }
-      if (appliedFilters.program) {
-        clientsQuery = clientsQuery.eq("program_status_value", appliedFilters.program);
+      if (appliedProgramValues.length === 1) {
+        clientsQuery = clientsQuery.eq("program_status_value", appliedProgramValues[0]);
+      } else if (appliedProgramValues.length > 1) {
+        clientsQuery = clientsQuery.in("program_status_value", appliedProgramValues);
       }
       if (appliedFilters.clientStartDate.startDate) {
         clientsQuery = clientsQuery.gte(
@@ -1473,7 +2042,7 @@ export function Dashboard() {
         (client) =>
           client.program_status_value === "off-boarded" &&
           isInDateRange(
-            client.client_age_date_offboarded_for_filtering,
+            calculatedOffboardedDate(client),
             appliedFilters.dateRange.startDate,
             appliedFilters.dateRange.endDate,
           ),
@@ -1504,13 +2073,50 @@ export function Dashboard() {
         return;
       }
 
-      const [historyResult, contractsResult] = await Promise.all([
+      const appHistoryQuery = appliedUsesAppClients
+        ? supabase
+            .from("client_history_events")
+            .select("legacy_client_glide_row_id, event_type, payload")
+            .in("legacy_client_glide_row_id", clientIds)
+            .in("event_type", ["client_status_changed", "client_retention_recorded"])
+            .gte(
+              "created_at",
+              appliedFilters.dateRange.startDate
+                ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+                : "0001-01-01T00:00:00.000Z",
+            )
+            .lt(
+              "created_at",
+              appliedFilters.dateRange.endDate
+                ? addDays(
+                    new Date(`${appliedFilters.dateRange.endDate}T00:00:00.000Z`),
+                    1,
+                  ).toISOString()
+                : "9999-12-31T00:00:00.000Z",
+            )
+        : Promise.resolve({ data: [], error: null });
+      const appContractsQuery = appliedUsesAppClients
+        ? supabase
+            .from("client_contracts")
+            .select("client_id, end_date")
+            .in("client_id", clientIds)
+            .is("archived_at", null)
+            .not("end_date", "is", null)
+        : Promise.resolve({ data: [], error: null });
+
+      const [
+        appHistoryResult,
+        legacyHistoryResult,
+        appContractsResult,
+        legacyContractsResult,
+      ] = await Promise.all([
+        appHistoryQuery,
         supabase
           .from("backup_company_clients_history")
           .select("client_id")
           .in("client_id", clientIds)
           .eq("change_type_code", "program-status")
-          .eq("value", "back-end")
+          .in("value", ["front-end", "back-end"])
           .in("original_value", ["front-end", "back-end"])
           .gte(
             "modified_date",
@@ -1524,6 +2130,7 @@ export function Dashboard() {
               ? addDays(new Date(`${appliedFilters.dateRange.endDate}T00:00:00.000Z`), 1).toISOString()
               : "9999-12-31T00:00:00.000Z",
           ),
+        appContractsQuery,
         supabase
           .from("backup_company_clients_contracts")
           .select("client_id, end_date")
@@ -1533,18 +2140,37 @@ export function Dashboard() {
 
       if (cancelled) return;
 
-      if (historyResult.error) {
-        console.error("Failed to load offer-filtered retained history:", historyResult.error);
+      if (appHistoryResult.error) {
+        console.error("Failed to load app-owned retained history:", appHistoryResult.error);
       }
-      if (contractsResult.error) {
-        console.error("Failed to load offer-filtered contract history:", contractsResult.error);
+      if (legacyHistoryResult.error) {
+        console.error("Failed to load legacy retained history:", legacyHistoryResult.error);
+      }
+      if (appContractsResult.error) {
+        console.error("Failed to load app-owned contract history:", appContractsResult.error);
+      }
+      if (legacyContractsResult.error) {
+        console.error("Failed to load legacy contract history:", legacyContractsResult.error);
       }
 
-      const retainedIds = new Set(
-        ((historyResult.data ?? []) as OfferKpiHistoryRow[])
+      const retainedIds = new Set<string>();
+      ((appHistoryResult.data ?? []) as AppKpiHistoryRow[]).forEach((row) => {
+        const clientId = row.legacy_client_glide_row_id;
+        if (!clientId) return;
+        if (
+          row.event_type === "client_retention_recorded" ||
+          isRetainedStatusTransition(
+            stringFromPayload(row.payload, "from_status"),
+            stringFromPayload(row.payload, "to_status"),
+          )
+        ) {
+          retainedIds.add(clientId);
+        }
+      });
+      ((legacyHistoryResult.data ?? []) as OfferKpiHistoryRow[])
           .map((row) => row.client_id)
-          .filter((id): id is string => Boolean(id)),
-      );
+          .filter((id): id is string => Boolean(id))
+          .forEach((id) => retainedIds.add(id));
       const churnedIds = new Set(churned.map((client) => client.glide_row_id));
       const renewingIds = new Set<string>();
 
@@ -1557,7 +2183,11 @@ export function Dashboard() {
         }
       });
 
-      ((contractsResult.data ?? []) as OfferKpiContractRow[]).forEach((contract) => {
+      const contractRows = [
+        ...((appContractsResult.data ?? []) as OfferKpiContractRow[]),
+        ...((legacyContractsResult.data ?? []) as OfferKpiContractRow[]),
+      ];
+      contractRows.forEach((contract) => {
         if (!contract.client_id || !contract.end_date) return;
         const client = clientById.get(contract.client_id);
         if (!client) return;
@@ -1650,8 +2280,8 @@ export function Dashboard() {
       setRetentionKpiLoading(false);
     }
 
-    if (appliedFilters.offerId) {
-      void loadOfferFilteredKpis();
+    if (appliedUsesAppClients || appliedFilters.offerId || appliedProgramValues.length > 1) {
+      void loadClientSideFilteredKpis();
     } else {
       loadPrimaryKpis();
       loadRetentionKpis();
@@ -1672,6 +2302,8 @@ export function Dashboard() {
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
     appliedShowSecondaryFilter,
+    appliedUsesAppClients,
+    appliedProgramValues,
     reportVersion,
     rpcFilterParams,
     assignedTeamMemberId,
@@ -1745,6 +2377,9 @@ export function Dashboard() {
         tasksByStatus: [],
         csmWorkload: [],
       });
+      setCapacityRows([]);
+      setChartClients([]);
+      setProfileUpkeep(null);
       setChartsLoading(false);
       return;
     }
@@ -1754,12 +2389,56 @@ export function Dashboard() {
     async function loadCharts() {
       setChartsLoading(true);
 
+      const clientSourceTable = appliedUsesAppClients
+        ? "clients"
+        : "backup_company_clients";
+      const clientSelect = appliedUsesAppClients
+        ? [
+            "glide_row_id",
+            "client_name",
+            "client_image",
+            "company_glide_row_id",
+            "program_status_value",
+            "outcomes_buy_in_for_filtering",
+            "outcomes_progress_for_filtering",
+            "next_steps_value",
+            "csm_date_of_last_contact",
+            "csm_date_of_next_contact",
+            "offer_milestones_current_milestone_id",
+            "offer_milestones_current_milestone_change_date",
+            "outcomes_progress_date",
+            "outcomes_buy_in_date",
+            "offer_milestones_current_offer_id",
+            "csm_team_member_id",
+            "csm_secondary_assignee_id",
+            "client_age_date_onboarded",
+          ].join(", ")
+        : [
+            "glide_row_id",
+            "client_name",
+            "client_image",
+            "program_status_value",
+            "outcomes_buy_in_for_filtering",
+            "outcomes_progress_for_filtering",
+            "next_steps_value",
+            "csm_date_of_last_contact",
+            "csm_date_of_next_contact",
+            "offer_milestones_current_milestone_id",
+            "offer_milestones_current_milestone_change_date",
+            "outcomes_progress_date",
+            "outcomes_buy_in_date",
+            "offer_milestones_current_offer_id",
+            "csm_team_member_id",
+            "csm_secondary_assignee_id",
+            "client_age_date_onboarded",
+          ].join(", ");
       let clientsQuery = supabase
-        .from("backup_company_clients")
-        .select(
-          "glide_row_id, program_status_value, outcomes_buy_in_for_filtering, outcomes_progress_for_filtering, offer_milestones_current_offer_id, csm_team_member_id, csm_secondary_assignee_id, client_age_date_onboarded",
+        .from(clientSourceTable)
+        .select(clientSelect)
+        .eq(
+          appliedUsesAppClients ? "company_glide_row_id" : "company_id",
+          appliedFilters.companyId,
         )
-        .eq("company_id", appliedFilters.companyId)
         .range(0, 4999);
 
       if (assignedTeamMemberId) {
@@ -1775,8 +2454,10 @@ export function Dashboard() {
           appliedFilters.secondaryAssigneeId,
         );
       }
-      if (appliedFilters.program) {
-        clientsQuery = clientsQuery.eq("program_status_value", appliedFilters.program);
+      if (appliedProgramValues.length === 1) {
+        clientsQuery = clientsQuery.eq("program_status_value", appliedProgramValues[0]);
+      } else if (appliedProgramValues.length > 1) {
+        clientsQuery = clientsQuery.in("program_status_value", appliedProgramValues);
       }
       if (appliedFilters.offerId) {
         clientsQuery = clientsQuery.eq(
@@ -1820,8 +2501,93 @@ export function Dashboard() {
         console.error("Failed to load dashboard chart tasks:", tasksError);
       }
 
-      const clients = ((clientRows ?? []) as ChartClientRow[]);
+      const clients = (appliedUsesAppClients
+        ? ((clientRows ?? []) as unknown as Record<string, unknown>[]).map(
+            mapAppChartClientRow,
+          )
+        : ((clientRows ?? []) as unknown as ChartClientRow[]));
+      const activeClientsForWorkload = clients.filter(
+        (client) =>
+          isActiveClientStatus(client.program_status_value) &&
+          client.csm_team_member_id &&
+          activeManagerIds.has(client.csm_team_member_id),
+      );
+      const activeClientsForUpkeep = clients.filter((client) =>
+        isActiveClientStatus(client.program_status_value),
+      );
+      const upkeepFreshnessStart = addDays(new Date(), -PROFILE_UPKEEP_FRESHNESS_DAYS);
+      let profileUpkeepHistoryRows: ProfileUpkeepHistoryRow[] = [];
+      const activeClientIdsForUpkeep = activeClientsForUpkeep
+        .map((client) => client.glide_row_id)
+        .filter(Boolean);
+
+      if (
+        appliedUsesAppClients &&
+        appliedAppCompany?.id &&
+        activeClientIdsForUpkeep.length > 0
+      ) {
+        const { data: historyRows, error: historyError } = await supabase
+          .from("client_history_events")
+          .select(
+            [
+              "legacy_client_glide_row_id",
+              "event_type",
+              "next_steps",
+              "last_contact_at",
+              "next_contact_at",
+              "progress_status",
+              "buy_in_status",
+              "created_at",
+            ].join(", "),
+          )
+          .eq("company_id", appliedAppCompany.id)
+          .in("legacy_client_glide_row_id", activeClientIdsForUpkeep)
+          .gte("created_at", upkeepFreshnessStart.toISOString())
+          .range(0, 4999);
+
+        if (historyError) {
+          console.error("Failed to load profile upkeep history:", historyError);
+        } else {
+          profileUpkeepHistoryRows =
+            (historyRows ?? []) as unknown as ProfileUpkeepHistoryRow[];
+        }
+      }
+
+      const activeClientsByManager = new Map<string, number>();
+      activeClientsForWorkload.forEach((client) => {
+        if (!client.csm_team_member_id) return;
+        activeClientsByManager.set(
+          client.csm_team_member_id,
+          (activeClientsByManager.get(client.csm_team_member_id) ?? 0) + 1,
+        );
+      });
       const tasks = ((taskRows ?? []) as ChartTaskRow[]);
+      setChartClients(clients);
+      setProfileUpkeep(
+        calculateProfileUpkeep(
+          clients,
+          profileUpkeepHistoryRows,
+          upkeepFreshnessStart,
+        ),
+      );
+      setCapacityRows(
+        availableTeamMembers
+          .map((member) => {
+            const id = teamMemberOptionId(member);
+            return {
+              id,
+              name: member.name ?? "Unassigned",
+              activeClients: activeClientsByManager.get(id) ?? 0,
+              capacity:
+                member.capacity_number === null ||
+                member.capacity_number === undefined
+                  ? null
+                  : Number(member.capacity_number),
+            };
+          })
+          .filter((row) => row.activeClients > 0 || row.capacity !== null)
+          .sort((a, b) => b.activeClients - a.activeClients || a.name.localeCompare(b.name)),
+      );
       const offerIds = [
         ...new Set(
           clients
@@ -1865,8 +2631,8 @@ export function Dashboard() {
         ),
         tasksByStatus: countBy(tasks, (task) => task.status_value),
         csmWorkload: countBy(
-          tasks,
-          (task) => task.assigned_to_id,
+          activeClientsForWorkload,
+          (client) => client.csm_team_member_id,
           teamMemberNameById,
         ),
       });
@@ -1884,10 +2650,14 @@ export function Dashboard() {
     appliedFilters.companyId,
     appliedFilters.csmId,
     appliedFilters.offerId,
-    appliedFilters.program,
+    appliedProgramValues,
     appliedFilters.secondaryAssigneeId,
     appliedShowSecondaryFilter,
+    appliedAppCompany?.id,
+    appliedUsesAppClients,
+    activeManagerIds,
     assignedTeamMemberId,
+    availableTeamMembers,
     teamMemberNameById,
     reportVersion,
   ]);
@@ -1965,7 +2735,7 @@ export function Dashboard() {
                       {teamMembersLoading ? "Loading team..." : "All CSMs"}
                     </option>
                     {availableTeamMembers.map((member) => (
-                      <option key={member.glide_row_id} value={member.glide_row_id}>
+                      <option key={teamMemberOptionId(member)} value={teamMemberOptionId(member)}>
                         {member.name ?? "(unnamed)"}
                       </option>
                     ))}
@@ -2000,7 +2770,7 @@ export function Dashboard() {
                         : "All secondary assignees"}
                     </option>
                     {availableTeamMembers.map((member) => (
-                      <option key={member.glide_row_id} value={member.glide_row_id}>
+                      <option key={teamMemberOptionId(member)} value={teamMemberOptionId(member)}>
                         {member.name ?? "(unnamed)"}
                       </option>
                     ))}
@@ -2008,32 +2778,20 @@ export function Dashboard() {
                 </div>
               )}
 
-              <div>
-                <label
-                  htmlFor="program-filter"
-                  className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1"
-                >
-                  Program
-                </label>
-                <select
-                  id="program-filter"
-                  value={pendingFilters.program}
-                  onChange={(e) =>
-                    setPendingFilters((p) => ({ ...p, program: e.target.value }))
-                  }
-                  disabled={programChoicesLoading}
-                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-                >
-                  <option value="">
-                    {programChoicesLoading ? "Loading programs..." : "All programs"}
-                  </option>
-                  {programChoices.map((choice) => (
-                    <option key={choice.value} value={choice.value}>
-                      {choice.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <MultiSelectDropdown
+                label="Program"
+                values={pendingProgramValues}
+                options={programChoices}
+                loading={programChoicesLoading}
+                loadingLabel="Loading programs..."
+                allLabel="All programs"
+                onChange={(values) =>
+                  setPendingFilters((p) => ({
+                    ...p,
+                    program: programFilterFromValues(values),
+                  }))
+                }
+              />
 
               <div>
                 <label
@@ -2207,13 +2965,113 @@ export function Dashboard() {
               onOpenList={() => openDetailDrawer("churned")}
             />
           </div>
+
+          <div className="pt-2">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+              Profile Upkeep
+            </h2>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-wider text-gray-500">
+                  Profile Updated Score
+                </div>
+                <div className="mt-2 flex items-end gap-3">
+                  <div className="text-4xl font-semibold text-gray-900">
+                    {chartsLoading || !profileUpkeep
+                      ? "--"
+                      : `${profileUpkeep.averageScore}%`}
+                  </div>
+                  <div className="pb-1 text-sm text-gray-500">
+                    {chartsLoading || !profileUpkeep
+                      ? "Checking active clients"
+                      : `${profileUpkeep.freshFieldCount}/${profileUpkeep.checkedFieldCount} fields fresh`}
+                  </div>
+                </div>
+                <p className="mt-2 text-sm text-gray-500">
+                  Active clients only. Fields count as fresh when updated in the last{" "}
+                  {PROFILE_UPKEEP_FRESHNESS_DAYS} days.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openProfileUpkeepCompleteDetail}
+                disabled={!profileUpkeep || chartsLoading}
+                className="w-fit rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 transition-colors enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 enabled:hover:text-indigo-700 disabled:cursor-default"
+              >
+                {profileUpkeep
+                  ? `${profileUpkeep.completeClientCount}/${profileUpkeep.clientCount} complete profiles`
+                  : "RetainOS pilot metric"}
+              </button>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                {
+                  key: "nextSteps" as const,
+                  label: "Next Steps",
+                  score: profileUpkeep?.fieldScores.nextSteps,
+                },
+                {
+                  key: "milestone" as const,
+                  label: "Milestone",
+                  score: profileUpkeep?.fieldScores.milestone,
+                },
+                {
+                  key: "lastContact" as const,
+                  label: "Last Contact",
+                  score: profileUpkeep?.fieldScores.lastContact,
+                },
+                {
+                  key: "nextContact" as const,
+                  label: "Next Contact",
+                  score: profileUpkeep?.fieldScores.nextContact,
+                },
+                {
+                  key: "progress" as const,
+                  label: "Progress",
+                  score: profileUpkeep?.fieldScores.progress,
+                },
+                {
+                  key: "buyIn" as const,
+                  label: "Buy-in",
+                  score: profileUpkeep?.fieldScores.buyIn,
+                },
+              ].map(({ key, label, score }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => openProfileUpkeepFieldDetail(key, label)}
+                  disabled={!profileUpkeep || chartsLoading}
+                  className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-left transition-colors enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 disabled:cursor-default"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-gray-700">
+                      {label}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {chartsLoading || score === undefined ? "--" : `${score}%`}
+                    </span>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-gray-200">
+                    <div
+                      className="h-1.5 rounded-full bg-emerald-500"
+                      style={{
+                        width: `${chartsLoading || typeof score !== "number" ? 0 : score}%`,
+                      }}
+                    />
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       ) : activeDashboardTab === "charts" ? (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
               <div className="text-xs uppercase tracking-wider text-gray-500">
-                Visible Clients
+                Visible Client Total
               </div>
               <div className="mt-1 text-sm font-semibold text-gray-900">
                 {chartTotal(chartData.programDistribution).toLocaleString()}
@@ -2254,25 +3112,61 @@ export function Dashboard() {
                 title="Program Distribution"
                 subtitle="Clients grouped by current program status"
               >
-                <DonutChart data={chartData.programDistribution} />
+                <DonutChart
+                  data={chartData.programDistribution}
+                  onItemClick={(item) =>
+                    openChartDetail(
+                      "Program Distribution",
+                      item,
+                      (client) => client.program_status_value,
+                    )
+                  }
+                />
               </ChartCard>
               <ChartCard
                 title="Buy-in"
                 subtitle="Client outcome buy-in distribution"
               >
-                <DonutChart data={chartData.buyInDistribution} />
+                <DonutChart
+                  data={chartData.buyInDistribution}
+                  onItemClick={(item) =>
+                    openChartDetail(
+                      "Buy-in",
+                      item,
+                      (client) => client.outcomes_buy_in_for_filtering,
+                    )
+                  }
+                />
               </ChartCard>
               <ChartCard
                 title="Progress"
                 subtitle="Client outcome progress distribution"
               >
-                <DonutChart data={chartData.progressDistribution} />
+                <DonutChart
+                  data={chartData.progressDistribution}
+                  onItemClick={(item) =>
+                    openChartDetail(
+                      "Progress",
+                      item,
+                      (client) => client.outcomes_progress_for_filtering,
+                    )
+                  }
+                />
               </ChartCard>
               <ChartCard
                 title="Clients By Offer"
                 subtitle="Top current offers for filtered clients"
               >
-                <BarChart data={chartData.clientsByOffer} />
+                <BarChart
+                  data={chartData.clientsByOffer}
+                  onItemClick={(item) =>
+                    openChartDetail(
+                      "Clients By Offer",
+                      item,
+                      (client) => client.offer_milestones_current_offer_id,
+                    )
+                  }
+                />
               </ChartCard>
               <ChartCard
                 title="Tasks By Status"
@@ -2281,10 +3175,58 @@ export function Dashboard() {
                 <BarChart data={chartData.tasksByStatus} />
               </ChartCard>
               <ChartCard
-                title="CSM Workload"
-                subtitle="Tasks grouped by assigned CSM"
+                title="CSM Active Client Workload"
+                subtitle="Active Front End and Back End clients grouped by client-managing CSM"
               >
                 <BarChart data={chartData.csmWorkload} />
+              </ChartCard>
+              <ChartCard
+                title="CSM Capacity"
+                subtitle="Active clients against configured team member capacity"
+              >
+                {capacityRows.length === 0 ? (
+                  <div className="flex h-36 items-center justify-center rounded-lg border border-dashed border-gray-200 text-sm text-gray-500">
+                    No capacity data
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {capacityRows.slice(0, 8).map((row) => {
+                      const utilization =
+                        row.capacity && row.capacity > 0
+                          ? Math.round((row.activeClients / row.capacity) * 100)
+                          : null;
+                      return (
+                        <div key={row.id} className="rounded-lg border border-gray-100 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-gray-900">
+                                {row.name}
+                              </div>
+                              <div className="mt-0.5 text-xs text-gray-500">
+                                {row.activeClients} active client
+                                {row.activeClients === 1 ? "" : "s"} /{" "}
+                                {row.capacity ?? "Not set"} capacity
+                              </div>
+                            </div>
+                            <span
+                              className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${
+                                utilization === null
+                                  ? "border-gray-200 bg-gray-50 text-gray-600"
+                                  : utilization >= 90
+                                    ? "border-red-200 bg-red-50 text-red-700"
+                                    : utilization >= 75
+                                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              }`}
+                            >
+                              {utilization === null ? "Not set" : `${utilization}%`}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </ChartCard>
             </div>
           )}
@@ -2517,6 +3459,210 @@ export function Dashboard() {
               </div>
             </div>
           </aside>
+        </div>
+      )}
+
+      {profileUpkeepDetail && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close profile upkeep detail dialog"
+            onClick={() => setProfileUpkeepDetail(null)}
+            className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative flex max-h-[82vh] w-full max-w-3xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {profileUpkeepDetail.title}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {profileUpkeepDetail.summary}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProfileUpkeepDetail(null)}
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L10 8.94l4.72-4.72a.75.75 0 1 1 1.06 1.06L11.06 10l4.72 4.72a.75.75 0 1 1-1.06 1.06L10 11.06l-4.72 4.72a.75.75 0 1 1-1.06-1.06L8.94 10 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
+                </svg>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {[
+                {
+                  label: profileUpkeepDetail.updatedLabel,
+                  rows: profileUpkeepDetail.updated,
+                  tone: "green",
+                },
+                {
+                  label: profileUpkeepDetail.missingLabel,
+                  rows: profileUpkeepDetail.missing,
+                  tone: "amber",
+                },
+              ].map((section) => (
+                <section key={section.label} className="mb-5 last:mb-0">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-semibold text-gray-900">
+                      {section.label}
+                    </h4>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                        section.tone === "green"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      {section.rows.length}
+                    </span>
+                  </div>
+                  {section.rows.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-gray-200 py-8 text-center text-sm text-gray-500">
+                      No clients in this group.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+                      {section.rows.map(({ client, score }) => (
+                        <Link
+                          key={client.glide_row_id}
+                          to={`/clients/${client.glide_row_id}`}
+                          className="flex items-center justify-between gap-4 px-3 py-3 hover:bg-gray-50"
+                        >
+                          <div className="flex min-w-0 items-center gap-3">
+                            {client.client_image ? (
+                              <img
+                                src={client.client_image}
+                                alt=""
+                                className="h-10 w-10 rounded-xl border border-gray-200 object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
+                                {getInitials(client.client_name)}
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-gray-900">
+                                {client.client_name ?? "Unnamed client"}
+                              </div>
+                              <div className="truncate text-xs text-gray-500">
+                                {teamMemberNameById.get(
+                                  client.csm_team_member_id ?? "",
+                                ) ?? "Unassigned"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-3">
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700">
+                              {score}%
+                            </span>
+                            <span className="text-xs font-medium text-indigo-600">
+                              View
+                            </span>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {chartDetail && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close chart detail dialog"
+            onClick={() => setChartDetail(null)}
+            className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {chartDetail.title}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {chartDetail.rows.length.toLocaleString()} client
+                  {chartDetail.rows.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChartDetail(null)}
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L10 8.94l4.72-4.72a.75.75 0 1 1 1.06 1.06L11.06 10l4.72 4.72a.75.75 0 1 1-1.06 1.06L10 11.06l-4.72 4.72a.75.75 0 1 1-1.06-1.06L8.94 10 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
+                </svg>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {chartDetail.rows.length === 0 ? (
+                <div className="py-10 text-center text-sm text-gray-500">
+                  No clients matched this chart segment.
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {chartDetail.rows.map((client) => (
+                    <Link
+                      key={client.glide_row_id}
+                      to={`/clients/${client.glide_row_id}`}
+                      className="flex items-center justify-between gap-4 py-3 hover:bg-gray-50"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        {client.client_image ? (
+                          <img
+                            src={client.client_image}
+                            alt=""
+                            className="h-10 w-10 rounded-xl border border-gray-200 object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
+                            {getInitials(client.client_name)}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-gray-900">
+                            {client.client_name ?? "Unnamed client"}
+                          </div>
+                          <div className="truncate text-xs text-gray-500">
+                            {teamMemberNameById.get(client.csm_team_member_id ?? "") ??
+                              "Unassigned"}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs font-medium text-indigo-600">
+                        View
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

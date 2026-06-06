@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ProgramStatusPill,
@@ -12,6 +12,7 @@ type ClientRow = Record<string, unknown> & {
   client_name?: string | null;
   client_image?: string | null;
   company_id?: string | null;
+  company_glide_row_id?: string | null;
   csm_team_member_id?: string | null;
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
@@ -19,7 +20,30 @@ type ClientRow = Record<string, unknown> & {
 interface TeamMember {
   glide_row_id: string;
   name: string | null;
+  is_archived?: boolean | null;
+  role_hide_from_csm_list?: boolean | null;
 }
+type OutcomeChoice = {
+  value: string;
+  label: string;
+};
+type OutcomeChoiceSets = {
+  success: OutcomeChoice[];
+  progress: OutcomeChoice[];
+  buyIn: OutcomeChoice[];
+};
+type OutcomeChoiceRow = {
+  success_value?: string | null;
+  success_display?: string | null;
+  progress_value?: string | null;
+  progress_display?: string | null;
+  buy_in_value?: string | null;
+  buy_in_display?: string | null;
+};
+type OfferRow = Record<string, unknown> & {
+  glide_row_id: string;
+  name?: string | null;
+};
 type ContractRow = Record<string, unknown> & {
   glide_row_id?: string | null;
   client_id?: string | null;
@@ -33,11 +57,14 @@ type ContractRow = Record<string, unknown> & {
   last_modified_by?: string | null;
 };
 type ClientMilestoneRow = Record<string, unknown> & {
+  id?: string | null;
   glide_row_id?: string | null;
   milestone_id?: string | null;
   offer_id?: string | null;
   start_date?: string | null;
   completion_date?: string | null;
+  duration_days?: number | string | null;
+  time_to_hit_days?: number | string | null;
 };
 type OfferMilestoneRow = Record<string, unknown> & {
   glide_row_id?: string | null;
@@ -69,8 +96,31 @@ type ClientTaskRow = Record<string, unknown> & {
   status_value?: string | null;
   external_link?: string | null;
 };
+type ClientHistoryEventRow = Record<string, unknown> & {
+  id: string;
+  legacy_client_glide_row_id?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  next_steps?: string | null;
+  last_contact_at?: string | null;
+  next_contact_at?: string | null;
+  success_status?: string | null;
+  progress_status?: string | null;
+  buy_in_status?: string | null;
+  notes?: string | null;
+  created_at?: string | null;
+};
+function mapAppClientRow(row: Record<string, unknown>): ClientRow {
+  return {
+    ...row,
+    company_id:
+      typeof row.company_glide_row_id === "string"
+        ? row.company_glide_row_id
+        : (row.company_id as string | null | undefined),
+  } as ClientRow;
+}
 const basicInfoFields: [string, string[]][] = [
-  ["Business Name", ["business_name", "client_name"]],
+  ["Business Name", ["business_name", "client_business", "client_name"]],
   [
     "Archetype",
     [
@@ -126,6 +176,7 @@ const programFields: [string, string[]][] = [
   [
     "Director Notes",
     [
+      "client_director_notes",
       "director_notes",
       "director_notes_value",
       "director_notes_text",
@@ -406,6 +457,16 @@ function getContractStatus(contract: Record<string, unknown>) {
   return endDate.getTime() >= Date.now() ? "Active" : "Expired";
 }
 
+function daysUntilDate(value: unknown) {
+  const date = dateFromValue(value);
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
 function hasCurrentContract(client: ClientRow | null | undefined) {
   if (!client) return false;
   return [
@@ -572,6 +633,66 @@ function titleize(value: string) {
     .map((part) => part[0]?.toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
 }
+function outcomeLabel(value: string, display?: string | null) {
+  if (display && display.trim()) return display.trim();
+  return titleize(value);
+}
+function outcomeChoicesFromRows(rows: OutcomeChoiceRow[] | null | undefined) {
+  const seen = {
+    success: new Set<string>(),
+    progress: new Set<string>(),
+    buyIn: new Set<string>(),
+  };
+  const choices: OutcomeChoiceSets = { success: [], progress: [], buyIn: [] };
+
+  for (const row of rows ?? []) {
+    if (row.success_value && !seen.success.has(row.success_value)) {
+      seen.success.add(row.success_value);
+      choices.success.push({
+        value: row.success_value,
+        label: outcomeLabel(row.success_value, row.success_display),
+      });
+    }
+    if (
+      row.progress_value &&
+      row.progress_value !== "offtrack" &&
+      !seen.progress.has(row.progress_value)
+    ) {
+      seen.progress.add(row.progress_value);
+      choices.progress.push({
+        value: row.progress_value,
+        label: outcomeLabel(row.progress_value, row.progress_display),
+      });
+    }
+    if (row.buy_in_value && !seen.buyIn.has(row.buy_in_value)) {
+      seen.buyIn.add(row.buy_in_value);
+      choices.buyIn.push({
+        value: row.buy_in_value,
+        label: outcomeLabel(row.buy_in_value, row.buy_in_display),
+      });
+    }
+  }
+
+  return choices;
+}
+async function functionErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "context" in error) {
+    const context = (error as { context?: unknown }).context;
+    if (context instanceof Response) {
+      try {
+        const payload = (await context.clone().json()) as {
+          error?: string;
+          message?: string;
+        };
+        if (payload.error) return payload.error;
+        if (payload.message) return payload.message;
+      } catch {
+        // Fall back to the SDK error message.
+      }
+    }
+  }
+  return error instanceof Error ? error.message : "Unable to save outcomes.";
+}
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -654,6 +775,1379 @@ function getInitials(name: string | null | undefined) {
       .join("") || "--"
   );
 }
+
+function textInputValue(value: unknown) {
+  const shown = displayValue(value);
+  return shown === "--" ? "" : shown;
+}
+
+function dateInputValue(value: unknown) {
+  if (!isPresent(value)) return "";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function todayInputValue() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function milestoneSortValue(milestone: OfferMilestoneRow) {
+  const order = Number(milestone.order);
+  return Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER;
+}
+
+function dateFromValue(value: unknown) {
+  if (!isPresent(value)) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function daysBetweenValues(startValue: unknown, endValue: unknown) {
+  const start = dateFromValue(startValue);
+  const end = dateFromValue(endValue);
+  if (!start || !end) return null;
+  const msPerDay = 1000 * 60 * 60 * 24;
+  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / msPerDay));
+}
+
+function milestoneStatusClasses(status: string) {
+  if (status === "Completed") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+  if (status === "Current") {
+    return "border-indigo-200 bg-indigo-50 text-indigo-700";
+  }
+  if (status === "Started") {
+    return "border-blue-200 bg-blue-50 text-blue-700";
+  }
+  return "border-gray-200 bg-gray-50 text-gray-600";
+}
+
+function ClientProfileEditModal({
+  client,
+  teamMembers,
+  canManageAssignment,
+  canEditDirectorNotes,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  teamMembers: TeamMember[];
+  canManageAssignment: boolean;
+  canEditDirectorNotes: boolean;
+  onClose: () => void;
+  onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
+}) {
+  const [clientName, setClientName] = useState(textInputValue(client.client_name));
+  const [clientBusiness, setClientBusiness] = useState(
+    textInputValue(client.client_business),
+  );
+  const [clientEmail, setClientEmail] = useState(textInputValue(client.client_email));
+  const [clientArchetype, setClientArchetype] = useState(
+    textInputValue(client.client_archetype_value),
+  );
+  const [northStar, setNorthStar] = useState(
+    textInputValue(valueFrom(client, ["north_star_value"])),
+  );
+  const [directorNotes, setDirectorNotes] = useState(
+    textInputValue(valueFrom(client, ["client_director_notes"])),
+  );
+  const [csmTeamMemberId, setCsmTeamMemberId] = useState(
+    client.csm_team_member_id ?? "",
+  );
+  const availableAssignees = teamMembers.filter(
+    (member) =>
+      member.is_archived !== true && member.role_hide_from_csm_list !== true,
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-profile",
+      {
+        body: {
+          clientLegacyId: client.glide_row_id,
+          clientName,
+          clientBusiness,
+          clientEmail,
+          clientArchetype,
+          northStar,
+          directorNotes,
+          ...(canManageAssignment ? { csmTeamMemberId } : {}),
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(await functionErrorMessage(error));
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close edit profile"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Edit Client Profile
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Saves to RetainOS pilot client data and history.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-5 py-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Client Name
+                </span>
+                <input
+                  value={clientName}
+                  onChange={(event) => setClientName(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Business Name
+                </span>
+                <input
+                  value={clientBusiness}
+                  onChange={(event) => setClientBusiness(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Email
+                </span>
+                <input
+                  type="email"
+                  value={clientEmail}
+                  onChange={(event) => setClientEmail(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Archetype
+                </span>
+                <input
+                  value={clientArchetype}
+                  onChange={(event) => setClientArchetype(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </label>
+            </div>
+            {canManageAssignment ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Primary CSM
+                </span>
+                <select
+                  value={csmTeamMemberId}
+                  onChange={(event) => setCsmTeamMemberId(event.target.value)}
+                  disabled={saving}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                >
+                  <option value="">Unassigned</option>
+                  {availableAssignees.map((member) => (
+                    <option key={member.glide_row_id} value={member.glide_row_id}>
+                      {member.name ?? "(unnamed)"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                North Star
+              </span>
+              <textarea
+                value={northStar}
+                onChange={(event) => setNorthStar(event.target.value)}
+                rows={5}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+              />
+            </label>
+            {canEditDirectorNotes ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Director Notes
+                </span>
+                <textarea
+                  value={directorNotes}
+                  onChange={(event) => setDirectorNotes(event.target.value)}
+                  rows={4}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </label>
+            ) : null}
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Profile"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ClientOutcomesEditModal({
+  client,
+  choices,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  choices: OutcomeChoiceSets;
+  onClose: () => void;
+  onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
+}) {
+  const [successStatus, setSuccessStatus] = useState(
+    textInputValue(
+      valueFrom(client, [
+        "outcomes_success_value",
+        "outcomes_success_for_filtering",
+        "success_status",
+      ]),
+    ),
+  );
+  const [progressStatus, setProgressStatus] = useState(
+    textInputValue(
+      valueFrom(client, [
+        "outcomes_progress_value",
+        "outcomes_progress_for_filtering",
+        "progress_status",
+      ]),
+    ),
+  );
+  const [buyInStatus, setBuyInStatus] = useState(
+    textInputValue(
+      valueFrom(client, [
+        "outcomes_buy_in_value",
+        "outcomes_buy_in_for_filtering",
+        "buy_in_status",
+      ]),
+    ),
+  );
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-outcomes",
+      {
+        body: {
+          clientLegacyId: client.glide_row_id,
+          successStatus,
+          progressStatus,
+          buyInStatus,
+          notes,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  const renderSelect = (
+    label: string,
+    value: string,
+    options: OutcomeChoice[],
+    onChange: (value: string) => void,
+  ) => (
+    <label className="block">
+      <span className="text-sm font-medium text-gray-700">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+      >
+        <option value="">Not set</option>
+        {options.map((choice) => (
+          <option key={choice.value} value={choice.value}>
+            {choice.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close edit outcomes"
+        className="absolute inset-0 bg-gray-900/40"
+        onClick={onClose}
+      />
+      <div className="relative w-full max-w-xl rounded-lg bg-white shadow-xl">
+        <form onSubmit={handleSubmit} className="p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Edit Outcomes
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Update success, progress, and buy-in for this client.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md px-2 py-1 text-xl text-gray-400 hover:bg-gray-100 hover:text-gray-600 cursor-pointer"
+              aria-label="Close"
+            >
+              &times;
+            </button>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {renderSelect(
+              "Success",
+              successStatus,
+              choices.success,
+              setSuccessStatus,
+            )}
+            {renderSelect(
+              "Progress",
+              progressStatus,
+              choices.progress,
+              setProgressStatus,
+            )}
+            {renderSelect("Buy-in", buyInStatus, choices.buyIn, setBuyInStatus)}
+          </div>
+
+          <label className="mt-4 block">
+            <span className="text-sm font-medium text-gray-700">
+              Notes
+              <span className="ml-1 font-normal text-gray-400">(optional)</span>
+            </span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={4}
+              className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </label>
+
+          {saveError ? (
+            <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {saveError}
+            </div>
+          ) : null}
+
+          <div className="mt-6 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Outcomes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ClientStatusModal({
+  client,
+  programChoices,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  programChoices: ProgramChoice[];
+  onClose: () => void;
+  onSaved: (
+    client: ClientRow,
+    event: ClientHistoryEventRow | null,
+    updatedContract: ContractRow | null,
+  ) => void;
+}) {
+  const allowedStatuses = new Set([
+    "front-end",
+    "back-end",
+    "paused",
+    "suspended",
+    "off-boarded",
+  ]);
+  const statusOptions = programChoices
+    .filter(
+      (choice) =>
+        choice.program_value && allowedStatuses.has(choice.program_value),
+    )
+    .sort((a, b) => {
+      const order = ["front-end", "back-end", "paused", "suspended", "off-boarded"];
+      return (
+        order.indexOf(a.program_value ?? "") -
+        order.indexOf(b.program_value ?? "")
+      );
+    });
+  const fallbackOptions =
+    statusOptions.length > 0
+      ? statusOptions
+      : [
+          { program_value: "front-end", program_label: "Front End", program_emoji: null },
+          { program_value: "back-end", program_label: "Back End", program_emoji: null },
+          { program_value: "paused", program_label: "Paused", program_emoji: null },
+          { program_value: "suspended", program_label: "Suspended", program_emoji: null },
+          { program_value: "off-boarded", program_label: "Offboarded", program_emoji: null },
+        ];
+  const [targetStatus, setTargetStatus] = useState(
+    fallbackOptions.find(
+      (choice) => choice.program_value !== client.program_status_value,
+    )?.program_value ?? "front-end",
+  );
+  const [reason, setReason] = useState("");
+  const [returnDate, setReturnDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const requiresReason = ["paused", "suspended", "off-boarded"].includes(
+    targetStatus ?? "",
+  );
+  const requiresReturnDate = targetStatus === "paused";
+  const isReactivation =
+    targetStatus === "front-end" || targetStatus === "back-end";
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-status",
+      {
+        body: {
+          clientLegacyId: client.glide_row_id,
+          targetStatus,
+          reason,
+          returnDate,
+          notes,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+        (data.updatedContract as ContractRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close status change"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Change Client Status
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Uses existing program statuses and records the change in history.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-5 py-5">
+            <div className="rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+              Current status:{" "}
+              <ProgramStatusPill
+                value={client.program_status_value}
+                choices={programChoices}
+              />
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                New Status
+              </span>
+              <select
+                value={targetStatus ?? ""}
+                onChange={(event) => setTargetStatus(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                {fallbackOptions.map((choice) => (
+                  <option
+                    key={choice.program_value ?? ""}
+                    value={choice.program_value ?? ""}
+                    disabled={choice.program_value === client.program_status_value}
+                  >
+                    {choice.program_label ?? choice.program_value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {requiresReason ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Reason
+                </span>
+                <textarea
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  rows={3}
+                  required
+                  disabled={saving}
+                  placeholder={
+                    targetStatus === "paused"
+                      ? "Leadership-approved pause reason"
+                      : targetStatus === "suspended"
+                        ? "Payment or delinquency context"
+                        : "Offboarding reason"
+                  }
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+                />
+              </label>
+            ) : null}
+            {requiresReturnDate ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Return Date
+                </span>
+                <input
+                  type="date"
+                  value={returnDate}
+                  onChange={(event) => setReturnDate(event.target.value)}
+                  required
+                  disabled={saving}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                />
+                <span className="mt-1 block text-xs text-gray-500">
+                  Paused clients extend the app-owned contract by the approved
+                  pause window.
+                </span>
+              </label>
+            ) : null}
+            {isReactivation ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                Moving back to Front End or Back End is the reactivation step.
+              </div>
+            ) : null}
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Notes
+              </span>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={3}
+                disabled={saving}
+                placeholder="Optional extra context for history"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+              />
+            </label>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Status"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function NewContractModal({
+  client,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  onClose: () => void;
+  onSaved: (
+    contract: ContractRow,
+    client: ClientRow,
+    event: ClientHistoryEventRow | null,
+    retentionEvent: ClientHistoryEventRow | null,
+  ) => void;
+}) {
+  const [startDate, setStartDate] = useState(
+    dateInputValue(valueFrom(client, ["current_contract_start_date"])),
+  );
+  const [endDate, setEndDate] = useState("");
+  const [contractDays, setContractDays] = useState("");
+  const [monthlyValue, setMonthlyValue] = useState("");
+  const [totalContractValue, setTotalContractValue] = useState("");
+  const [referenceLink, setReferenceLink] = useState("");
+  const [notes, setNotes] = useState("");
+  const [autoRenew, setAutoRenew] = useState(false);
+  const [status, setStatus] = useState("active");
+  const currentProgramStatus =
+    typeof client.program_status_value === "string"
+      ? client.program_status_value
+      : "";
+  const canRecordRetention = ["front-end", "back-end"].includes(currentProgramStatus);
+  const [retentionType, setRetentionType] = useState("none");
+  const [retentionTargetStatus, setRetentionTargetStatus] = useState(
+    currentProgramStatus || "front-end",
+  );
+  const [markSuccess, setMarkSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-contract",
+      {
+        body: {
+          clientLegacyId: client.glide_row_id,
+          startDate,
+          endDate,
+          contractDays,
+          monthlyValue,
+          totalContractValue,
+          referenceLink,
+          notes,
+          autoRenew,
+          status,
+          retentionType,
+          retentionTargetStatus,
+          markSuccess,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.contract && data?.client) {
+      onSaved(
+        data.contract as ContractRow,
+        mapAppClientRow(data.client as Record<string, unknown>),
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+        (data.retentionEvent as ClientHistoryEventRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close new contract"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              New Contract
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Saves to RetainOS pilot contract data and updates the client summary.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-5 py-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Start Date
+                </span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(event) => setStartDate(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  End / Renewal Date
+                </span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(event) => setEndDate(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Contract Days
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  value={contractDays}
+                  onChange={(event) => setContractDays(event.target.value)}
+                  placeholder="Optional"
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Monthly Value
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={monthlyValue}
+                  onChange={(event) => setMonthlyValue(event.target.value)}
+                  placeholder="Optional"
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Total Contract Value
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={totalContractValue}
+                  onChange={(event) => setTotalContractValue(event.target.value)}
+                  placeholder="Optional"
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Status
+                </span>
+                <select
+                  value={status}
+                  onChange={(event) => setStatus(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                >
+                  <option value="active">Active</option>
+                  <option value="pending">Pending</option>
+                  <option value="expired">Expired</option>
+                </select>
+              </label>
+            </div>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input
+                type="checkbox"
+                checked={autoRenew}
+                onChange={(event) => setAutoRenew(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600"
+              />
+              Auto renew
+            </label>
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-indigo-700">
+                  Retention Outcome
+                </span>
+                <select
+                  value={retentionType}
+                  onChange={(event) => {
+                    const nextType = event.target.value;
+                    setRetentionType(nextType);
+                    setMarkSuccess(nextType !== "none");
+                    if (nextType === "upsell") {
+                      setRetentionTargetStatus("back-end");
+                    } else if (nextType === "renewal") {
+                      setRetentionTargetStatus(currentProgramStatus || "front-end");
+                    }
+                  }}
+                  disabled={!canRecordRetention}
+                  className="block w-full rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  <option value="none">Do not record retention</option>
+                  <option value="renewal">Renew current program</option>
+                  {currentProgramStatus === "front-end" ? (
+                    <option value="upsell">Renew and move to Back End</option>
+                  ) : null}
+                </select>
+              </label>
+              <p className="mt-2 text-xs text-indigo-700">
+                Use this when the new contract represents a renewal or upsell. It
+                writes a RetainOS retention event for Dashboard reporting.
+              </p>
+              {retentionType !== "none" ? (
+                <label className="mt-3 flex items-center gap-2 text-sm font-medium text-indigo-900">
+                  <input
+                    type="checkbox"
+                    checked={markSuccess}
+                    onChange={(event) => setMarkSuccess(event.target.checked)}
+                    className="h-4 w-4 rounded border-indigo-300 text-indigo-600"
+                  />
+                  Mark success with this renewal
+                </label>
+              ) : null}
+              {!canRecordRetention ? (
+                <p className="mt-2 text-xs text-amber-700">
+                  Retention can only be recorded for active Front End or Back End clients.
+                </p>
+              ) : null}
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Contract Link
+              </span>
+              <input
+                type="url"
+                value={referenceLink}
+                onChange={(event) => setReferenceLink(event.target.value)}
+                placeholder="https://..."
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Notes
+              </span>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={4}
+                placeholder="Optional context"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
+              />
+            </label>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Contract"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function MilestoneActionModal({
+  client,
+  action,
+  currentMilestoneName,
+  existingProgress,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  action: "start_milestone" | "complete_milestone";
+  currentMilestoneName: string;
+  existingProgress: ClientMilestoneRow | null;
+  onClose: () => void;
+  onSaved: (
+    client: ClientRow,
+    milestone: ClientMilestoneRow,
+    event: ClientHistoryEventRow | null,
+  ) => void;
+}) {
+  const [startDate, setStartDate] = useState(
+    dateInputValue(existingProgress?.start_date) || todayInputValue(),
+  );
+  const [completionDate, setCompletionDate] = useState(todayInputValue());
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const isComplete = action === "complete_milestone";
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-milestone",
+      {
+        body: {
+          action,
+          clientLegacyId: client.glide_row_id,
+          startDate,
+          completionDate: isComplete ? completionDate : undefined,
+          notes,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client && data?.clientMilestone) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        data.clientMilestone as ClientMilestoneRow,
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close milestone action"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              {isComplete ? "Complete Milestone" : "Start Milestone"}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              {currentMilestoneName}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-5 py-5">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Start Date
+              </span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(event) => setStartDate(event.target.value)}
+                required={!isComplete}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+              {isComplete ? (
+                <span className="mt-1 block text-xs text-gray-500">
+                  Optional override. If left as-is, RetainOS uses the saved
+                  start date for duration and the onboarded date for time to hit.
+                </span>
+              ) : null}
+            </label>
+            {isComplete ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Completion Date
+                </span>
+                <input
+                  type="date"
+                  value={completionDate}
+                  onChange={(event) => setCompletionDate(event.target.value)}
+                  required
+                  disabled={saving}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                />
+              </label>
+            ) : null}
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Notes
+              </span>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={3}
+                disabled={saving}
+                placeholder="Optional context for history"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+              />
+            </label>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : isComplete ? "Complete Milestone" : "Start Milestone"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PathwayChangeModal({
+  client,
+  offers,
+  offerMilestones,
+  relationLookup,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  offers: OfferRow[];
+  offerMilestones: OfferMilestoneRow[];
+  relationLookup: Map<string, string>;
+  onClose: () => void;
+  onSaved: (
+    client: ClientRow,
+    milestone: ClientMilestoneRow,
+    event: ClientHistoryEventRow | null,
+  ) => void;
+}) {
+  const initialOfferId =
+    textInputValue(valueFrom(client, ["offer_milestones_current_offer_id"])) ||
+    offers[0]?.glide_row_id ||
+    "";
+  const [offerId, setOfferId] = useState(initialOfferId);
+  const milestonesForOffer = offerMilestones
+    .filter((milestone) => milestone.offer_id === offerId)
+    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+  const initialMilestoneId =
+    textInputValue(valueFrom(client, ["offer_milestones_current_milestone_id"])) ||
+    milestonesForOffer[0]?.glide_row_id ||
+    "";
+  const [milestoneId, setMilestoneId] = useState(initialMilestoneId);
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  function handleOfferChange(nextOfferId: string) {
+    setOfferId(nextOfferId);
+    const firstMilestone = offerMilestones
+      .filter((milestone) => milestone.offer_id === nextOfferId)
+      .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b))[0];
+    setMilestoneId(firstMilestone?.glide_row_id ?? "");
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-milestone",
+      {
+        body: {
+          action: "set_pathway",
+          clientLegacyId: client.glide_row_id,
+          offerId,
+          milestoneId,
+          notes,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client && data?.clientMilestone) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        data.clientMilestone as ClientMilestoneRow,
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close pathway change"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Change Pathway
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Directors and Super Admins can change the active offer and
+              milestone.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-5 py-5">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Offer / Pathway
+              </span>
+              <select
+                value={offerId}
+                onChange={(event) => handleOfferChange(event.target.value)}
+                required
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                {offers.map((offer) => (
+                  <option key={offer.glide_row_id} value={offer.glide_row_id}>
+                    {offer.name ?? offer.glide_row_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Current Milestone
+              </span>
+              <select
+                value={milestoneId}
+                onChange={(event) => setMilestoneId(event.target.value)}
+                required
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                {milestonesForOffer.map((milestone) => (
+                  <option
+                    key={milestone.glide_row_id ?? milestone.name ?? "milestone"}
+                    value={milestone.glide_row_id ?? ""}
+                  >
+                    {displayValue(milestone.name, relationLookup)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Notes
+              </span>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={3}
+                disabled={saving}
+                placeholder="Optional context for history"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+              />
+            </label>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !offerId || !milestoneId}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Pathway"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function FieldGrid({
   fields,
   client,
@@ -833,15 +2327,70 @@ function ContractCard({
 function ContractSection({
   client,
   contracts,
+  canCreateContract,
+  onCreateContract,
 }: {
   client?: ClientRow;
   contracts: ContractRow[];
+  canCreateContract: boolean;
+  onCreateContract: () => void;
 }) {
   const [showOlderContracts, setShowOlderContracts] = useState(false);
   const showCurrent = hasCurrentContract(client);
   const [latestLinkedContract, ...olderLinkedContracts] = contracts;
+  const clientStatus =
+    typeof client?.program_status_value === "string"
+      ? client.program_status_value
+      : "";
+  const currentRenewalDate = contractEndDate((client ?? {}) as Record<string, unknown>);
+  const daysUntilRenewal = daysUntilDate(currentRenewalDate);
+  const showRenewalPrompt =
+    canCreateContract &&
+    ["front-end", "back-end"].includes(clientStatus) &&
+    daysUntilRenewal !== null &&
+    daysUntilRenewal <= 30;
   return (
     <div className="space-y-4">
+      {canCreateContract ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onCreateContract}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+          >
+            + New Contract
+          </button>
+        </div>
+      ) : null}
+      {showRenewalPrompt ? (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-sky-950">
+                Contract renewal prompt
+              </h2>
+              <p className="mt-1 text-sm text-sky-800">
+                {daysUntilRenewal !== null && daysUntilRenewal < 0
+                  ? `This contract ended ${Math.abs(daysUntilRenewal)} day${
+                      Math.abs(daysUntilRenewal) === 1 ? "" : "s"
+                    } ago.`
+                  : `This contract is up for renewal in ${daysUntilRenewal} day${
+                      daysUntilRenewal === 1 ? "" : "s"
+                    }.`}{" "}
+                Add the next contract and choose a retention outcome to keep Dashboard
+                retention clean.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onCreateContract}
+              className="w-fit rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 cursor-pointer"
+            >
+              Add Renewal Contract
+            </button>
+          </div>
+        </div>
+      ) : null}
       {showCurrent && (
         <ContractCard title="Current Contract" contract={client as ClientRow} isLatest />
       )}
@@ -893,14 +2442,26 @@ function ContractSection({
 
 function PathwaysSection({
   client,
+  offers,
   clientMilestones,
   offerMilestones,
   relationLookup,
+  canAdvanceMilestones,
+  canManagePathways,
+  onStartMilestone,
+  onCompleteMilestone,
+  onChangePathway,
 }: {
   client: ClientRow;
+  offers: OfferRow[];
   clientMilestones: ClientMilestoneRow[];
   offerMilestones: OfferMilestoneRow[];
   relationLookup: Map<string, string>;
+  canAdvanceMilestones: boolean;
+  canManagePathways: boolean;
+  onStartMilestone: (progress: ClientMilestoneRow | null) => void;
+  onCompleteMilestone: (progress: ClientMilestoneRow | null) => void;
+  onChangePathway: () => void;
 }) {
   const offerValue = valueFrom(client, [
     "offer_milestones_current_offer_id",
@@ -908,12 +2469,178 @@ function PathwaysSection({
     "offer_id",
     "offer_name",
   ]);
+  const milestoneValue = valueFrom(client, [
+    "offer_milestones_current_milestone_id",
+    "offer_milestones_2nd_current_milestone_id",
+    "milestone_id",
+    "milestone_name",
+  ]);
+  const currentOfferMilestones = offerMilestones.filter((milestone) => {
+    if (!isPresent(offerValue)) return false;
+    return String(milestone.offer_id) === String(offerValue);
+  });
+  const sortedOfferMilestones = currentOfferMilestones
+    .slice()
+    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+  const currentProgress =
+    clientMilestones.find(
+      (milestone) => milestone.milestone_id === milestoneValue,
+    ) ?? null;
+  const canShowActions =
+    canAdvanceMilestones && isPresent(offerValue) && isPresent(milestoneValue);
+  const progressByMilestoneId = new Map(
+    clientMilestones
+      .filter(
+        (milestone) =>
+          isPresent(milestone.milestone_id) &&
+          (!isPresent(milestone.offer_id) ||
+            !isPresent(offerValue) ||
+            String(milestone.offer_id) === String(offerValue)),
+      )
+      .map((milestone) => [String(milestone.milestone_id), milestone]),
+  );
+  const configuredMilestoneIds = new Set(
+    sortedOfferMilestones
+      .filter((milestone) => isPresent(milestone.glide_row_id))
+      .map((milestone) => String(milestone.glide_row_id)),
+  );
+  const timelineRows = sortedOfferMilestones.map((milestone) => {
+    const milestoneId = milestone.glide_row_id ?? null;
+    const progress = milestoneId
+      ? progressByMilestoneId.get(String(milestoneId)) ?? null
+      : null;
+    const isCurrent =
+      isPresent(milestoneId) && String(milestoneId) === String(milestoneValue);
+    let status = "Not started";
+    if (isPresent(progress?.completion_date)) status = "Completed";
+    else if (isCurrent) status = "Current";
+    else if (isPresent(progress?.start_date)) status = "Started";
+
+    return {
+      milestone,
+      progress,
+      isCurrent,
+      status,
+    };
+  });
+  const extraProgressRows = clientMilestones
+    .filter((milestone) => {
+      if (isPresent(milestone.offer_id) && isPresent(offerValue)) {
+        if (String(milestone.offer_id) !== String(offerValue)) return false;
+      }
+      if (!isPresent(milestone.milestone_id)) return false;
+      return (
+        String(milestone.milestone_id) === String(milestoneValue) ||
+        !configuredMilestoneIds.has(String(milestone.milestone_id))
+      );
+    })
+    .map((progress) => ({
+      milestone: null,
+      progress,
+      isCurrent:
+        isPresent(progress.milestone_id) &&
+        String(progress.milestone_id) === String(milestoneValue),
+      status: isPresent(progress.completion_date)
+        ? "Completed"
+        : isPresent(progress.start_date)
+          ? "Started"
+          : "Not started",
+    }));
+  const visibleTimelineRows =
+    timelineRows.length > 0 ? timelineRows : extraProgressRows;
+  const completedMilestones = clientMilestones
+    .filter((milestone) => {
+      if (!isPresent(milestone.completion_date)) return false;
+      if (!isPresent(milestone.offer_id) || !isPresent(offerValue)) return true;
+      return String(milestone.offer_id) === String(offerValue);
+    })
+    .slice()
+    .sort((a, b) => {
+      const aDate = dateFromValue(a.completion_date)?.getTime() ?? 0;
+      const bDate = dateFromValue(b.completion_date)?.getTime() ?? 0;
+      return bDate - aDate;
+    });
+  const lastCompletedMilestone = completedMilestones[0] ?? null;
+  const hasCurrentStarted = isPresent(currentProgress?.start_date);
+  const hasCurrentCompleted = isPresent(currentProgress?.completion_date);
+  const showStartAction = canShowActions && !hasCurrentStarted;
+  const showCompleteAction =
+    canShowActions && hasCurrentStarted && !hasCurrentCompleted;
+  const daysInCurrentMilestone =
+    hasCurrentStarted && !hasCurrentCompleted
+      ? daysBetweenValues(currentProgress?.start_date, new Date().toISOString())
+      : null;
 
   return (
-    <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="space-y-5 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+            Current Pathway
+          </div>
+          <h2 className="mt-1 text-lg font-semibold text-gray-900">
+            {displayValue(offerValue, relationLookup)}
+          </h2>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+            <span className="font-medium text-gray-900">
+              {displayValue(milestoneValue, relationLookup)}
+            </span>
+            {isPresent(currentProgress?.start_date) ? (
+              <span>Started {formatDate(currentProgress?.start_date)}</span>
+            ) : (
+              <span>Not started yet</span>
+            )}
+            {daysInCurrentMilestone !== null ? (
+              <span>{daysInCurrentMilestone} days in milestone</span>
+            ) : null}
+          </div>
+          {lastCompletedMilestone ? (
+            <p className="mt-2 text-sm text-gray-500">
+              Last completed:{" "}
+              <span className="font-medium text-gray-700">
+                {displayValue(lastCompletedMilestone.milestone_id, relationLookup)}
+              </span>{" "}
+              on {formatDate(lastCompletedMilestone.completion_date)}
+            </p>
+          ) : null}
+        </div>
+        {(canManagePathways || showStartAction || showCompleteAction) && (
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            {showStartAction ? (
+              <button
+                type="button"
+                onClick={() => onStartMilestone(currentProgress)}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+              >
+                Start Milestone
+              </button>
+            ) : null}
+            {showCompleteAction ? (
+              <button
+                type="button"
+                onClick={() => onCompleteMilestone(currentProgress)}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+              >
+                Complete Milestone
+              </button>
+            ) : null}
+            {canManagePathways && offers.length > 0 ? (
+              <button
+                type="button"
+                onClick={onChangePathway}
+                className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                Change Pathway
+              </button>
+            ) : null}
+          </div>
+        )}
+      </div>
+
       <FieldGrid
         fields={[
           ["Offer", ["offer_milestones_current_offer_id", "offer_id", "offer_name"]],
+          ["Milestones", ["offer_milestones_current_milestone_id", "milestone_id"]],
           ["Last Contact", ["csm_date_of_last_contact"]],
           ["Next Contact", ["csm_date_of_next_contact"]],
         ]}
@@ -924,41 +2651,50 @@ function PathwaysSection({
 
       <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
         <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
-          Milestones
+          Milestone Timeline
         </div>
         <div className="mt-3 space-y-2">
-          {clientMilestones.length > 0 ? (
-            clientMilestones.map((milestone, index) => (
+          {visibleTimelineRows.length > 0 ? (
+            visibleTimelineRows.map(({ milestone, progress, isCurrent, status }, index) => {
+              const milestoneId = milestone?.glide_row_id ?? progress?.milestone_id;
+              const targetDays =
+                milestone?.target_days_to_complete_from_onboarding_date;
+              const duration =
+                progress?.duration_days ??
+                daysBetweenValues(progress?.start_date, progress?.completion_date);
+              return (
               <div
-                key={milestone.glide_row_id ?? `${milestone.milestone_id ?? "milestone"}-${index}`}
-                className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm"
+                key={String(milestoneId ?? `milestone-${index}`)}
+                className={`rounded-md border bg-white px-3 py-3 text-sm ${
+                  isCurrent ? "border-indigo-200 ring-1 ring-indigo-100" : "border-gray-200"
+                }`}
               >
-                <div className="font-medium text-gray-900">
-                  {displayValue(milestone.milestone_id, relationLookup)}
-                </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  Start: {formatDate(milestone.start_date)} · Completed:{" "}
-                  {formatDate(milestone.completion_date)}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="font-medium text-gray-900">
+                      {milestone
+                        ? displayValue(milestone.name)
+                        : displayValue(progress?.milestone_id, relationLookup)}
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      Start: {formatDate(progress?.start_date)} · Completed:{" "}
+                      {formatDate(progress?.completion_date)}
+                      {isPresent(duration) ? ` · Duration ${duration} days` : ""}
+                      {isPresent(progress?.time_to_hit_days)
+                        ? ` · Time to hit ${progress?.time_to_hit_days} days`
+                        : ""}
+                      {isPresent(targetDays) ? ` · Target ${targetDays} days` : ""}
+                    </div>
+                  </div>
+                  <span
+                    className={`w-fit rounded-full border px-2 py-0.5 text-xs font-medium ${milestoneStatusClasses(status)}`}
+                  >
+                    {status}
+                  </span>
                 </div>
               </div>
-            ))
-          ) : offerMilestones.length > 0 ? (
-            offerMilestones.map((milestone, index) => (
-              <div
-                key={milestone.glide_row_id ?? `${offerValue ?? "offer"}-${index}`}
-                className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm"
-              >
-                <div className="font-medium text-gray-900">
-                  {displayValue(milestone.name)}
-                </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  Configured for this offer
-                  {isPresent(milestone.target_days_to_complete_from_onboarding_date)
-                    ? ` · Target ${milestone.target_days_to_complete_from_onboarding_date} days`
-                    : ""}
-                </div>
-              </div>
-            ))
+              );
+            })
           ) : (
             <div className="text-sm font-medium text-gray-900">--</div>
           )}
@@ -1124,31 +2860,139 @@ function TasksSection({
     </div>
   );
 }
+
+function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
+  if (events.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
+        No RetainOS history has been saved for this client yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {events.map((event) => (
+        <article
+          key={event.id}
+          className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">
+                {event.title ?? "Quick Update"}
+              </h2>
+              <p className="mt-1 text-xs text-gray-500">
+                {formatDateTime(event.created_at)}
+              </p>
+            </div>
+            <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+              RetainOS history
+            </span>
+          </div>
+          {event.notes ? (
+            <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
+              {event.notes}
+            </p>
+          ) : event.summary ? (
+            <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
+              {event.summary}
+            </p>
+          ) : null}
+          {event.next_steps ? (
+            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                Next Steps
+              </div>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">
+                {event.next_steps}
+              </p>
+            </div>
+          ) : null}
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <ContractField
+              label="Last Contact"
+              value={formatDate(event.last_contact_at)}
+            />
+            <ContractField
+              label="Next Contact"
+              value={formatDate(event.next_contact_at)}
+            />
+            <ContractField
+              label="Success"
+              value={event.success_status || "--"}
+            />
+            <ContractField
+              label="Progress"
+              value={event.progress_status || "--"}
+            />
+            <ContractField
+              label="Buy In"
+              value={event.buy_in_status || "--"}
+            />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
 export function ClientDetail() {
   const { clientId } = useParams<{ clientId: string }>();
   const { capabilities, effectiveCompanyId, teamMemberId } = useAccountContext();
   const [client, setClient] = useState<ClientRow | null>(null);
   const [contracts, setContracts] = useState<ContractRow[]>([]);
+  const [offers, setOffers] = useState<OfferRow[]>([]);
   const [clientMilestones, setClientMilestones] = useState<ClientMilestoneRow[]>([]);
   const [offerMilestones, setOfferMilestones] = useState<OfferMilestoneRow[]>([]);
   const [tasks, setTasks] = useState<ClientTaskRow[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<ClientHistoryEventRow[]>([]);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
+  const [outcomeChoices, setOutcomeChoices] = useState<OutcomeChoiceSets>({
+    success: [],
+    progress: [],
+    buyIn: [],
+  });
   const [relationLookup, setRelationLookup] = useState(new Map<string, string>());
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editingOutcomes, setEditingOutcomes] = useState(false);
+  const [changingStatus, setChangingStatus] = useState(false);
+  const [creatingContract, setCreatingContract] = useState(false);
+  const [milestoneAction, setMilestoneAction] = useState<{
+    action: "start_milestone" | "complete_milestone";
+    progress: ClientMilestoneRow | null;
+  } | null>(null);
+  const [changingPathway, setChangingPathway] = useState(false);
   useEffect(() => {
     if (!clientId) return;
     let cancelled = false;
     async function loadClient() {
       setLoading(true);
       setError(null);
-      const { data, error: clientError } = await supabase
-        .from("backup_company_clients")
+      const { data: appClient, error: appClientError } = await supabase
+        .from("clients")
         .select("*")
         .eq("glide_row_id", clientId)
-        .single();
+        .maybeSingle();
+
+      let data: Record<string, unknown> | null = appClient
+        ? mapAppClientRow(appClient as Record<string, unknown>)
+        : null;
+      let clientError = appClientError;
+
+      if (!data) {
+        const backupResult = await supabase
+          .from("backup_company_clients")
+          .select("*")
+          .eq("glide_row_id", clientId)
+          .single();
+        data = backupResult.data as Record<string, unknown> | null;
+        clientError = backupResult.error;
+      }
+
       if (cancelled) return;
       if (clientError) {
         setError(clientError.message);
@@ -1181,15 +3025,41 @@ export function ClientDetail() {
         nextClient.offer_milestones_current_offer_id,
         nextClient.offer_milestones_2nd_current_offer_id,
       ].filter((id): id is string => typeof id === "string" && id.trim() !== "");
+      const companyGlideRowId =
+        typeof nextClient.company_glide_row_id === "string"
+          ? nextClient.company_glide_row_id
+          : typeof nextClient.company_id === "string"
+            ? nextClient.company_id
+            : "";
+      const { data: companyOfferRows } = companyGlideRowId
+        ? await supabase
+            .from("backup_company_offers")
+            .select("*")
+            .eq("company_id", companyGlideRowId)
+            .order("name", { ascending: true })
+        : { data: [] };
+      const companyOfferIds =
+        companyOfferRows?.map((offer) => offer.glide_row_id).filter(Boolean) ??
+        [];
       const [
         { data: contractRows },
+        { data: appContractRows },
         { data: choices },
+        { data: outcomeChoiceRows },
         { data: milestoneRows },
+        { data: appMilestoneRows },
         { data: offerMilestoneRows },
         { data: taskRows },
+        { data: appTaskRows },
+        { data: historyRows },
       ] = await Promise.all([
         supabase
           .from("backup_company_clients_contracts")
+          .select("*")
+          .eq("client_id", nextClient.glide_row_id)
+          .order("end_date", { ascending: false, nullsFirst: false }),
+        supabase
+          .from("client_contracts")
           .select("*")
           .eq("client_id", nextClient.glide_row_id)
           .order("end_date", { ascending: false, nullsFirst: false }),
@@ -1199,15 +3069,26 @@ export function ClientDetail() {
           .not("program_value", "is", null)
           .order("index", { ascending: true }),
         supabase
+          .from("backup_choices")
+          .select(
+            "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display",
+          )
+          .order("index", { ascending: true }),
+        supabase
           .from("backup_company_clients_milestones")
           .select("*")
           .eq("client_id", nextClient.glide_row_id)
           .order("start_date", { ascending: false, nullsFirst: false }),
-        offerIds.length > 0
+        supabase
+          .from("client_milestones")
+          .select("*")
+          .eq("client_id", nextClient.glide_row_id)
+          .order("created_at", { ascending: false }),
+        companyOfferIds.length > 0 || offerIds.length > 0
           ? supabase
               .from("backup_company_offer_milestones")
               .select("*")
-              .in("offer_id", offerIds)
+              .in("offer_id", companyOfferIds.length > 0 ? companyOfferIds : offerIds)
               .order("order", { ascending: true, nullsFirst: false })
           : Promise.resolve({ data: [] }),
         supabase
@@ -1215,28 +3096,79 @@ export function ClientDetail() {
           .select("*")
           .eq("client_id", nextClient.glide_row_id)
           .order("task_due_date", { ascending: true, nullsFirst: false }),
+        supabase
+          .from("client_tasks")
+          .select("*")
+          .eq("client_id", nextClient.glide_row_id)
+          .order("task_due_date", { ascending: true, nullsFirst: false }),
+        supabase
+          .from("client_history_events")
+          .select("*")
+          .eq("legacy_client_glide_row_id", nextClient.glide_row_id)
+          .order("created_at", { ascending: false })
+          .limit(25),
       ]);
       if (!cancelled) {
-        setContracts((contractRows ?? []) as ContractRow[]);
+        setContracts([
+          ...((appContractRows ?? []) as ContractRow[]),
+          ...((contractRows ?? []) as ContractRow[]),
+        ]);
         setProgramChoices((choices ?? []) as ProgramChoice[]);
-        setClientMilestones((milestoneRows ?? []) as ClientMilestoneRow[]);
+        setOutcomeChoices(
+          outcomeChoicesFromRows((outcomeChoiceRows ?? []) as OutcomeChoiceRow[]),
+        );
+        setOffers((companyOfferRows ?? []) as OfferRow[]);
+        setClientMilestones([
+          ...((appMilestoneRows ?? []) as ClientMilestoneRow[]),
+          ...((milestoneRows ?? []) as ClientMilestoneRow[]),
+        ]);
         setOfferMilestones((offerMilestoneRows ?? []) as OfferMilestoneRow[]);
-        setTasks((taskRows ?? []) as ClientTaskRow[]);
+        setTasks([
+          ...((appTaskRows ?? []) as ClientTaskRow[]),
+          ...((taskRows ?? []) as ClientTaskRow[]),
+        ]);
+        setHistoryEvents((historyRows ?? []) as ClientHistoryEventRow[]);
       }
-      const milestoneRelationIds = ((milestoneRows ?? []) as ClientMilestoneRow[])
-        .flatMap((row) => extractGlideIds(row.milestone_id));
+      const milestoneRelationIds = [
+        ...((milestoneRows ?? []) as ClientMilestoneRow[]),
+        ...((appMilestoneRows ?? []) as ClientMilestoneRow[]),
+      ].flatMap((row) => extractGlideIds(row.milestone_id));
       const lookup = await resolveRelationNames([
         ...relationIds,
         ...milestoneRelationIds,
       ]);
       if (!cancelled) setRelationLookup(lookup);
       if (nextClient.company_id) {
-        const { data: members } = await supabase
-          .from("backup_company_team")
-          .select("glide_row_id, name")
-          .eq("company_id", nextClient.company_id)
-          .order("name", { ascending: true });
-        if (!cancelled) setTeamMembers((members ?? []) as TeamMember[]);
+        const { data: appCompany } = await supabase
+          .from("companies")
+          .select("id")
+          .eq("legacy_glide_row_id", nextClient.company_id)
+          .in("migration_status", ["pilot", "migrated"])
+          .maybeSingle();
+        if (appCompany?.id) {
+          const { data: appMembers } = await supabase
+            .from("company_members")
+            .select("id, legacy_glide_row_id, name, status, hide_from_csm_list")
+            .eq("company_id", appCompany.id)
+            .order("name", { ascending: true });
+          if (!cancelled) {
+            setTeamMembers(
+              (appMembers ?? []).map((member) => ({
+                glide_row_id: member.legacy_glide_row_id ?? member.id,
+                name: member.name,
+                is_archived: member.status === "archived",
+                role_hide_from_csm_list: member.hide_from_csm_list,
+              })),
+            );
+          }
+        } else {
+          const { data: members } = await supabase
+            .from("backup_company_team")
+            .select("glide_row_id, name, is_archived, role_hide_from_csm_list")
+            .eq("company_id", nextClient.company_id)
+            .order("name", { ascending: true });
+          if (!cancelled) setTeamMembers((members ?? []) as TeamMember[]);
+        }
       }
       setLoading(false);
     }
@@ -1263,6 +3195,20 @@ export function ClientDetail() {
       ),
     [teamMembers],
   );
+  const displayLookup = useMemo(() => {
+    const next = new Map(relationLookup);
+    for (const offer of offers) {
+      if (offer.glide_row_id && offer.name) {
+        next.set(offer.glide_row_id, offer.name);
+      }
+    }
+    for (const milestone of offerMilestones) {
+      if (milestone.glide_row_id && milestone.name) {
+        next.set(milestone.glide_row_id, milestone.name);
+      }
+    }
+    return next;
+  }, [offers, offerMilestones, relationLookup]);
   if (loading)
     return (
       <div className="flex items-center justify-center py-20">
@@ -1295,6 +3241,33 @@ export function ClientDetail() {
   ];
   const activeFields =
     tabs.find((tab) => tab.key === activeTab)?.fields ?? basicInfoFields;
+  const canEditProfile =
+    capabilities.canEditClient && Boolean(client.company_glide_row_id);
+  const canManageAssignment =
+    canEditProfile &&
+    capabilities.canViewAllClients &&
+    !capabilities.canViewOnlyAssignedClients;
+  const canChangeStatus = canEditProfile;
+  const canCreateContract = canEditProfile;
+  const currentMilestoneName = displayValue(
+    valueFrom(client, [
+      "offer_milestones_current_milestone_id",
+      "milestone_id",
+      "milestone_name",
+    ]),
+    displayLookup,
+  );
+  const upsertMilestone = (milestone: ClientMilestoneRow) => {
+    setClientMilestones((current) => [
+      milestone,
+      ...current.filter(
+        (row) =>
+          row.id !== milestone.id &&
+          row.glide_row_id !== milestone.glide_row_id &&
+          row.milestone_id !== milestone.milestone_id,
+      ),
+    ]);
+  };
   return (
     <div>
       <div className="mb-4">
@@ -1333,8 +3306,34 @@ export function ClientDetail() {
               </div>
             </div>
           </div>
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Read-only preview
+          <div className="flex items-center gap-3">
+            {canChangeStatus ? (
+              <button
+                type="button"
+                onClick={() => setChangingStatus(true)}
+                className="rounded-md border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 cursor-pointer"
+              >
+                Change Status
+              </button>
+            ) : null}
+            {canEditProfile ? (
+              <button
+                type="button"
+                onClick={() => setEditingProfile(true)}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+              >
+                Edit Profile
+              </button>
+            ) : null}
+            <div
+              className={`rounded-md border px-3 py-2 text-sm ${
+                canEditProfile
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-amber-200 bg-amber-50 text-amber-800"
+              }`}
+            >
+              {canEditProfile ? "RetainOS pilot data" : "Read-only preview"}
+            </div>
           </div>
         </div>
       </div>
@@ -1360,29 +3359,179 @@ export function ClientDetail() {
           >
             Tasks
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("history")}
+            className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${activeTab === "history" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"}`}
+          >
+            History
+          </button>
         </nav>
       </div>
       {activeTab === "tasks" ? (
         <TasksSection tasks={tasks} teamMemberNameById={teamMemberNameById} />
+      ) : activeTab === "history" ? (
+        <HistorySection events={historyEvents} />
       ) : activeTab === "contract" ? (
-        <ContractSection client={client} contracts={contracts} />
+        <ContractSection
+          client={client}
+          contracts={contracts}
+          canCreateContract={canCreateContract}
+          onCreateContract={() => setCreatingContract(true)}
+        />
       ) : activeTab === "pathways" ? (
         <PathwaysSection
           client={client}
+          offers={offers}
           clientMilestones={clientMilestones}
           offerMilestones={offerMilestones}
-          relationLookup={relationLookup}
+          relationLookup={displayLookup}
+          canAdvanceMilestones={capabilities.canAdvanceClientMilestones}
+          canManagePathways={capabilities.canManageClientPathways}
+          onStartMilestone={(progress) =>
+            setMilestoneAction({ action: "start_milestone", progress })
+          }
+          onCompleteMilestone={(progress) =>
+            setMilestoneAction({ action: "complete_milestone", progress })
+          }
+          onChangePathway={() => setChangingPathway(true)}
         />
+      ) : activeTab === "outcomes" ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+                Outcomes
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Success, progress, and buy-in are saved to RetainOS history.
+              </p>
+            </div>
+            {canEditProfile ? (
+              <button
+                type="button"
+                onClick={() => setEditingOutcomes(true)}
+                className="w-fit rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+              >
+                Edit Outcomes
+              </button>
+            ) : null}
+          </div>
+          <FieldGrid
+            fields={activeFields}
+            client={client}
+            programChoices={programChoices}
+            relationLookup={displayLookup}
+          />
+        </div>
       ) : (
         <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
           <FieldGrid
             fields={activeFields}
             client={client}
             programChoices={programChoices}
-            relationLookup={relationLookup}
+            relationLookup={displayLookup}
           />
         </div>
       )}
+      {editingProfile ? (
+        <ClientProfileEditModal
+          client={client}
+          teamMembers={teamMembers}
+          canManageAssignment={canManageAssignment}
+          canEditDirectorNotes={capabilities.canViewDirectorNotes}
+          onClose={() => setEditingProfile(false)}
+          onSaved={(updatedClient, event) => {
+            setClient(updatedClient);
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
+      {editingOutcomes ? (
+        <ClientOutcomesEditModal
+          client={client}
+          choices={outcomeChoices}
+          onClose={() => setEditingOutcomes(false)}
+          onSaved={(updatedClient, event) => {
+            setClient(updatedClient);
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
+      {changingStatus ? (
+        <ClientStatusModal
+          client={client}
+          programChoices={programChoices}
+          onClose={() => setChangingStatus(false)}
+          onSaved={(updatedClient, event, updatedContract) => {
+            setClient(updatedClient);
+            if (updatedContract) {
+              setContracts((current) => [
+                updatedContract,
+                ...current.filter(
+                  (contract) => contract.glide_row_id !== updatedContract.glide_row_id,
+                ),
+              ]);
+            }
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
+      {creatingContract ? (
+        <NewContractModal
+          client={client}
+          onClose={() => setCreatingContract(false)}
+          onSaved={(contract, updatedClient, event, retentionEvent) => {
+            setClient(updatedClient);
+            setContracts((current) => [contract, ...current]);
+            if (event || retentionEvent) {
+              setHistoryEvents((current) =>
+                [retentionEvent, event, ...current]
+                  .filter((row): row is ClientHistoryEventRow => Boolean(row))
+                  .slice(0, 25),
+              );
+            }
+          }}
+        />
+      ) : null}
+      {milestoneAction ? (
+        <MilestoneActionModal
+          client={client}
+          action={milestoneAction.action}
+          currentMilestoneName={currentMilestoneName}
+          existingProgress={milestoneAction.progress}
+          onClose={() => setMilestoneAction(null)}
+          onSaved={(updatedClient, milestone, event) => {
+            setClient(updatedClient);
+            upsertMilestone(milestone);
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
+      {changingPathway ? (
+        <PathwayChangeModal
+          client={client}
+          offers={offers}
+          offerMilestones={offerMilestones}
+          relationLookup={displayLookup}
+          onClose={() => setChangingPathway(false)}
+          onSaved={(updatedClient, milestone, event) => {
+            setClient(updatedClient);
+            upsertMilestone(milestone);
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

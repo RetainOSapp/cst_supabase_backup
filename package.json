@@ -6,7 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "db:apply:sql": "node scripts/apply-sql-file.mjs",
+    "pilot:seed:ethical-scaling": "node scripts/seed-ethical-scaling-pilot.mjs --apply",
+    "pilot:seed:ethical-scaling:dry": "node scripts/seed-ethical-scaling-pilot.mjs",
+    "pilot:seed:ethical-scaling:clients": "node scripts/seed-ethical-scaling-clients-pilot.mjs --apply",
+    "pilot:seed:ethical-scaling:clients:dry": "node scripts/seed-ethical-scaling-clients-pilot.mjs",
+    "pilot:qa:ethical-scaling": "node scripts/qa-ethical-scaling-pilot.mjs",
+    "pilot:reconcile:ethical-scaling": "node scripts/reconcile-ethical-scaling-pilot.mjs",
+    "pilot:reconcile:company": "node scripts/reconcile-ethical-scaling-pilot.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ProgramStatusPill,
@@ -8,17 +15,44 @@ import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 const PAGE_SIZE = 12;
-type ViewMode = "list" | "card";
+type ViewMode = "list" | "card" | "calendar";
+type CalendarMode = "month" | "week" | "day";
 type SortField = "client_name" | "onboarded" | "renewal";
 type SortDirection = "asc" | "desc";
 type ClientRow = Record<string, unknown> & {
   glide_row_id: string;
   client_name?: string | null;
   client_image?: string | null;
+  company_id?: string | null;
+  company_glide_row_id?: string | null;
   csm_team_member_id?: string | null;
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
 };
+interface ClientHistoryEvent {
+  id: string;
+  legacy_client_glide_row_id: string;
+  next_steps: string | null;
+  last_contact_at: string | null;
+  next_contact_at: string | null;
+  success_status: string | null;
+  progress_status: string | null;
+  buy_in_status: string | null;
+  notes: string | null;
+  created_at: string;
+}
+interface CalendarTaskRow {
+  glide_row_id: string;
+  client_id: string | null;
+  task_name: string | null;
+  task_due_date: string | null;
+  status_value?: string | null;
+  assigned_to_id?: string | null;
+}
+interface OutcomeChoice {
+  value: string;
+  display: string;
+}
 interface Company {
   glide_row_id: string;
   name: string | null;
@@ -65,14 +99,19 @@ interface ClientsCacheState {
 
 function readClientsCache(): ClientsCacheState | null {
   try {
-    const raw = window.sessionStorage.getItem(CLIENTS_CACHE_KEY);
+    const raw =
+      window.localStorage.getItem(CLIENTS_CACHE_KEY) ??
+      window.sessionStorage.getItem(CLIENTS_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<ClientsCacheState>;
     return {
       filters: { ...emptyFilters, ...(parsed.filters ?? {}) },
       appliedFilters: { ...emptyFilters, ...(parsed.appliedFilters ?? {}) },
       page: Math.max(1, Number(parsed.page) || 1),
-      viewMode: parsed.viewMode === "card" ? "card" : "list",
+      viewMode:
+        parsed.viewMode === "card" || parsed.viewMode === "calendar"
+          ? parsed.viewMode
+          : "list",
       sortField:
         parsed.sortField === "onboarded" || parsed.sortField === "renewal"
           ? parsed.sortField
@@ -85,7 +124,16 @@ function readClientsCache(): ClientsCacheState | null {
 }
 
 function writeClientsCache(state: ClientsCacheState) {
-  window.sessionStorage.setItem(CLIENTS_CACHE_KEY, JSON.stringify(state));
+  window.localStorage.setItem(CLIENTS_CACHE_KEY, JSON.stringify(state));
+}
+function mapAppClientRow(row: Record<string, unknown>): ClientRow {
+  return {
+    ...row,
+    company_id:
+      typeof row.company_glide_row_id === "string"
+        ? row.company_glide_row_id
+        : (row.company_id as string | null | undefined),
+  } as ClientRow;
 }
 const lastContactColumns = [
   "csm_date_of_last_contact",
@@ -293,6 +341,7 @@ function displayValue(value: unknown, lookup = new Map<string, string>()): strin
     const trimmed = value.trim();
     const mapped = lookup.get(trimmed);
     if (mapped) return mapped;
+    if (trimmed.toLowerCase() === "x") return "--";
     if (
       (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
       (trimmed.startsWith("[") && trimmed.endsWith("]"))
@@ -328,90 +377,6 @@ function displayValue(value: unknown, lookup = new Map<string, string>()): strin
   return formatValue(value);
 }
 
-function extractGlideIds(value: unknown): string[] {
-  const ids = new Set<string>();
-  const visit = (next: unknown) => {
-    if (!isPresent(next)) return;
-    if (typeof next === "string") {
-      const trimmed = next.trim();
-      if (
-        (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-        (trimmed.startsWith("[") && trimmed.endsWith("]"))
-      ) {
-        try {
-          visit(JSON.parse(trimmed));
-          return;
-        } catch {
-          // Keep checking the raw string below.
-        }
-      }
-      if (/^[A-Za-z0-9_.-]{12,}$/.test(trimmed)) ids.add(trimmed);
-      return;
-    }
-    if (Array.isArray(next)) {
-      next.forEach(visit);
-      return;
-    }
-    if (typeof next === "object") {
-      Object.values(next as Record<string, unknown>).forEach(visit);
-    }
-  };
-  visit(value);
-  return [...ids];
-}
-
-function bestDisplayName(row: Record<string, unknown>) {
-  for (const key of displayNameKeys) {
-    const value = row[key];
-    if (isPresent(value)) return displayValue(value);
-  }
-  const rawData = row.data;
-  if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
-    for (const key of displayNameKeys) {
-      const value = (rawData as Record<string, unknown>)[key];
-      if (isPresent(value)) return displayValue(value);
-    }
-  }
-  return null;
-}
-
-async function resolveRelationNames(ids: string[]) {
-  const uniqueIds = [...new Set(ids)].filter(Boolean);
-  const resolved = new Map<string, string>();
-  if (uniqueIds.length === 0) return resolved;
-
-  const tables = [
-    "backup_company_offers",
-    "backup_company_offer_milestones",
-    "backup_company_clients_pathways_and_milestones",
-    "backup_company_pathways_and_milestones",
-    "backup_pathways_and_milestones",
-    "backup_pathways_milestones",
-    "backup_company_client_pathways",
-    "backup_company_pathways",
-    "backup_pathways",
-    "backup_company_milestones",
-    "backup_milestones",
-    "backup_choices",
-  ];
-
-  for (const table of tables) {
-    const remaining = uniqueIds.filter((id) => !resolved.has(id));
-    if (remaining.length === 0) break;
-    const { data, error } = await supabase
-      .from(table)
-      .select("*")
-      .in("glide_row_id", remaining);
-    if (error) continue;
-    for (const row of (data ?? []) as Record<string, unknown>[]) {
-      const id = row.glide_row_id;
-      const name = bestDisplayName(row);
-      if (typeof id === "string" && name) resolved.set(id, name);
-    }
-  }
-
-  return resolved;
-}
 function formatDate(value: unknown) {
   if (!value) return "--";
   const date = new Date(String(value));
@@ -419,10 +384,123 @@ function formatDate(value: unknown) {
     ? formatValue(value)
     : date.toLocaleDateString();
 }
+function monthInputValue(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+function monthLabel(date: Date) {
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+}
+function dateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function dateKeyFromValue(value: unknown) {
+  if (!value) return "";
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? "" : dateKey(date);
+}
+function monthBounds(monthDate: Date) {
+  const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+  const next = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
+  return { start, next };
+}
+function weekBounds(date: Date) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  start.setDate(start.getDate() - start.getDay());
+  const next = new Date(start);
+  next.setDate(start.getDate() + 7);
+  return { start, next };
+}
+function dayBounds(date: Date) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const next = new Date(start);
+  next.setDate(start.getDate() + 1);
+  return { start, next };
+}
+function calendarBounds(mode: CalendarMode, date: Date) {
+  if (mode === "day") return dayBounds(date);
+  if (mode === "week") return weekBounds(date);
+  return monthBounds(date);
+}
+function addMonths(date: Date, months: number) {
+  return new Date(date.getFullYear(), date.getMonth() + months, 1);
+}
+function addCalendarPeriod(date: Date, mode: CalendarMode, amount: number) {
+  if (mode === "month") return addMonths(date, amount);
+  const next = new Date(date);
+  next.setDate(date.getDate() + amount * (mode === "week" ? 7 : 1));
+  return next;
+}
+function isDateInRange(value: unknown, start: Date, next: Date) {
+  if (!value) return false;
+  const date = new Date(String(value));
+  return !Number.isNaN(date.getTime()) && date >= start && date < next;
+}
+function formatDateTime(value: unknown) {
+  if (!value) return "--";
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime())
+    ? formatValue(value)
+    : date.toLocaleString();
+}
+function toDateTimeInputValue(value: unknown) {
+  if (!value) return "";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
 function normalizeOutcome(value: unknown) {
   const raw = formatValue(value).trim();
   if (!raw || raw === "--" || raw.toLowerCase() === "x") return "";
   return raw;
+}
+const defaultOutcomeChoices: OutcomeChoice[] = [
+  { value: "green", display: "Green" },
+  { value: "yellow", display: "Yellow" },
+  { value: "red", display: "Red" },
+];
+
+function outcomeChoicesFromRows(
+  rows: Record<string, unknown>[],
+  valueKey: string,
+  displayKey: string,
+) {
+  const seen = new Set<string>();
+  const choices: OutcomeChoice[] = [];
+  for (const row of rows) {
+    const value = normalizeOutcome(row[valueKey]);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    choices.push({
+      value,
+      display: normalizeOutcome(row[displayKey]) || titleize(value),
+    });
+  }
+  return choices;
+}
+
+function choiceDisplay(
+  value: string | null | undefined,
+  choices: OutcomeChoice[],
+) {
+  const normalized = normalizeOutcome(value);
+  if (!normalized) return "";
+  const match = choices.find(
+    (choice) => choice.value === normalized || choice.display === normalized,
+  );
+  return match?.display ?? titleize(normalized);
+}
+
+function coerceChoiceValue(value: string, choices: OutcomeChoice[]) {
+  const normalized = normalizeOutcome(value);
+  if (!normalized) return "";
+  const match = choices.find(
+    (choice) => choice.value === normalized || choice.display === normalized,
+  );
+  return match?.value ?? normalized;
 }
 function titleize(value: string) {
   return value
@@ -528,6 +606,45 @@ function ReadOnlyField({
     </div>
   );
 }
+function OutcomeSelect({
+  label,
+  value,
+  choices,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  choices: OutcomeChoice[];
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const hasCurrentValue =
+    value !== "" && !choices.some((choice) => choice.value === value);
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+        {label}
+      </span>
+      <select
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+      >
+        <option value="">Not set</option>
+        {hasCurrentValue ? (
+          <option value={value}>{choiceDisplay(value, choices)}</option>
+        ) : null}
+        {choices.map((choice) => (
+          <option key={choice.value} value={choice.value}>
+            {choice.display}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 function QuickUpdateModal({
   client,
   onClose,
@@ -535,20 +652,203 @@ function QuickUpdateModal({
   client: ClientRow;
   onClose: () => void;
 }) {
-  const [relationLookup, setRelationLookup] = useState(new Map<string, string>());
-  const pathwayValue = valueFrom(client, pathwayColumns);
+  const [isPilotCompany, setIsPilotCompany] = useState(false);
+  const [historyEvents, setHistoryEvents] = useState<ClientHistoryEvent[]>([]);
+  const [loadingPilotState, setLoadingPilotState] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [nextSteps, setNextSteps] = useState(
+    formatValue(valueFrom(client, nextStepsColumns)) === "--"
+      ? ""
+      : formatValue(valueFrom(client, nextStepsColumns)),
+  );
+  const [lastContactAt, setLastContactAt] = useState(
+    toDateTimeInputValue(valueFrom(client, lastContactColumns)),
+  );
+  const [nextContactAt, setNextContactAt] = useState(
+    toDateTimeInputValue(valueFrom(client, nextContactColumns)),
+  );
+  const [successStatus, setSuccessStatus] = useState(
+    normalizeOutcome(valueFrom(client, successColumns)),
+  );
+  const [progressStatus, setProgressStatus] = useState(
+    normalizeOutcome(valueFrom(client, progressColumns)),
+  );
+  const [buyInStatus, setBuyInStatus] = useState(
+    normalizeOutcome(valueFrom(client, buyInColumns)),
+  );
+  const [successChoices, setSuccessChoices] = useState<OutcomeChoice[]>([]);
+  const [progressChoices, setProgressChoices] = useState<OutcomeChoice[]>([]);
+  const [buyInChoices, setBuyInChoices] = useState<OutcomeChoice[]>([]);
+  const [notes, setNotes] = useState("");
+  const companyLegacyId = client.company_id ?? "";
 
   useEffect(() => {
     let cancelled = false;
-    async function loadRelationNames() {
-      const lookup = await resolveRelationNames(extractGlideIds(pathwayValue));
-      if (!cancelled) setRelationLookup(lookup);
+
+    async function loadOutcomeChoices() {
+      const { data, error } = await supabase
+        .from("backup_choices")
+        .select(
+          "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display, index",
+        )
+        .order("index", { ascending: true });
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load outcome choices:", error);
+        setSuccessChoices(defaultOutcomeChoices);
+        setProgressChoices(defaultOutcomeChoices);
+        setBuyInChoices(defaultOutcomeChoices);
+        return;
+      }
+
+      const rows = (data ?? []) as Record<string, unknown>[];
+      const nextSuccessChoices =
+        outcomeChoicesFromRows(rows, "success_value", "success_display");
+      const nextProgressChoices =
+        outcomeChoicesFromRows(rows, "progress_value", "progress_display").filter(
+          (choice) => choice.value !== "offtrack",
+        );
+      const nextBuyInChoices =
+        outcomeChoicesFromRows(rows, "buy_in_value", "buy_in_display");
+
+      setSuccessChoices(
+        nextSuccessChoices.length > 0
+          ? nextSuccessChoices
+          : defaultOutcomeChoices,
+      );
+      setProgressChoices(
+        nextProgressChoices.length > 0
+          ? nextProgressChoices
+          : defaultOutcomeChoices,
+      );
+      setBuyInChoices(
+        nextBuyInChoices.length > 0 ? nextBuyInChoices : defaultOutcomeChoices,
+      );
     }
-    void loadRelationNames();
+
+    void loadOutcomeChoices();
     return () => {
       cancelled = true;
     };
-  }, [pathwayValue]);
+  }, []);
+
+  useEffect(() => {
+    if (successChoices.length === 0) return;
+    setSuccessStatus((current) => coerceChoiceValue(current, successChoices));
+  }, [successChoices]);
+
+  useEffect(() => {
+    if (progressChoices.length === 0) return;
+    setProgressStatus((current) => coerceChoiceValue(current, progressChoices));
+  }, [progressChoices]);
+
+  useEffect(() => {
+    if (buyInChoices.length === 0) return;
+    setBuyInStatus((current) => coerceChoiceValue(current, buyInChoices));
+  }, [buyInChoices]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPilotState() {
+      setLoadingPilotState(true);
+      setSaveError(null);
+
+      const { data: company, error: companyError } = await supabase
+        .from("companies")
+        .select("id, migration_status")
+        .eq("legacy_glide_row_id", companyLegacyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (companyError || !company) {
+        setIsPilotCompany(false);
+        setHistoryEvents([]);
+        setLoadingPilotState(false);
+        return;
+      }
+
+      setIsPilotCompany(true);
+      const { data: events, error: eventsError } = await supabase
+        .from("client_history_events")
+        .select(
+          "id, legacy_client_glide_row_id, next_steps, last_contact_at, next_contact_at, success_status, progress_status, buy_in_status, notes, created_at",
+        )
+        .eq("legacy_client_glide_row_id", client.glide_row_id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (cancelled) return;
+
+      if (eventsError) {
+        setSaveError(eventsError.message);
+      } else {
+        setHistoryEvents((events ?? []) as ClientHistoryEvent[]);
+      }
+      setLoadingPilotState(false);
+    }
+
+    if (companyLegacyId) void loadPilotState();
+    else {
+      setIsPilotCompany(false);
+      setLoadingPilotState(false);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [client.glide_row_id, companyLegacyId]);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!isPilotCompany || saving) return;
+
+    setSaving(true);
+    setSaveError(null);
+    setSaveMessage(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-quick-update",
+      {
+        body: {
+          companyLegacyId,
+          clientLegacyId: client.glide_row_id,
+          nextSteps,
+          lastContactAt,
+          nextContactAt,
+          successStatus,
+          progressStatus,
+          buyInStatus,
+          notes,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+
+    if (data?.event) {
+      setHistoryEvents((current) =>
+        [data.event as ClientHistoryEvent, ...current].slice(0, 5),
+      );
+    }
+    setNotes("");
+    setSaveMessage("Quick Update saved to RetainOS pilot history.");
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -565,7 +865,9 @@ function QuickUpdateModal({
               Quick Update
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Read-only preview for {client.client_name ?? "Unnamed client"}
+              {isPilotCompany
+                ? `RetainOS pilot write for ${client.client_name ?? "Unnamed client"}`
+                : `Read-only preview for ${client.client_name ?? "Unnamed client"}`}
             </p>
           </div>
           <button
@@ -577,67 +879,446 @@ function QuickUpdateModal({
             <span className="text-xl leading-none">x</span>
           </button>
         </div>
-        <div className="space-y-5 px-5 py-5">
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-5 px-5 py-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <ReadOnlyField
+                label="North Star"
+                value={valueFrom(client, northStarColumns)}
+                display="rich"
+              />
+              <ReadOnlyField
+                label="Next Steps"
+                value={valueFrom(client, nextStepsColumns)}
+                display="rich"
+              />
+              <ReadOnlyField
+                label="Date of Last Contact"
+                value={formatDate(valueFrom(client, lastContactColumns))}
+              />
+              <ReadOnlyField
+                label="Date of Next Contact"
+                value={formatDate(valueFrom(client, nextContactColumns))}
+              />
+            </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <ReadOnlyField
-              label="North Star"
-              value={valueFrom(client, northStarColumns)}
-              display="rich"
-            />
-            <ReadOnlyField
-              label="Next Steps"
-              value={valueFrom(client, nextStepsColumns)}
-              display="rich"
-            />
-            <ReadOnlyField
-              label="Date of Last Contact"
-              value={formatDate(valueFrom(client, lastContactColumns))}
-            />
-            <ReadOnlyField
-              label="Date of Next Contact"
-              value={formatDate(valueFrom(client, nextContactColumns))}
-            />
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Next Steps
+              </span>
+              <textarea
+                disabled={!isPilotCompany || saving}
+                value={nextSteps}
+                onChange={(event) => setNextSteps(event.target.value)}
+                rows={4}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Notes
+              </span>
+              <textarea
+                disabled={!isPilotCompany || saving}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={4}
+                placeholder="Add context from the client interaction"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Date of Last Contact
+              </span>
+              <input
+                type="datetime-local"
+                disabled={!isPilotCompany || saving}
+                value={lastContactAt}
+                onChange={(event) => setLastContactAt(event.target.value)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Date of Next Contact
+              </span>
+              <input
+                type="datetime-local"
+                disabled={!isPilotCompany || saving}
+                value={nextContactAt}
+                onChange={(event) => setNextContactAt(event.target.value)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+            </label>
           </div>
-          <ReadOnlyField
-            label="Pathways & Milestones"
-            value={pathwayValue}
-            display="rich"
-            lookup={relationLookup}
-          />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <ReadOnlyField
+            <OutcomeSelect
               label="Success"
-              value={valueFrom(client, successColumns)}
-              display="outcome"
+              value={successStatus}
+              choices={successChoices}
+              disabled={!isPilotCompany || saving}
+              onChange={setSuccessStatus}
             />
-            <ReadOnlyField
+            <OutcomeSelect
               label="Progress"
-              value={valueFrom(client, progressColumns)}
-              display="outcome"
+              value={progressStatus}
+              choices={progressChoices}
+              disabled={!isPilotCompany || saving}
+              onChange={setProgressStatus}
             />
-            <ReadOnlyField
+            <OutcomeSelect
               label="Buy In"
-              value={valueFrom(client, buyInColumns)}
-              display="outcome"
+              value={buyInStatus}
+              choices={buyInChoices}
+              disabled={!isPilotCompany || saving}
+              onChange={setBuyInStatus}
             />
           </div>
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Editing is locked for now while this reads from the Glide mirror.
+          <div
+            className={`rounded-md border px-4 py-3 text-sm ${
+              isPilotCompany
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-amber-200 bg-amber-50 text-amber-800"
+            }`}
+          >
+            {loadingPilotState
+              ? "Checking RetainOS write status..."
+              : isPilotCompany
+                ? "Quick Updates save to RetainOS pilot history. Glide mirror fields remain unchanged."
+                : "Editing is locked for now while this reads from the Glide mirror."}
           </div>
-        </div>
-        <div className="flex justify-end border-t border-gray-200 px-5 py-4">
+          {saveError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {saveError}
+            </div>
+          ) : null}
+          {saveMessage ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              {saveMessage}
+            </div>
+          ) : null}
+          {historyEvents.length > 0 ? (
+            <section className="rounded-lg border border-gray-200 bg-gray-50">
+              <div className="border-b border-gray-200 px-4 py-3">
+                <h3 className="text-sm font-semibold text-gray-900">
+                  RetainOS pilot history
+                </h3>
+              </div>
+              <div className="divide-y divide-gray-200">
+                {historyEvents.map((historyEvent) => (
+                  <article
+                    key={historyEvent.id}
+                    className="space-y-2 px-4 py-3 text-sm"
+                  >
+                    <div className="font-medium text-gray-900">
+                      {formatDateTime(historyEvent.created_at)}
+                    </div>
+                    {historyEvent.notes ? (
+                      <p className="text-gray-700">{historyEvent.notes}</p>
+                    ) : null}
+                    {historyEvent.next_steps ? (
+                      <p className="text-gray-700">
+                        <span className="font-medium">Next steps:</span>{" "}
+                        {historyEvent.next_steps}
+                      </p>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+                      {historyEvent.success_status ? (
+                        <span className="rounded-full bg-white px-2 py-1">
+                          Success:{" "}
+                          {choiceDisplay(
+                            historyEvent.success_status,
+                            successChoices,
+                          )}
+                        </span>
+                      ) : null}
+                      {historyEvent.progress_status ? (
+                        <span className="rounded-full bg-white px-2 py-1">
+                          Progress:{" "}
+                          {choiceDisplay(
+                            historyEvent.progress_status,
+                            progressChoices,
+                          )}
+                        </span>
+                      ) : null}
+                      {historyEvent.buy_in_status ? (
+                        <span className="rounded-full bg-white px-2 py-1">
+                          Buy In:{" "}
+                          {choiceDisplay(
+                            historyEvent.buy_in_status,
+                            buyInChoices,
+                          )}
+                        </span>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+            className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
           >
             Done
           </button>
-        </div>
+          <button
+            type="submit"
+            disabled={!isPilotCompany || saving}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+          >
+            {saving ? "Saving..." : "Save Quick Update"}
+          </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 }
+
+function NewClientModal({
+  companyLegacyId,
+  teamMembers,
+  programChoices,
+  assignedTeamMemberId,
+  onClose,
+  onCreated,
+}: {
+  companyLegacyId: string;
+  teamMembers: TeamMember[];
+  programChoices: ProgramChoice[];
+  assignedTeamMemberId: string;
+  onClose: () => void;
+  onCreated: (client: ClientRow) => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const availableAssignees = teamMembers.filter(
+    (member) =>
+      member.is_archived !== true && member.role_hide_from_csm_list !== true,
+  );
+  const [clientName, setClientName] = useState("");
+  const [clientBusiness, setClientBusiness] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientArchetype, setClientArchetype] = useState("");
+  const [northStar, setNorthStar] = useState("");
+  const [dateOnboarded, setDateOnboarded] = useState(today);
+  const [programStatusValue, setProgramStatusValue] = useState(
+    programChoices[0]?.program_value ?? "front-end",
+  );
+  const [csmTeamMemberId, setCsmTeamMemberId] = useState(assignedTeamMemberId);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-create",
+      {
+        body: {
+          companyGlideId: companyLegacyId,
+          clientName,
+          clientBusiness,
+          clientEmail,
+          clientArchetype,
+          northStar,
+          dateOnboarded,
+          programStatusValue,
+          csmTeamMemberId,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client) {
+      onCreated(mapAppClientRow(data.client as Record<string, unknown>));
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close new client"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">New Client</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Creates a RetainOS pilot client record. Glide mirror data stays unchanged.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2">
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Client Name
+              </span>
+              <input
+                value={clientName}
+                onChange={(event) => setClientName(event.target.value)}
+                required
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Business Name
+              </span>
+              <input
+                value={clientBusiness}
+                onChange={(event) => setClientBusiness(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Email
+              </span>
+              <input
+                type="email"
+                value={clientEmail}
+                onChange={(event) => setClientEmail(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Status
+              </span>
+              <select
+                value={programStatusValue}
+                onChange={(event) => setProgramStatusValue(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                {programChoices.length === 0 ? (
+                  <option value="front-end">Front End</option>
+                ) : (
+                  programChoices.map((choice) => (
+                    <option
+                      key={choice.program_value ?? ""}
+                      value={choice.program_value ?? ""}
+                    >
+                      {choice.program_label ?? choice.program_value}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Date Onboarded
+              </span>
+              <input
+                type="date"
+                value={dateOnboarded}
+                onChange={(event) => setDateOnboarded(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Primary CSM
+              </span>
+              <select
+                value={csmTeamMemberId}
+                onChange={(event) => setCsmTeamMemberId(event.target.value)}
+                disabled={saving || Boolean(assignedTeamMemberId)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              >
+                <option value="">Unassigned</option>
+                {availableAssignees.map((member) => (
+                  <option key={member.glide_row_id} value={member.glide_row_id}>
+                    {member.name ?? "(unnamed)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Archetype
+              </span>
+              <input
+                value={clientArchetype}
+                onChange={(event) => setClientArchetype(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                North Star
+              </span>
+              <textarea
+                value={northStar}
+                onChange={(event) => setNorthStar(event.target.value)}
+                rows={3}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !clientName.trim()}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Creating..." : "Create Client"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function FilterInput({
   id,
   label,
@@ -731,14 +1412,22 @@ export function Clients() {
   const initialCompanyId =
     effectiveCompanyId ||
     (searchParams.get("companyId") ?? cachedState?.filters.companyId ?? "");
+  const cachedCompanyMatches =
+    Boolean(cachedState) &&
+    cachedState?.filters.companyId === initialCompanyId &&
+    cachedState?.appliedFilters.companyId === initialCompanyId;
   const [filters, setFilters] = useState<ClientFilters>(() =>
-    initialCompanyId
-      ? { ...emptyFilters, companyId: initialCompanyId }
+    cachedCompanyMatches
+      ? (cachedState?.filters ?? emptyFilters)
+      : initialCompanyId
+        ? { ...emptyFilters, companyId: initialCompanyId }
       : (cachedState?.filters ?? emptyFilters),
   );
   const [appliedFilters, setAppliedFilters] = useState<ClientFilters>(() =>
-    initialCompanyId
-      ? { ...emptyFilters, companyId: initialCompanyId }
+    cachedCompanyMatches
+      ? (cachedState?.appliedFilters ?? emptyFilters)
+      : initialCompanyId
+        ? { ...emptyFilters, companyId: initialCompanyId }
       : (cachedState?.appliedFilters ?? emptyFilters),
   );
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -749,7 +1438,16 @@ export function Clients() {
   const [offersLoading, setOffersLoading] = useState(false);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
+  const [appClientCompanyIds, setAppClientCompanyIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [clients, setClients] = useState<ClientRow[]>([]);
+  const [calendarClients, setCalendarClients] = useState<ClientRow[]>([]);
+  const [calendarTasks, setCalendarTasks] = useState<CalendarTaskRow[]>([]);
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>("month");
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [totalClients, setTotalClients] = useState(0);
@@ -764,9 +1462,11 @@ export function Clients() {
     cachedState?.sortDirection ?? "asc",
   );
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
+  const statusFilterRef = useRef<HTMLFieldSetElement>(null);
   const [quickUpdateClient, setQuickUpdateClient] = useState<ClientRow | null>(
     null,
   );
+  const [newClientOpen, setNewClientOpen] = useState(false);
   const selectedCompany = useMemo(
     () =>
       companies.find((company) => company.glide_row_id === filters.companyId) ??
@@ -801,6 +1501,11 @@ export function Clients() {
     ? teamMemberId
     : "";
   const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
+  const isUsingAppClients = appClientCompanyIds.has(
+    appliedFilters.companyId || filters.companyId,
+  );
+  const canCreateClient =
+    capabilities.canEditClient && Boolean(appliedFilters.companyId || filters.companyId);
 
   useEffect(() => {
     writeClientsCache({
@@ -812,6 +1517,19 @@ export function Clients() {
       sortDirection,
     });
   }, [appliedFilters, filters, page, sortDirection, sortField, viewMode]);
+  useEffect(() => {
+    if (!statusFilterOpen) return;
+    function closeStatusFilter(event: MouseEvent) {
+      if (
+        statusFilterRef.current &&
+        !statusFilterRef.current.contains(event.target as Node)
+      ) {
+        setStatusFilterOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", closeStatusFilter);
+    return () => document.removeEventListener("mousedown", closeStatusFilter);
+  }, [statusFilterOpen]);
   useEffect(() => {
     if (!effectiveCompanyId || searchParams.get("companyId") === effectiveCompanyId) {
       return;
@@ -835,17 +1553,34 @@ export function Clients() {
   }, [assignedTeamMemberId, effectiveCompanyId, searchParams, setSearchParams]);
   useEffect(() => {
     async function loadCompanies() {
-      let query = supabase
+      const [backupCompaniesResult, appCompaniesResult] = await Promise.all([
+        supabase
         .from("backup_companies")
         .select("glide_row_id, name, enable_secondary_assignee")
         .or("archived.is.null,archived.eq.false")
-        .order("name", { ascending: true });
+          .order("name", { ascending: true }),
+        supabase
+          .from("companies")
+          .select("legacy_glide_row_id, migration_status")
+          .in("migration_status", ["pilot", "migrated"]),
+      ]);
+
+      let rows = (backupCompaniesResult.data ?? []) as Company[];
       if (!canUseCompanySwitcher && effectiveCompanyId) {
-        query = query.eq("glide_row_id", effectiveCompanyId);
+        rows = rows.filter((company) => company.glide_row_id === effectiveCompanyId);
       }
-      const { data, error } = await query;
-      if (error) console.error("Failed to load companies:", error);
-      setCompanies((data ?? []) as Company[]);
+      if (backupCompaniesResult.error)
+        console.error("Failed to load companies:", backupCompaniesResult.error);
+      if (appCompaniesResult.error)
+        console.error("Failed to load app companies:", appCompaniesResult.error);
+      setCompanies(rows);
+      setAppClientCompanyIds(
+        new Set(
+          (appCompaniesResult.data ?? [])
+            .map((company) => company.legacy_glide_row_id)
+            .filter((id): id is string => typeof id === "string" && id !== ""),
+        ),
+      );
       setCompaniesLoading(false);
     }
     void loadCompanies();
@@ -859,14 +1594,38 @@ export function Clients() {
     let cancelled = false;
     async function loadTeamMembers() {
       setTeamMembersLoading(true);
-      const { data, error } = await supabase
-        .from("backup_company_team")
-        .select("glide_row_id, name, is_archived, role_hide_from_csm_list")
-        .eq("company_id", filters.companyId)
-        .order("name", { ascending: true });
-      if (cancelled) return;
-      if (error) console.error("Failed to load team members:", error);
-      setTeamMembers((data ?? []) as TeamMember[]);
+      const { data: appCompany } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("legacy_glide_row_id", filters.companyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+      if (appCompany?.id) {
+        const { data, error } = await supabase
+          .from("company_members")
+          .select("id, legacy_glide_row_id, name, status, hide_from_csm_list")
+          .eq("company_id", appCompany.id)
+          .order("name", { ascending: true });
+        if (cancelled) return;
+        if (error) console.error("Failed to load app-owned team members:", error);
+        setTeamMembers(
+          (data ?? []).map((member) => ({
+            glide_row_id: member.legacy_glide_row_id ?? member.id,
+            name: member.name,
+            is_archived: member.status === "archived",
+            role_hide_from_csm_list: member.hide_from_csm_list,
+          })),
+        );
+      } else {
+        const { data, error } = await supabase
+          .from("backup_company_team")
+          .select("glide_row_id, name, is_archived, role_hide_from_csm_list")
+          .eq("company_id", filters.companyId)
+          .order("name", { ascending: true });
+        if (cancelled) return;
+        if (error) console.error("Failed to load mirrored team members:", error);
+        setTeamMembers((data ?? []) as TeamMember[]);
+      }
       setTeamMembersLoading(false);
     }
     void loadTeamMembers();
@@ -936,10 +1695,14 @@ export function Clients() {
     setClientsError(null);
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
+    const useAppClients = appClientCompanyIds.has(appliedFilters.companyId);
     let query = supabase
-      .from("backup_company_clients")
+      .from(useAppClients ? "clients" : "backup_company_clients")
       .select("*", { count: "exact" })
-      .eq("company_id", appliedFilters.companyId)
+      .eq(
+        useAppClients ? "company_glide_row_id" : "company_id",
+        appliedFilters.companyId,
+      )
       .range(from, to);
     if (appliedFilters.clientName.trim())
       query = query.ilike(
@@ -986,15 +1749,154 @@ export function Clients() {
       setTotalClients(0);
       setClientsError(error.message);
     } else {
-      const rows = (data ?? []) as ClientRow[];
+      const rows = useAppClients
+        ? ((data ?? []) as Record<string, unknown>[]).map(mapAppClientRow)
+        : ((data ?? []) as ClientRow[]);
       setClients(rows);
       setTotalClients(count ?? rows.length);
     }
     setClientsLoading(false);
-  }, [appliedFilters, assignedTeamMemberId, page, sortDirection, sortField]);
+  }, [
+    appClientCompanyIds,
+    appliedFilters,
+    assignedTeamMemberId,
+    page,
+    sortDirection,
+    sortField,
+  ]);
   useEffect(() => {
     void loadClients();
   }, [loadClients]);
+  const loadCalendarClients = useCallback(async () => {
+    if (!appliedFilters.companyId || viewMode !== "calendar") {
+      setCalendarClients([]);
+      setCalendarTasks([]);
+      setCalendarLoading(false);
+      return;
+    }
+
+    setCalendarLoading(true);
+    setCalendarError(null);
+
+    const useAppClients = appClientCompanyIds.has(appliedFilters.companyId);
+    const bounds = calendarBounds(calendarMode, calendarDate);
+    let query = supabase
+      .from(useAppClients ? "clients" : "backup_company_clients")
+      .select("*")
+      .eq(
+        useAppClients ? "company_glide_row_id" : "company_id",
+        appliedFilters.companyId,
+      )
+      .order("client_name", { ascending: true, nullsFirst: false })
+      .range(0, 4999);
+
+    if (appliedFilters.clientName.trim()) {
+      query = query.ilike(
+        "client_name",
+        `%${appliedFilters.clientName.trim()}%`,
+      );
+    }
+    if (assignedTeamMemberId) {
+      query = query.or(
+        `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+      );
+    } else if (appliedFilters.csmId) {
+      query = query.eq("csm_team_member_id", appliedFilters.csmId);
+    }
+    if (appliedFilters.secondaryAssigneeId) {
+      query = query.eq(
+        "csm_secondary_assignee_id",
+        appliedFilters.secondaryAssigneeId,
+      );
+    }
+    if (appliedFilters.offerId) {
+      query = query.eq("offer_milestones_current_offer_id", appliedFilters.offerId);
+    }
+    if (appliedFilters.programs.length > 0) {
+      query = query.in("program_status_value", appliedFilters.programs);
+    }
+    if (appliedFilters.lastContact) {
+      const dayStart = new Date(
+        `${appliedFilters.lastContact}T00:00:00.000Z`,
+      ).toISOString();
+      const dayEnd = new Date(
+        `${appliedFilters.lastContact}T23:59:59.999Z`,
+      ).toISOString();
+      query = query
+        .gte("csm_date_of_last_contact", dayStart)
+        .lte("csm_date_of_last_contact", dayEnd);
+    }
+
+    const appTasksQuery = useAppClients
+      ? supabase
+          .from("client_tasks")
+          .select(
+            "glide_row_id, client_id, task_name, task_due_date, status_value, assigned_to_id",
+          )
+          .eq("company_glide_row_id", appliedFilters.companyId)
+          .not("client_id", "is", null)
+          .not("task_due_date", "is", null)
+          .gte("task_due_date", bounds.start.toISOString())
+          .lt("task_due_date", bounds.next.toISOString())
+          .order("task_due_date", { ascending: true, nullsFirst: false })
+          .range(0, 4999)
+      : Promise.resolve({ data: [], error: null });
+    const backupTasksQuery = supabase
+      .from("backup_company_clients_tasks")
+      .select(
+        "glide_row_id, client_id, task_name, task_due_date, status_value, assigned_to_id",
+      )
+      .eq("company_id", appliedFilters.companyId)
+      .not("client_id", "is", null)
+      .not("task_due_date", "is", null)
+      .gte("task_due_date", bounds.start.toISOString())
+      .lt("task_due_date", bounds.next.toISOString())
+      .order("task_due_date", { ascending: true, nullsFirst: false })
+      .range(0, 4999);
+
+    const [{ data, error }, appTasksResult, backupTasksResult] = await Promise.all([
+      query,
+      appTasksQuery,
+      backupTasksQuery,
+    ]);
+
+    if (error) {
+      console.error("Failed to load contact calendar:", error);
+      setCalendarClients([]);
+      setCalendarTasks([]);
+      setCalendarError(error.message);
+    } else {
+      const rows = useAppClients
+        ? ((data ?? []) as Record<string, unknown>[]).map(mapAppClientRow)
+        : ((data ?? []) as ClientRow[]);
+      setCalendarClients(rows);
+      if (appTasksResult.error)
+        console.error("Failed to load app calendar tasks:", appTasksResult.error);
+      if (backupTasksResult.error)
+        console.error(
+          "Failed to load mirrored calendar tasks:",
+          backupTasksResult.error,
+        );
+      const appRows = (appTasksResult.data ?? []) as CalendarTaskRow[];
+      const backupRows = (backupTasksResult.data ?? []) as CalendarTaskRow[];
+      const appTaskIds = new Set(appRows.map((task) => task.glide_row_id));
+      setCalendarTasks([
+        ...appRows,
+        ...backupRows.filter((task) => !appTaskIds.has(task.glide_row_id)),
+      ]);
+    }
+    setCalendarLoading(false);
+  }, [
+    appClientCompanyIds,
+    appliedFilters,
+    assignedTeamMemberId,
+    calendarDate,
+    calendarMode,
+    viewMode,
+  ]);
+  useEffect(() => {
+    void loadCalendarClients();
+  }, [loadCalendarClients]);
   function applyFilters() {
     if (!filters.companyId) return;
     const next = {
@@ -1055,10 +1957,25 @@ export function Clients() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">Clients</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Read-only view of clients mirrored from Glide into Supabase.
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">Clients</h1>
+            <p className="mt-1 text-sm text-gray-500">
+              {isUsingAppClients
+                ? "RetainOS pilot client data for this company. Quick Updates write to app-owned client state and history."
+                : "Read-only view of clients mirrored from Glide into Supabase."}
+            </p>
+          </div>
+          {canCreateClient ? (
+            <button
+              type="button"
+              onClick={() => setNewClientOpen(true)}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 cursor-pointer"
+            >
+              + New Client
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -1106,7 +2023,7 @@ export function Clients() {
                   setFilters((prev) => ({ ...prev, clientName }))
                 }
               />
-              <fieldset className="relative">
+              <fieldset ref={statusFilterRef} className="relative">
                 <legend className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                   Status
                 </legend>
@@ -1336,51 +2253,133 @@ export function Clients() {
               >
                 Cards
               </ViewButton>
+              <ViewButton
+                active={viewMode === "calendar"}
+                onClick={() => setViewMode("calendar")}
+              >
+                Calendar
+              </ViewButton>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <label
-                htmlFor="clients-sort-field"
-                className="text-xs font-medium uppercase tracking-wider text-gray-500"
-              >
-                Sort
-              </label>
-              <select
-                id="clients-sort-field"
-                value={sortField}
-                onChange={(event) => {
-                  setSortField(event.target.value as SortField);
-                  setPage(1);
-                }}
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="client_name">Client name</option>
-                <option value="onboarded">Onboarded date</option>
-                <option value="renewal">Renewal date</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  setSortDirection((direction) =>
-                    direction === "asc" ? "desc" : "asc",
-                  );
-                  setPage(1);
-                }}
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                {sortField === "client_name"
-                  ? sortDirection === "asc"
-                    ? "A-Z"
-                    : "Z-A"
-                  : sortDirection === "asc"
-                    ? "Oldest first"
-                    : "Newest first"}
-              </button>
-            </div>
+            {viewMode !== "calendar" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <label
+                  htmlFor="clients-sort-field"
+                  className="text-xs font-medium uppercase tracking-wider text-gray-500"
+                >
+                  Sort
+                </label>
+                <select
+                  id="clients-sort-field"
+                  value={sortField}
+                  onChange={(event) => {
+                    setSortField(event.target.value as SortField);
+                    setPage(1);
+                  }}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="client_name">Client name</option>
+                  <option value="onboarded">Onboarded date</option>
+                  <option value="renewal">Renewal date</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortDirection((direction) =>
+                      direction === "asc" ? "desc" : "asc",
+                    );
+                    setPage(1);
+                  }}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {sortField === "client_name"
+                    ? sortDirection === "asc"
+                      ? "A-Z"
+                      : "Z-A"
+                    : sortDirection === "asc"
+                      ? "Oldest first"
+                      : "Newest first"}
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-md border border-gray-200 bg-white p-1 shadow-sm">
+                  {(["month", "week", "day"] as CalendarMode[]).map((mode) => (
+                    <ViewButton
+                      key={mode}
+                      active={calendarMode === mode}
+                      onClick={() => setCalendarMode(mode)}
+                    >
+                      {mode[0].toUpperCase() + mode.slice(1)}
+                    </ViewButton>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCalendarDate((date) =>
+                      addCalendarPeriod(date, calendarMode, -1),
+                    )
+                  }
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <input
+                  type={calendarMode === "month" ? "month" : "date"}
+                  value={
+                    calendarMode === "month"
+                      ? monthInputValue(calendarDate)
+                      : dateKey(calendarDate)
+                  }
+                  onChange={(event) => {
+                    if (calendarMode === "month") {
+                      const [year, month] = event.target.value
+                        .split("-")
+                        .map(Number);
+                      if (year && month) setCalendarDate(new Date(year, month - 1, 1));
+                    } else {
+                      const next = new Date(`${event.target.value}T00:00:00`);
+                      if (!Number.isNaN(next.getTime())) setCalendarDate(next);
+                    }
+                  }}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCalendarDate((date) =>
+                      addCalendarPeriod(date, calendarMode, 1),
+                    )
+                  }
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
-          {clientsError ? (
+          {clientsError && viewMode !== "calendar" ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {clientsError}
             </div>
+          ) : viewMode === "calendar" ? (
+            <ContactCalendar
+              mode={calendarMode}
+              anchorDate={calendarDate}
+              clients={calendarClients}
+              tasks={calendarTasks}
+              loading={calendarLoading}
+              error={calendarError}
+              programChoices={programChoices}
+              teamMemberNameById={teamMemberNameById}
+              clientMeta={clientMeta}
+              onOpenClient={(id) =>
+                navigate(`/clients/${encodeURIComponent(id)}`)
+              }
+              onQuickUpdate={
+                capabilities.canQuickUpdate ? setQuickUpdateClient : undefined
+              }
+            />
           ) : clientsLoading ? (
             <div className="flex items-center justify-center py-20">
               <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-600" />
@@ -1416,7 +2415,7 @@ export function Clients() {
               }
             />
           )}
-          {!clientsLoading && totalClients > 0 && (
+          {viewMode !== "calendar" && !clientsLoading && totalClients > 0 && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
               <p className="text-sm text-gray-500">
                 Showing {pageStart}-{pageEnd} of {totalClients.toLocaleString()}
@@ -1454,6 +2453,20 @@ export function Clients() {
           onClose={() => setQuickUpdateClient(null)}
         />
       )}
+      {newClientOpen ? (
+        <NewClientModal
+          companyLegacyId={appliedFilters.companyId || filters.companyId}
+          teamMembers={teamMembers}
+          programChoices={programChoices}
+          assignedTeamMemberId={assignedTeamMemberId}
+          onClose={() => setNewClientOpen(false)}
+          onCreated={(client) => {
+            setClients((current) => [client, ...current].slice(0, PAGE_SIZE));
+            setTotalClients((current) => current + 1);
+            setPage(1);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1669,6 +2682,313 @@ function ClientCards({
           </div>
         );
       })}
+    </div>
+  );
+}
+type CalendarEventType =
+  | "onboarded"
+  | "renewal"
+  | "last-contact"
+  | "next-contact"
+  | "task";
+
+function eventSortOrder(type: CalendarEventType) {
+  if (type === "next-contact") return 1;
+  if (type === "last-contact") return 2;
+  if (type === "task") return 3;
+  if (type === "renewal") return 4;
+  return 5;
+}
+
+function eventBorderClass(type: CalendarEventType) {
+  if (type === "next-contact") return "border-indigo-200";
+  if (type === "last-contact") return "border-emerald-200";
+  if (type === "task") return "border-amber-200";
+  if (type === "renewal") return "border-rose-200";
+  return "border-sky-200";
+}
+
+function eventTagClass(type: CalendarEventType) {
+  if (type === "next-contact") return "bg-indigo-50 text-indigo-700";
+  if (type === "last-contact") return "bg-emerald-50 text-emerald-700";
+  if (type === "task") return "bg-amber-50 text-amber-700";
+  if (type === "renewal") return "bg-rose-50 text-rose-700";
+  return "bg-sky-50 text-sky-700";
+}
+
+function CalendarLegend() {
+  const items: { type: CalendarEventType; label: string }[] = [
+    { type: "next-contact", label: "Next" },
+    { type: "last-contact", label: "Last" },
+    { type: "task", label: "Task" },
+    { type: "renewal", label: "Renewal" },
+    { type: "onboarded", label: "Onboarded" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {items.map((item) => (
+        <span
+          key={item.type}
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${eventTagClass(item.type)}`}
+        >
+          {item.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ContactCalendar({
+  mode,
+  anchorDate,
+  clients,
+  tasks,
+  loading,
+  error,
+  programChoices,
+  teamMemberNameById,
+  clientMeta,
+  onOpenClient,
+  onQuickUpdate,
+}: {
+  mode: CalendarMode;
+  anchorDate: Date;
+  clients: ClientRow[];
+  tasks: CalendarTaskRow[];
+  loading: boolean;
+  error: string | null;
+  programChoices: ProgramChoice[];
+  teamMemberNameById: Map<string, string>;
+  clientMeta: (client: ClientRow) => {
+    last: unknown;
+    next: unknown;
+    onboarded: unknown;
+    renewal: unknown;
+  };
+  onOpenClient: (id: string) => void;
+  onQuickUpdate?: (client: ClientRow) => void;
+}) {
+  const todayKey = dateKey(new Date());
+  const { start, next } = calendarBounds(mode, anchorDate);
+  const firstGridDay = new Date(start);
+  if (mode === "month") firstGridDay.setDate(start.getDate() - start.getDay());
+
+  const dayCount = mode === "month" ? 42 : mode === "week" ? 7 : 1;
+  const days = Array.from({ length: dayCount }, (_, index) => {
+    const day = new Date(firstGridDay);
+    day.setDate(firstGridDay.getDate() + index);
+    return day;
+  });
+
+  type CalendarEvent = {
+    id: string;
+    type: CalendarEventType;
+    label: string;
+    date: unknown;
+    client: ClientRow;
+    task?: CalendarTaskRow;
+  };
+  const clientById = new Map(clients.map((client) => [client.glide_row_id, client]));
+  const eventsByDay = new Map<string, CalendarEvent[]>();
+  const addEvent = (event: CalendarEvent) => {
+    if (!isDateInRange(event.date, start, next)) return;
+    const key = dateKeyFromValue(event.date);
+    if (!key) return;
+    const rows = eventsByDay.get(key) ?? [];
+    rows.push(event);
+    eventsByDay.set(key, rows);
+  };
+
+  for (const client of clients) {
+    const meta = clientMeta(client);
+    addEvent({
+      id: `${client.glide_row_id}:onboarded`,
+      type: "onboarded",
+      label: "Onboarded",
+      date: meta.onboarded,
+      client,
+    });
+    addEvent({
+      id: `${client.glide_row_id}:renewal`,
+      type: "renewal",
+      label: "Renewal",
+      date: meta.renewal,
+      client,
+    });
+    addEvent({
+      id: `${client.glide_row_id}:last-contact`,
+      type: "last-contact",
+      label: "Last contact",
+      date: meta.last,
+      client,
+    });
+    addEvent({
+      id: `${client.glide_row_id}:next-contact`,
+      type: "next-contact",
+      label: "Next contact",
+      date: meta.next,
+      client,
+    });
+  }
+  for (const task of tasks) {
+    if (!task.client_id) continue;
+    const client = clientById.get(task.client_id);
+    if (!client) continue;
+    addEvent({
+      id: `${task.glide_row_id}:task`,
+      type: "task",
+      label: task.task_name ? `Task: ${task.task_name}` : "Task due",
+      date: task.task_due_date,
+      client,
+      task,
+    });
+  }
+  for (const events of eventsByDay.values()) {
+    events.sort(
+      (a, b) =>
+        String(a.client.client_name ?? "").localeCompare(
+          String(b.client.client_name ?? ""),
+        ) || eventSortOrder(a.type) - eventSortOrder(b.type),
+    );
+  }
+
+  const rangeLabel =
+    mode === "month"
+      ? monthLabel(anchorDate)
+      : mode === "week"
+        ? `${formatDate(start)} - ${formatDate(new Date(next.getTime() - 1))}`
+        : formatDate(anchorDate);
+  const eventCount = [...eventsByDay.values()].reduce(
+    (sum, rows) => sum + rows.length,
+    0,
+  );
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        {error}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+            Contact Calendar
+          </h3>
+          <p className="mt-1 text-sm text-gray-500">
+            {loading
+              ? "Loading client timeline..."
+              : `${eventCount.toLocaleString()} calendar event${eventCount === 1 ? "" : "s"} in ${rangeLabel}`}
+          </p>
+        </div>
+        <CalendarLegend />
+      </div>
+      {mode !== "day" ? (
+        <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div key={day} className="px-3 py-2">
+              {day}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-600" />
+        </div>
+      ) : (
+        <div className={`grid grid-cols-1 ${mode === "day" ? "" : "sm:grid-cols-7"}`}>
+          {days.map((day) => {
+            const key = dateKey(day);
+            const dayEvents = eventsByDay.get(key) ?? [];
+            const inCurrentMonth = mode !== "month" || day.getMonth() === anchorDate.getMonth();
+            const isToday = key === todayKey;
+            return (
+              <div
+                key={key}
+                className={`${mode === "day" ? "min-h-96" : "min-h-36"} border-b border-r border-gray-100 p-2 ${
+                  inCurrentMonth ? "bg-white" : "bg-gray-50 text-gray-400"
+                }`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span
+                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                      isToday
+                        ? "bg-indigo-600 text-white"
+                        : inCurrentMonth
+                          ? "text-gray-700"
+                          : "text-gray-400"
+                    }`}
+                  >
+                    {day.getDate()}
+                  </span>
+                  {dayEvents.length > 0 ? (
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                      {dayEvents.length}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="space-y-1.5">
+                  {dayEvents.slice(0, mode === "day" ? 40 : 5).map((event) => (
+                    <div
+                      key={event.id}
+                      className={`rounded-md border bg-white p-2 shadow-sm ${eventBorderClass(event.type)}`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onOpenClient(event.client.glide_row_id)}
+                        className="block w-full truncate text-left text-xs font-semibold text-gray-900 hover:text-indigo-700"
+                        title={event.client.client_name ?? "Unnamed client"}
+                      >
+                        {event.client.client_name ?? "Unnamed client"}
+                      </button>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${eventTagClass(event.type)}`}
+                        >
+                          {event.label}
+                        </span>
+                      </div>
+                      <div className="mt-1 truncate text-[11px] text-gray-500">
+                        {teamMemberNameById.get(event.client.csm_team_member_id ?? "") ??
+                          "Unassigned"}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <ProgramStatusPill
+                          value={event.client.program_status_value}
+                          choices={programChoices}
+                        />
+                        {onQuickUpdate && event.type !== "onboarded" ? (
+                          <button
+                            type="button"
+                            onClick={() => onQuickUpdate(event.client)}
+                            className="rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100"
+                          >
+                            Update
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                  {dayEvents.length > (mode === "day" ? 40 : 5) ? (
+                    <div className="rounded-md bg-gray-50 px-2 py-1 text-xs text-gray-500">
+                      +{dayEvents.length - (mode === "day" ? 40 : 5)} more
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!loading && eventCount === 0 ? (
+        <div className="border-t border-gray-100 px-4 py-8 text-center text-sm text-gray-500">
+          No calendar events found for this range.
+        </div>
+      ) : null}
     </div>
   );
 }

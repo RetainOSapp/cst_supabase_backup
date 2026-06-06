@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ProgramStatusPill } from "../lib/clientDisplay.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
@@ -308,6 +308,245 @@ function TaskListTable({
   );
 }
 
+function NewTaskModal({
+  companyId,
+  clients,
+  teamMembers,
+  assignedTeamMemberId,
+  onClose,
+  onCreated,
+}: {
+  companyId: string;
+  clients: ClientRow[];
+  teamMembers: TeamMember[];
+  assignedTeamMemberId: string;
+  onClose: () => void;
+  onCreated: (task: TaskRow) => void;
+}) {
+  const [taskName, setTaskName] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [assignedToId, setAssignedToId] = useState(assignedTeamMemberId);
+  const [taskDueDate, setTaskDueDate] = useState("");
+  const [priority, setPriority] = useState("");
+  const [statusValue, setStatusValue] = useState("todo");
+  const [externalLink, setExternalLink] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const availableTeamMembers = teamMembers.filter(
+    (member) =>
+      member.is_archived !== true && member.role_hide_from_csm_list !== true,
+  );
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-task",
+      {
+        body: {
+          companyGlideId: companyId,
+          taskName,
+          taskDescription,
+          clientId,
+          assignedToId,
+          taskDueDate,
+          priority,
+          statusValue,
+          externalLink,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.task) {
+      onCreated(data.task as TaskRow);
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close new task"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">New Task</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Creates a RetainOS pilot task. Glide mirror tasks stay unchanged.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2">
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Task Name
+              </span>
+              <input
+                value={taskName}
+                onChange={(event) => setTaskName(event.target.value)}
+                required
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Description
+              </span>
+              <textarea
+                value={taskDescription}
+                onChange={(event) => setTaskDescription(event.target.value)}
+                rows={3}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Client
+              </span>
+              <select
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                <option value="">Company-level task</option>
+                {clients.map((client) => (
+                  <option key={client.glide_row_id} value={client.glide_row_id}>
+                    {client.client_name ?? "Unnamed client"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Assigned To
+              </span>
+              <select
+                value={assignedToId}
+                onChange={(event) => setAssignedToId(event.target.value)}
+                disabled={saving || Boolean(assignedTeamMemberId)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              >
+                <option value="">Unassigned</option>
+                {availableTeamMembers.map((member) => (
+                  <option key={member.glide_row_id} value={member.glide_row_id}>
+                    {member.name ?? "(unnamed)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Due Date
+              </span>
+              <input
+                type="date"
+                value={taskDueDate}
+                onChange={(event) => setTaskDueDate(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Priority
+              </span>
+              <select
+                value={priority}
+                onChange={(event) => setPriority(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                <option value="">Not set</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Status
+              </span>
+              <select
+                value={statusValue}
+                onChange={(event) => setStatusValue(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                <option value="todo">To Do</option>
+                <option value="in-progress">In Progress</option>
+                <option value="done">Done</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                External Link
+              </span>
+              <input
+                value={externalLink}
+                onChange={(event) => setExternalLink(event.target.value)}
+                disabled={saving}
+                placeholder="Optional"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+              />
+            </label>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !taskName.trim()}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Creating..." : "Create Task"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function Tasks() {
   const [searchParams, setSearchParams] = useSearchParams();
   const {
@@ -334,17 +573,24 @@ export function Tasks() {
   const [search, setSearch] = useState(cached?.search ?? "");
   const [companies, setCompanies] = useState<Company[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [appTaskCompanyIds, setAppTaskCompanyIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [clientById, setClientById] = useState(new Map<string, ClientRow>());
+  const [companyClients, setCompanyClients] = useState<ClientRow[]>([]);
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
 
   const assignedTeamMemberId = capabilities.canViewOnlyAssignedClients
     ? teamMemberId
     : "";
   const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
+  const isUsingAppTasks = appTaskCompanyIds.has(companyId);
+  const canCreateTask = capabilities.canAccessTasks && Boolean(companyId);
 
   const availableTeamMembers = useMemo(
     () =>
@@ -394,9 +640,25 @@ export function Tasks() {
       if (!canUseCompanySwitcher && effectiveCompanyId) {
         query = query.eq("glide_row_id", effectiveCompanyId);
       }
-      const { data, error } = await query;
+      const [backupCompaniesResult, appCompaniesResult] = await Promise.all([
+        query,
+        supabase
+          .from("companies")
+          .select("legacy_glide_row_id, migration_status")
+          .in("migration_status", ["pilot", "migrated"]),
+      ]);
+      const { data, error } = backupCompaniesResult;
       if (error) console.error("Failed to load companies:", error);
+      if (appCompaniesResult.error)
+        console.error("Failed to load app companies:", appCompaniesResult.error);
       setCompanies((data ?? []) as Company[]);
+      setAppTaskCompanyIds(
+        new Set(
+          (appCompaniesResult.data ?? [])
+            .map((company) => company.legacy_glide_row_id)
+            .filter((id): id is string => typeof id === "string" && id !== ""),
+        ),
+      );
       setLoadingCompanies(false);
     }
     void loadCompanies();
@@ -437,6 +699,39 @@ export function Tasks() {
 
   useEffect(() => {
     if (!companyId) {
+      setCompanyClients([]);
+      return;
+    }
+    let cancelled = false;
+    async function loadCompanyClients() {
+      const sourceTable = appTaskCompanyIds.has(companyId)
+        ? "clients"
+        : "backup_company_clients";
+      const { data, error } = await supabase
+        .from(sourceTable)
+        .select("glide_row_id, client_name, client_image, program_status_value")
+        .eq(
+          sourceTable === "clients" ? "company_glide_row_id" : "company_id",
+          companyId,
+        )
+        .order("client_name", { ascending: true, nullsFirst: false })
+        .limit(500);
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load company clients:", error);
+        setCompanyClients([]);
+      } else {
+        setCompanyClients((data ?? []) as ClientRow[]);
+      }
+    }
+    void loadCompanyClients();
+    return () => {
+      cancelled = true;
+    };
+  }, [appTaskCompanyIds, companyId]);
+
+  useEffect(() => {
+    if (!companyId) {
       setTasks([]);
       setClientById(new Map());
       return;
@@ -445,33 +740,62 @@ export function Tasks() {
     async function loadTasks() {
       setLoadingTasks(true);
       setTasksError(null);
-      let query = supabase
+      let backupQuery = supabase
         .from("backup_company_clients_tasks")
         .select("*")
         .eq("company_id", companyId);
 
-      if (assignedTeamMemberId) query = query.eq("assigned_to_id", assignedTeamMemberId);
-      else if (csmId) query = query.eq("assigned_to_id", csmId);
+      let appQuery = supabase
+        .from("client_tasks")
+        .select("*")
+        .eq("company_glide_row_id", companyId);
+
+      if (assignedTeamMemberId) {
+        backupQuery = backupQuery.eq("assigned_to_id", assignedTeamMemberId);
+        appQuery = appQuery.eq("assigned_to_id", assignedTeamMemberId);
+      } else if (csmId) {
+        backupQuery = backupQuery.eq("assigned_to_id", csmId);
+        appQuery = appQuery.eq("assigned_to_id", csmId);
+      }
       if (search.trim()) {
         const q = `%${search.trim()}%`;
-        query = query.or(`task_name.ilike.${q},task_description.ilike.${q}`);
+        backupQuery = backupQuery.or(
+          `task_name.ilike.${q},task_description.ilike.${q}`,
+        );
+        appQuery = appQuery.or(`task_name.ilike.${q},task_description.ilike.${q}`);
       }
-      query = query.order("task_due_date", {
+      backupQuery = backupQuery.order("task_due_date", {
+        ascending: true,
+        nullsFirst: false,
+      });
+      appQuery = appQuery.order("task_due_date", {
         ascending: true,
         nullsFirst: false,
       });
 
-      const { data, error } = await query.limit(250);
+      const [backupResult, appResult] = await Promise.all([
+        backupQuery.limit(250),
+        appTaskCompanyIds.has(companyId)
+          ? appQuery.limit(250)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
       if (cancelled) return;
-      if (error) {
+      if (backupResult.error || appResult.error) {
         setTasks([]);
         setClientById(new Map());
-        setTasksError(error.message);
+        setTasksError(
+          backupResult.error?.message ??
+            appResult.error?.message ??
+            "Failed to load tasks",
+        );
         setLoadingTasks(false);
         return;
       }
 
-      let rows = (data ?? []) as TaskRow[];
+      let rows = [
+        ...((appResult.data ?? []) as TaskRow[]),
+        ...((backupResult.data ?? []) as TaskRow[]),
+      ];
       if (statusMode === "open") rows = rows.filter((task) => !isClosedTask(task));
       if (statusMode === "closed") rows = rows.filter(isClosedTask);
       setTasks(rows);
@@ -480,15 +804,30 @@ export function Tasks() {
         ...new Set(rows.map((task) => task.client_id).filter(Boolean)),
       ] as string[];
       if (clientIds.length > 0) {
-        const { data: clients, error: clientsError } = await supabase
-          .from("backup_company_clients")
-          .select("glide_row_id, client_name, client_image, program_status_value")
-          .in("glide_row_id", clientIds);
+        const [backupClientsResult, appClientsResult] = await Promise.all([
+          supabase
+            .from("backup_company_clients")
+            .select("glide_row_id, client_name, client_image, program_status_value")
+            .in("glide_row_id", clientIds),
+          appTaskCompanyIds.has(companyId)
+            ? supabase
+                .from("clients")
+                .select("glide_row_id, client_name, client_image, program_status_value")
+                .in("glide_row_id", clientIds)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
         if (!cancelled) {
-          if (clientsError) console.error("Failed to load task clients:", clientsError);
+          if (backupClientsResult.error)
+            console.error("Failed to load backup task clients:", backupClientsResult.error);
+          if (appClientsResult.error)
+            console.error("Failed to load app task clients:", appClientsResult.error);
+          const clients = [
+            ...((backupClientsResult.data ?? []) as ClientRow[]),
+            ...((appClientsResult.data ?? []) as ClientRow[]),
+          ];
           setClientById(
             new Map(
-              ((clients ?? []) as ClientRow[]).map((client) => [
+              clients.map((client) => [
                 client.glide_row_id,
                 client,
               ]),
@@ -505,7 +844,7 @@ export function Tasks() {
     return () => {
       cancelled = true;
     };
-  }, [assignedTeamMemberId, companyId, csmId, search, statusMode]);
+  }, [appTaskCompanyIds, assignedTeamMemberId, companyId, csmId, search, statusMode]);
 
   const columns = useMemo(() => {
     const todo = tasks.filter(
@@ -540,13 +879,16 @@ export function Tasks() {
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Tasks</h1>
           <p className="mt-1 text-sm text-gray-500">
-            View client tasks by company and CSM.
+            {isUsingAppTasks
+              ? "RetainOS pilot tasks plus mirrored Glide tasks for this company."
+              : "Read-only task view mirrored from Glide into Supabase."}
           </p>
         </div>
         <button
           type="button"
-          disabled
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white opacity-50"
+          onClick={() => setNewTaskOpen(true)}
+          disabled={!canCreateTask}
+          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
         >
           New Task
         </button>
@@ -750,6 +1092,30 @@ export function Tasks() {
           ))}
         </div>
       )}
+      {newTaskOpen ? (
+        <NewTaskModal
+          companyId={companyId}
+          clients={companyClients}
+          teamMembers={teamMembers}
+          assignedTeamMemberId={assignedTeamMemberId}
+          onClose={() => setNewTaskOpen(false)}
+          onCreated={(task) => {
+            setTasks((current) => [task, ...current]);
+            if (task.client_id && !clientById.has(task.client_id)) {
+              const client = companyClients.find(
+                (row) => row.glide_row_id === task.client_id,
+              );
+              if (client) {
+                setClientById((current) => {
+                  const next = new Map(current);
+                  next.set(client.glide_row_id, client);
+                  return next;
+                });
+              }
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -54,6 +54,11 @@ export function Header() {
               Dashboard
             </Link>
           )}
+          {capabilities.canAccessCsmReports && (
+            <Link to="/csm-reports" className={linkClass("/csm-reports")}>
+              CSM Reports
+            </Link>
+          )}
           {capabilities.canAccessClients && (
             <Link to="/clients" className={linkClass("/clients")}>
               Clients
@@ -62,6 +67,11 @@ export function Header() {
           {capabilities.canAccessTasks && (
             <Link to="/tasks" className={linkClass("/tasks")}>
               Tasks
+            </Link>
+          )}
+          {capabilities.canAccessAdminHub && (
+            <Link to="/admin" className={linkClass("/admin")}>
+              Admin Hub
             </Link>
           )}
           {capabilities.canAccessSaasClients && (

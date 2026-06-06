@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 type DetailTab = "team" | "customization" | "pathways" | "settings";
+type TeamSource = "mirror" | "app_owned";
+type TeamRole = "director" | "support" | "csm" | "viewer";
+type TeamStatusFilter = "active" | "archived";
 
 interface CompanyRow {
   glide_row_id: string;
@@ -15,8 +18,15 @@ interface CompanyRow {
   enable_call_ai_for_csms: boolean | null;
 }
 
+interface AppCompanyRow {
+  id: string;
+  legacy_glide_row_id: string | null;
+  migration_status: "mirror_only" | "pilot" | "migrated";
+}
+
 interface TeamRow {
   glide_row_id: string;
+  app_member_id?: string | null;
   email: string | null;
   name: string | null;
   photo: string | null;
@@ -27,6 +37,20 @@ interface TeamRow {
   role_read_only_user: boolean | null;
   capacity_number: number | null;
   is_archived: boolean | null;
+}
+
+interface AppTeamRow {
+  id: string;
+  legacy_glide_row_id: string | null;
+  email: string | null;
+  name: string | null;
+  photo_url: string | null;
+  company_id: string;
+  role: "director" | "support" | "csm" | "viewer";
+  is_read_only: boolean | null;
+  hide_from_csm_list: boolean | null;
+  capacity_number: number | null;
+  status: "active" | "archived";
 }
 
 function getInitials(name: string | null | undefined) {
@@ -62,6 +86,48 @@ function roleLabel(member: TeamRow) {
   return "CSM";
 }
 
+function roleValue(member: TeamRow): TeamRole {
+  if (member.role_read_only_user) return "viewer";
+  if (member.role_id === 1 || member.role_is_saa_s_admin) return "director";
+  if (member.role_id === 2) return "support";
+  if (member.role_id === 3) return "csm";
+  if (member.role_hide_from_csm_list) return "support";
+  return "csm";
+}
+
+const roleOptions: { label: string; value: TeamRole }[] = [
+  { label: "Director", value: "director" },
+  { label: "CSM", value: "csm" },
+  { label: "Support", value: "support" },
+  { label: "Viewer", value: "viewer" },
+];
+
+function mapAppTeamMember(member: AppTeamRow, legacyCompanyId: string): TeamRow {
+  const roleId =
+    member.role === "director"
+      ? 1
+      : member.role === "support"
+        ? 2
+        : member.role === "csm"
+          ? 3
+          : null;
+
+  return {
+    glide_row_id: member.legacy_glide_row_id ?? member.id,
+    app_member_id: member.id,
+    email: member.email,
+    name: member.name,
+    photo: member.photo_url,
+    company_id: legacyCompanyId,
+    role_id: roleId,
+    role_is_saa_s_admin: member.role === "director",
+    role_hide_from_csm_list: member.hide_from_csm_list,
+    role_read_only_user: member.role === "viewer" || member.is_read_only === true,
+    capacity_number: member.capacity_number,
+    is_archived: member.status === "archived",
+  };
+}
+
 function TabButton({
   active,
   onClick,
@@ -86,18 +152,47 @@ function TabButton({
   );
 }
 
-function TeamMemberCard({ member }: { member: TeamRow }) {
+function TeamMemberCard({
+  member,
+  canManage,
+  onEdit,
+  onArchive,
+}: {
+  member: TeamRow;
+  canManage: boolean;
+  onEdit: (member: TeamRow) => void;
+  onArchive: (member: TeamRow) => void;
+}) {
   return (
     <article className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex justify-end">
-        <button
-          type="button"
-          disabled
-          title="Actions are locked in read-only mode"
-          className="text-gray-300"
-        >
-          ...
-        </button>
+        {canManage ? (
+          <div className="flex gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => onEdit(member)}
+              className="font-medium text-indigo-600 hover:text-indigo-700"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => onArchive(member)}
+              className="font-medium text-red-600 hover:text-red-700"
+            >
+              Archive
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled
+            title="Actions are locked in read-only mode"
+            className="text-gray-300"
+          >
+            ...
+          </button>
+        )}
       </div>
       <div className="flex flex-col items-center text-center">
         {member.photo ? (
@@ -135,11 +230,75 @@ function TeamMemberCard({ member }: { member: TeamRow }) {
 
 function NewTeamMemberModal({
   companyName,
+  companyLegacyId,
+  canManage,
+  member,
   onClose,
+  onSaved,
+  onArchive,
 }: {
   companyName: string;
+  companyLegacyId: string;
+  canManage: boolean;
+  member?: TeamRow | null;
   onClose: () => void;
+  onSaved: () => void;
+  onArchive: (member: TeamRow) => void;
 }) {
+  const isEditing = Boolean(member?.app_member_id);
+  const [name, setName] = useState(member?.name ?? "");
+  const [email, setEmail] = useState(member?.email ?? "");
+  const [photoUrl, setPhotoUrl] = useState(member?.photo ?? "");
+  const [role, setRole] = useState<TeamRole>(member ? roleValue(member) : "director");
+  const [capacityNumber, setCapacityNumber] = useState(
+    member?.capacity_number === null || member?.capacity_number === undefined
+      ? ""
+      : String(member.capacity_number),
+  );
+  const [hideFromCsmList, setHideFromCsmList] = useState(
+    member?.role_hide_from_csm_list === true,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!canManage) return;
+    setSaving(true);
+    setError(null);
+
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-member",
+      {
+        body: {
+          action: isEditing ? "update" : "create",
+          companyLegacyId,
+          memberId: member?.app_member_id,
+          name,
+          email,
+          photoUrl,
+          role,
+          capacityNumber: capacityNumber === "" ? null : Number(capacityNumber),
+          hideFromCsmList,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (invokeError) {
+      setError(invokeError.message);
+      return;
+    }
+
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+
+    onSaved();
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
@@ -152,10 +311,12 @@ function NewTeamMemberModal({
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">
-              New Team Member
+              {isEditing ? "Edit Team Member" : "New Team Member"}
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Add directors, CSMs, support, or viewers to {companyName}.
+              {canManage
+                ? `Manage directors, CSMs, support, or viewers for ${companyName}.`
+                : `Team writes are not enabled for ${companyName}.`}
             </p>
           </div>
           <button
@@ -167,65 +328,137 @@ function NewTeamMemberModal({
             <span className="text-xl leading-none">x</span>
           </button>
         </div>
-        <div className="space-y-4 px-6 py-5">
-          {["Name", "Email", "Profile picture"].map((label) => (
-            <div key={label}>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-6 py-5">
+            <div>
               <label className="mb-1 block text-sm font-medium text-gray-700">
-                {label}
-                {label !== "Profile picture" ? "*" : ""}
+                Name*
               </label>
               <input
-                disabled
-                className="block w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+                required
+                disabled={!canManage || saving}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
               />
             </div>
-          ))}
-          <div>
-            <div className="mb-2 block text-sm font-medium text-gray-700">Role*</div>
-            <div className="flex flex-wrap gap-2">
-              {["Director", "CSM", "Support", "Viewer"].map((role, index) => (
-                <button
-                  key={role}
-                  type="button"
-                  disabled
-                  className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
-                    index === 0
-                      ? "border-slate-500 bg-slate-500 text-white"
-                      : "border-gray-200 bg-gray-50 text-gray-500"
-                  }`}
-                >
-                  {role}
-                </button>
-              ))}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Email*
+              </label>
+              <input
+                required
+                type="email"
+                disabled={!canManage || saving}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              />
             </div>
-            <p className="mt-2 text-xs text-gray-500">
-              Role permissions will be enforced when write mode and auth hierarchy are approved.
-            </p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Profile picture URL
+              </label>
+              <input
+                disabled={!canManage || saving}
+                value={photoUrl}
+                onChange={(event) => setPhotoUrl(event.target.value)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Capacity %
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="1000"
+                disabled={!canManage || saving}
+                value={capacityNumber}
+                onChange={(event) => setCapacityNumber(event.target.value)}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+            </div>
+            <div>
+              <div className="mb-2 block text-sm font-medium text-gray-700">Role*</div>
+              <div className="flex flex-wrap gap-2">
+                {roleOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    disabled={!canManage || saving}
+                    onClick={() => setRole(option.value)}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-medium ${
+                      role === option.value
+                        ? "border-slate-700 bg-slate-700 text-white"
+                        : "border-gray-200 bg-gray-50 text-gray-600 hover:border-gray-300"
+                    } disabled:opacity-60`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-gray-600">
+              <input
+                disabled={!canManage || saving}
+                checked={hideFromCsmList}
+                onChange={(event) => setHideFromCsmList(event.target.checked)}
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              The assigned person does not manage clients.
+            </label>
+            <div
+              className={`rounded-md border px-4 py-3 text-sm ${
+                canManage
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-amber-200 bg-amber-50 text-amber-800"
+              }`}
+            >
+              {canManage
+                ? "Writes are enabled for this RetainOS pilot company."
+                : "Editing is locked while this reads from the Glide mirror."}
+            </div>
+            {error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
           </div>
-          <label className="flex items-center gap-2 text-sm text-gray-600">
-            <input disabled type="checkbox" className="h-4 w-4 rounded border-gray-300" />
-            The assigned person does not manage clients.
-          </label>
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Editing is locked while this reads from the Glide mirror.
+          <div className="flex flex-col gap-3 border-t border-gray-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              {isEditing && member ? (
+                <button
+                  type="button"
+                  onClick={() => onArchive(member)}
+                  disabled={!canManage || saving}
+                  className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  Archive member
+                </button>
+              ) : null}
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={saving}
+                className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!canManage || saving}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {saving ? "Saving..." : isEditing ? "Save changes" : "Submit"}
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white opacity-50"
-          >
-            Submit
-          </button>
-        </div>
+        </form>
       </div>
     </div>
   );
@@ -239,9 +472,40 @@ function EmptyTeamSection({ role }: { role: string }) {
   );
 }
 
-export function SaasClientDetail() {
+function TeamStatusButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+        active
+          ? "bg-slate-800 text-white"
+          : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function SaasClientDetail({
+  companyIdOverride,
+  mode = "super_admin",
+}: {
+  companyIdOverride?: string;
+  mode?: "super_admin" | "admin";
+}) {
   const navigate = useNavigate();
-  const { companyId } = useParams();
+  const params = useParams();
+  const companyId = companyIdOverride ?? params.companyId;
   const { setViewAsCompanyId, viewAsCompanyId } = useAccountContext();
   const [company, setCompany] = useState<CompanyRow | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamRow[]>([]);
@@ -249,31 +513,38 @@ export function SaasClientDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showTeamModal, setShowTeamModal] = useState(false);
+  const [editingMember, setEditingMember] = useState<TeamRow | null>(null);
+  const [teamSource, setTeamSource] = useState<TeamSource>("mirror");
+  const [teamReloadKey, setTeamReloadKey] = useState(0);
+  const [teamActionError, setTeamActionError] = useState<string | null>(null);
+  const [teamStatusFilter, setTeamStatusFilter] =
+    useState<TeamStatusFilter>("active");
 
   useEffect(() => {
     if (!companyId) return;
+    const legacyCompanyId = companyId;
     let cancelled = false;
 
     async function loadCompany() {
       setLoading(true);
       setError(null);
+      setTeamActionError(null);
 
-      const [{ data: companyData, error: companyError }, { data: teamData, error: teamError }] =
+      const [{ data: companyData, error: companyError }, { data: appCompany }] =
         await Promise.all([
           supabase
             .from("backup_companies")
             .select(
               "glide_row_id, name, archived, synced_at, view_override, enable_secondary_assignee, enable_call_ai_for_csms",
             )
-            .eq("glide_row_id", companyId)
+            .eq("glide_row_id", legacyCompanyId)
             .maybeSingle(),
           supabase
-            .from("backup_company_team")
-            .select(
-              "glide_row_id, email, name, photo, company_id, role_id, role_is_saa_s_admin, role_hide_from_csm_list, role_read_only_user, capacity_number, is_archived",
-            )
-            .eq("company_id", companyId)
-            .order("name", { ascending: true }),
+            .from("companies")
+            .select("id, legacy_glide_row_id, migration_status")
+            .eq("legacy_glide_row_id", legacyCompanyId)
+            .in("migration_status", ["pilot", "migrated"])
+            .maybeSingle(),
         ]);
 
       if (cancelled) return;
@@ -285,8 +556,46 @@ export function SaasClientDetail() {
         setCompany(companyData as CompanyRow | null);
       }
 
+      const appCompanyRow = appCompany as AppCompanyRow | null;
+      if (appCompanyRow) {
+        const { data: appTeam, error: appTeamError } = await supabase
+          .from("company_members")
+          .select(
+            "id, legacy_glide_row_id, email, name, photo_url, company_id, role, is_read_only, hide_from_csm_list, capacity_number, status",
+          )
+          .eq("company_id", appCompanyRow.id)
+          .order("name", { ascending: true });
+
+        if (cancelled) return;
+
+        if (appTeamError) {
+          console.error("Failed to load app-owned SaaS team:", appTeamError);
+          setTeamSource("mirror");
+        } else {
+          setTeamMembers(
+            ((appTeam ?? []) as AppTeamRow[]).map((member) =>
+              mapAppTeamMember(member, legacyCompanyId),
+            ),
+          );
+          setTeamSource("app_owned");
+          setLoading(false);
+          return;
+        }
+      }
+
+      const { data: teamData, error: teamError } = await supabase
+        .from("backup_company_team")
+        .select(
+          "glide_row_id, email, name, photo, company_id, role_id, role_is_saa_s_admin, role_hide_from_csm_list, role_read_only_user, capacity_number, is_archived",
+        )
+        .eq("company_id", legacyCompanyId)
+        .order("name", { ascending: true });
+
+      if (cancelled) return;
+
       if (teamError) console.error("Failed to load SaaS team:", teamError);
       setTeamMembers((teamData ?? []) as TeamRow[]);
+      setTeamSource("mirror");
       setLoading(false);
     }
 
@@ -295,7 +604,7 @@ export function SaasClientDetail() {
     return () => {
       cancelled = true;
     };
-  }, [companyId]);
+  }, [companyId, teamReloadKey]);
 
   const groupedTeam = useMemo(() => {
     const activeMembers = teamMembers.filter((member) => member.is_archived !== true);
@@ -307,13 +616,67 @@ export function SaasClientDetail() {
     };
   }, [teamMembers]);
 
+  const archivedTeamMembers = useMemo(
+    () => teamMembers.filter((member) => member.is_archived === true),
+    [teamMembers],
+  );
+
   const companyName = company?.name ?? "Unnamed company";
   const isViewing = viewAsCompanyId === companyId;
+  const canManagePilotTeam = teamSource === "app_owned";
 
   function handleViewAs() {
     if (!companyId) return;
     setViewAsCompanyId(companyId);
     navigate("/dashboard");
+  }
+
+  function handleOpenTeamModal(member?: TeamRow) {
+    setEditingMember(member ?? null);
+    setShowTeamModal(true);
+    setTeamActionError(null);
+  }
+
+  function handleCloseTeamModal() {
+    setShowTeamModal(false);
+    setEditingMember(null);
+  }
+
+  function handleTeamSaved() {
+    handleCloseTeamModal();
+    setTeamReloadKey((key) => key + 1);
+  }
+
+  async function handleArchiveMember(member: TeamRow) {
+    if (!canManagePilotTeam || !member.app_member_id || !companyId) return;
+    const label = member.name ?? member.email ?? "this team member";
+    const confirmed = window.confirm(`Archive ${label}?`);
+    if (!confirmed) return;
+
+    setTeamActionError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-member",
+      {
+        body: {
+          action: "archive",
+          companyLegacyId: companyId,
+          memberId: member.app_member_id,
+        },
+      },
+    );
+
+    if (invokeError) {
+      setTeamActionError(invokeError.message);
+      return;
+    }
+
+    if (data?.error) {
+      setTeamActionError(data.error);
+      return;
+    }
+
+    setTeamReloadKey((key) => key + 1);
+    handleCloseTeamModal();
   }
 
   if (loading) {
@@ -339,9 +702,13 @@ export function SaasClientDetail() {
 
   return (
     <div>
-      <Link to="/saas-clients" className="text-sm font-medium text-indigo-600">
-        Back to SaaS clients
-      </Link>
+      {mode === "super_admin" ? (
+        <Link to="/saas-clients" className="text-sm font-medium text-indigo-600">
+          Back to SaaS clients
+        </Link>
+      ) : (
+        <p className="text-sm font-medium text-gray-500">Admin Hub</p>
+      )}
 
       <section className="mt-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -406,40 +773,104 @@ export function SaasClientDetail() {
 
       {activeTab === "team" ? (
         <div className="mt-6 space-y-6">
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setShowTeamModal(true)}
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-            >
-              + New Team Member
-            </button>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap gap-2">
+              <TeamStatusButton
+                active={teamStatusFilter === "active"}
+                onClick={() => setTeamStatusFilter("active")}
+              >
+                Active
+              </TeamStatusButton>
+              <TeamStatusButton
+                active={teamStatusFilter === "archived"}
+                onClick={() => setTeamStatusFilter("archived")}
+              >
+                Archived ({archivedTeamMembers.length})
+              </TeamStatusButton>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 md:justify-end">
+              {teamSource === "app_owned" ? (
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                  RetainOS pilot data
+                </span>
+              ) : (
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                  Glide mirror data
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => handleOpenTeamModal()}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                + New Team Member
+              </button>
+            </div>
           </div>
 
-          {(["Director", "CSM", "Support", "Viewer"] as const).map((role) => {
-            const members = groupedTeam[role];
-            return (
-              <section
-                key={role}
-                className="rounded-lg border border-gray-200 bg-gray-50"
-              >
-                <div className="border-b border-gray-200 px-4 py-3">
-                  <h2 className="text-sm font-semibold text-gray-900">{role}</h2>
-                </div>
-                <div className="p-4">
-                  {members.length === 0 ? (
-                    <EmptyTeamSection role={role} />
-                  ) : (
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                      {members.map((member) => (
-                        <TeamMemberCard key={member.glide_row_id} member={member} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </section>
-            );
-          })}
+          {teamActionError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {teamActionError}
+            </div>
+          ) : null}
+
+          {teamStatusFilter === "active" ? (
+            (["Director", "CSM", "Support", "Viewer"] as const).map((role) => {
+              const members = groupedTeam[role];
+              return (
+                <section
+                  key={role}
+                  className="rounded-lg border border-gray-200 bg-gray-50"
+                >
+                  <div className="border-b border-gray-200 px-4 py-3">
+                    <h2 className="text-sm font-semibold text-gray-900">{role}</h2>
+                  </div>
+                  <div className="p-4">
+                    {members.length === 0 ? (
+                      <EmptyTeamSection role={role} />
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        {members.map((member) => (
+                          <TeamMemberCard
+                            key={member.glide_row_id}
+                            member={member}
+                            canManage={canManagePilotTeam}
+                            onEdit={handleOpenTeamModal}
+                            onArchive={handleArchiveMember}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              );
+            })
+          ) : (
+            <section className="rounded-lg border border-gray-200 bg-gray-50">
+              <div className="border-b border-gray-200 px-4 py-3">
+                <h2 className="text-sm font-semibold text-gray-900">
+                  Archived team members
+                </h2>
+              </div>
+              <div className="p-4">
+                {archivedTeamMembers.length === 0 ? (
+                  <EmptyTeamSection role="archived team member" />
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {archivedTeamMembers.map((member) => (
+                      <TeamMemberCard
+                        key={member.glide_row_id}
+                        member={member}
+                        canManage={false}
+                        onEdit={handleOpenTeamModal}
+                        onArchive={handleArchiveMember}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
         </div>
       ) : (
         <div className="mt-6 rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
@@ -450,7 +881,12 @@ export function SaasClientDetail() {
       {showTeamModal && (
         <NewTeamMemberModal
           companyName={companyName}
-          onClose={() => setShowTeamModal(false)}
+          companyLegacyId={companyId ?? ""}
+          canManage={canManagePilotTeam}
+          member={editingMember}
+          onClose={handleCloseTeamModal}
+          onSaved={handleTeamSaved}
+          onArchive={handleArchiveMember}
         />
       )}
     </div>

@@ -8,6 +8,7 @@ import { Tables } from "./pages/Tables.tsx";
 import { TableDetail } from "./pages/TableDetail.tsx";
 import { SyncLog } from "./pages/SyncLog.tsx";
 import { Dashboard } from "./pages/Dashboard.tsx";
+import { CsmReports } from "./pages/CsmReports.tsx";
 import { Clients } from "./pages/Clients.tsx";
 import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { Tasks } from "./pages/Tasks.tsx";
@@ -40,8 +41,23 @@ function DefaultRoute() {
   if (capabilities.canAccessDashboard) return <Navigate to="/dashboard" replace />;
   if (capabilities.canAccessClients) return <Navigate to="/clients" replace />;
   if (capabilities.canAccessTasks) return <Navigate to="/tasks" replace />;
+  if (capabilities.canAccessAdminHub) return <Navigate to="/admin" replace />;
   if (capabilities.canAccessSaasClients) return <Navigate to="/saas-clients" replace />;
   return <NoPermission />;
+}
+
+function AdminHub() {
+  const { effectiveCompanyId } = useAccountContext();
+
+  if (!effectiveCompanyId) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center text-amber-900">
+        Select a company before opening Admin Hub.
+      </div>
+    );
+  }
+
+  return <SaasClientDetail companyIdOverride={effectiveCompanyId} mode="admin" />;
 }
 
 function AccountShell() {
@@ -107,6 +123,14 @@ function AccountShell() {
             }
           />
           <Route
+            path="csm-reports"
+            element={
+              <RequireCapability allowed={capabilities.canAccessCsmReports}>
+                <CsmReports />
+              </RequireCapability>
+            }
+          />
+          <Route
             path="clients"
             element={
               <RequireCapability allowed={capabilities.canAccessClients}>
@@ -127,6 +151,14 @@ function AccountShell() {
             element={
               <RequireCapability allowed={capabilities.canAccessTasks}>
                 <Tasks />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="admin"
+            element={
+              <RequireCapability allowed={capabilities.canAccessAdminHub}>
+                <AdminHub />
               </RequireCapability>
             }
           />

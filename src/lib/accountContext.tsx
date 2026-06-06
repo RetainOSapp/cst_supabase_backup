@@ -31,13 +31,17 @@ interface TeamMembershipRow {
 export interface AccountCapabilities {
   canAccessSaasClients: boolean;
   canAccessDashboard: boolean;
+  canAccessCsmReports: boolean;
   canAccessClients: boolean;
   canAccessTasks: boolean;
   canAccessTables: boolean;
+  canAccessAdminHub: boolean;
   canUseCompanySwitcher: boolean;
   canTriggerAiInsights: boolean;
   canQuickUpdate: boolean;
   canEditClient: boolean;
+  canAdvanceClientMilestones: boolean;
+  canManageClientPathways: boolean;
   canViewDirectorNotes: boolean;
   canManageTeam: boolean;
   canViewAllClients: boolean;
@@ -108,13 +112,17 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
   return {
     canAccessSaasClients: isSuperAdmin,
     canAccessDashboard: isSuperAdmin || isDirector || isCsm || isSupport,
+    canAccessCsmReports: isSuperAdmin || isDirector || isSupport,
     canAccessClients: canSeeCompany,
     canAccessTasks: canWork,
     canAccessTables: isSuperAdmin,
+    canAccessAdminHub: isSuperAdmin || isDirector,
     canUseCompanySwitcher: isSuperAdmin,
     canTriggerAiInsights: isSuperAdmin || isDirector,
     canQuickUpdate: canWork,
     canEditClient: canWork,
+    canAdvanceClientMilestones: isSuperAdmin || isDirector || isCsm,
+    canManageClientPathways: isSuperAdmin || isDirector,
     canViewDirectorNotes: isSuperAdmin || isDirector,
     canManageTeam: isSuperAdmin || isDirector,
     canViewAllClients: isSuperAdmin || isDirector || isSupport || isViewer,
