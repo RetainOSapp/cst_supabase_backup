@@ -54,6 +54,17 @@ function normalizeDate(value: unknown) {
   return date.toISOString();
 }
 
+function daysBetween(startIso: string | null, endIso: string | null) {
+  if (!startIso || !endIso) return null;
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return Math.max(
+    0,
+    Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)),
+  );
+}
+
 async function resolveActor(
   supabase: ReturnType<typeof createClient>,
   userEmail: string,
@@ -183,6 +194,42 @@ Deno.serve(async (req) => {
     const now = new Date().toISOString();
     const onboardedAt = normalizeDate(body.dateOnboarded) ?? now;
     const programStatus = nullableText(body.programStatusValue) ?? "front-end";
+    const requestedOfferId = nullableText(body.offerId);
+    const requestedMilestoneId = nullableText(body.milestoneId);
+    const contractStartDate = normalizeDate(body.contractStartDate);
+    const contractEndDate = normalizeDate(body.contractEndDate);
+
+    let selectedOffer: Record<string, unknown> | null = null;
+    let selectedMilestone: Record<string, unknown> | null = null;
+    if (requestedOfferId) {
+      const { data: offer, error: offerError } = await supabase
+        .from("backup_company_offers")
+        .select("glide_row_id, company_id, name")
+        .eq("glide_row_id", requestedOfferId)
+        .eq("company_id", companyGlideId)
+        .maybeSingle();
+      if (offerError) throw offerError;
+      if (!offer) {
+        return jsonResponse({ error: "That offer does not belong to this company." }, 400);
+      }
+      selectedOffer = offer;
+      if (requestedMilestoneId) {
+        const { data: milestone, error: milestoneError } = await supabase
+          .from("backup_company_offer_milestones")
+          .select("glide_row_id, offer_id, name, order")
+          .eq("glide_row_id", requestedMilestoneId)
+          .eq("offer_id", requestedOfferId)
+          .maybeSingle();
+        if (milestoneError) throw milestoneError;
+        if (!milestone) {
+          return jsonResponse(
+            { error: "That milestone does not belong to the selected offer." },
+            400,
+          );
+        }
+        selectedMilestone = milestone;
+      }
+    }
 
     const insertPayload = {
       glide_row_id: glideRowId,
@@ -198,6 +245,15 @@ Deno.serve(async (req) => {
         actor.role === "csm" ? null : nullableText(body.secondaryAssigneeId),
       client_age_date_onboarded: onboardedAt,
       program_status_value: programStatus,
+      offer_milestones_current_offer_id: requestedOfferId,
+      offer_milestones_current_milestone_id: requestedMilestoneId,
+      offer_milestones_current_milestone_change_date: requestedMilestoneId
+        ? now
+        : null,
+      current_contract_start_date: contractStartDate,
+      current_contract_end_date: contractEndDate,
+      current_contract_end_date_for_filtering: contractEndDate,
+      current_contract_of_days: daysBetween(contractStartDate, contractEndDate),
       metadata: {
         created_in: "retainos_client_create_pilot",
         actor_role: actor.role,
@@ -211,6 +267,57 @@ Deno.serve(async (req) => {
       .single();
 
     if (createError) throw createError;
+
+    let clientMilestone = null;
+    if (requestedOfferId && requestedMilestoneId) {
+      const { data, error } = await supabase
+        .from("client_milestones")
+        .insert({
+          company_id: company.id,
+          company_glide_row_id: company.legacy_glide_row_id,
+          glide_row_id: `client_milestone_${crypto.randomUUID()}`,
+          client_id: glideRowId,
+          offer_id: requestedOfferId,
+          milestone_id: requestedMilestoneId,
+          start_date: onboardedAt,
+          initiated_by_member_id: actor.memberId,
+          initiated_by_name: userEmail,
+          metadata: {
+            actor_role: actor.role,
+            created_in: "retainos_client_create_pilot",
+            mirrored_offer_name: selectedOffer?.name ?? null,
+            mirrored_milestone_name: selectedMilestone?.name ?? null,
+          },
+        })
+        .select("*")
+        .single();
+      if (error) throw error;
+      clientMilestone = data;
+    }
+
+    let contract = null;
+    if (contractStartDate || contractEndDate) {
+      const { data, error } = await supabase
+        .from("client_contracts")
+        .insert({
+          company_id: company.id,
+          company_glide_row_id: company.legacy_glide_row_id,
+          glide_row_id: `contract_${crypto.randomUUID()}`,
+          client_id: glideRowId,
+          start_date: contractStartDate,
+          end_date: contractEndDate,
+          contract_days: daysBetween(contractStartDate, contractEndDate),
+          status: "active",
+          metadata: {
+            actor_role: actor.role,
+            created_in: "retainos_client_create_pilot",
+          },
+        })
+        .select("*")
+        .single();
+      if (error) throw error;
+      contract = data;
+    }
 
     const { data: event, error: historyError } = await supabase
       .from("client_history_events")
@@ -226,6 +333,10 @@ Deno.serve(async (req) => {
         payload: {
           actor_role: actor.role,
           client,
+          initial_offer: selectedOffer,
+          initial_milestone: selectedMilestone,
+          client_milestone: clientMilestone,
+          initial_contract: contract,
         },
       })
       .select("*")
@@ -251,7 +362,7 @@ Deno.serve(async (req) => {
       },
     });
 
-    return jsonResponse({ ok: true, client, event });
+    return jsonResponse({ ok: true, client, event, clientMilestone, contract });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return jsonResponse({ error: message }, 500);

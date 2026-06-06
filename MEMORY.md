@@ -183,7 +183,8 @@ Important distinction:
 - The active milestone should render by configured name, not raw Glide id. Example: Ali Abdaal advanced from `Onboarding` to `Touchpoint Mapping`; the current milestone id `xsZ4WRBhRF-RrJvZeexBrQ` must display as `Touchpoint Mapping`.
 - Pathways v1 is functionally acceptable for the Ethical Scaling pilot after QA/polish, but the modal/user-flow UI does not yet match the low-fi designs. Treat design fidelity as a later pass after wiring is stable.
 - Secondary offer/milestone fields are deferred until the primary offer flow is validated.
-- Quick Update does not yet include milestone progress. In Glide, this is a common CSM workflow, so add it later using the proper low-fi flow rather than forcing it into the current Quick Update modal.
+- On 2026-06-06, pilot workflow polish added current-milestone completion to Quick Update, optional initial offer/milestone/contract setup to New Client, and a compact Clients-page reminder strip for next contacts, renewals, and paused return dates. Jay QA passed milestone completion against Ali Abdaal and Matt Shiver, approved both optional New Client setup paths, and accepted reminders as a pilot starting point. Keep pathway changes on the full Client Detail page; Quick Update handles milestone progress only.
+- `PILOT_ONBOARDING.md` is the recording script/checklist for onboarding Ben and Emily into the Ethical Scaling internal pilot.
 
 Example found during debugging:
 

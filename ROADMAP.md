@@ -1429,6 +1429,21 @@ Use this section as the “what good looks like” checklist before migrating re
    - Configure `support@ethicalscaling.com` as the pilot sender through a custom SMTP provider for OTP/PIN emails.
    - Test successful login delivery for Jay, Ben, and Emily without hitting Supabase's built-in email limit.
 
+### Pilot Workflow Polish
+
+- `[x]` Milestone progress is available from Quick Update.
+  - Quick Update shows the current offer/milestone and lets an authorized CSM complete the current milestone.
+  - Completion uses the existing milestone write path, records history/audit, and advances to the next configured milestone.
+  - Jay QA passed against Ali Abdaal and Matt Shiver.
+  - Product decision: pathway changes remain on the full Client Detail page. Quick Update handles milestone progress only.
+- `[x]` New Client setup can optionally configure the initial offer/pathway, starting milestone, and initial contract dates in one flow.
+  - Jay QA passed for both optional setup paths.
+- `[x]` Minimal pilot reminders are visible above the Clients roster.
+  - Shows active-client next contacts and renewals plus paused-client return dates due in the next 7 days or overdue within the last 30 days.
+  - The existing Clients calendar remains the full manual pilot timeline.
+  - Jay confirmed this is an acceptable pilot starting point. Broader notification automation remains later roadmap work.
+- `[x]` Ethical Scaling pilot onboarding guide exists in `PILOT_ONBOARDING.md`.
+
 ## QA Checklist For Every Release
 
 - `[ ]` `npm run build` passes.

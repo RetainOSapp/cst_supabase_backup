@@ -68,6 +68,19 @@ interface Offer {
   glide_row_id: string;
   name: string | null;
 }
+interface OfferMilestone {
+  glide_row_id: string;
+  offer_id: string | null;
+  name: string | null;
+  order?: number | null;
+}
+interface PilotReminder {
+  id: string;
+  type: "next-contact" | "renewal" | "paused-return";
+  label: string;
+  date: string;
+  client: ClientRow;
+}
 interface ClientFilters {
   companyId: string;
   csmId: string;
@@ -682,7 +695,20 @@ function QuickUpdateModal({
   const [progressChoices, setProgressChoices] = useState<OutcomeChoice[]>([]);
   const [buyInChoices, setBuyInChoices] = useState<OutcomeChoice[]>([]);
   const [notes, setNotes] = useState("");
+  const [currentOfferName, setCurrentOfferName] = useState("");
+  const [currentMilestoneName, setCurrentMilestoneName] = useState("");
+  const [completingMilestone, setCompletingMilestone] = useState(false);
   const companyLegacyId = client.company_id ?? "";
+  const [currentOfferId] = useState(
+    typeof client.offer_milestones_current_offer_id === "string"
+      ? client.offer_milestones_current_offer_id
+      : "",
+  );
+  const [currentMilestoneId, setCurrentMilestoneId] = useState(
+    typeof client.offer_milestones_current_milestone_id === "string"
+      ? client.offer_milestones_current_milestone_id
+      : "",
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -734,6 +760,36 @@ function QuickUpdateModal({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCurrentMilestone() {
+      if (!currentOfferId || !currentMilestoneId) {
+        setCurrentOfferName("");
+        setCurrentMilestoneName("");
+        return;
+      }
+      const [offerResult, milestoneResult] = await Promise.all([
+        supabase
+          .from("backup_company_offers")
+          .select("name")
+          .eq("glide_row_id", currentOfferId)
+          .maybeSingle(),
+        supabase
+          .from("backup_company_offer_milestones")
+          .select("name")
+          .eq("glide_row_id", currentMilestoneId)
+          .maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setCurrentOfferName(offerResult.data?.name ?? currentOfferId);
+      setCurrentMilestoneName(milestoneResult.data?.name ?? currentMilestoneId);
+    }
+    void loadCurrentMilestone();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentMilestoneId, currentOfferId]);
 
   useEffect(() => {
     if (successChoices.length === 0) return;
@@ -848,6 +904,57 @@ function QuickUpdateModal({
     }
     setNotes("");
     setSaveMessage("Quick Update saved to RetainOS pilot history.");
+  }
+
+  async function completeCurrentMilestone() {
+    if (
+      !isPilotCompany ||
+      !currentOfferId ||
+      !currentMilestoneId ||
+      completingMilestone
+    ) {
+      return;
+    }
+    setCompletingMilestone(true);
+    setSaveError(null);
+    setSaveMessage(null);
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-milestone",
+      {
+        body: {
+          action: "complete_milestone",
+          clientLegacyId: client.glide_row_id,
+          offerId: currentOfferId,
+          milestoneId: currentMilestoneId,
+          completionDate: new Date().toISOString(),
+          notes,
+        },
+      },
+    );
+    setCompletingMilestone(false);
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    const nextName =
+      typeof data?.nextMilestone?.name === "string"
+        ? data.nextMilestone.name
+        : "";
+    const nextId =
+      typeof data?.nextMilestone?.glide_row_id === "string"
+        ? data.nextMilestone.glide_row_id
+        : "";
+    if (nextId) setCurrentMilestoneId(nextId);
+    setCurrentMilestoneName(nextName || currentMilestoneName);
+    setSaveMessage(
+      nextName
+        ? `Milestone completed. ${nextName} is now current.`
+        : "Milestone completed.",
+    );
   }
 
   return (
@@ -975,6 +1082,32 @@ function QuickUpdateModal({
               onChange={setBuyInStatus}
             />
           </div>
+          <section className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  Current milestone
+                </h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  {currentMilestoneName
+                    ? `${currentOfferName || "Current offer"} / ${currentMilestoneName}`
+                    : "No current milestone is configured for this client."}
+                </p>
+              </div>
+              {currentMilestoneName ? (
+                <button
+                  type="button"
+                  onClick={completeCurrentMilestone}
+                  disabled={!isPilotCompany || saving || completingMilestone}
+                  className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
+                >
+                  {completingMilestone
+                    ? "Completing..."
+                    : "Complete current milestone"}
+                </button>
+              ) : null}
+            </div>
+          </section>
           <div
             className={`rounded-md border px-4 py-3 text-sm ${
               isPilotCompany
@@ -1084,6 +1217,7 @@ function NewClientModal({
   companyLegacyId,
   teamMembers,
   programChoices,
+  offers,
   assignedTeamMemberId,
   onClose,
   onCreated,
@@ -1091,6 +1225,7 @@ function NewClientModal({
   companyLegacyId: string;
   teamMembers: TeamMember[];
   programChoices: ProgramChoice[];
+  offers: Offer[];
   assignedTeamMemberId: string;
   onClose: () => void;
   onCreated: (client: ClientRow) => void;
@@ -1110,8 +1245,42 @@ function NewClientModal({
     programChoices[0]?.program_value ?? "front-end",
   );
   const [csmTeamMemberId, setCsmTeamMemberId] = useState(assignedTeamMemberId);
+  const [offerId, setOfferId] = useState("");
+  const [offerMilestones, setOfferMilestones] = useState<OfferMilestone[]>([]);
+  const [milestoneId, setMilestoneId] = useState("");
+  const [createInitialContract, setCreateInitialContract] = useState(false);
+  const [contractStartDate, setContractStartDate] = useState(today);
+  const [contractEndDate, setContractEndDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMilestones() {
+      if (!offerId) {
+        setOfferMilestones([]);
+        setMilestoneId("");
+        return;
+      }
+      const { data, error } = await supabase
+        .from("backup_company_offer_milestones")
+        .select("glide_row_id, offer_id, name, order")
+        .eq("offer_id", offerId)
+        .order("order", { ascending: true, nullsFirst: false });
+      if (cancelled) return;
+      if (error) {
+        setSaveError(error.message);
+        return;
+      }
+      const rows = (data ?? []) as OfferMilestone[];
+      setOfferMilestones(rows);
+      setMilestoneId(rows[0]?.glide_row_id ?? "");
+    }
+    void loadMilestones();
+    return () => {
+      cancelled = true;
+    };
+  }, [offerId]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1132,6 +1301,10 @@ function NewClientModal({
           dateOnboarded,
           programStatusValue,
           csmTeamMemberId,
+          offerId,
+          milestoneId,
+          contractStartDate: createInitialContract ? contractStartDate : "",
+          contractEndDate: createInitialContract ? contractEndDate : "",
         },
       },
     );
@@ -1291,6 +1464,88 @@ function NewClientModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
               />
             </label>
+            <div className="md:col-span-2 border-t border-gray-200 pt-4">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Initial journey and contract
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Optional setup that saves follow-up work after creating the client.
+              </p>
+            </div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Offer / Pathway
+              </span>
+              <select
+                value={offerId}
+                onChange={(event) => setOfferId(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                <option value="">Set up later</option>
+                {offers.map((offer) => (
+                  <option key={offer.glide_row_id} value={offer.glide_row_id}>
+                    {offer.name ?? "(unnamed)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Starting Milestone
+              </span>
+              <select
+                value={milestoneId}
+                onChange={(event) => setMilestoneId(event.target.value)}
+                disabled={saving || !offerId}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+              >
+                <option value="">
+                  {offerId ? "Select milestone" : "Select an offer first"}
+                </option>
+                {offerMilestones.map((milestone) => (
+                  <option key={milestone.glide_row_id} value={milestone.glide_row_id}>
+                    {milestone.name ?? "(unnamed)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 md:col-span-2">
+              <input
+                type="checkbox"
+                checked={createInitialContract}
+                onChange={(event) => setCreateInitialContract(event.target.checked)}
+                disabled={saving}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span className="text-sm font-medium text-gray-800">
+                Add initial contract now
+              </span>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Contract Start
+              </span>
+              <input
+                type="date"
+                value={contractStartDate}
+                onChange={(event) => setContractStartDate(event.target.value)}
+                disabled={saving || !createInitialContract}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Contract End / Renewal Date
+              </span>
+              <input
+                type="date"
+                value={contractEndDate}
+                onChange={(event) => setContractEndDate(event.target.value)}
+                disabled={saving || !createInitialContract}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
             {saveError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">
                 {saveError}
@@ -1399,6 +1654,61 @@ function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
+function PilotReminders({
+  reminders,
+  onOpenClient,
+}: {
+  reminders: PilotReminder[];
+  onOpenClient: (id: string) => void;
+}) {
+  if (reminders.length === 0) return null;
+  const today = dateKey(new Date());
+  return (
+    <section className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-amber-950">Pilot reminders</h2>
+          <p className="mt-1 text-sm text-amber-800">
+            Due or coming up in the next 7 days. Use the calendar for the full timeline.
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-800">
+          {reminders.length}
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-3">
+        {reminders.slice(0, 9).map((reminder) => {
+          const reminderKey = dateKeyFromValue(reminder.date);
+          const overdue = Boolean(reminderKey && reminderKey < today);
+          return (
+            <button
+              key={reminder.id}
+              type="button"
+              onClick={() => onOpenClient(reminder.client.glide_row_id)}
+              className="rounded-md border border-amber-200 bg-white px-3 py-2 text-left hover:border-amber-300 hover:bg-amber-100/40 cursor-pointer"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-sm font-semibold text-gray-900">
+                  {reminder.client.client_name ?? "Unnamed client"}
+                </span>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    overdue
+                      ? "bg-red-50 text-red-700"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {overdue ? "Overdue" : formatDate(reminder.date)}
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-gray-600">{reminder.label}</div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 export function Clients() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1448,6 +1758,7 @@ export function Clients() {
   const [calendarDate, setCalendarDate] = useState(() => new Date());
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [pilotReminders, setPilotReminders] = useState<PilotReminder[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [totalClients, setTotalClients] = useState(0);
@@ -1897,6 +2208,93 @@ export function Clients() {
   useEffect(() => {
     void loadCalendarClients();
   }, [loadCalendarClients]);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPilotReminders() {
+      if (
+        !appliedFilters.companyId ||
+        !appClientCompanyIds.has(appliedFilters.companyId)
+      ) {
+        setPilotReminders([]);
+        return;
+      }
+      let query = supabase
+        .from("clients")
+        .select("*")
+        .eq("company_glide_row_id", appliedFilters.companyId)
+        .range(0, 4999);
+      if (assignedTeamMemberId) {
+        query = query.or(
+          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+        );
+      }
+      const { data, error } = await query;
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load pilot reminders:", error);
+        setPilotReminders([]);
+        return;
+      }
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const oldest = new Date(start);
+      oldest.setDate(oldest.getDate() - 30);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 8);
+      const reminders: PilotReminder[] = [];
+      for (const rawClient of (data ?? []) as Record<string, unknown>[]) {
+        const client = mapAppClientRow(rawClient);
+        const candidates = [
+          {
+            type: "next-contact" as const,
+            label: "Next contact",
+            date: client.csm_date_of_next_contact,
+            enabled: ["front-end", "back-end"].includes(
+              String(client.program_status_value ?? ""),
+            ),
+          },
+          {
+            type: "renewal" as const,
+            label: "Contract renewal",
+            date: client.current_contract_end_date_for_filtering,
+            enabled: ["front-end", "back-end"].includes(
+              String(client.program_status_value ?? ""),
+            ),
+          },
+          {
+            type: "paused-return" as const,
+            label: "Paused client return",
+            date: client.program_paused_return_date,
+            enabled: client.program_status_value === "paused",
+          },
+        ];
+        for (const candidate of candidates) {
+          if (!candidate.enabled || typeof candidate.date !== "string") continue;
+          const date = new Date(candidate.date);
+          if (Number.isNaN(date.getTime()) || date < oldest || date >= end) continue;
+          reminders.push({
+            id: `${client.glide_row_id}:${candidate.type}`,
+            type: candidate.type,
+            label: candidate.label,
+            date: candidate.date,
+            client,
+          });
+        }
+      }
+      reminders.sort(
+        (a, b) =>
+          new Date(a.date).getTime() - new Date(b.date).getTime() ||
+          String(a.client.client_name ?? "").localeCompare(
+            String(b.client.client_name ?? ""),
+          ),
+      );
+      setPilotReminders(reminders);
+    }
+    void loadPilotReminders();
+    return () => {
+      cancelled = true;
+    };
+  }, [appClientCompanyIds, appliedFilters.companyId, assignedTeamMemberId]);
   function applyFilters() {
     if (!filters.companyId) return;
     const next = {
@@ -1977,6 +2375,10 @@ export function Clients() {
           ) : null}
         </div>
       </div>
+      <PilotReminders
+        reminders={pilotReminders}
+        onOpenClient={(id) => navigate(`/clients/${encodeURIComponent(id)}`)}
+      />
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
@@ -2458,6 +2860,7 @@ export function Clients() {
           companyLegacyId={appliedFilters.companyId || filters.companyId}
           teamMembers={teamMembers}
           programChoices={programChoices}
+          offers={offers}
           assignedTeamMemberId={assignedTeamMemberId}
           onClose={() => setNewClientOpen(false)}
           onCreated={(client) => {
