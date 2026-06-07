@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { supabase } from "./supabase.ts";
+import { withTimeout } from "./async.ts";
 
 const VIEW_AS_COMPANY_KEY = "retainOS.viewAsCompanyId.v1";
 
@@ -20,12 +21,37 @@ export type AccountRole =
 
 export type AccountStatus = "loading" | "ready" | "no_access";
 
-interface TeamMembershipRow {
+interface MirrorTeamMembershipRow {
   glide_row_id: string;
   company_id: string | null;
   role_id: number | null;
   role_read_only_user: boolean | null;
   is_archived: boolean | null;
+}
+
+interface AppTeamMembershipRow {
+  id: string;
+  legacy_glide_row_id: string | null;
+  company_id: string | null;
+  role: Exclude<AccountRole, "super_admin">;
+  is_read_only: boolean | null;
+  status: "active" | "archived" | null;
+  companies:
+    | {
+        legacy_glide_row_id: string | null;
+        migration_status: string | null;
+      }
+    | Array<{
+        legacy_glide_row_id: string | null;
+        migration_status: string | null;
+      }>
+    | null;
+}
+
+interface ResolvedMembership {
+  role: AccountRole;
+  companyId: string;
+  teamMemberId: string;
 }
 
 export interface AccountCapabilities {
@@ -92,12 +118,41 @@ function writeStoredViewAsCompanyId(companyId: string) {
   }
 }
 
-function roleFromMembership(row: TeamMembershipRow): AccountRole {
+function roleFromMirrorMembership(row: MirrorTeamMembershipRow): AccountRole {
   if (row.role_read_only_user) return "viewer";
   if (row.role_id === 1) return "director";
   if (row.role_id === 2) return "support";
   if (row.role_id === 3) return "csm";
   return "viewer";
+}
+
+function companyFromAppMembership(row: AppTeamMembershipRow) {
+  return Array.isArray(row.companies) ? row.companies[0] : row.companies;
+}
+
+function roleFromAppMembership(row: AppTeamMembershipRow): AccountRole {
+  if (row.is_read_only) return "viewer";
+  return row.role;
+}
+
+function resolveAppMembership(row: AppTeamMembershipRow): ResolvedMembership | null {
+  if (row.status !== "active") return null;
+  const company = companyFromAppMembership(row);
+  if (!company?.legacy_glide_row_id) return null;
+  return {
+    role: roleFromAppMembership(row),
+    companyId: company.legacy_glide_row_id,
+    teamMemberId: row.legacy_glide_row_id ?? row.id,
+  };
+}
+
+function resolveMirrorMembership(row: MirrorTeamMembershipRow): ResolvedMembership | null {
+  if (row.is_archived === true || !row.company_id) return null;
+  return {
+    role: roleFromMirrorMembership(row),
+    companyId: row.company_id,
+    teamMemberId: row.glide_row_id,
+  };
 }
 
 function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
@@ -150,9 +205,13 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (mounted) setEmail(user?.email ?? null);
-    });
+    withTimeout(supabase.auth.getUser(), 10000, "Auth user check")
+      .then(({ data: { user } }) => {
+        if (mounted) setEmail(user?.email ?? null);
+      })
+      .catch(() => {
+        if (mounted) setEmail(null);
+      });
 
     const {
       data: { subscription },
@@ -202,10 +261,68 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("backup_company_team")
-        .select("glide_row_id, company_id, role_id, role_read_only_user, is_archived")
-        .ilike("email", normalizedEmail);
+      let appData: AppTeamMembershipRow[] | null = null;
+      let mirrorData: MirrorTeamMembershipRow[] | null = null;
+      let error: { message: string } | null = null;
+
+      try {
+        const appResult = await withTimeout(
+          supabase
+            .from("company_members")
+            .select(
+              "id, legacy_glide_row_id, company_id, role, is_read_only, status, companies!inner(legacy_glide_row_id, migration_status)",
+            )
+            .ilike("email", normalizedEmail)
+            .in("companies.migration_status", ["pilot", "migrated"]),
+          12000,
+          "App account lookup",
+        );
+        appData = appResult.data as AppTeamMembershipRow[] | null;
+        error = appResult.error;
+
+        if (!error) {
+          const activeAppMemberships = (appData ?? [])
+            .map(resolveAppMembership)
+            .filter((membership): membership is ResolvedMembership =>
+              Boolean(membership),
+            );
+
+          if (activeAppMemberships.length > 0) {
+            if (activeAppMemberships.length > 1) {
+              setStatus("no_access");
+              setAccessIssue(
+                "This email belongs to multiple companies. Ask a Super Admin to clean up access before signing in.",
+              );
+              return;
+            }
+
+            const membership = activeAppMemberships[0];
+            setRole(membership.role);
+            setCompanyId(membership.companyId);
+            setTeamMemberId(membership.teamMemberId);
+            setStatus("ready");
+            return;
+          }
+        }
+
+        const mirrorResult = await withTimeout(
+          supabase
+            .from("backup_company_team")
+            .select("glide_row_id, company_id, role_id, role_read_only_user, is_archived")
+            .ilike("email", normalizedEmail),
+          12000,
+          "Mirror account lookup",
+        );
+        mirrorData = mirrorResult.data as MirrorTeamMembershipRow[] | null;
+        error = mirrorResult.error;
+      } catch (err) {
+        error = {
+          message:
+            err instanceof Error
+              ? err.message
+              : "Account lookup failed. Supabase may be temporarily unavailable.",
+        };
+      }
 
       if (cancelled) return;
 
@@ -215,10 +332,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const activeMemberships = ((data ?? []) as TeamMembershipRow[]).filter(
-        (membership) =>
-          membership.is_archived !== true && Boolean(membership.company_id),
-      );
+      const activeMemberships = (mirrorData ?? [])
+        .map(resolveMirrorMembership)
+        .filter((membership): membership is ResolvedMembership =>
+          Boolean(membership),
+        );
 
       if (activeMemberships.length === 0) {
         setStatus("no_access");
@@ -235,9 +353,9 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       }
 
       const membership = activeMemberships[0];
-      setRole(roleFromMembership(membership));
-      setCompanyId(membership.company_id ?? "");
-      setTeamMemberId(membership.glide_row_id);
+      setRole(membership.role);
+      setCompanyId(membership.companyId);
+      setTeamMemberId(membership.teamMemberId);
       setStatus("ready");
     }
 

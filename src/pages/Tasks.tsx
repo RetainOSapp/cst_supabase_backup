@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ProgramStatusPill } from "../lib/clientDisplay.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
+import { ComingSoonPanel } from "../components/ComingSoon.tsx";
 
 type ViewMode = "board" | "list";
 type StatusMode = "open" | "all" | "closed";
@@ -552,7 +553,6 @@ export function Tasks() {
   const {
     capabilities,
     effectiveCompanyId,
-    setViewAsCompanyId,
     teamMemberId,
   } = useAccountContext();
   const cached = useMemo(() => readTasksCache(), []);
@@ -579,7 +579,6 @@ export function Tasks() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [clientById, setClientById] = useState(new Map<string, ClientRow>());
   const [companyClients, setCompanyClients] = useState<ClientRow[]>([]);
-  const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -659,7 +658,6 @@ export function Tasks() {
             .filter((id): id is string => typeof id === "string" && id !== ""),
         ),
       );
-      setLoadingCompanies(false);
     }
     void loadCompanies();
   }, [canUseCompanySwitcher, effectiveCompanyId]);
@@ -673,14 +671,48 @@ export function Tasks() {
     let cancelled = false;
     async function loadTeam() {
       setLoadingTeam(true);
-      const { data, error } = await supabase
-        .from("backup_company_team")
-        .select("glide_row_id, name, is_archived, role_hide_from_csm_list")
-        .eq("company_id", companyId)
-        .order("name", { ascending: true });
+      let rows: TeamMember[] = [];
+      if (appTaskCompanyIds.has(companyId)) {
+        const { data: appCompany, error: companyError } = await supabase
+          .from("companies")
+          .select("id")
+          .eq("legacy_glide_row_id", companyId)
+          .in("migration_status", ["pilot", "migrated"])
+          .maybeSingle();
+        if (companyError) console.error("Failed to load app company:", companyError);
+        if (appCompany?.id) {
+          const { data, error } = await supabase
+            .from("company_members")
+            .select("id, legacy_glide_row_id, name, status, hide_from_csm_list")
+            .eq("company_id", appCompany.id)
+            .eq("status", "active")
+            .order("name", { ascending: true });
+          if (cancelled) return;
+          if (error) console.error("Failed to load app team members:", error);
+          rows = ((data ?? []) as Array<{
+            id: string;
+            legacy_glide_row_id: string | null;
+            name: string | null;
+            status: string | null;
+            hide_from_csm_list: boolean | null;
+          }>).map((member) => ({
+            glide_row_id: member.legacy_glide_row_id ?? member.id,
+            name: member.name,
+            is_archived: member.status === "archived",
+            role_hide_from_csm_list: member.hide_from_csm_list,
+          }));
+        }
+      } else {
+        const { data, error } = await supabase
+          .from("backup_company_team")
+          .select("glide_row_id, name, is_archived, role_hide_from_csm_list")
+          .eq("company_id", companyId)
+          .order("name", { ascending: true });
+        if (cancelled) return;
+        if (error) console.error("Failed to load team members:", error);
+        rows = (data ?? []) as TeamMember[];
+      }
       if (cancelled) return;
-      if (error) console.error("Failed to load team members:", error);
-      const rows = (data ?? []) as TeamMember[];
       setTeamMembers(rows);
       if (
         csmId &&
@@ -695,7 +727,7 @@ export function Tasks() {
     return () => {
       cancelled = true;
     };
-  }, [assignedTeamMemberId, companyId, csmId]);
+  }, [appTaskCompanyIds, assignedTeamMemberId, companyId, csmId]);
 
   useEffect(() => {
     if (!companyId) {
@@ -895,36 +927,7 @@ export function Tasks() {
       </div>
 
       <div className="mb-5 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
-          <div>
-            <label
-              htmlFor="tasks-company"
-              className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
-            >
-              Company
-            </label>
-            <select
-              id="tasks-company"
-              value={companyId}
-              onChange={(event) => {
-                if (canUseCompanySwitcher) setViewAsCompanyId(event.target.value);
-                setCompanyId(event.target.value);
-                setCsmId(assignedTeamMemberId);
-              }}
-              disabled={loadingCompanies || !canUseCompanySwitcher}
-              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              <option value="">
-                {loadingCompanies ? "Loading companies..." : "Select company"}
-              </option>
-              {companies.map((company) => (
-                <option key={company.glide_row_id} value={company.glide_row_id}>
-                  {company.name ?? "(unnamed)"}
-                </option>
-              ))}
-            </select>
-          </div>
-
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           {!capabilities.canViewOnlyAssignedClients && (
             <div>
               <label
@@ -1092,6 +1095,13 @@ export function Tasks() {
           ))}
         </div>
       )}
+      <div className="mt-6">
+        <ComingSoonPanel
+          compact
+          title="Expanded Tasks"
+          description="Task editing, richer assignment workflows, notifications, recurring tasks, and deeper task automation will be added after the pilot."
+        />
+      </div>
       {newTaskOpen ? (
         <NewTaskModal
           companyId={companyId}

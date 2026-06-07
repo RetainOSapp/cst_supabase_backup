@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import type { ReactNode } from "react";
 import { AuthGuard } from "./components/AuthGuard.tsx";
-import { Header } from "./components/Header.tsx";
+import { AppShell } from "./components/Header.tsx";
 import { AccountProvider, useAccountContext } from "./lib/accountContext.tsx";
 import { Login } from "./pages/Login.tsx";
 import { Tables } from "./pages/Tables.tsx";
@@ -14,6 +14,7 @@ import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { Tasks } from "./pages/Tasks.tsx";
 import { SaasClients } from "./pages/SaasClients.tsx";
 import { SaasClientDetail } from "./pages/SaasClientDetail.tsx";
+import { ComingSoonPage } from "./components/ComingSoon.tsx";
 
 function NoPermission() {
   return (
@@ -66,7 +67,7 @@ function AccountShell() {
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-600" />
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
       </div>
     );
   }
@@ -85,9 +86,8 @@ function AccountShell() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header />
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6 sm:px-6 lg:px-8">
+    <AppShell>
+      <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
         <Routes>
           <Route index element={<DefaultRoute />} />
           <Route
@@ -155,6 +155,17 @@ function AccountShell() {
             }
           />
           <Route
+            path="groups"
+            element={
+              <RequireCapability allowed={capabilities.canAccessClients}>
+                <ComingSoonPage
+                  title="Groups"
+                  description="Group cohorts, shared client journeys, and group-level management will be added in a later rollout phase."
+                />
+              </RequireCapability>
+            }
+          />
+          <Route
             path="admin"
             element={
               <RequireCapability allowed={capabilities.canAccessAdminHub}>
@@ -181,7 +192,7 @@ function AccountShell() {
           <Route path="*" element={<DefaultRoute />} />
         </Routes>
       </main>
-    </div>
+    </AppShell>
   );
 }
 

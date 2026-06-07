@@ -17,6 +17,7 @@ import { OffBoardedClientsKpi } from "../components/dashboard/kpis/OffBoardedCli
 import { RetainedClientsKpi } from "../components/dashboard/kpis/RetainedClientsKpi.tsx";
 import { RetentionPercentageKpi } from "../components/dashboard/kpis/RetentionPercentageKpi.tsx";
 import { UpForRenewalKpi } from "../components/dashboard/kpis/UpForRenewalKpi.tsx";
+import { ComingSoonModal, ComingSoonPanel } from "../components/ComingSoon.tsx";
 import { supabase } from "../lib/supabase.ts";
 import { type DashboardKpiSqlParams } from "../lib/dashboardKpiSql.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
@@ -49,6 +50,8 @@ interface DashboardRpcFilterParams {
   p_csm_id: string | null;
   p_secondary_assignee_id: string | null;
   p_program_value: string | null;
+  p_program_values?: string[] | null;
+  p_offer_id?: string | null;
   p_client_start_date_from: string | null;
   p_client_start_date_to: string | null;
   p_date_range_start: string | null;
@@ -71,12 +74,11 @@ interface RetentionKpiCountsRow {
   active_renewing_clients: number | null;
 }
 
-interface ClientsListRow {
-  glide_row_id: string;
-  client_name: string | null;
-  client_image: string | null;
-  csm_team_member_id: string | null;
-  total_count: number | string | null;
+interface CanonicalKpiCountsRow
+  extends PrimaryKpiCountsRow,
+    RetentionKpiCountsRow {
+  paused_clients: number | null;
+  suspended_clients: number | null;
 }
 
 interface Company {
@@ -167,6 +169,11 @@ type ChartClientRow = Record<string, unknown> & {
   csm_team_member_id: string | null;
   csm_secondary_assignee_id?: string | null;
   client_age_date_onboarded?: string | null;
+  client_age_date_offboarded?: string | null;
+  client_age_date_offboarded_for_filtering?: string | null;
+  current_contract_start_date?: string | null;
+  current_contract_of_days?: number | null;
+  current_contract_end_date?: string | null;
 };
 
 interface ProfileUpkeepHistoryRow {
@@ -1154,7 +1161,6 @@ export function Dashboard() {
   const {
     capabilities,
     effectiveCompanyId,
-    setViewAsCompanyId,
     teamMemberId,
   } = useAccountContext();
   const [pendingFilters, setPendingFilters] = useState(() =>
@@ -1166,6 +1172,7 @@ export function Dashboard() {
   const [reportVersion, setReportVersion] = useState(0);
   const [activeDashboardTab, setActiveDashboardTab] =
     useState<DashboardTab>("overview");
+  const [exportComingSoon, setExportComingSoon] = useState(false);
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [appCompanyByLegacyId, setAppCompanyByLegacyId] = useState(
@@ -1214,16 +1221,8 @@ export function Dashboard() {
   });
   const [capacityRows, setCapacityRows] = useState<CapacityRow[]>([]);
   const [chartClients, setChartClients] = useState<ChartClientRow[]>([]);
-  const [profileUpkeep, setProfileUpkeep] =
+  const [, setProfileUpkeep] =
     useState<ProfileUpkeepSummary | null>(null);
-  const [profileUpkeepDetail, setProfileUpkeepDetail] = useState<{
-    title: string;
-    summary: string;
-    updatedLabel: string;
-    missingLabel: string;
-    updated: ProfileUpkeepSummary["clients"];
-    missing: ProfileUpkeepSummary["clients"];
-  } | null>(null);
   const [chartDetail, setChartDetail] = useState<{
     title: string;
     rows: ChartClientRow[];
@@ -1490,37 +1489,6 @@ export function Dashboard() {
     });
   };
 
-  const openProfileUpkeepFieldDetail = (
-    field: ProfileUpkeepFieldKey,
-    label: string,
-  ) => {
-    if (!profileUpkeep) return;
-    const updated = profileUpkeep.clients.filter((row) => row.fields[field]);
-    const missing = profileUpkeep.clients.filter((row) => !row.fields[field]);
-    setProfileUpkeepDetail({
-      title: `Profile Upkeep: ${label}`,
-      summary: `${updated.length.toLocaleString()} updated · ${missing.length.toLocaleString()} not updated`,
-      updatedLabel: `${label} updated`,
-      missingLabel: `${label} not updated`,
-      updated,
-      missing,
-    });
-  };
-
-  const openProfileUpkeepCompleteDetail = () => {
-    if (!profileUpkeep) return;
-    const complete = profileUpkeep.clients.filter((row) => row.complete);
-    const incomplete = profileUpkeep.clients.filter((row) => !row.complete);
-    setProfileUpkeepDetail({
-      title: "Profile Upkeep: Complete Profiles",
-      summary: `${complete.length.toLocaleString()} complete · ${incomplete.length.toLocaleString()} incomplete`,
-      updatedLabel: "Complete profiles",
-      missingLabel: "Incomplete profiles",
-      updated: complete,
-      missing: incomplete,
-    });
-  };
-
   const copyKpiSql = async () => {
     if (!kpiInfoModal?.sql) return;
     try {
@@ -1544,6 +1512,9 @@ export function Dashboard() {
         : null,
       p_program_value:
         appliedProgramValues.length === 1 ? appliedProgramValues[0] : null,
+      p_program_values:
+        appliedProgramValues.length > 0 ? appliedProgramValues : null,
+      p_offer_id: appliedFilters.offerId || null,
       p_client_start_date_from: appliedFilters.clientStartDate.startDate || null,
       p_client_start_date_to: appliedFilters.clientStartDate.endDate || null,
       p_date_range_start: appliedFilters.dateRange.startDate || null,
@@ -1556,6 +1527,7 @@ export function Dashboard() {
       appliedFilters.dateRange.startDate,
       appliedFilters.companyId,
       appliedFilters.csmId,
+      appliedFilters.offerId,
       appliedProgramValues,
       appliedFilters.secondaryAssigneeId,
       appliedShowSecondaryFilter,
@@ -1584,6 +1556,7 @@ export function Dashboard() {
       appliedFilters.dateRange.endDate,
       appliedFilters.companyId,
       appliedFilters.csmId,
+      appliedFilters.offerId,
       appliedProgramValues,
       appliedFilters.secondaryAssigneeId,
       appliedShowSecondaryFilter,
@@ -1684,64 +1657,42 @@ export function Dashboard() {
       setTeamMembersLoading(true);
 
       const appCompany = appCompanyByLegacyId.get(pendingFilters.companyId);
-      const appTeamQuery = appCompany
-        ? supabase
-            .from("company_members")
-            .select(
-              "id, legacy_glide_row_id, name, email, role, hide_from_csm_list, capacity_number, status",
-            )
-            .eq("company_id", appCompany.id)
-            .eq("status", "active")
-            .order("name", { ascending: true })
-        : Promise.resolve({ data: [], error: null });
-      const backupTeamQuery = supabase
-        .from("backup_company_team")
-        .select(
-          "glide_row_id, name, email, is_archived, role_id, role_read_only_user, role_hide_from_csm_list, capacity_number",
-        )
-        .eq("company_id", pendingFilters.companyId)
-        .order("name", { ascending: true });
-
-      const [appResult, backupResult] = await Promise.all([
-        appTeamQuery,
-        backupTeamQuery,
-      ]);
-
-      if (cancelled) return;
-
-      if (appResult.error) console.error("Failed to load app team members:", appResult.error);
-      if (backupResult.error) console.error("Failed to load team members:", backupResult.error);
-
-      if (backupResult.error && appResult.error) {
-        setTeamMembers([]);
+      if (appCompany) {
+        const { data, error } = await supabase
+          .from("company_members")
+          .select(
+            "id, legacy_glide_row_id, name, email, role, hide_from_csm_list, capacity_number, status",
+          )
+          .eq("company_id", appCompany.id)
+          .eq("status", "active")
+          .order("name", { ascending: true });
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to load app team members:", error);
+          setTeamMembers([]);
+        } else {
+          setTeamMembers(
+            ((data ?? []) as unknown as TeamMember[]).map((member) => ({
+              ...member,
+              glide_row_id: member.legacy_glide_row_id || member.id || "",
+              is_archived: false,
+            })),
+          );
+        }
       } else {
-        const backupRows = ((backupResult.data ?? []) as unknown as TeamMember[]).map(
+        const { data, error } = await supabase
+          .from("backup_company_team")
+          .select(
+            "glide_row_id, name, email, is_archived, role_id, role_read_only_user, role_hide_from_csm_list, capacity_number",
+          )
+          .eq("company_id", pendingFilters.companyId)
+          .order("name", { ascending: true });
+        if (cancelled) return;
+        if (error) console.error("Failed to load team members:", error);
+        const rows = ((data ?? []) as unknown as TeamMember[]).map(
           (member) => ({ ...member, glide_row_id: member.glide_row_id ?? "" }),
         );
-        const backupByLegacyId = new Map(
-          backupRows.map((member) => [member.glide_row_id, member]),
-        );
-        const merged: TeamMember[] = ((appResult.data ?? []) as unknown as TeamMember[]).map(
-          (member) => {
-            const legacyId = member.legacy_glide_row_id ?? "";
-            const backup = backupByLegacyId.get(legacyId);
-            return {
-              ...backup,
-              ...member,
-              glide_row_id: legacyId || member.id || "",
-              name: member.name || backup?.name || "Unassigned",
-              email: member.email || backup?.email || null,
-              capacity_number:
-                member.capacity_number ?? backup?.capacity_number ?? null,
-              is_archived: false,
-            };
-          },
-        );
-        const legacyIds = new Set(merged.map((member) => member.glide_row_id ?? ""));
-        for (const member of backupRows) {
-          if (!legacyIds.has(member.glide_row_id ?? "")) merged.push(member);
-        }
-        setTeamMembers(merged);
+        setTeamMembers(rows);
       }
 
       setTeamMembersLoading(false);
@@ -1766,11 +1717,19 @@ export function Dashboard() {
     async function loadOffers() {
       setOffersLoading(true);
 
-      const { data, error } = await supabase
-        .from("backup_company_offers")
-        .select("glide_row_id, name")
-        .eq("company_id", pendingFilters.companyId)
-        .order("name", { ascending: true });
+      const appCompany = appCompanyByLegacyId.get(pendingFilters.companyId);
+      const { data, error } = appCompany
+        ? await supabase
+            .from("company_offers")
+            .select("glide_row_id, name")
+            .eq("company_id", appCompany.id)
+            .eq("status", "active")
+            .order("name", { ascending: true })
+        : await supabase
+            .from("backup_company_offers")
+            .select("glide_row_id, name")
+            .eq("company_id", pendingFilters.companyId)
+            .order("name", { ascending: true });
 
       if (cancelled) return;
 
@@ -1789,7 +1748,7 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [pendingFilters.companyId]);
+  }, [appCompanyByLegacyId, pendingFilters.companyId]);
 
   useEffect(() => {
     if (!pendingFilters.companyId || baseProgramChoices.length > 0) return;
@@ -1928,6 +1887,11 @@ export function Dashboard() {
     }
 
     let cancelled = false;
+    const {
+      p_program_values: _canonicalProgramValues,
+      p_offer_id: _canonicalOfferId,
+      ...legacyRpcFilterParams
+    } = rpcFilterParams;
 
     async function loadClientSideFilteredKpis() {
       setPrimaryKpiLoading(true);
@@ -2218,12 +2182,58 @@ export function Dashboard() {
       setRetentionKpiLoading(false);
     }
 
+    async function loadCanonicalKpis() {
+      setPrimaryKpiLoading(true);
+      setRetentionKpiLoading(true);
+
+      const { data, error } = await supabase.rpc(
+        "dashboard_kpi_counts_canonical",
+        {
+          p_company_id: rpcFilterParams.p_company_id,
+          p_csm_id: assignedTeamMemberId || rpcFilterParams.p_csm_id,
+          p_secondary_assignee_id: rpcFilterParams.p_secondary_assignee_id,
+          p_program_values: rpcFilterParams.p_program_values ?? null,
+          p_offer_id: rpcFilterParams.p_offer_id ?? null,
+          p_client_start_date_from: rpcFilterParams.p_client_start_date_from,
+          p_client_start_date_to: rpcFilterParams.p_client_start_date_to,
+          p_date_range_start: rpcFilterParams.p_date_range_start,
+          p_date_range_end: rpcFilterParams.p_date_range_end,
+        },
+      );
+
+      if (cancelled) return true;
+
+      if (error) {
+        console.error("Failed to load canonical dashboard KPIs:", error);
+        return false;
+      }
+
+      const row = ((data ?? []) as CanonicalKpiCountsRow[])[0] ?? null;
+      setActiveClients(Number(row?.active_clients ?? 0));
+      setFrontEndClients(Number(row?.front_end_clients ?? 0));
+      setBackEndClients(Number(row?.back_end_clients ?? 0));
+      setOffBoardedClients(Number(row?.off_boarded_clients ?? 0));
+      setChurnedClientsCount(Number(row?.churned_clients ?? 0));
+      setChurnPercentage(
+        row?.churn_percentage == null ? 0 : Number(row.churn_percentage),
+      );
+      setRetainedClients(Number(row?.retained_clients ?? 0));
+      setRenewingClientsCount(Number(row?.renewing_clients ?? 0));
+      setRetentionPercentage(
+        row?.retention_percentage == null ? 0 : Number(row.retention_percentage),
+      );
+      setActiveRenewingClients(Number(row?.active_renewing_clients ?? 0));
+      setPrimaryKpiLoading(false);
+      setRetentionKpiLoading(false);
+      return true;
+    }
+
     async function loadPrimaryKpis() {
       setPrimaryKpiLoading(true);
 
       const { data, error } = await supabase.rpc(
         "dashboard_kpi_counts_primary",
-        rpcFilterParams,
+        legacyRpcFilterParams,
       );
 
       if (cancelled) return;
@@ -2256,7 +2266,7 @@ export function Dashboard() {
 
       const { data, error } = await supabase.rpc(
         "dashboard_kpi_counts_retention",
-        rpcFilterParams,
+        legacyRpcFilterParams,
       );
 
       if (cancelled) return;
@@ -2280,12 +2290,21 @@ export function Dashboard() {
       setRetentionKpiLoading(false);
     }
 
-    if (appliedUsesAppClients || appliedFilters.offerId || appliedProgramValues.length > 1) {
-      void loadClientSideFilteredKpis();
-    } else {
-      loadPrimaryKpis();
-      loadRetentionKpis();
-    }
+    void (async () => {
+      const loadedCanonical = await loadCanonicalKpis();
+      if (cancelled || loadedCanonical) return;
+
+      if (
+        appliedUsesAppClients ||
+        appliedFilters.offerId ||
+        appliedProgramValues.length > 1
+      ) {
+        await loadClientSideFilteredKpis();
+      } else {
+        loadPrimaryKpis();
+        loadRetentionKpis();
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -2322,34 +2341,318 @@ export function Dashboard() {
 
     async function loadDetailRows() {
       setDetailLoading(true);
+      const clientSourceTable = appliedUsesAppClients
+        ? "clients"
+        : "backup_company_clients";
+      const companyColumn = appliedUsesAppClients
+        ? "company_glide_row_id"
+        : "company_id";
+      let clientsQuery = supabase
+        .from(clientSourceTable)
+        .select(
+          [
+            "glide_row_id",
+            "client_name",
+            "client_image",
+            ...(appliedUsesAppClients ? ["company_glide_row_id"] : []),
+            "csm_team_member_id",
+            "csm_secondary_assignee_id",
+            "program_status_value",
+            "offer_milestones_current_offer_id",
+            "client_age_date_onboarded",
+            "client_age_date_offboarded",
+            "client_age_date_offboarded_for_filtering",
+            "current_contract_start_date",
+            "current_contract_of_days",
+            "current_contract_end_date",
+          ].join(", "),
+        )
+        .eq(companyColumn, appliedFilters.companyId)
+        .range(0, 4999);
 
-      const { data, error } = await supabase.rpc("dashboard_clients_list", {
-        ...rpcFilterParams,
-        p_detail_key: detailKey,
-        p_search: detailSearch || null,
-        p_limit: DETAIL_PAGE_SIZE,
-        p_offset: (detailPage - 1) * DETAIL_PAGE_SIZE,
-      });
+      if (appliedFilters.offerId) {
+        clientsQuery = clientsQuery.eq(
+          "offer_milestones_current_offer_id",
+          appliedFilters.offerId,
+        );
+      }
+      if (assignedTeamMemberId) {
+        clientsQuery = clientsQuery.or(
+          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+        );
+      } else if (appliedFilters.csmId) {
+        clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
+      }
+      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+        clientsQuery = clientsQuery.eq(
+          "csm_secondary_assignee_id",
+          appliedFilters.secondaryAssigneeId,
+        );
+      }
+      if (appliedProgramValues.length === 1) {
+        clientsQuery = clientsQuery.eq("program_status_value", appliedProgramValues[0]);
+      } else if (appliedProgramValues.length > 1) {
+        clientsQuery = clientsQuery.in("program_status_value", appliedProgramValues);
+      }
+      if (appliedFilters.clientStartDate.startDate) {
+        clientsQuery = clientsQuery.gte(
+          "client_age_date_onboarded",
+          `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
+        );
+      }
+      if (appliedFilters.clientStartDate.endDate) {
+        clientsQuery = clientsQuery.lt(
+          "client_age_date_onboarded",
+          addDays(
+            new Date(`${appliedFilters.clientStartDate.endDate}T00:00:00.000Z`),
+            1,
+          ).toISOString(),
+        );
+      }
 
+      const { data: clientRows, error: clientsError } = await clientsQuery;
       if (cancelled) return;
 
-      if (error) {
-        console.error("Failed to load KPI detail rows:", error);
+      if (clientsError) {
+        console.error("Failed to load KPI detail clients:", clientsError);
         setDetailRows([]);
         setDetailTotalCount(0);
-      } else {
-        const rows = ((data ?? []) as ClientsListRow[]);
-        const totalCount = rows.length > 0 ? Number(rows[0].total_count ?? 0) : 0;
-        setDetailRows(
-          rows.map((row) => ({
-            glide_row_id: row.glide_row_id,
-            client_name: row.client_name,
-            client_image: row.client_image,
-            csm_team_member_id: row.csm_team_member_id,
-          })),
-        );
-        setDetailTotalCount(totalCount);
+        setDetailLoading(false);
+        return;
       }
+
+      const clients = (clientRows ?? []) as unknown as OfferKpiClientRow[];
+      const reportClients = clients.filter((client) =>
+        passesReportEndDate(client, appliedFilters.dateRange.endDate),
+      );
+      const clientIds = reportClients
+        .map((client) => client.glide_row_id)
+        .filter(Boolean);
+      const clientById = new Map(
+        reportClients.map((client) => [client.glide_row_id, client]),
+      );
+      let retainedIds = new Set<string>();
+      let renewingIds = new Set<string>();
+      let churnedIds = new Set<string>();
+
+      if (
+        ["retained", "renewing", "active-renewing", "churned"].includes(
+          detailKey,
+        ) &&
+        clientIds.length > 0
+      ) {
+        const appHistoryQuery = appliedUsesAppClients
+          ? supabase
+              .from("client_history_events")
+              .select("legacy_client_glide_row_id, event_type, payload")
+              .in("legacy_client_glide_row_id", clientIds)
+              .in("event_type", [
+                "client_status_changed",
+                "client_retention_recorded",
+              ])
+              .gte(
+                "created_at",
+                appliedFilters.dateRange.startDate
+                  ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+                  : "0001-01-01T00:00:00.000Z",
+              )
+              .lt(
+                "created_at",
+                appliedFilters.dateRange.endDate
+                  ? addDays(
+                      new Date(
+                        `${appliedFilters.dateRange.endDate}T00:00:00.000Z`,
+                      ),
+                      1,
+                    ).toISOString()
+                  : "9999-12-31T00:00:00.000Z",
+              )
+          : Promise.resolve({ data: [], error: null });
+        const appContractsQuery = appliedUsesAppClients
+          ? supabase
+              .from("client_contracts")
+              .select("client_id, end_date")
+              .in("client_id", clientIds)
+              .is("archived_at", null)
+              .not("end_date", "is", null)
+          : Promise.resolve({ data: [], error: null });
+
+        const [
+          appHistoryResult,
+          legacyHistoryResult,
+          appContractsResult,
+          legacyContractsResult,
+        ] = await Promise.all([
+          appHistoryQuery,
+          supabase
+            .from("backup_company_clients_history")
+            .select("client_id")
+            .in("client_id", clientIds)
+            .eq("change_type_code", "program-status")
+            .in("value", ["front-end", "back-end"])
+            .in("original_value", ["front-end", "back-end"])
+            .gte(
+              "modified_date",
+              appliedFilters.dateRange.startDate
+                ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+                : "0001-01-01T00:00:00.000Z",
+            )
+            .lt(
+              "modified_date",
+              appliedFilters.dateRange.endDate
+                ? addDays(
+                    new Date(
+                      `${appliedFilters.dateRange.endDate}T00:00:00.000Z`,
+                    ),
+                    1,
+                  ).toISOString()
+                : "9999-12-31T00:00:00.000Z",
+            ),
+          appContractsQuery,
+          supabase
+            .from("backup_company_clients_contracts")
+            .select("client_id, end_date")
+            .in("client_id", clientIds)
+            .not("end_date", "is", null),
+        ]);
+
+        if (cancelled) return;
+
+        if (appHistoryResult.error) {
+          console.error("Failed to load app-owned KPI detail history:", appHistoryResult.error);
+        }
+        if (legacyHistoryResult.error) {
+          console.error("Failed to load legacy KPI detail history:", legacyHistoryResult.error);
+        }
+        if (appContractsResult.error) {
+          console.error("Failed to load app-owned KPI detail contracts:", appContractsResult.error);
+        }
+        if (legacyContractsResult.error) {
+          console.error("Failed to load legacy KPI detail contracts:", legacyContractsResult.error);
+        }
+
+        retainedIds = new Set<string>();
+        ((appHistoryResult.data ?? []) as AppKpiHistoryRow[]).forEach((row) => {
+          const clientId = row.legacy_client_glide_row_id;
+          if (!clientId) return;
+          if (
+            row.event_type === "client_retention_recorded" ||
+            isRetainedStatusTransition(
+              stringFromPayload(row.payload, "from_status"),
+              stringFromPayload(row.payload, "to_status"),
+            )
+          ) {
+            retainedIds.add(clientId);
+          }
+        });
+        ((legacyHistoryResult.data ?? []) as OfferKpiHistoryRow[])
+          .map((row) => row.client_id)
+          .filter((id): id is string => Boolean(id))
+          .forEach((id) => retainedIds.add(id));
+
+        churnedIds = new Set(
+          reportClients
+            .filter((client) =>
+              isChurnedClient(
+                client,
+                appliedFilters.dateRange.startDate,
+                appliedFilters.dateRange.endDate,
+              ),
+            )
+            .map((client) => client.glide_row_id),
+        );
+
+        renewingIds = new Set<string>();
+        reportClients.forEach((client) => {
+          if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+          if (churnedIds.has(client.glide_row_id)) return;
+          const contractEnd = calculatedContractEndDate(client);
+          if (
+            contractEnd &&
+            isInDateRange(
+              contractEnd,
+              appliedFilters.dateRange.startDate,
+              appliedFilters.dateRange.endDate,
+            )
+          ) {
+            renewingIds.add(client.glide_row_id);
+          }
+        });
+
+        const contractRows = [
+          ...((appContractsResult.data ?? []) as OfferKpiContractRow[]),
+          ...((legacyContractsResult.data ?? []) as OfferKpiContractRow[]),
+        ];
+        contractRows.forEach((contract) => {
+          if (!contract.client_id || !contract.end_date) return;
+          const client = clientById.get(contract.client_id);
+          if (!client) return;
+          if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+          if (churnedIds.has(contract.client_id)) return;
+          if (
+            isInDateRange(
+              contract.end_date,
+              appliedFilters.dateRange.startDate,
+              appliedFilters.dateRange.endDate,
+            )
+          ) {
+            renewingIds.add(contract.client_id);
+          }
+        });
+      }
+
+      let rows = reportClients.filter((client) => {
+        if (detailKey === "active") {
+          return ["front-end", "back-end"].includes(client.program_status_value ?? "");
+        }
+        if (detailKey === "front-end" || detailKey === "back-end") {
+          return client.program_status_value === detailKey;
+        }
+        if (detailKey === "off-boarded") {
+          return (
+            client.program_status_value === "off-boarded" &&
+            isInDateRange(
+              calculatedOffboardedDate(client),
+              appliedFilters.dateRange.startDate,
+              appliedFilters.dateRange.endDate,
+            )
+          );
+        }
+        if (detailKey === "churned") return churnedIds.has(client.glide_row_id);
+        if (detailKey === "retained") return retainedIds.has(client.glide_row_id);
+        if (detailKey === "renewing") return renewingIds.has(client.glide_row_id);
+        if (detailKey === "active-renewing") {
+          return (
+            renewingIds.has(client.glide_row_id) &&
+            ["front-end", "back-end"].includes(client.program_status_value ?? "") &&
+            !retainedIds.has(client.glide_row_id)
+          );
+        }
+        return false;
+      });
+
+      const search = detailSearch.trim().toLowerCase();
+      if (search) {
+        rows = rows.filter((client) =>
+          String(client.client_name ?? "").toLowerCase().includes(search),
+        );
+      }
+
+      rows = rows.sort((a, b) =>
+        String(a.client_name ?? "").localeCompare(String(b.client_name ?? "")),
+      );
+      const totalCount = rows.length;
+      const start = (detailPage - 1) * DETAIL_PAGE_SIZE;
+      const pageRows = rows.slice(start, start + DETAIL_PAGE_SIZE);
+      setDetailRows(
+        pageRows.map((row) => ({
+          glide_row_id: row.glide_row_id,
+          client_name: row.client_name,
+          client_image: row.client_image,
+          csm_team_member_id: row.csm_team_member_id,
+        })),
+      );
+      setDetailTotalCount(totalCount);
 
       setDetailLoading(false);
     }
@@ -2362,10 +2665,23 @@ export function Dashboard() {
   }, [
     activeDetailKey,
     appliedFilters.companyId,
+    appliedFilters.clientStartDate.endDate,
+    appliedFilters.clientStartDate.startDate,
+    appliedFilters.csmId,
+    appliedFilters.dateRange.endDate,
+    appliedFilters.dateRange.startDate,
+    appliedFilters.offerId,
+    appliedFilters.program,
+    appliedFilters.secondaryAssigneeId,
+    appliedProgramValues,
+    appliedShowSecondaryFilter,
+    appliedUsesAppClients,
+    assignedTeamMemberId,
     detailPage,
     detailSearch,
-    rpcFilterParams,
   ]);
+
+  const shouldLoadDashboardCharts = activeDashboardTab === "charts";
 
   useEffect(() => {
     if (!appliedFilters.companyId) {
@@ -2380,6 +2696,11 @@ export function Dashboard() {
       setCapacityRows([]);
       setChartClients([]);
       setProfileUpkeep(null);
+      setChartsLoading(false);
+      return;
+    }
+
+    if (!shouldLoadDashboardCharts) {
       setChartsLoading(false);
       return;
     }
@@ -2599,7 +2920,7 @@ export function Dashboard() {
 
       if (offerIds.length > 0) {
         const { data: offers, error: offersError } = await supabase
-          .from("backup_company_offers")
+          .from(appliedUsesAppClients ? "company_offers" : "backup_company_offers")
           .select("glide_row_id, name")
           .in("glide_row_id", offerIds);
         if (!cancelled) {
@@ -2656,8 +2977,10 @@ export function Dashboard() {
     appliedAppCompany?.id,
     appliedUsesAppClients,
     activeManagerIds,
+    activeDashboardTab,
     assignedTeamMemberId,
     availableTeamMembers,
+    shouldLoadDashboardCharts,
     teamMemberNameById,
     reportVersion,
   ]);
@@ -2670,48 +2993,19 @@ export function Dashboard() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-gray-900">Dashboard</h1>
+        <button
+          type="button"
+          onClick={() => setExportComingSoon(true)}
+          className="rounded-full border border-[#59abf0] bg-white px-5 py-2 text-sm font-semibold text-[#2b79c4] hover:bg-[#eaf4fe]"
+        >
+          Export
+        </button>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 mb-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <label
-              htmlFor="company-filter"
-              className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1"
-            >
-              Company
-            </label>
-            <select
-              id="company-filter"
-              value={pendingFilters.companyId}
-              onChange={(e) => {
-                const id = e.target.value;
-                if (canUseCompanySwitcher) setViewAsCompanyId(id);
-                setPendingFilters((p) => ({
-                  ...p,
-                  companyId: id,
-                  csmId: assignedTeamMemberId,
-                  secondaryAssigneeId: "",
-                  offerId: "",
-                  ...(id ? {} : { program: "" }),
-                }));
-              }}
-              disabled={companiesLoading || !canUseCompanySwitcher}
-              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-            >
-              <option value="">
-                {companiesLoading ? "Loading companies..." : "Select a company"}
-              </option>
-              {companies.map((company) => (
-                <option key={company.glide_row_id} value={company.glide_row_id}>
-                  {company.name ?? "(unnamed)"}
-                </option>
-              ))}
-            </select>
-          </div>
-
           {showCompanyScopedFilters && (
             <>
               {!capabilities.canViewOnlyAssignedClients && (
@@ -2966,105 +3260,6 @@ export function Dashboard() {
             />
           </div>
 
-          <div className="pt-2">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
-              Profile Upkeep
-            </h2>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-gray-500">
-                  Profile Updated Score
-                </div>
-                <div className="mt-2 flex items-end gap-3">
-                  <div className="text-4xl font-semibold text-gray-900">
-                    {chartsLoading || !profileUpkeep
-                      ? "--"
-                      : `${profileUpkeep.averageScore}%`}
-                  </div>
-                  <div className="pb-1 text-sm text-gray-500">
-                    {chartsLoading || !profileUpkeep
-                      ? "Checking active clients"
-                      : `${profileUpkeep.freshFieldCount}/${profileUpkeep.checkedFieldCount} fields fresh`}
-                  </div>
-                </div>
-                <p className="mt-2 text-sm text-gray-500">
-                  Active clients only. Fields count as fresh when updated in the last{" "}
-                  {PROFILE_UPKEEP_FRESHNESS_DAYS} days.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={openProfileUpkeepCompleteDetail}
-                disabled={!profileUpkeep || chartsLoading}
-                className="w-fit rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 transition-colors enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 enabled:hover:text-indigo-700 disabled:cursor-default"
-              >
-                {profileUpkeep
-                  ? `${profileUpkeep.completeClientCount}/${profileUpkeep.clientCount} complete profiles`
-                  : "RetainOS pilot metric"}
-              </button>
-            </div>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {[
-                {
-                  key: "nextSteps" as const,
-                  label: "Next Steps",
-                  score: profileUpkeep?.fieldScores.nextSteps,
-                },
-                {
-                  key: "milestone" as const,
-                  label: "Milestone",
-                  score: profileUpkeep?.fieldScores.milestone,
-                },
-                {
-                  key: "lastContact" as const,
-                  label: "Last Contact",
-                  score: profileUpkeep?.fieldScores.lastContact,
-                },
-                {
-                  key: "nextContact" as const,
-                  label: "Next Contact",
-                  score: profileUpkeep?.fieldScores.nextContact,
-                },
-                {
-                  key: "progress" as const,
-                  label: "Progress",
-                  score: profileUpkeep?.fieldScores.progress,
-                },
-                {
-                  key: "buyIn" as const,
-                  label: "Buy-in",
-                  score: profileUpkeep?.fieldScores.buyIn,
-                },
-              ].map(({ key, label, score }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => openProfileUpkeepFieldDetail(key, label)}
-                  disabled={!profileUpkeep || chartsLoading}
-                  className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-left transition-colors enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 disabled:cursor-default"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium text-gray-700">
-                      {label}
-                    </span>
-                    <span className="text-sm font-semibold text-gray-900">
-                      {chartsLoading || score === undefined ? "--" : `${score}%`}
-                    </span>
-                  </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-gray-200">
-                    <div
-                      className="h-1.5 rounded-full bg-emerald-500"
-                      style={{
-                        width: `${chartsLoading || typeof score !== "number" ? 0 : score}%`,
-                      }}
-                    />
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       ) : activeDashboardTab === "charts" ? (
         <div className="space-y-5">
@@ -3232,75 +3427,19 @@ export function Dashboard() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-          <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">
-                  AI Insights
-                </h2>
-                <p className="mt-1 text-sm text-gray-500">
-                  Read-only placeholder until we wire an approved AI generation path.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white opacity-50"
-              >
-                Generate AI Insights
-              </button>
-            </div>
-            <div className="mt-6 space-y-4 text-sm leading-6 text-gray-700">
-              <p>
-                The selected report currently has{" "}
-                <span className="font-semibold text-gray-900">
-                  {activeClients?.toLocaleString() ?? "0"} active clients
-                </span>
-                , with{" "}
-                <span className="font-semibold text-gray-900">
-                  {frontEndClients?.toLocaleString() ?? "0"} front-end
-                </span>{" "}
-                and{" "}
-                <span className="font-semibold text-gray-900">
-                  {backEndClients?.toLocaleString() ?? "0"} back-end
-                </span>{" "}
-                clients.
-              </p>
-              <p>
-                Retention and renewal signals should be reviewed alongside the
-                Charts tab, especially CSM workload, client buy-in, and progress
-                distribution. These are the first places to look for operational
-                constraints before drawing conclusions from churn or renewal rates.
-              </p>
-              <p>
-                Once AI generation is approved, this panel can summarize trend
-                changes, highlight unusual segments, and suggest follow-up questions
-                for the selected company, CSM, program, and date range.
-              </p>
-            </div>
-          </section>
-          <aside className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
-              Inputs For Future AI
-            </h3>
-            <div className="mt-4 space-y-3 text-sm text-gray-700">
-              <div className="rounded-md bg-gray-50 px-3 py-2">
-                KPI snapshot
-              </div>
-              <div className="rounded-md bg-gray-50 px-3 py-2">
-                Chart aggregates
-              </div>
-              <div className="rounded-md bg-gray-50 px-3 py-2">
-                Date range and CSM filters
-              </div>
-              <div className="rounded-md bg-gray-50 px-3 py-2">
-                Client/task operational signals
-              </div>
-            </div>
-          </aside>
-        </div>
+        <ComingSoonPanel
+          title="Dashboard AI Insights"
+          description="AI-generated summaries, risk signals, and recommended actions will use the selected dashboard filters when this feature launches."
+        />
       )}
+
+      {exportComingSoon ? (
+        <ComingSoonModal
+          title="Dashboard Export"
+          description="Exportable dashboard reports, PDFs, CSVs, and shareable HTML views are planned for a later rollout phase."
+          onClose={() => setExportComingSoon(false)}
+        />
+      ) : null}
 
       {activeDetailKey && (
         <div className="fixed inset-0 z-30">
@@ -3459,125 +3598,6 @@ export function Dashboard() {
               </div>
             </div>
           </aside>
-        </div>
-      )}
-
-      {profileUpkeepDetail && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
-          <button
-            type="button"
-            aria-label="Close profile upkeep detail dialog"
-            onClick={() => setProfileUpkeepDetail(null)}
-            className="absolute inset-0 bg-slate-900/40 cursor-pointer"
-          />
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="relative flex max-h-[82vh] w-full max-w-3xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl"
-          >
-            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {profileUpkeepDetail.title}
-                </h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  {profileUpkeepDetail.summary}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setProfileUpkeepDetail(null)}
-                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-5 w-5"
-                >
-                  <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L10 8.94l4.72-4.72a.75.75 0 1 1 1.06 1.06L11.06 10l4.72 4.72a.75.75 0 1 1-1.06 1.06L10 11.06l-4.72 4.72a.75.75 0 1 1-1.06-1.06L8.94 10 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
-                </svg>
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              {[
-                {
-                  label: profileUpkeepDetail.updatedLabel,
-                  rows: profileUpkeepDetail.updated,
-                  tone: "green",
-                },
-                {
-                  label: profileUpkeepDetail.missingLabel,
-                  rows: profileUpkeepDetail.missing,
-                  tone: "amber",
-                },
-              ].map((section) => (
-                <section key={section.label} className="mb-5 last:mb-0">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <h4 className="text-sm font-semibold text-gray-900">
-                      {section.label}
-                    </h4>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
-                        section.tone === "green"
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-amber-200 bg-amber-50 text-amber-700"
-                      }`}
-                    >
-                      {section.rows.length}
-                    </span>
-                  </div>
-                  {section.rows.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-gray-200 py-8 text-center text-sm text-gray-500">
-                      No clients in this group.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-gray-100 rounded-lg border border-gray-100">
-                      {section.rows.map(({ client, score }) => (
-                        <Link
-                          key={client.glide_row_id}
-                          to={`/clients/${client.glide_row_id}`}
-                          className="flex items-center justify-between gap-4 px-3 py-3 hover:bg-gray-50"
-                        >
-                          <div className="flex min-w-0 items-center gap-3">
-                            {client.client_image ? (
-                              <img
-                                src={client.client_image}
-                                alt=""
-                                className="h-10 w-10 rounded-xl border border-gray-200 object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
-                                {getInitials(client.client_name)}
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-gray-900">
-                                {client.client_name ?? "Unnamed client"}
-                              </div>
-                              <div className="truncate text-xs text-gray-500">
-                                {teamMemberNameById.get(
-                                  client.csm_team_member_id ?? "",
-                                ) ?? "Unassigned"}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-3">
-                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700">
-                              {score}%
-                            </span>
-                            <span className="text-xs font-medium text-indigo-600">
-                              View
-                            </span>
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </section>
-              ))}
-            </div>
-          </div>
         </div>
       )}
 

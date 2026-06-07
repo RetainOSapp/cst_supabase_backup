@@ -115,7 +115,7 @@ Core decisions captured there:
 - Supabase CLI auth rule: the default Supabase CLI account is currently authenticated to the RetainOS organization and can see project `zjauqflzxzsbpnivzsct`. Do not pass `--profile retainos`; that named profile is malformed and causes `Unsupported Config Type ""`. Run RetainOS Supabase commands from this workspace using the default profile.
 - CSM Reports drill-through cleanup was added on 2026-06-05. Field Upkeep already drills into field-level and complete/incomplete client lists; CSM Summary rows now open a CSM-specific active client update list with links to client profiles.
 - CSM Reports drill-through QA passed on 2026-06-06: date ranges, CSM modal, not-updated-first order, and client profile links worked correctly.
-- Canonical dashboard KPI RPC v1 was applied on 2026-06-05 through `supabase/migrations/20260605103000_dashboard_kpi_counts_canonical.sql`. Function name: `dashboard_kpi_counts_canonical`. It supports legacy/app company id normalization, multi-program filters, offer filters, CSM filters, date filters, app-owned pilot/migrated `clients`, and mirror-only fallback. Smoke-tested against Ethical Scaling and returned active/front/back/offboard/churn/retention/renewal counts. The Dashboard UI has not fully switched to this RPC yet; current UI still uses the validated app-owned client-side formula path for pilot/migrated companies.
+- Canonical dashboard KPI RPC v1 was applied on 2026-06-05 through `supabase/migrations/20260605103000_dashboard_kpi_counts_canonical.sql`. Function name: `dashboard_kpi_counts_canonical`. It supports legacy/app company id normalization, multi-program filters, offer filters, CSM filters, date filters, app-owned pilot/migrated `clients`, and mirror-only fallback. Smoke-tested against Ethical Scaling and returned active/front/back/offboard/churn/retention/renewal counts. As of 2026-06-06, the Dashboard KPI strip tries this canonical RPC first for active/front/back/offboard/churn/retention/renewal numbers, including offer and multi-program filters, then falls back to the existing working client-side/legacy RPC calculation if the canonical function errors.
 - Canonical Dashboard RPC QA passed on 2026-06-06 for the full Ethical Scaling result and Front End-only filter; returned values matched the expected baseline.
 
 ## Client Workspace
@@ -173,7 +173,10 @@ Important distinction:
 - Real configured offer milestones come from `backup_company_offer_milestones`, filtered by `offer_id`.
 - Client-specific milestone rows come from `backup_company_clients_milestones`, filtered by `client_id`.
 - App-owned milestone progress writes now go to `client_milestones` for pilot/migrated companies. Migration: `supabase/migrations/20260602123000_client_milestones_write_pilot.sql`. Edge Function: `supabase/functions/manage-client-milestone`.
-- Pathways & Milestones v1 keeps offer/milestone configuration read from the Glide mirror, but client progress is RetainOS-owned.
+- Pathways & Milestones now use app-owned offer/milestone configuration for pilot/migrated companies and Glide mirror configuration for read-only fallback companies.
+- On 2026-06-06, Company Pathways & Milestones Setup V1 introduced app-owned `company_offers` and `company_offer_milestones` for pilot/migrated companies. The migration seeds their existing Glide configuration once; `manage-company-pathway` controls Director/SuperAdmin create, edit, and archive actions. Mirror-only companies remain read-only from Glide.
+- Pilot client creation, milestone progression, Client Detail, Clients offer filters, Dashboard offer filters, and Quick Update milestone labels prefer the app-owned journey configuration.
+- Offers or milestones assigned to active clients cannot be archived. Reordering controls and unarchive remain later polish.
 - SuperAdmins and Directors can change a client's current offer/pathway and milestone.
 - Assigned CSMs can start and complete milestones for assigned clients only.
 - Support does not write milestones in v1.
@@ -558,3 +561,73 @@ SaaS Client details / Admin Hub Team notes:
   - Otherwise -> CSM.
 - New Team Member, edit role/capacity, and archive are enabled for app-owned pilot/migrated companies through the Edge Function path.
 - Mirror-only company Team writes remain disabled/read-only.
+
+## HiFi Product Decisions - 2026-06-06
+
+- Use the HiFi handoff as the visual source of truth while preserving the current working RetainOS data model, permissions, navigation structure, and write flows.
+- Dashboard chart modernization is a deliberate UI/data Phase 2. Use Recharts with a clean shadcn-chart-inspired treatment, RetainOS HiFi colors, visible labels, and existing drill-through behavior.
+- Agreed chart shapes:
+  - Program Distribution, Buy-in, and Progress: donut charts.
+  - Clients By Offer, Tasks By Status, and CSM Active Client Workload: modern bar charts.
+- Metrics shown in the HiFi prototype such as churn reasons, richer actionable dashboard data, subscription tiers, and company customization flags are future real product scope. Do not dismiss them as sample-only data; wire them after their canonical formulas/tables exist.
+- Quick Update should retain the existing working milestone-progress controls and receive the HiFi modal styling. Pathway changes remain on the full Client Detail page.
+- New Client should retain the richer pilot setup fields, including assignment, offer/pathway, starting milestone, and initial contract dates, while adopting the HiFi styling.
+- Final standalone production logo assets can be added during a later pilot UI revision. Prefer SVG wordmark/icon/light/dark assets when supplied.
+- HiFi client workflow pass started on 2026-06-06:
+  - Quick Update now uses the RetainOS HiFi modal treatment while preserving outcomes, contact dates, notes, history, and current-milestone completion.
+  - New Client now uses the HiFi modal treatment while preserving assignment, status, offer/pathway, starting milestone, North Star, and optional initial contract setup.
+  - Client Detail received its first HiFi shell pass: RetainOS colors, buttons, tabs, profile header, and field cards.
+
+## Dashboard Performance - 2026-06-06
+
+- Dashboard Overview should stay fast and formula-focused.
+  - It uses canonical KPI cards and drill-throughs.
+  - It should not eagerly load chart, task, capacity, or profile-upkeep datasets while the user is only viewing Overview.
+- Dashboard Charts now lazy-load the heavier client/task/offer/capacity data when the Charts tab is opened.
+- Field/Profile Upkeep belongs in CSM Reports, not Dashboard Overview.
+  - The duplicate Dashboard Profile Upkeep block was removed to avoid confusion and hidden data-loading cost.
+- Next pilot sequence:
+  - Re-run Ethical Scaling reconciliation after latest app-owned writes.
+  - If reconciliation is clean, reduce Ethical Scaling pilot surfaces to prefer app-owned tables and keep Glide mirror fallback only for non-pilot companies or not-yet-built tables.
+
+## Ethical Scaling Reconciliation - 2026-06-06 / 2026-06-07
+
+- Run command: `npm run pilot:reconcile:ethical-scaling`.
+- The reconciliation script now checks clients, active CSM assignment integrity, app-owned offers, app-owned offer milestones, app-owned contracts, app-owned client milestones, history/audit activity, and a `rolloutGate` summary.
+- 2026-06-07 recovery note:
+  - Supabase Nano/free-tier IO budget was exhausted after heavy Glide backup syncs, causing app/login/reconciliation timeouts.
+  - Jay upgraded the project from Nano to Micro after moving to Pro; app and reconciliation performance recovered.
+  - After Jay resynced Ethical Scaling backup clients/history, the mirror had five additional clients not yet in app-owned `clients`.
+  - `scripts/seed-ethical-scaling-clients-pilot.mjs` now supports `--missing-only` to insert only absent app-owned client rows and preserve existing pilot edits.
+  - Missing-only seed inserted: Vanessa Valencia, Oscar Sey, Samantha Kall, Practice Advisor, and Alima Sharipova.
+- Latest result on 2026-06-07:
+  - `rolloutGate.readyForPilot = true`.
+  - `blockers = []`.
+  - Mirrored clients: 159.
+  - App-owned clients: 159.
+  - Missing app-owned clients: 0.
+  - App-only clients: 0.
+  - Invalid active CSM assignments: 0.
+  - Active clients with missing app-owned offer config: 0.
+  - Active clients with missing app-owned milestone config: 0.
+- Non-blocking notes from the reconciliation:
+  - Seven invalid CSM assignments exist only on offboarded clients.
+  - One app-owned offer and two app-owned offer milestones are app-only archived pilot/test rows.
+  - Historical mirrored contracts are not fully backfilled into app-owned `client_contracts` yet; pilot contract writes are app-owned from this point forward.
+  - Historical mirrored client milestone records are not fully backfilled into app-owned `client_milestones` yet; pilot milestone writes are app-owned from this point forward.
+- Next step after this pass: reduce Ethical Scaling pilot surfaces to prefer app-owned tables wherever app-owned equivalents exist, while preserving `backup_*` fallback for mirror-only companies and not-yet-built areas.
+
+## Pilot Backup Dependency Reduction - 2026-06-07
+
+- Login/access provisioning now prefers app-owned `company_members` for pilot/migrated companies before falling back to `backup_company_team`.
+  - Updated and deployed Edge Function: `supabase/functions/prepare-login`.
+  - Smoke test against `recruiting@ethicalscaling.com` returned `{"ok":true,"access":"company_user"}`.
+- Browser account resolution now prefers active app-owned `company_members` joined to pilot/migrated `companies`.
+  - The resolved `companyId` remains the legacy Glide company id for compatibility with existing routes/filters.
+  - The resolved `teamMemberId` is `legacy_glide_row_id` when present, otherwise the app-owned member UUID.
+- Pilot team dropdown/filter reads now prefer `company_members` without also querying the mirror:
+  - Clients page was already using app-owned members.
+  - CSM Reports now reads app-owned team only for pilot/migrated companies.
+  - Dashboard now reads app-owned team only for pilot/migrated companies.
+  - Tasks now reads app-owned team only for pilot/migrated companies.
+- Mirror fallback remains for non-pilot/mirror-only companies.

@@ -29,6 +29,39 @@ function parseAllowlist(value: string | undefined) {
   );
 }
 
+async function hasActiveAppMembership(
+  supabase: ReturnType<typeof createClient>,
+  email: string,
+) {
+  const { data, error } = await supabase
+    .from("company_members")
+    .select("id, status, company:companies!inner(id, migration_status)")
+    .ilike("email", email)
+    .eq("status", "active")
+    .in("company.migration_status", ["pilot", "migrated"]);
+
+  if (error) throw error;
+
+  return (data ?? []).length > 0;
+}
+
+async function hasActiveMirrorMembership(
+  supabase: ReturnType<typeof createClient>,
+  email: string,
+) {
+  const { data, error } = await supabase
+    .from("backup_company_team")
+    .select("glide_row_id, company_id, is_archived")
+    .ilike("email", email);
+
+  if (error) throw error;
+
+  return (data ?? []).some(
+    (membership) =>
+      membership.is_archived !== true && Boolean(membership.company_id),
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -71,19 +104,23 @@ Deno.serve(async (req) => {
     );
     const isSuperAdmin = superAdminEmails.has(email);
 
-    const { data: memberships, error: membershipError } = await supabase
-      .from("backup_company_team")
-      .select("glide_row_id, company_id, is_archived")
-      .ilike("email", email);
-
-    if (membershipError) {
-      return jsonResponse({ error: membershipError.message }, 500);
+    let hasActiveMembership = false;
+    try {
+      hasActiveMembership = await hasActiveAppMembership(supabase, email);
+      if (!hasActiveMembership) {
+        hasActiveMembership = await hasActiveMirrorMembership(supabase, email);
+      }
+    } catch (error) {
+      return jsonResponse(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Could not verify RetainOS access.",
+        },
+        500,
+      );
     }
-
-    const hasActiveMembership = (memberships ?? []).some(
-      (membership) =>
-        membership.is_archived !== true && Boolean(membership.company_id),
-    );
 
     if (!isSuperAdmin && !hasActiveMembership) {
       return jsonResponse({

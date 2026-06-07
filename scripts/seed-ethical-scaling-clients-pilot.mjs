@@ -4,6 +4,7 @@ import { getSupabaseEnv, loadDotEnv } from "./shared-env.mjs";
 loadDotEnv();
 
 const apply = process.argv.includes("--apply");
+const missingOnly = process.argv.includes("--missing-only");
 const { url, serviceRoleKey } = getSupabaseEnv();
 const supabase = createClient(url, serviceRoleKey, {
   auth: { persistSession: false },
@@ -135,9 +136,26 @@ async function main() {
 
   if (sourceError) throw sourceError;
 
-  const payloads = (sourceClients ?? []).map((client) =>
+  const sourcePayloads = (sourceClients ?? []).map((client) =>
     clientPayload(client, company),
   );
+
+  let payloads = sourcePayloads;
+  if (missingOnly) {
+    const { data: existingClients, error: existingError } = await supabase
+      .from("clients")
+      .select("glide_row_id")
+      .eq("company_id", company.id);
+
+    if (existingError) throw existingError;
+
+    const existingIds = new Set(
+      (existingClients ?? []).map((client) => client.glide_row_id),
+    );
+    payloads = sourcePayloads.filter(
+      (client) => !existingIds.has(client.glide_row_id),
+    );
+  }
 
   const byStatus = payloads.reduce((acc, client) => {
     const status = client.program_status_value ?? "not_set";
@@ -149,9 +167,16 @@ async function main() {
     JSON.stringify(
       {
         mode: apply ? "apply" : "dry-run",
+        scope: missingOnly ? "missing-only" : "all-clients",
         company,
         clientCount: payloads.length,
         byStatus,
+        clients: payloads.map((client) => ({
+          glide_row_id: client.glide_row_id,
+          client_name: client.client_name,
+          program_status_value: client.program_status_value,
+          csm_team_member_id: client.csm_team_member_id,
+        })),
       },
       null,
       2,
@@ -159,7 +184,9 @@ async function main() {
   );
 
   if (!apply) {
-    console.log("Dry run only. Re-run with --apply to write pilot clients.");
+    console.log(
+      "Dry run only. Re-run with --apply to write pilot clients. Use --missing-only to preserve existing app-owned rows.",
+    );
     return;
   }
 
@@ -183,6 +210,7 @@ async function main() {
     after_data: {
       client_count: payloads.length,
       by_status: byStatus,
+      scope: missingOnly ? "missing-only" : "all-clients",
     },
   });
 

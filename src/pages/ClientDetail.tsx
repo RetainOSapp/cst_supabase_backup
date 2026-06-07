@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  getProgramStatusDisplay,
   ProgramStatusPill,
   type ProgramChoice,
 } from "../lib/clientDisplay.tsx";
@@ -134,6 +135,19 @@ const basicInfoFields: [string, string[]][] = [
   ["Status", ["program_status_value"]],
   ["Date Onboarded", ["client_age_date_onboarded"]],
   ["Client Age", ["client_age_date_onboarded"]],
+];
+const offboardedDateCandidates = [
+  "client_age_date_offboarded",
+  "client_age_date_offboarded_for_filtering",
+  "client_age_date_off_boarded",
+  "date_offboarded",
+  "date_off_boarded",
+  "offboarded_date",
+  "off_boarded_date",
+  "offboarding_date",
+  "offboard_date",
+  "client_offboarded_date",
+  "client_offboarding_date",
 ];
 const contractFields: [string, string[]][] = [
   ["Start Date", ["start_date", "contract_start_date", "current_contract_start_date"]],
@@ -386,13 +400,30 @@ function formatDate(value: unknown) {
   });
 }
 
-function formatClientAge(value: unknown) {
+function formatClientAge(value: unknown, endValue?: unknown) {
   if (!isPresent(value)) return "--";
   const onboarded = new Date(String(value));
   if (Number.isNaN(onboarded.getTime())) return displayValue(value);
-  const diffMs = Date.now() - onboarded.getTime();
+  if (endValue === false) return "--";
+  const ended =
+    isPresent(endValue) && !Number.isNaN(new Date(String(endValue)).getTime())
+      ? new Date(String(endValue))
+      : new Date();
+  const diffMs = ended.getTime() - onboarded.getTime();
   const days = Math.max(0, Math.floor(diffMs / 86_400_000));
   return `${days.toLocaleString()} day${days === 1 ? "" : "s"}`;
+}
+
+function isOffboardedStatus(
+  value: unknown,
+  programChoices: ProgramChoice[] = [],
+) {
+  const raw = String(value ?? "").toLowerCase();
+  const display = getProgramStatusDisplay(
+    typeof value === "string" ? value : null,
+    programChoices,
+  ).text.toLowerCase();
+  return raw.includes("offboard") || display.includes("offboard");
 }
 
 function formatCurrency(value: unknown) {
@@ -1824,6 +1855,12 @@ function MilestoneActionModal({
         body: {
           action,
           clientLegacyId: client.glide_row_id,
+          offerId:
+            existingProgress?.offer_id ??
+            valueFrom(client, ["offer_milestones_current_offer_id"]),
+          milestoneId:
+            existingProgress?.milestone_id ??
+            valueFrom(client, ["offer_milestones_current_milestone_id"]),
           startDate,
           completionDate: isComplete ? completionDate : undefined,
           notes,
@@ -2160,16 +2197,16 @@ function FieldGrid({
   relationLookup?: Map<string, string>;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       {fields.map(([label, candidates]) => (
         <div
           key={label}
-          className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3"
+          className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-4"
         >
-          <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
+          <div className="text-[11px] font-semibold uppercase text-[#586273]">
             {label}
           </div>
-          <div className="mt-1 text-sm font-medium text-gray-900">
+          <div className="mt-2 text-sm font-medium text-[#162b3e]">
             {label === "Status" ? (
               <ProgramStatusPill
                 value={String(valueFrom(client, candidates) ?? "")}
@@ -2180,7 +2217,15 @@ function FieldGrid({
               label === "Next Contact" ? (
               formatDate(valueFrom(client, candidates))
             ) : label === "Client Age" ? (
-              formatClientAge(valueFrom(client, candidates))
+              formatClientAge(
+                valueFrom(client, candidates),
+                isOffboardedStatus(
+                  valueFrom(client, ["program_status_value"]),
+                  programChoices,
+                )
+                  ? valueFrom(client, offboardedDateCandidates) || false
+                  : null,
+              )
             ) : isOutcomeField(label) ? (
               <OutcomePill value={valueFrom(client, candidates)} />
             ) : isRichField(label) ? (
@@ -2469,7 +2514,7 @@ function PathwaysSection({
     "offer_id",
     "offer_name",
   ]);
-  const milestoneValue = valueFrom(client, [
+  const rawMilestoneValue = valueFrom(client, [
     "offer_milestones_current_milestone_id",
     "offer_milestones_2nd_current_milestone_id",
     "milestone_id",
@@ -2482,12 +2527,6 @@ function PathwaysSection({
   const sortedOfferMilestones = currentOfferMilestones
     .slice()
     .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
-  const currentProgress =
-    clientMilestones.find(
-      (milestone) => milestone.milestone_id === milestoneValue,
-    ) ?? null;
-  const canShowActions =
-    canAdvanceMilestones && isPresent(offerValue) && isPresent(milestoneValue);
   const progressByMilestoneId = new Map(
     clientMilestones
       .filter(
@@ -2499,6 +2538,32 @@ function PathwaysSection({
       )
       .map((milestone) => [String(milestone.milestone_id), milestone]),
   );
+  const fallbackMilestone =
+    sortedOfferMilestones.find((milestone) => {
+      const milestoneId = milestone.glide_row_id;
+      if (!isPresent(milestoneId)) return false;
+      return !isPresent(
+        progressByMilestoneId.get(String(milestoneId))?.completion_date,
+      );
+    }) ??
+    sortedOfferMilestones[0] ??
+    null;
+  const milestoneValue = isPresent(rawMilestoneValue)
+    ? rawMilestoneValue
+    : fallbackMilestone?.glide_row_id ?? null;
+  const currentProgress =
+    clientMilestones.find(
+      (milestone) => milestone.milestone_id === milestoneValue,
+    ) ??
+    (isPresent(offerValue) && isPresent(milestoneValue)
+      ? ({
+          client_id: client.glide_row_id,
+          offer_id: String(offerValue),
+          milestone_id: String(milestoneValue),
+        } as ClientMilestoneRow)
+      : null);
+  const canShowActions =
+    canAdvanceMilestones && isPresent(offerValue) && isPresent(milestoneValue);
   const configuredMilestoneIds = new Set(
     sortedOfferMilestones
       .filter((milestone) => isPresent(milestone.glide_row_id))
@@ -2564,25 +2629,24 @@ function PathwaysSection({
   const hasCurrentStarted = isPresent(currentProgress?.start_date);
   const hasCurrentCompleted = isPresent(currentProgress?.completion_date);
   const showStartAction = canShowActions && !hasCurrentStarted;
-  const showCompleteAction =
-    canShowActions && hasCurrentStarted && !hasCurrentCompleted;
+  const showCompleteAction = canShowActions && !hasCurrentCompleted;
   const daysInCurrentMilestone =
     hasCurrentStarted && !hasCurrentCompleted
       ? daysBetweenValues(currentProgress?.start_date, new Date().toISOString())
       : null;
 
   return (
-    <div className="space-y-5 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="space-y-5 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          <div className="text-[11px] font-semibold uppercase text-[#6c7684]">
             Current Pathway
           </div>
-          <h2 className="mt-1 text-lg font-semibold text-gray-900">
+          <h2 className="mt-1 text-lg font-semibold text-[#162b3e]">
             {displayValue(offerValue, relationLookup)}
           </h2>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-600">
-            <span className="font-medium text-gray-900">
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[#586273]">
+            <span className="font-medium text-[#162b3e]">
               {displayValue(milestoneValue, relationLookup)}
             </span>
             {isPresent(currentProgress?.start_date) ? (
@@ -2595,9 +2659,9 @@ function PathwaysSection({
             ) : null}
           </div>
           {lastCompletedMilestone ? (
-            <p className="mt-2 text-sm text-gray-500">
+            <p className="mt-2 text-sm text-[#6c7684]">
               Last completed:{" "}
-              <span className="font-medium text-gray-700">
+              <span className="font-medium text-[#162b3e]">
                 {displayValue(lastCompletedMilestone.milestone_id, relationLookup)}
               </span>{" "}
               on {formatDate(lastCompletedMilestone.completion_date)}
@@ -2610,7 +2674,7 @@ function PathwaysSection({
               <button
                 type="button"
                 onClick={() => onStartMilestone(currentProgress)}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+                className="retainos-button-secondary cursor-pointer px-4 py-2 text-sm"
               >
                 Start Milestone
               </button>
@@ -2619,7 +2683,7 @@ function PathwaysSection({
               <button
                 type="button"
                 onClick={() => onCompleteMilestone(currentProgress)}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+                className="retainos-button-primary cursor-pointer px-4 py-2 text-sm"
               >
                 Complete Milestone
               </button>
@@ -2628,9 +2692,9 @@ function PathwaysSection({
               <button
                 type="button"
                 onClick={onChangePathway}
-                className="rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                className="retainos-button-secondary cursor-pointer px-4 py-2 text-sm"
               >
-                Change Pathway
+                Change Pathway & Milestones
               </button>
             ) : null}
           </div>
@@ -2644,13 +2708,16 @@ function PathwaysSection({
           ["Last Contact", ["csm_date_of_last_contact"]],
           ["Next Contact", ["csm_date_of_next_contact"]],
         ]}
-        client={client}
+        client={{
+          ...client,
+          offer_milestones_current_milestone_id: milestoneValue,
+        }}
         programChoices={[]}
         relationLookup={relationLookup}
       />
 
-      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-        <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
+      <div className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
+        <div className="text-[11px] font-semibold uppercase text-[#6c7684]">
           Milestone Timeline
         </div>
         <div className="mt-3 space-y-2">
@@ -3031,12 +3098,27 @@ export function ClientDetail() {
           : typeof nextClient.company_id === "string"
             ? nextClient.company_id
             : "";
-      const { data: companyOfferRows } = companyGlideRowId
+      const { data: appPathwayCompany } = companyGlideRowId
         ? await supabase
-            .from("backup_company_offers")
-            .select("*")
-            .eq("company_id", companyGlideRowId)
-            .order("name", { ascending: true })
+            .from("companies")
+            .select("id")
+            .eq("legacy_glide_row_id", companyGlideRowId)
+            .in("migration_status", ["pilot", "migrated"])
+            .maybeSingle()
+        : { data: null };
+      const { data: companyOfferRows } = companyGlideRowId
+        ? appPathwayCompany?.id
+          ? await supabase
+              .from("company_offers")
+              .select("*")
+              .eq("company_id", appPathwayCompany.id)
+              .eq("status", "active")
+              .order("name", { ascending: true })
+          : await supabase
+              .from("backup_company_offers")
+              .select("*")
+              .eq("company_id", companyGlideRowId)
+              .order("name", { ascending: true })
         : { data: [] };
       const companyOfferIds =
         companyOfferRows?.map((offer) => offer.glide_row_id).filter(Boolean) ??
@@ -3085,11 +3167,20 @@ export function ClientDetail() {
           .eq("client_id", nextClient.glide_row_id)
           .order("created_at", { ascending: false }),
         companyOfferIds.length > 0 || offerIds.length > 0
-          ? supabase
-              .from("backup_company_offer_milestones")
-              .select("*")
-              .in("offer_id", companyOfferIds.length > 0 ? companyOfferIds : offerIds)
-              .order("order", { ascending: true, nullsFirst: false })
+          ? appPathwayCompany?.id
+            ? supabase
+                .from("company_offer_milestones")
+                .select(
+                  "*, order:position, target_days_to_complete_from_onboarding_date:target_days_to_complete, ttv_milestone:is_ttv_milestone, final_milestone:is_final_milestone",
+                )
+                .in("offer_id", companyOfferIds.length > 0 ? companyOfferIds : offerIds)
+                .eq("status", "active")
+                .order("position", { ascending: true, nullsFirst: false })
+            : supabase
+                .from("backup_company_offer_milestones")
+                .select("*")
+                .in("offer_id", companyOfferIds.length > 0 ? companyOfferIds : offerIds)
+                .order("order", { ascending: true, nullsFirst: false })
           : Promise.resolve({ data: [] }),
         supabase
           .from("backup_company_clients_tasks")
@@ -3212,7 +3303,7 @@ export function ClientDetail() {
   if (loading)
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-600" />
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
       </div>
     );
   if (error || !client)
@@ -3220,7 +3311,7 @@ export function ClientDetail() {
       <div>
         <Link
           to="/clients"
-          className="text-sm text-indigo-600 hover:text-indigo-800"
+          className="text-sm font-medium text-[#2b79c4] hover:text-[#162b3e]"
         >
           &larr; Back to clients
         </Link>
@@ -3249,14 +3340,6 @@ export function ClientDetail() {
     !capabilities.canViewOnlyAssignedClients;
   const canChangeStatus = canEditProfile;
   const canCreateContract = canEditProfile;
-  const currentMilestoneName = displayValue(
-    valueFrom(client, [
-      "offer_milestones_current_milestone_id",
-      "milestone_id",
-      "milestone_name",
-    ]),
-    displayLookup,
-  );
   const upsertMilestone = (milestone: ClientMilestoneRow) => {
     setClientMilestones((current) => [
       milestone,
@@ -3273,30 +3356,30 @@ export function ClientDetail() {
       <div className="mb-4">
         <Link
           to="/clients"
-          className="text-sm text-indigo-600 hover:text-indigo-800"
+          className="text-sm font-medium text-[#2b79c4] hover:text-[#162b3e]"
         >
           &larr; Back to clients
         </Link>
       </div>
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mb-6 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-4">
             {client.client_image ? (
               <img
                 src={client.client_image}
                 alt=""
-                className="h-16 w-16 rounded-2xl border border-gray-200 bg-gray-50 object-cover"
+                className="h-16 w-16 rounded-md border border-[#e4e9f0] bg-[#f7f9fc] object-cover"
               />
             ) : (
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-indigo-100 bg-indigo-50 text-lg font-semibold text-indigo-700">
+              <div className="flex h-16 w-16 items-center justify-center rounded-md border border-[#d6eafb] bg-[#eaf4fe] text-lg font-semibold text-[#2b79c4]">
                 {getInitials(client.client_name)}
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="truncate text-2xl font-semibold text-gray-900">
+              <h1 className="truncate text-2xl font-semibold text-[#162b3e]">
                 {client.client_name ?? "Unnamed client"}
               </h1>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[#586273]">
                 <span>{csmName}</span>
                 <span aria-hidden="true">-</span>
                 <ProgramStatusPill
@@ -3311,7 +3394,7 @@ export function ClientDetail() {
               <button
                 type="button"
                 onClick={() => setChangingStatus(true)}
-                className="rounded-md border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 cursor-pointer"
+                className="retainos-button-secondary"
               >
                 Change Status
               </button>
@@ -3320,7 +3403,7 @@ export function ClientDetail() {
               <button
                 type="button"
                 onClick={() => setEditingProfile(true)}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+                className="retainos-button-primary"
               >
                 Edit Profile
               </button>
@@ -3337,7 +3420,7 @@ export function ClientDetail() {
           </div>
         </div>
       </div>
-      <div className="mb-5 border-b border-gray-200">
+      <div className="mb-5 border-b border-[#e4e9f0]">
         <nav
           className="-mb-px flex gap-5 overflow-x-auto"
           aria-label="Client sections"
@@ -3347,7 +3430,7 @@ export function ClientDetail() {
               key={tab.key}
               type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${activeTab === tab.key ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"}`}
+              className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${activeTab === tab.key ? "border-[#59abf0] text-[#2b79c4]" : "border-transparent text-[#586273] hover:border-[#cbd2dc] hover:text-[#162b3e]"}`}
             >
               {tab.label}
             </button>
@@ -3355,14 +3438,14 @@ export function ClientDetail() {
           <button
             type="button"
             onClick={() => setActiveTab("tasks")}
-            className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${activeTab === "tasks" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"}`}
+            className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${activeTab === "tasks" ? "border-[#59abf0] text-[#2b79c4]" : "border-transparent text-[#586273] hover:border-[#cbd2dc] hover:text-[#162b3e]"}`}
           >
             Tasks
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("history")}
-            className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${activeTab === "history" ? "border-indigo-600 text-indigo-600" : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"}`}
+            className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors cursor-pointer ${activeTab === "history" ? "border-[#59abf0] text-[#2b79c4]" : "border-transparent text-[#586273] hover:border-[#cbd2dc] hover:text-[#162b3e]"}`}
           >
             History
           </button>
@@ -3397,7 +3480,7 @@ export function ClientDetail() {
           onChangePathway={() => setChangingPathway(true)}
         />
       ) : activeTab === "outcomes" ? (
-        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
@@ -3411,7 +3494,7 @@ export function ClientDetail() {
               <button
                 type="button"
                 onClick={() => setEditingOutcomes(true)}
-                className="w-fit rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 cursor-pointer"
+                className="retainos-button-primary w-fit"
               >
                 Edit Outcomes
               </button>
@@ -3425,7 +3508,7 @@ export function ClientDetail() {
           />
         </div>
       ) : (
-        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+        <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
           <FieldGrid
             fields={activeFields}
             client={client}
@@ -3504,7 +3587,15 @@ export function ClientDetail() {
         <MilestoneActionModal
           client={client}
           action={milestoneAction.action}
-          currentMilestoneName={currentMilestoneName}
+          currentMilestoneName={displayValue(
+            milestoneAction.progress?.milestone_id ??
+              valueFrom(client, [
+                "offer_milestones_current_milestone_id",
+                "milestone_id",
+                "milestone_name",
+              ]),
+            displayLookup,
+          )}
           existingProgress={milestoneAction.progress}
           onClose={() => setMilestoneAction(null)}
           onSaved={(updatedClient, milestone, event) => {

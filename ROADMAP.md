@@ -85,9 +85,13 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - Notification settings.
   - Client/account management settings.
   - Client list view columns.
-- `[ ]` Company Pathways & Milestones setup:
-  - CRUD pathways/offers.
-  - CRUD milestones.
+- `[~]` Company Pathways & Milestones setup:
+  - App-owned `company_offers` and `company_offer_milestones` tables seed pilot/migrated companies from Glide once.
+  - Admin Hub / SaaS Company Detail lists offers and their ordered milestones.
+  - Directors and SuperAdmins can create, edit, and archive offers/milestones for pilot companies.
+  - Offers/milestones assigned to active clients cannot be archived until those clients move elsewhere.
+  - Mirror-only companies retain a read-only Glide fallback.
+  - Remaining: deploy migration/function, Ethical Scaling QA, and later reordering/unarchive polish.
 - `[ ]` Company settings:
   - Call and communication settings.
   - Advanced settings / embed enablement.
@@ -156,7 +160,8 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
 - `[ ]` Bulk upload clients through CSV.
 - `[ ]` Zapier client creation webhook with required server-validated `company_id`.
 - `[~]` Profile upkeep scoring.
-  - Dashboard Overview v1 exists for active clients with six-field freshness.
+  - CSM Reports v1 exists for active clients with six-field freshness.
+  - Dashboard duplicate was removed so Dashboard stays focused on KPI/chart reporting and CSM Reports owns field-upkeep compliance.
 - `[~]` Client history/change log.
   - Client Detail now has a pilot `History` tab for RetainOS Quick Update events.
 
@@ -166,8 +171,31 @@ Goal: Directors, CSMs, and Support can run the operating cadence: client follow-
 
 Next session lock:
 
-- QA Profile Upkeep Score v1 on Dashboard Overview with Ethical Scaling real data.
-- Then decide whether the next session should harden Dashboard formulas/canonical RPCs or continue Client Profile operating fields.
+- `[x]` Dashboard performance pass after canonical KPI/drill-through wiring.
+  - Dashboard Overview no longer loads hidden chart/upkeep/task datasets on first page load.
+  - Dashboard Profile Upkeep duplicate was removed; CSM Reports remains the source for field-upkeep compliance.
+  - Charts now lazy-load their heavier client/task/offer/capacity dataset when the Charts tab is opened.
+  - Keep canonical KPI RPC as the source for card counts.
+- `[x]` Ethical Scaling reconciliation pass before pilot rollout.
+  - Command: `npm run pilot:reconcile:ethical-scaling`.
+  - 2026-06-06 result: `rolloutGate.readyForPilot = true`, with no blockers.
+  - Confirmed 154 mirrored clients and 154 app-owned clients, with no missing/extra client rows.
+  - 2026-06-07 post-Supabase Micro recovery result: `rolloutGate.readyForPilot = true`, with no blockers.
+  - After the final backup sync, five mirrored front-end clients were missing from app-owned `clients`; they were inserted with the safe missing-only seed path so existing pilot edits were not overwritten.
+  - Confirmed 159 mirrored clients and 159 app-owned clients, with no missing/extra client rows.
+  - Confirmed zero invalid active CSM assignments.
+  - Confirmed active clients have app-owned offer and milestone configuration available.
+  - Non-blocking notes: invalid assignments exist only on offboarded clients; archived pilot/test offer and milestone rows exist app-side; historical mirrored contracts and client milestones are not fully app-backfilled yet.
+  - Remaining product/process decision: pilot-week source-of-truth rules so RetainOS and Glide do not receive conflicting edits.
+- `[high]` Reduce Glide mirror dependency for Ethical Scaling pilot surfaces after reconciliation is clean.
+  - Keep mirror fallback for non-pilot companies.
+  - For Ethical Scaling pilot users, prefer app-owned tables wherever the app-owned equivalent exists.
+  - Track any remaining backup-table reads that are still required only because the app-owned table is not built yet.
+  - 2026-06-07 checkpoint:
+    - Login provisioning and browser account resolution now prefer app-owned `company_members`.
+    - CSM/team dropdowns on Clients, CSM Reports, Dashboard, and Tasks now prefer app-owned `company_members` for pilot/migrated companies.
+    - `prepare-login` was deployed and smoke-tested with Emily's pilot email.
+    - Remaining likely mirror dependencies: company list/search shell, mirrored choices/status definitions, historical contracts, historical milestone rows, legacy tasks, and legacy dashboard history/contract calculations where app-owned equivalents are incomplete.
 
 - `[~]` Task manager board/list exists and now includes New Task v1 for app-owned pilot/migrated companies.
 - `[~]` CRUD Tasks.
@@ -185,7 +213,8 @@ Next session lock:
 - `[ ]` CSM Reports AI summary can remain later if AI is not live.
 - `[~]` Dashboard KPIs/charts exist; validate against canonical formulas.
   - Charts read app-owned clients for pilot/migrated companies and fall back to the Glide mirror for mirror-only companies.
-  - KPI cards use the app-owned formula path for pilot/migrated companies as of 2026-06-04; mirror-only companies still use the legacy RPC path where applicable.
+  - KPI cards now try `dashboard_kpi_counts_canonical` first, including offer and multi-program filters, then fall back to the prior app-owned/legacy calculation if the canonical RPC errors.
+  - Performance follow-up v1 completed on 2026-06-06: Overview avoids hidden chart/upkeep loads and Charts lazy-loads heavier datasets by active tab.
   - App-owned offboarded, retention, and renewal/up-for-renewal formulas were hardened against Ethical Scaling pilot data sources.
   - Retention now includes `client_retention_recorded` events for same-program renewals.
   - Program filter supports multi-select.
@@ -197,7 +226,8 @@ Next session lock:
   - Validate active, front-end/back-end, offboarded, churn, retention, renewal, workload, and capacity definitions against Ethical Scaling pilot data.
   - Working spec: `DASHBOARD_FORMULA_VALIDATION.md`.
   - Draft SQL starting point: `DASHBOARD_CANONICAL_RPC_DRAFT.sql`.
-  - Expand SQL/RPC support so offer and multi-program filters do not rely on client-side fallback.
+  - Canonical KPI UI integration v1 is wired for Dashboard KPI cards; Jay QA against live Ethical Scaling data is still needed before marking shipped.
+  - Remaining gaps: charts/client drill-throughs still use client-row calculations; decide later whether those should move to canonical reporting views too.
 - `[x]` Client contact calendar.
   - V1 exists as a Calendar view on `/clients`, beside List and Cards.
   - Day, Week, and Month modes exist.
@@ -877,13 +907,18 @@ The current Glide model starts with Companies. Companies own team members, group
 
 ### Pathways And Milestones Management
 
-- `[ ]` SuperAdmin/company Pathways & Milestones configuration tab.
-- `[ ]` New Offer / Milestone flow.
-- `[ ]` Edit Offer / Milestone flow.
+- `[~]` SuperAdmin/company Pathways & Milestones configuration tab.
+  - V1 is implemented in Admin Hub / SaaS Company Detail for pilot companies.
+  - Mirror-only companies see the same configuration read-only from Glide.
+- `[~]` New Offer / Milestone flow.
+  - V1 supports names, milestone ordering position, target days, time-to-value, and final-milestone flags.
+- `[~]` Edit / archive Offer and Milestone flow.
+  - Archiving is blocked while active clients are assigned to the item.
+  - Remaining later polish: reorder controls and unarchive.
 - `[x]` Define whether offer/milestone writes go back to Glide mirror tables or new app-owned tables.
   - Do not mutate `backup_*`.
   - V1 writes client progress to app-owned `client_milestones`.
-  - Company offer/milestone template CRUD should use future app-owned `offers` and `offer_milestones` tables.
+  - Company offer/milestone template CRUD uses app-owned `company_offers` and `company_offer_milestones`.
 - `[~]` Client-level Pathways & Milestones progress writes.
   - Enabled for app-owned pilot/migrated clients through `manage-client-milestone`.
   - SuperAdmin/Director can change a client's current offer/pathway and milestone.
@@ -1198,12 +1233,12 @@ Source: `Datasheet - Ethical Scaling - Prompts.csv`.
 
 ### UX / High-Fidelity Pass
 
-- `[ ]` Full UI pass for login.
-- `[ ]` Full UI pass for authenticated shell.
+- `[~]` Full UI pass for login.
+- `[~]` Full UI pass for authenticated shell.
 - `[ ]` Full UI pass for Dashboard.
-- `[ ]` Full UI pass for Clients and Client Detail.
+- `[~]` Full UI pass for Clients and Client Detail.
 - `[ ]` Full UI pass for Tasks.
-- `[ ]` Full UI pass for SuperAdmin SaaS Clients.
+- `[~]` Full UI pass for SuperAdmin SaaS Clients.
 
 ### High-Fidelity Design Reference
 
@@ -1238,22 +1273,36 @@ This phase should happen after core wiring/write-mode foundations are stable. Us
   - Custom field cards.
   - Outcome definitions editor.
   - Churn reasons editor.
-- `[ ]` Dashboard KPI high-fidelity pass.
+- `[~]` Dashboard KPI high-fidelity pass.
   - KPI cards.
   - KPI/Charts/CSMs/AI tabs.
   - Export button.
   - Filters for user, date range, program, offer where applicable.
-- `[ ]` Dashboard CSM high-fidelity pass.
+- `[ ]` Dashboard chart visual/data Phase 2.
+  - Use Recharts with a clean shadcn-chart-inspired visual treatment.
+  - Use the existing RetainOS HiFi palette and keep labels visible for the first pass.
+  - Preserve existing clickable chart drill-through behavior and extend it where planned.
+  - Program Distribution: donut.
+  - Buy-in: donut.
+  - Progress: donut.
+  - Clients By Offer: modern horizontal/vertical bar chart with drill-through.
+  - Tasks By Status: bar chart with future clickable task-detail/filter modal.
+  - CSM Active Client Workload: bar chart.
+  - Treat actionable metrics shown in the HiFi prototype as future wiring scope, not disposable invented content.
+  - Add canonical formulas/data sources before exposing unwired metrics.
+- `[ ]` Dashboard CSM high-fidelity/data pass.
   - Avg. Time to Success chart.
   - Updated vs. Non-Updated Profiles chart.
   - CSM Workload & Capacity chart.
   - Churn Reason chart.
   - Renewal Opportunities chart.
   - Offboarding by CSM chart.
-- `[ ]` Client screens high-fidelity pass.
+- `[~]` Client screens high-fidelity pass.
   - Client roster views.
   - Client detail sections.
-  - Quick Update.
+  - Merge the existing working milestone-progress controls into the HiFi Quick Update modal styling.
+  - Keep pathway changes on the full Client Detail page.
+  - Preserve the richer pilot New Client setup fields while applying the HiFi styling.
   - Contract, program, outcomes, pathways/milestones, tasks, and history tabs.
 - `[ ]` Accessibility check.
   - Validate color contrast for all core text/background and CTA combinations.
@@ -1281,10 +1330,15 @@ This phase should happen after core wiring/write-mode foundations are stable. Us
   - 12 columns.
   - 40px margin.
   - 20px gutter.
-- `[ ]` Brand assets.
+- `[late]` Replace inline/prototype brand icons with final production logo assets during a pilot UI revision.
   - RetainOS wordmark.
   - RetainOS circular arrow mark.
   - Light, deep navy, and sky blue logo treatments.
+  - Prefer SVG assets for the full wordmark, icon-only mark, light version, dark/navy version, and favicon.
+- `[ ]` Post-pilot company configuration and commercial model.
+  - Company-defined churn reasons.
+  - Real subscription tiers and tier-based feature flags.
+  - Company customization settings and their canonical data sources.
 
 ## Final Migration Validation
 
@@ -1417,8 +1471,10 @@ Use this section as the “what good looks like” checklist before migrating re
    - Read-only Ethical Scaling command: `npm run pilot:reconcile:ethical-scaling`.
    - Reusable rollout command: `npm run pilot:reconcile:company -- --company="Company Name"`.
    - This reconciliation is a required gate before every future company's `mirror_only` -> `pilot` -> `migrated` transitions.
-   - On 2026-06-06 all 154 mirrored clients existed app-side with no missing or extra clients.
-   - All seven assignments pointing to an archived member belong to offboarded clients; active pilot clients have no invalid assignments.
+   - On 2026-06-06 the reconciliation gate returned `readyForPilot = true` with no blockers.
+   - All 154 mirrored clients existed app-side with no missing or extra clients.
+   - Active pilot clients have no invalid assignments and no missing app-owned offer/milestone configuration.
+   - Non-blocking notes: seven invalid assignments belong only to offboarded clients; archived pilot/test app-owned offer/milestone rows exist; historical mirrored contracts/client milestones are not fully app-backfilled yet.
    - Remaining: agree source-of-truth and parallel-run rules for pilot week.
 4. `[ ]` Validated work is committed to RetainOS `main`, deployed by Vercel, and production-smoke-tested.
 5. `[ ]` Production domain and authentication delivery are configured.
@@ -1444,6 +1500,16 @@ Use this section as the “what good looks like” checklist before migrating re
   - Jay confirmed this is an acceptable pilot starting point. Broader notification automation remains later roadmap work.
 - `[x]` Ethical Scaling pilot onboarding guide exists in `PILOT_ONBOARDING.md`.
 
+### Future UI/UX Polish
+
+- `[x]` Responsive navigation uses a mobile sidebar drawer on smaller screens.
+- `[x]` The sidebar company selector is the single global SuperAdmin `View As` control; redundant page-level company selectors are removed.
+- `[ ]` Add functional cross-app global search. Keep the header search hidden until it is wired.
+- `[ ]` Add notifications and an inbox experience. Keep the notification bell hidden until it is wired.
+- `[ ]` Add a user avatar/account menu. Keep it hidden until it has useful account actions.
+- `[ ]` Preserve the current working Dashboard information structure while applying the HiFi visual system.
+- `[x]` Use amber for Paused and Suspended statuses and red for Offboarded.
+
 ## QA Checklist For Every Release
 
 - `[ ]` `npm run build` passes.
@@ -1454,7 +1520,7 @@ Use this section as the “what good looks like” checklist before migrating re
 - `[ ]` Unknown emails cannot access RetainOS.
 - `[ ]` `/dashboard`, `/clients`, `/tasks`, `/clients/:clientId`, `/saas-clients` smoke-tested as applicable.
 - `[ ]` Vercel deploy from `main` verified after push.
-- `[ ]` Production login redirect and OTP/PIN delivery verified on `https://retainos.ai`.
+- `[ ]` Production login redirect and OTP/PIN delivery verified on `https://app.retainos.ai`.
 
 ## Known Operational Notes
 

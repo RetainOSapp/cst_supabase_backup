@@ -1,6 +1,8 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase.ts";
+import { ComingSoonModal } from "../components/ComingSoon.tsx";
+import { withTimeout } from "../lib/async.ts";
 
 export function Login() {
   const navigate = useNavigate();
@@ -9,11 +11,22 @@ export function Login() {
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [googleComingSoon, setGoogleComingSoon] = useState(false);
+
+  function isAvailabilityError(message: string) {
+    return /timed out|schema cache|temporarily unavailable|upstream request timeout/i.test(
+      message,
+    );
+  }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) navigate("/", { replace: true });
-    });
+    withTimeout(supabase.auth.getSession(), 10000, "Auth session check")
+      .then(({ data: { session } }) => {
+        if (session) navigate("/", { replace: true });
+      })
+      .catch(() => {
+        // Stay on login; the submit action will surface connection errors.
+      });
   }, [navigate]);
 
   async function handleSendOtp(e: FormEvent) {
@@ -23,28 +36,59 @@ export function Login() {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const { data: prepareData, error: prepareError } = await supabase.functions.invoke(
-      "prepare-login",
-      {
-        body: { email: normalizedEmail },
-      },
-    );
+    let prepareData: { ok?: boolean; error?: string } | null = null;
+    let prepareError: { message: string } | null = null;
 
-    if (prepareError) {
+    try {
+      const result = await withTimeout(
+        supabase.functions.invoke("prepare-login", {
+          body: { email: normalizedEmail },
+        }),
+        15000,
+        "Login preparation",
+      );
+      prepareData = result.data as { ok?: boolean; error?: string } | null;
+      prepareError = result.error;
+    } catch (err) {
+      prepareError = {
+        message:
+          err instanceof Error
+            ? err.message
+            : "Login preparation failed. Supabase may be temporarily unavailable.",
+      };
+    }
+
+    if (prepareError && !isAvailabilityError(prepareError.message)) {
       setLoading(false);
       setError(prepareError.message);
       return;
     }
+    const usedPrepareFallback = Boolean(prepareError);
     if (prepareData?.ok === false) {
       setLoading(false);
       setError(prepareData.error ?? "This email is not configured for RetainOS.");
       return;
     }
 
-    const { error: err } = await supabase.auth.signInWithOtp({
-      email: normalizedEmail,
-      options: { shouldCreateUser: false },
-    });
+    let err: { message: string } | null = null;
+    try {
+      const result = await withTimeout(
+        supabase.auth.signInWithOtp({
+          email: normalizedEmail,
+          options: { shouldCreateUser: false },
+        }),
+        15000,
+        "Login code send",
+      );
+      err = result.error;
+    } catch (sendError) {
+      err = {
+        message:
+          sendError instanceof Error
+            ? sendError.message
+            : "Login code send failed. Supabase may be temporarily unavailable.",
+      };
+    }
     setLoading(false);
 
     if (err) {
@@ -53,6 +97,11 @@ export function Login() {
     }
     setEmail(normalizedEmail);
     setOtpSent(true);
+    if (usedPrepareFallback) {
+      setError(
+        "Supabase is still recovering, so RetainOS skipped the access pre-check and sent a code only if this email already exists.",
+      );
+    }
   }
 
   async function handleVerify(e: FormEvent) {
@@ -60,11 +109,26 @@ export function Login() {
     setLoading(true);
     setError(null);
 
-    const { error: err } = await supabase.auth.verifyOtp({
-      email,
-      token,
-      type: "email",
-    });
+    let err: { message: string } | null = null;
+    try {
+      const result = await withTimeout(
+        supabase.auth.verifyOtp({
+          email,
+          token,
+          type: "email",
+        }),
+        15000,
+        "Login code verification",
+      );
+      err = result.error;
+    } catch (verifyError) {
+      err = {
+        message:
+          verifyError instanceof Error
+            ? verifyError.message
+            : "Login code verification failed. Supabase may be temporarily unavailable.",
+      };
+    }
     setLoading(false);
 
     if (err) {
@@ -75,29 +139,32 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <section className="flex flex-1 items-center justify-center px-6 py-10 sm:px-10 lg:px-16">
+    <div className="grid min-h-screen place-items-center bg-[#f1f4f9] px-4 py-8 text-[#162b3e]">
+      <div className="grid min-h-[640px] w-full max-w-[1040px] overflow-hidden rounded-2xl border border-[#e4e9f0] bg-white shadow-[0_12px_32px_rgba(16,27,41,.12)] lg:grid-cols-2">
+        <section className="flex items-center justify-center px-6 py-10 sm:px-10 lg:px-14">
           <div className="w-full max-w-md">
             <div className="mb-10 flex flex-col items-center text-center">
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-slate-200">
-                <div className="h-8 w-8 rounded-full border-[10px] border-slate-500 border-l-transparent" />
+              <div className="mb-4 grid h-14 w-14 place-items-center rounded-full bg-[#162b3e]">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M20.5 8.5A9 9 0 1 0 21 13" stroke="#59ABF0" strokeWidth="2.6" strokeLinecap="round" />
+                  <path d="M20.8 3.6 21.4 9 16 8.2z" fill="#59ABF0" />
+                </svg>
               </div>
-              <h1 className="text-2xl font-bold tracking-normal text-slate-900">
+              <h1 className="text-[26px] font-bold tracking-normal text-[#162b3e]">
                 RetainOS
               </h1>
-              <p className="mt-4 text-sm font-medium text-slate-500">
+              <p className="mt-4 text-sm font-medium text-[#586273]">
                 Enter your credentials to access your account
               </p>
             </div>
 
-            <div className="rounded-lg bg-slate-50 p-6 sm:p-8">
+            <div className="rounded-xl border border-[#e4e9f0] bg-[#f7f9fc] p-6 sm:p-7">
               {!otpSent ? (
                 <form onSubmit={handleSendOtp} className="space-y-5">
                   <div>
                     <label
                       htmlFor="email"
-                      className="mb-1.5 block text-sm font-semibold text-slate-800"
+                      className="mb-1.5 block text-sm font-semibold text-[#162b3e]"
                     >
                       Email address*
                     </label>
@@ -109,27 +176,27 @@ export function Login() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="block w-full rounded-lg border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] shadow-sm placeholder:text-[#98a2b3] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full rounded-md bg-slate-700 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full rounded-lg bg-[#162b3e] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#1e3a52] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {loading ? "Sending..." : "Sign In"}
                   </button>
                 </form>
               ) : (
                 <form onSubmit={handleVerify} className="space-y-5">
-                  <p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                  <p className="rounded-lg border border-[#e4e9f0] bg-white px-3 py-2 text-sm text-[#586273]">
                     We sent a login code to{" "}
-                    <strong className="font-semibold text-slate-900">{email}</strong>
+                    <strong className="font-semibold text-[#162b3e]">{email}</strong>
                   </p>
                   <div>
                     <label
                       htmlFor="token"
-                      className="mb-1.5 block text-sm font-semibold text-slate-800"
+                      className="mb-1.5 block text-sm font-semibold text-[#162b3e]"
                     >
                       Verification code*
                     </label>
@@ -141,13 +208,13 @@ export function Login() {
                       value={token}
                       onChange={(e) => setToken(e.target.value)}
                       placeholder="123456"
-                      className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-center text-sm tracking-widest text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="block w-full rounded-lg border border-[#cbd2dc] bg-white px-3 py-2.5 text-center text-sm tracking-widest text-[#162b3e] shadow-sm placeholder:text-[#98a2b3] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full rounded-md bg-slate-700 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full rounded-lg bg-[#162b3e] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#1e3a52] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {loading ? "Verifying..." : "Verify & Sign In"}
                   </button>
@@ -158,7 +225,7 @@ export function Login() {
                       setToken("");
                       setError(null);
                     }}
-                    className="w-full text-sm font-medium text-slate-500 hover:text-slate-700"
+                    className="w-full text-sm font-medium text-[#98a2b3] hover:text-[#586273]"
                   >
                     Use a different email
                   </button>
@@ -166,16 +233,16 @@ export function Login() {
               )}
 
               <div className="my-8 flex items-center gap-4">
-                <div className="h-px flex-1 bg-slate-300" />
-                <span className="text-sm font-semibold text-slate-500">Or</span>
-                <div className="h-px flex-1 bg-slate-300" />
+                <div className="h-px flex-1 bg-[#cbd2dc]" />
+                <span className="text-sm font-semibold text-[#98a2b3]">Or</span>
+                <div className="h-px flex-1 bg-[#cbd2dc]" />
               </div>
 
               <button
                 type="button"
-                disabled
-                title="Google sign-in is not enabled yet"
-                className="flex w-full items-center justify-center gap-3 rounded-md border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-400"
+                onClick={() => setGoogleComingSoon(true)}
+                title="Google sign-in"
+                className="flex w-full items-center justify-center gap-3 rounded-lg border border-[#cbd2dc] bg-white px-4 py-3 text-sm font-semibold text-[#586273] transition hover:border-[#59abf0] hover:bg-[#eaf4fe] hover:text-[#162b3e]"
               >
                 <span className="text-base font-bold">G</span>
                 Continue with Google
@@ -190,16 +257,27 @@ export function Login() {
           </div>
         </section>
 
-        <section className="hidden flex-1 items-center justify-center bg-slate-200 lg:flex">
-          <div className="flex h-40 w-40 items-center justify-center rounded-2xl bg-slate-400 text-slate-100">
-            <div className="relative h-20 w-24">
-              <div className="absolute left-2 top-8 h-10 w-14 rotate-[-8deg] rounded-sm bg-slate-100/80" />
-              <div className="absolute right-0 top-4 h-16 w-16 rotate-45 rounded-sm bg-slate-100/90" />
-              <div className="absolute left-3 top-0 h-8 w-8 rounded-full bg-slate-100/90" />
-            </div>
+        <section className="relative hidden flex-col items-center justify-center overflow-hidden bg-gradient-to-br from-[#1e3a52] to-[#0e1b29] px-12 text-center lg:flex">
+          <div className="absolute -right-24 -top-24 h-[460px] w-[460px] rounded-full border border-[#59abf0]/10" />
+          <div className="mb-7 grid h-28 w-28 place-items-center rounded-full bg-[#59abf0]/10">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20.5 8.5A9 9 0 1 0 21 13" stroke="#59ABF0" strokeWidth="2.4" strokeLinecap="round" />
+              <path d="M20.8 3.6 21.4 9 16 8.2z" fill="#59ABF0" />
+            </svg>
           </div>
+          <h2 className="text-2xl font-bold text-white">Retention, on autopilot</h2>
+          <p className="mt-3 max-w-xs text-sm leading-6 text-[#8fa3b8]">
+            Track every client through onboarding, renewal, and beyond in one source of truth for your CSM team.
+          </p>
         </section>
       </div>
+      {googleComingSoon ? (
+        <ComingSoonModal
+          title="Google Login"
+          description="Google Workspace sign-in will be added after the pilot authentication flow is fully validated."
+          onClose={() => setGoogleComingSoon(false)}
+        />
+      ) : null}
     </div>
   );
 }

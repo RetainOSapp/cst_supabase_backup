@@ -9,10 +9,6 @@ type SortField = "client" | "csm" | "status" | "updated";
 type SortDirection = "asc" | "desc";
 
 const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
-interface Company {
-  glide_row_id: string;
-  name: string | null;
-}
 
 interface AppCompany {
   id: string;
@@ -326,10 +322,8 @@ export function CsmReports() {
   const {
     capabilities,
     effectiveCompanyId,
-    setViewAsCompanyId,
     teamMemberId,
   } = useAccountContext();
-  const [companies, setCompanies] = useState<Company[]>([]);
   const [appCompanyByLegacyId, setAppCompanyByLegacyId] = useState(
     new Map<string, AppCompany>(),
   );
@@ -358,10 +352,8 @@ export function CsmReports() {
   const [sortField, setSortField] = useState<SortField>("csm");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [loading, setLoading] = useState(false);
-  const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
   const selectedAppCompany = companyId
     ? appCompanyByLegacyId.get(companyId) ?? null
     : null;
@@ -551,27 +543,12 @@ export function CsmReports() {
   useEffect(() => {
     let cancelled = false;
     async function loadCompanies() {
-      setLoadingCompanies(true);
-      const backupQuery = supabase
-        .from("backup_companies")
-        .select("glide_row_id, name")
-        .or("archived.is.null,archived.eq.false")
-        .order("name", { ascending: true });
-      const appQuery = supabase
+      const appResult = await supabase
         .from("companies")
         .select("id, legacy_glide_row_id, migration_status");
 
-      const [backupResult, appResult] = await Promise.all([
-        canUseCompanySwitcher || !effectiveCompanyId
-          ? backupQuery
-          : backupQuery.eq("glide_row_id", effectiveCompanyId),
-        appQuery,
-      ]);
-
       if (cancelled) return;
-      if (backupResult.error) console.error("Failed to load companies:", backupResult.error);
       if (appResult.error) console.error("Failed to load app companies:", appResult.error);
-      setCompanies((backupResult.data ?? []) as Company[]);
       setAppCompanyByLegacyId(
         new Map(
           ((appResult.data ?? []) as AppCompany[])
@@ -579,13 +556,12 @@ export function CsmReports() {
             .map((company) => [company.legacy_glide_row_id as string, company]),
         ),
       );
-      setLoadingCompanies(false);
     }
     void loadCompanies();
     return () => {
       cancelled = true;
     };
-  }, [canUseCompanySwitcher, effectiveCompanyId]);
+  }, []);
 
   useEffect(() => {
     if (!companyId) {
@@ -595,59 +571,44 @@ export function CsmReports() {
     let cancelled = false;
     async function loadTeam() {
       const appCompany = appCompanyByLegacyId.get(companyId);
-      const appTeamQuery = appCompany
-        ? supabase
-            .from("company_members")
-            .select(
-              "id, legacy_glide_row_id, name, email, role, hide_from_csm_list, status",
-            )
-            .eq("company_id", appCompany.id)
-            .eq("status", "active")
-            .order("name", { ascending: true })
-        : Promise.resolve({ data: [], error: null });
-      const backupTeamQuery = supabase
+      if (appCompany) {
+        const { data, error } = await supabase
+          .from("company_members")
+          .select(
+            "id, legacy_glide_row_id, name, email, role, hide_from_csm_list, status",
+          )
+          .eq("company_id", appCompany.id)
+          .eq("status", "active")
+          .order("name", { ascending: true });
+        if (cancelled) return;
+        if (error) console.error("Failed to load app team:", error);
+        const rows = ((data ?? []) as unknown as TeamMember[]).map((member) => ({
+          ...member,
+          glide_row_id: member.legacy_glide_row_id || member.id || "",
+          is_archived: false,
+        }));
+        setTeamMembers(rows);
+        if (csmId && !rows.some((member) => teamMemberOptionId(member) === csmId)) {
+          setCsmId("");
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
         .from("backup_company_team")
         .select(
           "glide_row_id, name, email, is_archived, role_id, role_is_saa_s_admin, role_read_only_user, role_hide_from_csm_list",
         )
         .eq("company_id", companyId)
         .order("name", { ascending: true });
-
-      const [appResult, backupResult] = await Promise.all([
-        appTeamQuery,
-        backupTeamQuery,
-      ]);
       if (cancelled) return;
-      if (appResult.error) console.error("Failed to load app team:", appResult.error);
-      if (backupResult.error) console.error("Failed to load backup team:", backupResult.error);
-
-      const backupRows = ((backupResult.data ?? []) as unknown as TeamMember[]).map(
-        (member) => ({ ...member, glide_row_id: member.glide_row_id ?? "" }),
-      );
-      const backupByLegacyId = new Map(
-        backupRows.map((member) => [
-          member.glide_row_id,
-          member,
-        ]),
-      );
-      const merged: TeamMember[] = ((appResult.data ?? []) as unknown as TeamMember[]).map((member) => {
-        const legacyId = member.legacy_glide_row_id ?? "";
-        const backup = backupByLegacyId.get(legacyId);
-        return {
-          ...backup,
-          ...member,
-          glide_row_id: legacyId || member.id || "",
-          name: member.name || backup?.name || "Unassigned",
-          email: member.email || backup?.email || null,
-          is_archived: false,
-        };
-      });
-      const legacyIds = new Set(merged.map((member) => member.glide_row_id ?? ""));
-      for (const member of backupRows) {
-        if (!legacyIds.has(member.glide_row_id ?? "")) merged.push(member);
-      }
-      setTeamMembers(merged as TeamMember[]);
-      if (csmId && !merged.some((member) => teamMemberOptionId(member) === csmId)) {
+      if (error) console.error("Failed to load backup team:", error);
+      const rows = ((data ?? []) as unknown as TeamMember[]).map((member) => ({
+        ...member,
+        glide_row_id: member.glide_row_id ?? "",
+      }));
+      setTeamMembers(rows);
+      if (csmId && !rows.some((member) => teamMemberOptionId(member) === csmId)) {
         setCsmId("");
       }
     }
@@ -866,33 +827,7 @@ export function CsmReports() {
       </div>
 
       <section className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Company
-            </span>
-            <select
-              value={companyId}
-              onChange={(event) => {
-                const id = event.target.value;
-                if (canUseCompanySwitcher) setViewAsCompanyId(id);
-                setCompanyId(id);
-                setCsmId("");
-              }}
-              disabled={loadingCompanies || !canUseCompanySwitcher}
-              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
-            >
-              <option value="">
-                {loadingCompanies ? "Loading companies..." : "Select a company"}
-              </option>
-              {companies.map((company) => (
-                <option key={company.glide_row_id} value={company.glide_row_id}>
-                  {company.name ?? "(unnamed)"}
-                </option>
-              ))}
-            </select>
-          </label>
-
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-500">
               CSM

@@ -203,10 +203,11 @@ Deno.serve(async (req) => {
     let selectedMilestone: Record<string, unknown> | null = null;
     if (requestedOfferId) {
       const { data: offer, error: offerError } = await supabase
-        .from("backup_company_offers")
-        .select("glide_row_id, company_id, name")
+        .from("company_offers")
+        .select("glide_row_id, company_glide_row_id, name, status")
         .eq("glide_row_id", requestedOfferId)
-        .eq("company_id", companyGlideId)
+        .eq("company_id", company.id)
+        .eq("status", "active")
         .maybeSingle();
       if (offerError) throw offerError;
       if (!offer) {
@@ -215,10 +216,12 @@ Deno.serve(async (req) => {
       selectedOffer = offer;
       if (requestedMilestoneId) {
         const { data: milestone, error: milestoneError } = await supabase
-          .from("backup_company_offer_milestones")
-          .select("glide_row_id, offer_id, name, order")
+          .from("company_offer_milestones")
+          .select("glide_row_id, offer_id, name, position")
           .eq("glide_row_id", requestedMilestoneId)
           .eq("offer_id", requestedOfferId)
+          .eq("company_id", company.id)
+          .eq("status", "active")
           .maybeSingle();
         if (milestoneError) throw milestoneError;
         if (!milestone) {

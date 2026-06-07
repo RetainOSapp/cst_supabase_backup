@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
+import { ComingSoonPanel } from "../components/ComingSoon.tsx";
 
 type DetailTab = "team" | "customization" | "pathways" | "settings";
 type TeamSource = "mirror" | "app_owned";
+type PathwaySource = "mirror" | "app_owned";
 type TeamRole = "director" | "support" | "csm" | "viewer";
 type TeamStatusFilter = "active" | "archived";
 
@@ -51,6 +53,28 @@ interface AppTeamRow {
   hide_from_csm_list: boolean | null;
   capacity_number: number | null;
   status: "active" | "archived";
+}
+
+interface CompanyOfferRow {
+  glide_row_id: string;
+  name: string | null;
+  company_id?: string | null;
+  status?: "active" | "archived" | null;
+}
+
+interface CompanyOfferMilestoneRow {
+  glide_row_id: string;
+  offer_id: string | null;
+  name: string | null;
+  position?: number | null;
+  order?: number | null;
+  target_days_to_complete?: number | null;
+  target_days_to_complete_from_onboarding_date?: number | null;
+  is_ttv_milestone?: boolean | null;
+  ttv_milestone?: boolean | null;
+  is_final_milestone?: boolean | null;
+  final_milestone?: boolean | null;
+  status?: "active" | "archived" | null;
 }
 
 function getInitials(name: string | null | undefined) {
@@ -496,6 +520,438 @@ function TeamStatusButton({
   );
 }
 
+function PathwaySetupModal({
+  companyLegacyId,
+  offer,
+  milestone,
+  defaultOfferId,
+  onClose,
+  onSaved,
+}: {
+  companyLegacyId: string;
+  offer?: CompanyOfferRow | null;
+  milestone?: CompanyOfferMilestoneRow | null;
+  defaultOfferId?: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isMilestone = milestone !== undefined;
+  const isEditing = Boolean(offer || milestone);
+  const [name, setName] = useState(offer?.name ?? milestone?.name ?? "");
+  const [position, setPosition] = useState(
+    String(milestone?.position ?? milestone?.order ?? 0),
+  );
+  const [targetDays, setTargetDays] = useState(
+    String(
+      milestone?.target_days_to_complete ??
+        milestone?.target_days_to_complete_from_onboarding_date ??
+        "",
+    ),
+  );
+  const [isTtvMilestone, setIsTtvMilestone] = useState(
+    milestone?.is_ttv_milestone ?? milestone?.ttv_milestone ?? false,
+  );
+  const [isFinalMilestone, setIsFinalMilestone] = useState(
+    milestone?.is_final_milestone ?? milestone?.final_milestone ?? false,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    const action = isMilestone
+      ? isEditing
+        ? "update_milestone"
+        : "create_milestone"
+      : isEditing
+        ? "update_offer"
+        : "create_offer";
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-pathway",
+      {
+        body: {
+          action,
+          companyLegacyId,
+          entityId: milestone?.glide_row_id ?? offer?.glide_row_id,
+          offerId: milestone?.offer_id ?? defaultOfferId,
+          name,
+          position,
+          targetDays,
+          isTtvMilestone,
+          isFinalMilestone,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError || data?.error) {
+      setError(data?.error ?? invokeError?.message ?? "Unable to save.");
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-xl rounded-lg border border-[#e4e9f0] bg-white shadow-2xl">
+        <form onSubmit={handleSubmit}>
+          <div className="flex items-center justify-between border-b border-[#e4e9f0] px-6 py-4">
+            <div>
+              <h2 className="text-lg font-semibold text-[#162b3e]">
+                {isEditing ? "Edit" : "New"} {isMilestone ? "milestone" : "offer"}
+              </h2>
+              <p className="mt-1 text-sm text-[#6c7684]">
+                This configuration will be available to RetainOS pilot clients.
+              </p>
+            </div>
+            <button type="button" onClick={onClose} className="text-2xl text-[#6c7684]">
+              ×
+            </button>
+          </div>
+          <div className="space-y-4 px-6 py-5">
+            <label className="block text-sm font-semibold text-[#364152]">
+              Name
+              <input
+                required
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="mt-1 block w-full rounded-md border border-[#cbd2dc] px-3 py-2.5 text-sm"
+              />
+            </label>
+            {isMilestone ? (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm font-semibold text-[#364152]">
+                    Position
+                    <input
+                      type="number"
+                      min="0"
+                      value={position}
+                      onChange={(event) => setPosition(event.target.value)}
+                      className="mt-1 block w-full rounded-md border border-[#cbd2dc] px-3 py-2.5 text-sm"
+                    />
+                  </label>
+                  <label className="block text-sm font-semibold text-[#364152]">
+                    Target days from onboarding
+                    <input
+                      type="number"
+                      min="0"
+                      value={targetDays}
+                      onChange={(event) => setTargetDays(event.target.value)}
+                      className="mt-1 block w-full rounded-md border border-[#cbd2dc] px-3 py-2.5 text-sm"
+                    />
+                  </label>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-[#364152]">
+                  <input
+                    type="checkbox"
+                    checked={isTtvMilestone}
+                    onChange={(event) => setIsTtvMilestone(event.target.checked)}
+                  />
+                  Counts as the time-to-value milestone
+                </label>
+                <label className="flex items-center gap-2 text-sm text-[#364152]">
+                  <input
+                    type="checkbox"
+                    checked={isFinalMilestone}
+                    onChange={(event) => setIsFinalMilestone(event.target.checked)}
+                  />
+                  Final milestone in this offer
+                </label>
+              </>
+            ) : null}
+            {error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-[#e4e9f0] px-6 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-[#cbd2dc] px-4 py-2 text-sm font-semibold text-[#586273]"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={saving}
+              className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-semibold text-[#162b3e] disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PathwaysSetup({
+  companyLegacyId,
+  source,
+  offers,
+  milestones,
+  canManage,
+  onReload,
+}: {
+  companyLegacyId: string;
+  source: PathwaySource;
+  offers: CompanyOfferRow[];
+  milestones: CompanyOfferMilestoneRow[];
+  canManage: boolean;
+  onReload: () => void;
+}) {
+  const [editingOffer, setEditingOffer] = useState<CompanyOfferRow | null | undefined>();
+  const [editingMilestone, setEditingMilestone] =
+    useState<CompanyOfferMilestoneRow | null | undefined>();
+  const [newMilestoneOfferId, setNewMilestoneOfferId] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function archiveItem(
+    action: "archive_offer" | "archive_milestone",
+    entityId: string,
+    label: string,
+  ) {
+    if (!window.confirm(`Archive ${label}?`)) return;
+    setActionError(null);
+    const { data, error } = await supabase.functions.invoke("manage-company-pathway", {
+      body: { action, companyLegacyId, entityId },
+    });
+    if (error || data?.error) {
+      setActionError(data?.error ?? error?.message ?? "Unable to archive.");
+      return;
+    }
+    onReload();
+  }
+
+  const activeOffers = offers.filter((offer) => offer.status !== "archived");
+  const archivedOffers = offers.filter((offer) => offer.status === "archived");
+
+  return (
+    <div className="mt-6 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-[#162b3e]">Offers & Milestones</h2>
+          <p className="mt-1 text-sm text-[#6c7684]">
+            Configure the primary client journeys and their ordered milestones.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+              source === "app_owned"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-slate-50 text-slate-600"
+            }`}
+          >
+            {source === "app_owned" ? "RetainOS pilot data" : "Glide mirror data"}
+          </span>
+          <button
+            type="button"
+            disabled={!canManage}
+            onClick={() => setEditingOffer(null)}
+            className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-semibold text-[#162b3e] disabled:opacity-40"
+          >
+            + New Offer
+          </button>
+        </div>
+      </div>
+
+      {source === "mirror" ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This company still reads journey configuration from Glide. Editing unlocks when
+          the company enters the RetainOS pilot.
+        </div>
+      ) : null}
+      {actionError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </div>
+      ) : null}
+
+      {activeOffers.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[#cbd2dc] bg-white p-10 text-center text-sm text-[#6c7684]">
+          No active offers configured yet.
+        </div>
+      ) : (
+        activeOffers.map((offer) => {
+          const offerMilestones = milestones
+            .filter(
+              (milestone) =>
+                milestone.offer_id === offer.glide_row_id &&
+                milestone.status !== "archived",
+            )
+            .sort(
+              (a, b) =>
+                Number(a.position ?? a.order ?? 0) - Number(b.position ?? b.order ?? 0),
+            );
+          return (
+            <section
+              key={offer.glide_row_id}
+              className="rounded-lg border border-[#e4e9f0] bg-white shadow-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e4e9f0] px-5 py-4">
+                <div>
+                  <h3 className="font-semibold text-[#162b3e]">{offer.name}</h3>
+                  <p className="mt-1 text-xs text-[#6c7684]">
+                    {offerMilestones.length} active milestone
+                    {offerMilestones.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={!canManage}
+                    onClick={() => setEditingOffer(offer)}
+                    className="rounded-md border border-[#cbd2dc] px-3 py-1.5 text-sm font-semibold text-[#586273] disabled:opacity-40"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canManage}
+                    onClick={() => {
+                      setNewMilestoneOfferId(offer.glide_row_id);
+                      setEditingMilestone(null);
+                    }}
+                    className="rounded-md border border-[#59abf0] px-3 py-1.5 text-sm font-semibold text-[#2b79c4] disabled:opacity-40"
+                  >
+                    + Milestone
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canManage}
+                    onClick={() =>
+                      void archiveItem(
+                        "archive_offer",
+                        offer.glide_row_id,
+                        offer.name ?? "offer",
+                      )
+                    }
+                    className="rounded-md px-3 py-1.5 text-sm font-semibold text-red-600 disabled:opacity-40"
+                  >
+                    Archive
+                  </button>
+                </div>
+              </div>
+              <div className="divide-y divide-[#e4e9f0]">
+                {offerMilestones.length === 0 ? (
+                  <p className="px-5 py-6 text-sm text-[#6c7684]">
+                    No milestones configured for this offer.
+                  </p>
+                ) : (
+                  offerMilestones.map((milestone, index) => (
+                    <div
+                      key={milestone.glide_row_id}
+                      className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#eaf4fe] text-xs font-bold text-[#2b79c4]">
+                          {index + 1}
+                        </span>
+                        <div>
+                          <p className="text-sm font-semibold text-[#162b3e]">
+                            {milestone.name}
+                          </p>
+                          <p className="mt-1 text-xs text-[#6c7684]">
+                            Target:{" "}
+                            {milestone.target_days_to_complete ??
+                              milestone.target_days_to_complete_from_onboarding_date ??
+                              "--"}{" "}
+                            days
+                            {milestone.is_ttv_milestone || milestone.ttv_milestone
+                              ? " · Time to value"
+                              : ""}
+                            {milestone.is_final_milestone || milestone.final_milestone
+                              ? " · Final"
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() => setEditingMilestone(milestone)}
+                          className="text-sm font-semibold text-[#2b79c4] disabled:opacity-40"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            void archiveItem(
+                              "archive_milestone",
+                              milestone.glide_row_id,
+                              milestone.name ?? "milestone",
+                            )
+                          }
+                          className="text-sm font-semibold text-red-600 disabled:opacity-40"
+                        >
+                          Archive
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          );
+        })
+      )}
+
+      {archivedOffers.length > 0 ? (
+        <details className="rounded-lg border border-[#e4e9f0] bg-white px-5 py-4">
+          <summary className="cursor-pointer text-sm font-semibold text-[#586273]">
+            Archived offers ({archivedOffers.length})
+          </summary>
+          <div className="mt-4 space-y-2">
+            {archivedOffers.map((offer) => (
+              <div
+                key={offer.glide_row_id}
+                className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3 text-sm text-[#6c7684]"
+              >
+                {offer.name}
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
+
+      {editingOffer !== undefined ? (
+        <PathwaySetupModal
+          companyLegacyId={companyLegacyId}
+          offer={editingOffer}
+          onClose={() => setEditingOffer(undefined)}
+          onSaved={() => {
+            setEditingOffer(undefined);
+            onReload();
+          }}
+        />
+      ) : null}
+      {editingMilestone !== undefined ? (
+        <PathwaySetupModal
+          companyLegacyId={companyLegacyId}
+          milestone={editingMilestone}
+          defaultOfferId={newMilestoneOfferId}
+          onClose={() => {
+            setEditingMilestone(undefined);
+            setNewMilestoneOfferId("");
+          }}
+          onSaved={() => {
+            setEditingMilestone(undefined);
+            setNewMilestoneOfferId("");
+            onReload();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export function SaasClientDetail({
   companyIdOverride,
   mode = "super_admin",
@@ -519,6 +975,13 @@ export function SaasClientDetail({
   const [teamActionError, setTeamActionError] = useState<string | null>(null);
   const [teamStatusFilter, setTeamStatusFilter] =
     useState<TeamStatusFilter>("active");
+  const [pathwaySource, setPathwaySource] = useState<PathwaySource>("mirror");
+  const [offers, setOffers] = useState<CompanyOfferRow[]>([]);
+  const [offerMilestones, setOfferMilestones] = useState<
+    CompanyOfferMilestoneRow[]
+  >([]);
+  const [pathwaysLoading, setPathwaysLoading] = useState(false);
+  const [pathwaysReloadKey, setPathwaysReloadKey] = useState(0);
 
   useEffect(() => {
     if (!companyId) return;
@@ -605,6 +1068,83 @@ export function SaasClientDetail({
       cancelled = true;
     };
   }, [companyId, teamReloadKey]);
+
+  useEffect(() => {
+    if (!companyId || activeTab !== "pathways") return;
+    const legacyCompanyId = companyId;
+    let cancelled = false;
+
+    async function loadPathways() {
+      setPathwaysLoading(true);
+      const { data: appCompany } = await supabase
+        .from("companies")
+        .select("id, migration_status")
+        .eq("legacy_glide_row_id", legacyCompanyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+
+      if (appCompany) {
+        const [offersResult, milestonesResult] = await Promise.all([
+          supabase
+            .from("company_offers")
+            .select("glide_row_id, name, status")
+            .eq("company_id", appCompany.id)
+            .order("name", { ascending: true }),
+          supabase
+            .from("company_offer_milestones")
+            .select(
+              "glide_row_id, offer_id, name, position, target_days_to_complete, is_ttv_milestone, is_final_milestone, status",
+            )
+            .eq("company_id", appCompany.id)
+            .order("position", { ascending: true }),
+        ]);
+        if (cancelled) return;
+        if (!offersResult.error && !milestonesResult.error) {
+          setOffers((offersResult.data ?? []) as CompanyOfferRow[]);
+          setOfferMilestones(
+            (milestonesResult.data ?? []) as CompanyOfferMilestoneRow[],
+          );
+          setPathwaySource("app_owned");
+          setPathwaysLoading(false);
+          return;
+        }
+        console.error(
+          "Failed to load app-owned pathway setup:",
+          offersResult.error ?? milestonesResult.error,
+        );
+      }
+
+      const [offersResult, milestonesResult] = await Promise.all([
+        supabase
+          .from("backup_company_offers")
+          .select("glide_row_id, company_id, name")
+          .eq("company_id", legacyCompanyId)
+          .order("name", { ascending: true }),
+        supabase
+          .from("backup_company_offer_milestones")
+          .select(
+            "glide_row_id, offer_id, name, order, target_days_to_complete_from_onboarding_date, ttv_milestone, final_milestone",
+          )
+          .order("order", { ascending: true, nullsFirst: false }),
+      ]);
+      if (cancelled) return;
+      const mirrorOffers = (offersResult.data ?? []) as CompanyOfferRow[];
+      const offerIds = new Set(mirrorOffers.map((offer) => offer.glide_row_id));
+      setOffers(mirrorOffers);
+      setOfferMilestones(
+        ((milestonesResult.data ?? []) as CompanyOfferMilestoneRow[]).filter(
+          (milestone) => milestone.offer_id && offerIds.has(milestone.offer_id),
+        ),
+      );
+      setPathwaySource("mirror");
+      setPathwaysLoading(false);
+    }
+
+    void loadPathways();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, companyId, pathwaysReloadKey]);
 
   const groupedTeam = useMemo(() => {
     const activeMembers = teamMembers.filter((member) => member.is_archived !== true);
@@ -872,9 +1412,35 @@ export function SaasClientDetail({
             </section>
           )}
         </div>
+      ) : activeTab === "pathways" ? (
+        pathwaysLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
+          </div>
+        ) : (
+          <PathwaysSetup
+            companyLegacyId={companyId ?? ""}
+            source={pathwaySource}
+            offers={offers}
+            milestones={offerMilestones}
+            canManage={pathwaySource === "app_owned"}
+            onReload={() => setPathwaysReloadKey((key) => key + 1)}
+          />
+        )
       ) : (
-        <div className="mt-6 rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
-          This tab is parked for the next phase.
+        <div className="mt-6">
+          <ComingSoonPanel
+            title={
+              activeTab === "customization"
+                ? "Company Customization"
+                : "Company Settings"
+            }
+            description={
+              activeTab === "customization"
+                ? "Custom fields, outcome definitions, churn reasons, and company-specific AI configuration will live here."
+                : "Company preferences, notification rules, subscription settings, and operational configuration will live here."
+            }
+          />
         </div>
       )}
 

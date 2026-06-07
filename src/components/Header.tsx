@@ -1,109 +1,288 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
-export function Header() {
-  const [email, setEmail] = useState<string | null>(null);
-  const location = useLocation();
-  const { capabilities, isSuperAdmin, role, viewAsCompanyId } = useAccountContext();
+interface SidebarCompany {
+  glide_row_id: string;
+  name: string | null;
+}
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setEmail(user?.email ?? null);
-    });
-  }, []);
+type IconName =
+  | "dashboard"
+  | "reports"
+  | "clients"
+  | "tasks"
+  | "groups"
+  | "admin"
+  | "saas"
+  | "tables"
+  | "logs";
 
-  const isActive = (path: string) => {
-    if (path === "/") {
-      return (
-        location.pathname === "/" || location.pathname.startsWith("/tables")
-      );
-    }
-    return (
-      location.pathname === path || location.pathname.startsWith(`${path}/`)
-    );
+function NavIcon({ name }: { name: IconName }) {
+  const common = {
+    width: 18,
+    height: 18,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    "aria-hidden": true,
+  };
+  const strokeProps = {
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
   };
 
-  const linkClass = (path: string) =>
-    `px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-      isActive(path)
-        ? "bg-indigo-100 text-indigo-700"
-        : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-    }`;
+  if (name === "dashboard") {
+    return <svg {...common}><path d="M4 4h6v6H4zM14 4h6v10h-6zM4 14h6v6H4zM14 18h6v2h-6z" {...strokeProps} /></svg>;
+  }
+  if (name === "reports") {
+    return <svg {...common}><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" {...strokeProps} /></svg>;
+  }
+  if (name === "clients" || name === "saas") {
+    return <svg {...common}><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75" {...strokeProps} /></svg>;
+  }
+  if (name === "tasks") {
+    return <svg {...common}><path d="m9 11 3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" {...strokeProps} /></svg>;
+  }
+  if (name === "groups") {
+    return <svg {...common}><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M14 14h2a4 4 0 0 1 4 4v2" {...strokeProps} /></svg>;
+  }
+  if (name === "admin") {
+    return <svg {...common}><path d="M12 15a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1V21H9.4v-.1a1.7 1.7 0 0 0-1.4-1.5 1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 3.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1-.4H2V9.4h.1A1.7 1.7 0 0 0 3.6 8a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.06 3.2l.06.06A1.7 1.7 0 0 0 8 3.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1V2h4.2v.1A1.7 1.7 0 0 0 15 3.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1 .4h.1v4.2H21a1.7 1.7 0 0 0-1.6 1.4Z" {...strokeProps} /></svg>;
+  }
+  if (name === "tables") {
+    return <svg {...common}><path d="M4 4h16v16H4zM4 10h16M10 4v16" {...strokeProps} /></svg>;
+  }
+  return <svg {...common}><path d="M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5" {...strokeProps} /></svg>;
+}
 
+function RetainOsMark({ compact = false }: { compact?: boolean }) {
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-14">
-        <div className="flex items-center gap-1">
-          <Link to="/dashboard" className="text-lg font-semibold text-gray-900 mr-6">
-            RetainOS
-          </Link>
-          {capabilities.canAccessTables && (
-            <>
-              <Link to="/tables" className={linkClass("/tables")}>
-                Tables
-              </Link>
-              <Link to="/logs" className={linkClass("/logs")}>
-                Sync Log
-              </Link>
-            </>
-          )}
-          {capabilities.canAccessDashboard && (
-            <Link to="/dashboard" className={linkClass("/dashboard")}>
-              Dashboard
-            </Link>
-          )}
-          {capabilities.canAccessCsmReports && (
-            <Link to="/csm-reports" className={linkClass("/csm-reports")}>
-              CSM Reports
-            </Link>
-          )}
-          {capabilities.canAccessClients && (
-            <Link to="/clients" className={linkClass("/clients")}>
-              Clients
-            </Link>
-          )}
-          {capabilities.canAccessTasks && (
-            <Link to="/tasks" className={linkClass("/tasks")}>
-              Tasks
-            </Link>
-          )}
-          {capabilities.canAccessAdminHub && (
-            <Link to="/admin" className={linkClass("/admin")}>
-              Admin Hub
-            </Link>
-          )}
-          {capabilities.canAccessSaasClients && (
-            <Link to="/saas-clients" className={linkClass("/saas-clients")}>
-              SaaS Clients
-            </Link>
-          )}
+    <span className="flex items-center gap-2.5">
+      <svg width={compact ? 25 : 28} height={compact ? 25 : 28} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M20.5 8.5A9 9 0 1 0 21 13" stroke="#59ABF0" strokeWidth="2.6" strokeLinecap="round" />
+        <path d="M20.8 3.6 21.4 9 16 8.2z" fill="#59ABF0" />
+      </svg>
+      <span className="text-lg font-bold text-white">RetainOS</span>
+    </span>
+  );
+}
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [companyName, setCompanyName] = useState("");
+  const [companies, setCompanies] = useState<SidebarCompany[]>([]);
+  const [companiesLoading, setCompaniesLoading] = useState(false);
+  const {
+    capabilities,
+    email,
+    effectiveCompanyId,
+    isSuperAdmin,
+    role,
+    setViewAsCompanyId,
+    viewAsCompanyId,
+  } = useAccountContext();
+
+  useEffect(() => setMobileOpen(false), [location.pathname]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!effectiveCompanyId) {
+      setCompanyName("");
+      return;
+    }
+    supabase
+      .from("backup_companies")
+      .select("name")
+      .eq("glide_row_id", effectiveCompanyId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setCompanyName(data?.name ?? "");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCompanyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!capabilities.canUseCompanySwitcher) {
+      setCompanies([]);
+      return;
+    }
+    setCompaniesLoading(true);
+    supabase
+      .from("backup_companies")
+      .select("glide_row_id, name")
+      .eq("archived", false)
+      .order("name", { ascending: true })
+      .then(({ data }) => {
+        if (cancelled) return;
+        setCompanies((data ?? []) as SidebarCompany[]);
+        setCompaniesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [capabilities.canUseCompanySwitcher]);
+
+  const firstName = useMemo(() => {
+    const local = email?.split("@")[0]?.split(/[.+_-]/)[0] ?? "";
+    return local ? `${local.charAt(0).toUpperCase()}${local.slice(1)}` : "there";
+  }, [email]);
+
+  const nav = [
+    { path: "/dashboard", label: "Dashboard", icon: "dashboard" as const, show: capabilities.canAccessDashboard },
+    { path: "/clients", label: "Clients", icon: "clients" as const, show: capabilities.canAccessClients },
+    { path: "/csm-reports", label: "CSM Reports", icon: "reports" as const, show: capabilities.canAccessCsmReports },
+    { path: "/tasks", label: "Tasks", icon: "tasks" as const, show: capabilities.canAccessTasks },
+    { path: "/groups", label: "Groups", icon: "groups" as const, show: capabilities.canAccessClients },
+    { path: "/admin", label: "Admin Hub", icon: "admin" as const, show: capabilities.canAccessAdminHub },
+    { path: "/saas-clients", label: "SaaS Clients", icon: "saas" as const, show: capabilities.canAccessSaasClients },
+  ].filter((item) => item.show);
+
+  const devNav = [
+    { path: "/tables", label: "Tables", icon: "tables" as const },
+    { path: "/logs", label: "Sync Log", icon: "logs" as const },
+  ];
+
+  const active = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(`${path}/`);
+
+  const sidebar = (
+    <aside className="flex h-full flex-col bg-[#162b3e] text-[#e8eef5]">
+      <Link to="/dashboard" className="px-5 pb-4 pt-5">
+        <RetainOsMark />
+      </Link>
+      <div className="mx-3 mb-2 rounded-lg bg-white/5 px-3 py-2.5">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#8fa3b8]">
+          {isSuperAdmin ? "Viewing company" : "Company"}
         </div>
-        <div className="flex items-center gap-4">
-          {isSuperAdmin && viewAsCompanyId && (
-            <span className="hidden rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 md:inline">
-              View as active
-            </span>
-          )}
-          {role && (
-            <span className="hidden rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium capitalize text-gray-600 md:inline">
-              {role.replace("_", " ")}
-            </span>
-          )}
-          {email && (
-            <span className="text-sm text-gray-500 hidden sm:inline">
-              {email}
-            </span>
-          )}
-          <button
-            onClick={() => supabase.auth.signOut()}
-            className="text-sm text-gray-500 hover:text-gray-700 cursor-pointer"
+        {capabilities.canUseCompanySwitcher ? (
+          <select
+            aria-label="View as company"
+            value={viewAsCompanyId}
+            onChange={(event) => setViewAsCompanyId(event.target.value)}
+            disabled={companiesLoading}
+            className="mt-2 block w-full rounded-md border border-white/10 bg-[#1e3a52] px-2.5 py-2 text-xs font-semibold text-white focus:border-[#59abf0] disabled:text-[#8fa3b8]"
           >
-            Sign Out
+            <option value="">
+              {companiesLoading ? "Loading companies..." : "Select a company"}
+            </option>
+            {companies.map((company) => (
+              <option key={company.glide_row_id} value={company.glide_row_id}>
+                {company.name ?? "(unnamed)"}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="mt-1 truncate text-sm font-semibold text-white">
+            {companyName || (effectiveCompanyId ? "Company selected" : "No company")}
+          </div>
+        )}
+      </div>
+      <nav className="flex-1 overflow-y-auto px-3 py-2">
+        {nav.map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={`mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-colors ${
+              active(item.path)
+                ? "bg-[#59abf0] text-white"
+                : "text-[#8fa3b8] hover:bg-white/6 hover:text-white"
+            }`}
+          >
+            <NavIcon name={item.icon} />
+            {item.label}
+          </Link>
+        ))}
+        {capabilities.canAccessTables && (
+          <>
+            <div className="px-3 pb-2 pt-5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#8fa3b8]">
+              Dev Tools
+            </div>
+            {devNav.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-colors ${
+                  active(item.path)
+                    ? "bg-[#59abf0] text-white"
+                    : "text-[#8fa3b8] hover:bg-white/6 hover:text-white"
+                }`}
+              >
+                <NavIcon name={item.icon} />
+                {item.label}
+              </Link>
+            ))}
+          </>
+        )}
+      </nav>
+      <div className="border-t border-white/8 px-4 py-4">
+        <div className="flex items-center gap-3">
+          <div className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#2b4d6a] text-xs font-bold text-white">
+            {firstName.slice(0, 2).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold text-white">{firstName}</div>
+            <div className="truncate text-[10px] capitalize text-[#8fa3b8]">
+              {role?.replace("_", " ") ?? email}
+            </div>
+          </div>
+          <button
+            type="button"
+            title="Sign out"
+            onClick={() => supabase.auth.signOut()}
+            className="retainos-focus ml-auto rounded-md p-2 text-[#8fa3b8] hover:bg-white/6 hover:text-white"
+          >
+            <span aria-hidden="true">↪</span>
           </button>
         </div>
       </div>
-    </header>
+    </aside>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#f7f9fc] lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
+      <div className="hidden h-screen lg:sticky lg:top-0 lg:block">{sidebar}</div>
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            className="absolute inset-0 bg-[#0e1b29]/55"
+            onClick={() => setMobileOpen(false)}
+          />
+          <div className="relative h-full w-[280px] max-w-[85vw]">{sidebar}</div>
+        </div>
+      )}
+      <div className="min-w-0">
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-[#e4e9f0] bg-white px-4 sm:px-6 lg:px-7">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setMobileOpen(true)}
+            className="retainos-focus rounded-lg border border-[#e4e9f0] px-3 py-2 text-[#586273] lg:hidden"
+          >
+            ☰
+          </button>
+          <div className="hidden whitespace-nowrap text-sm font-semibold text-[#162b3e] sm:block">
+            Welcome back, {firstName}
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {isSuperAdmin && viewAsCompanyId && (
+              <span className="hidden items-center gap-2 rounded-full border border-[#d6eafb] bg-[#eaf4fe] px-3 py-1.5 text-xs font-semibold text-[#2b79c4] sm:flex">
+                <span className="h-2 w-2 rounded-full bg-[#34b389]" />
+                View as active
+              </span>
+            )}
+          </div>
+        </header>
+        {children}
+      </div>
+    </div>
   );
 }

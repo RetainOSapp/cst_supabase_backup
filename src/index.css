@@ -1,1 +1,212 @@
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
+
+:root {
+  --retainos-navy-900: #0e1b29;
+  --retainos-navy-800: #162b3e;
+  --retainos-navy-700: #1e3a52;
+  --retainos-navy-600: #2b4d6a;
+  --retainos-blue-700: #2b79c4;
+  --retainos-blue-600: #3b8fd9;
+  --retainos-blue-500: #59abf0;
+  --retainos-blue-100: #d6eafb;
+  --retainos-blue-50: #eaf4fe;
+  --retainos-success-600: #2a9272;
+  --retainos-success-500: #34b389;
+  --retainos-success-50: #e7f6f0;
+  --retainos-warning-600: #c77c1e;
+  --retainos-warning-500: #e0922f;
+  --retainos-warning-50: #fcf3e6;
+  --retainos-danger-600: #c13a33;
+  --retainos-danger-500: #d6453d;
+  --retainos-danger-50: #fcebea;
+  --retainos-app-bg: #f7f9fc;
+  --retainos-border: #e4e9f0;
+  --retainos-border-strong: #cbd2dc;
+  --retainos-text: #162b3e;
+  --retainos-text-secondary: #586273;
+  --retainos-text-muted: #98a2b3;
+  font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--retainos-text);
+  background: var(--retainos-app-bg);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--retainos-app-bg);
+  color: var(--retainos-text);
+  font-family: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+input,
+select,
+textarea {
+  accent-color: var(--retainos-blue-600);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--retainos-blue-500);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--retainos-blue-100);
+}
+
+.retainos-focus {
+  outline: none;
+}
+
+.retainos-focus:focus-visible {
+  box-shadow: 0 0 0 3px var(--retainos-blue-100);
+}
+
+.retainos-modal {
+  border: 1px solid var(--retainos-border);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(16, 27, 41, 0.16);
+}
+
+.retainos-modal-header {
+  border-bottom: 1px solid var(--retainos-border);
+  background: #fff;
+}
+
+.retainos-modal-footer {
+  border-top: 1px solid var(--retainos-border);
+  background: var(--retainos-app-bg);
+}
+
+.retainos-modal input:not([type="checkbox"]):not([type="radio"]),
+.retainos-modal select,
+.retainos-modal textarea {
+  border-color: var(--retainos-border-strong);
+  border-radius: 8px;
+  color: var(--retainos-text);
+  font-size: 13px;
+}
+
+.retainos-modal input:not([type="checkbox"]):not([type="radio"]):focus,
+.retainos-modal select:focus,
+.retainos-modal textarea:focus {
+  border-color: var(--retainos-blue-500);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--retainos-blue-50);
+}
+
+.retainos-modal label > span:first-child {
+  color: var(--retainos-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.retainos-section {
+  border: 1px solid var(--retainos-border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 27, 41, 0.04);
+}
+
+.retainos-section-title {
+  color: var(--retainos-navy-800);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.retainos-section-copy {
+  color: var(--retainos-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.retainos-field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--retainos-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.retainos-input {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--retainos-border-strong);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+  color: var(--retainos-text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.retainos-input:focus {
+  border-color: var(--retainos-blue-500);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--retainos-blue-50);
+}
+
+.retainos-input:disabled {
+  cursor: not-allowed;
+  border-color: var(--retainos-border);
+  background: var(--retainos-app-bg);
+  color: var(--retainos-text-muted);
+}
+
+.retainos-button-primary,
+.retainos-button-secondary {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.retainos-button-primary {
+  border: 1px solid var(--retainos-blue-500);
+  background: var(--retainos-blue-500);
+  color: var(--retainos-navy-800);
+}
+
+.retainos-button-primary:hover {
+  border-color: var(--retainos-blue-600);
+  background: var(--retainos-blue-600);
+  color: #fff;
+}
+
+.retainos-button-secondary {
+  border: 1px solid var(--retainos-border-strong);
+  background: #fff;
+  color: var(--retainos-text-secondary);
+}
+
+.retainos-button-secondary:hover {
+  border-color: var(--retainos-blue-500);
+  background: var(--retainos-blue-50);
+  color: var(--retainos-blue-700);
+}
+
+.retainos-button-primary:disabled,
+.retainos-button-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

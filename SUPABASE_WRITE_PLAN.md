@@ -290,7 +290,10 @@ Pilot note:
 
 - `client_milestones` now exists as the app-owned client progress table for pilot/migrated companies.
 - `manage-client-milestone` enables Pathways & Milestones v1 for app-owned clients.
-- Company offer and milestone templates still read from mirrored `backup_company_offers` and `backup_company_offer_milestones`.
+- Company offer and milestone templates use app-owned `company_offers` and `company_offer_milestones` for pilot/migrated companies.
+- Migration `20260606170000_company_pathways_milestones_pilot.sql` seeds the initial app-owned configuration from the Glide mirror without mutating `backup_*`.
+- `manage-company-pathway` enables controlled create/edit/archive actions for Directors and SuperAdmins.
+- Mirror-only companies continue reading `backup_company_offers` and `backup_company_offer_milestones` as a read-only fallback.
 - SuperAdmins and Directors can change a client's current offer/pathway and milestone.
 - Assigned CSMs can start and complete milestones for their assigned clients only.
 - Support does not write milestones in v1.
@@ -306,7 +309,7 @@ Pilot note:
 
 First writes:
 
-- `[later]` Configure offers/milestones at company level.
+- `[v1 pilot]` Configure offers/milestones at company level.
 - `[v1 pilot]` Update a client's milestone progress.
 - `[v1 pilot]` Track time spent in each milestone.
 
@@ -595,6 +598,31 @@ The report must be reviewed for:
 Expected differences caused by validated RetainOS pilot writes are acceptable
 and must be documented. Unexpected differences block migration until resolved.
 The report is read-only and must never update `backup_*` or app-owned tables.
+
+Ethical Scaling checkpoint:
+
+- On 2026-06-06, `npm run pilot:reconcile:ethical-scaling` returned
+  `rolloutGate.readyForPilot = true` with no blockers.
+- Confirmed 154 mirrored clients and 154 app-owned clients, with no missing or
+  unexpected client rows.
+- On 2026-06-07, after a final Ethical Scaling backup sync and Supabase
+  compute recovery, reconciliation found five mirrored clients missing from the
+  app-owned `clients` table.
+- `scripts/seed-ethical-scaling-clients-pilot.mjs --missing-only --apply`
+  inserted only the missing app-owned rows and preserved existing pilot edits.
+- The follow-up reconciliation returned `rolloutGate.readyForPilot = true` with
+  159 mirrored clients and 159 app-owned clients.
+- After that clean gate, the first backup dependency reduction pass moved
+  login provisioning, browser account resolution, and CSM/team dropdowns for
+  pilot/migrated companies to prefer app-owned `company_members`. Mirror team
+  reads remain only as fallback for mirror-only companies.
+- Confirmed zero invalid active CSM assignments and zero active clients with
+  missing app-owned offer/milestone configuration.
+- Non-blocking documented differences:
+  - Invalid CSM assignments exist only on offboarded clients.
+  - Archived pilot/test app-owned offer and milestone rows exist.
+  - Historical mirrored contracts and client milestone records are not fully
+    backfilled app-side yet; pilot writes are app-owned from this point forward.
 
 ## Open Decisions
 

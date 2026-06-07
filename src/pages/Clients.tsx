@@ -603,11 +603,11 @@ function ReadOnlyField({
 }) {
   const shownValue = lookup ? displayValue(value, lookup) : value;
   return (
-    <div>
-      <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
+    <div className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-3.5 py-3">
+      <div className="text-[11px] font-semibold uppercase text-[#586273]">
         {label}
       </div>
-      <div className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800">
+      <div className="mt-1.5 text-sm font-medium text-[#162b3e]">
         {display === "rich" ? (
           <RichValue value={shownValue} />
         ) : display === "outcome" ? (
@@ -636,14 +636,12 @@ function OutcomeSelect({
     value !== "" && !choices.some((choice) => choice.value === value);
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-        {label}
-      </span>
+      <span className="retainos-field-label">{label}</span>
       <select
         disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+        className="retainos-input"
       >
         <option value="">Not set</option>
         {hasCurrentValue ? (
@@ -769,17 +767,33 @@ function QuickUpdateModal({
         setCurrentMilestoneName("");
         return;
       }
-      const [offerResult, milestoneResult] = await Promise.all([
+      const [appOfferResult, appMilestoneResult] = await Promise.all([
         supabase
-          .from("backup_company_offers")
+          .from("company_offers")
           .select("name")
           .eq("glide_row_id", currentOfferId)
           .maybeSingle(),
         supabase
-          .from("backup_company_offer_milestones")
+          .from("company_offer_milestones")
           .select("name")
           .eq("glide_row_id", currentMilestoneId)
           .maybeSingle(),
+      ]);
+      const [offerResult, milestoneResult] = await Promise.all([
+        appOfferResult.data
+          ? Promise.resolve(appOfferResult)
+          : supabase
+              .from("backup_company_offers")
+              .select("name")
+              .eq("glide_row_id", currentOfferId)
+              .maybeSingle(),
+        appMilestoneResult.data
+          ? Promise.resolve(appMilestoneResult)
+          : supabase
+              .from("backup_company_offer_milestones")
+              .select("name")
+              .eq("glide_row_id", currentMilestoneId)
+              .maybeSingle(),
       ]);
       if (cancelled) return;
       setCurrentOfferName(offerResult.data?.name ?? currentOfferId);
@@ -963,31 +977,34 @@ function QuickUpdateModal({
         type="button"
         aria-label="Close quick update"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+        className="absolute inset-0 bg-[#0e1b29]/55 backdrop-blur-[2px] cursor-pointer"
       />
-      <div className="relative max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+      <div className="retainos-modal relative max-h-[92vh] w-full max-w-4xl overflow-y-auto">
+        <div className="retainos-modal-header sticky top-0 z-10 flex items-start justify-between gap-4 px-6 py-5">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Quick Update
+            <div className="text-[11px] font-semibold uppercase text-[#2b79c4]">
+              Client interaction
+            </div>
+            <h2 className="mt-1 text-xl font-semibold text-[#162b3e]">
+              Quick Update · {client.client_name ?? "Unnamed client"}
             </h2>
-            <p className="mt-1 text-sm text-gray-500">
+            <p className="mt-1 text-sm text-[#586273]">
               {isPilotCompany
-                ? `RetainOS pilot write for ${client.client_name ?? "Unnamed client"}`
-                : `Read-only preview for ${client.client_name ?? "Unnamed client"}`}
+                ? "Record the latest client context, outcomes, and journey progress."
+                : "Read-only preview while this company remains on the Glide mirror."}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+            className="rounded-md p-1.5 text-[#98a2b3] hover:bg-white hover:text-[#162b3e] cursor-pointer"
           >
             <span className="sr-only">Close</span>
             <span className="text-xl leading-none">x</span>
           </button>
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="space-y-5 px-5 py-5">
+          <div className="space-y-5 px-6 py-6">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <ReadOnlyField
                 label="North Star"
@@ -1010,52 +1027,44 @@ function QuickUpdateModal({
             </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Next Steps
-              </span>
+              <span className="retainos-field-label">Next Steps</span>
               <textarea
                 disabled={!isPilotCompany || saving}
                 value={nextSteps}
                 onChange={(event) => setNextSteps(event.target.value)}
                 rows={4}
-                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+                className="retainos-input"
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Notes
-              </span>
+              <span className="retainos-field-label">Notes</span>
               <textarea
                 disabled={!isPilotCompany || saving}
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 rows={4}
                 placeholder="Add context from the client interaction"
-                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50 disabled:text-gray-500"
+                className="retainos-input"
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Date of Last Contact
-              </span>
+              <span className="retainos-field-label">Date of Last Contact</span>
               <input
                 type="datetime-local"
                 disabled={!isPilotCompany || saving}
                 value={lastContactAt}
                 onChange={(event) => setLastContactAt(event.target.value)}
-                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+                className="retainos-input"
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Date of Next Contact
-              </span>
+              <span className="retainos-field-label">Date of Next Contact</span>
               <input
                 type="datetime-local"
                 disabled={!isPilotCompany || saving}
                 value={nextContactAt}
                 onChange={(event) => setNextContactAt(event.target.value)}
-                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+                className="retainos-input"
               />
             </label>
           </div>
@@ -1082,13 +1091,20 @@ function QuickUpdateModal({
               onChange={setBuyInStatus}
             />
           </div>
-          <section className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-4">
+          <section className="retainos-section overflow-hidden">
+            <div className="border-b border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
+              <h3 className="retainos-section-title">Journey progress</h3>
+              <p className="retainos-section-copy mt-1">
+                Complete the current milestone when the client is ready to advance.
+              </p>
+            </div>
+            <div className="px-4 py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">
-                  Current milestone
-                </h3>
-                <p className="mt-1 text-sm text-gray-600">
+                <div className="text-[11px] font-semibold uppercase text-[#586273]">
+                  Current offer / milestone
+                </div>
+                <p className="mt-1.5 text-sm font-semibold text-[#162b3e]">
                   {currentMilestoneName
                     ? `${currentOfferName || "Current offer"} / ${currentMilestoneName}`
                     : "No current milestone is configured for this client."}
@@ -1099,13 +1115,14 @@ function QuickUpdateModal({
                   type="button"
                   onClick={completeCurrentMilestone}
                   disabled={!isPilotCompany || saving || completingMilestone}
-                  className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
+                  className="rounded-full border border-[#34b389] bg-[#e7f6f0] px-4 py-2 text-sm font-semibold text-[#2a9272] hover:bg-white disabled:opacity-50 cursor-pointer"
                 >
                   {completingMilestone
                     ? "Completing..."
                     : "Complete current milestone"}
                 </button>
               ) : null}
+            </div>
             </div>
           </section>
           <div
@@ -1132,9 +1149,9 @@ function QuickUpdateModal({
             </div>
           ) : null}
           {historyEvents.length > 0 ? (
-            <section className="rounded-lg border border-gray-200 bg-gray-50">
-              <div className="border-b border-gray-200 px-4 py-3">
-                <h3 className="text-sm font-semibold text-gray-900">
+            <section className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc]">
+              <div className="border-b border-[#e4e9f0] px-4 py-3">
+                <h3 className="text-sm font-semibold text-[#162b3e]">
                   RetainOS pilot history
                 </h3>
               </div>
@@ -1191,18 +1208,18 @@ function QuickUpdateModal({
             </section>
           ) : null}
           </div>
-          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+          <div className="retainos-modal-footer sticky bottom-0 flex justify-end gap-3 px-6 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            className="retainos-button-secondary"
           >
             Done
           </button>
           <button
             type="submit"
             disabled={!isPilotCompany || saving}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            className="retainos-button-primary"
           >
             {saving ? "Saving..." : "Save Quick Update"}
           </button>
@@ -1262,17 +1279,29 @@ function NewClientModal({
         setMilestoneId("");
         return;
       }
-      const { data, error } = await supabase
-        .from("backup_company_offer_milestones")
-        .select("glide_row_id, offer_id, name, order")
+      const appResult = await supabase
+        .from("company_offer_milestones")
+        .select("glide_row_id, offer_id, name, position")
         .eq("offer_id", offerId)
-        .order("order", { ascending: true, nullsFirst: false });
+        .eq("status", "active")
+        .order("position", { ascending: true, nullsFirst: false });
+      const mirrorResult =
+        appResult.error || (appResult.data ?? []).length === 0
+          ? await supabase
+              .from("backup_company_offer_milestones")
+              .select("glide_row_id, offer_id, name, order")
+              .eq("offer_id", offerId)
+              .order("order", { ascending: true, nullsFirst: false })
+          : null;
       if (cancelled) return;
+      const error = appResult.error && mirrorResult?.error;
       if (error) {
-        setSaveError(error.message);
+        setSaveError(mirrorResult?.error?.message ?? appResult.error?.message ?? "");
         return;
       }
-      const rows = (data ?? []) as OfferMilestone[];
+      const rows = ((appResult.data ?? []).length > 0
+        ? appResult.data
+        : mirrorResult?.data ?? []) as OfferMilestone[];
       setOfferMilestones(rows);
       setMilestoneId(rows[0]?.glide_row_id ?? "");
     }
@@ -1331,27 +1360,30 @@ function NewClientModal({
         type="button"
         aria-label="Close new client"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+        className="absolute inset-0 bg-[#0e1b29]/55 backdrop-blur-[2px] cursor-pointer"
       />
-      <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+      <div className="retainos-modal relative max-h-[92vh] w-full max-w-4xl overflow-y-auto">
+        <div className="retainos-modal-header sticky top-0 z-10 flex items-start justify-between gap-4 px-6 py-5">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">New Client</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Creates a RetainOS pilot client record. Glide mirror data stays unchanged.
+            <div className="text-[11px] font-semibold uppercase text-[#2b79c4]">
+              Client setup
+            </div>
+            <h2 className="mt-1 text-xl font-semibold text-[#162b3e]">New Client</h2>
+            <p className="mt-1 text-sm text-[#586273]">
+              Create the client, assign ownership, and optionally configure their initial journey and contract.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+            className="rounded-md p-1.5 text-[#98a2b3] hover:bg-white hover:text-[#162b3e] cursor-pointer"
           >
             <span className="sr-only">Close</span>
             <span className="text-xl leading-none">x</span>
           </button>
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 px-6 py-6 md:grid-cols-2">
             <label className="block md:col-span-2">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Client Name
@@ -1464,11 +1496,11 @@ function NewClientModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
               />
             </label>
-            <div className="md:col-span-2 border-t border-gray-200 pt-4">
-              <h3 className="text-sm font-semibold text-gray-900">
+            <div className="md:col-span-2 border-t border-[#e4e9f0] pt-5">
+              <h3 className="retainos-section-title">
                 Initial journey and contract
               </h3>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="retainos-section-copy mt-1">
                 Optional setup that saves follow-up work after creating the client.
               </p>
             </div>
@@ -1510,13 +1542,13 @@ function NewClientModal({
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 md:col-span-2">
+            <label className="flex items-center gap-2 rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-3 py-3 md:col-span-2">
               <input
                 type="checkbox"
                 checked={createInitialContract}
                 onChange={(event) => setCreateInitialContract(event.target.checked)}
                 disabled={saving}
-                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                className="h-4 w-4 rounded border-[#cbd2dc] text-[#3b8fd9] focus:ring-[#59abf0]"
               />
               <span className="text-sm font-medium text-gray-800">
                 Add initial contract now
@@ -1552,18 +1584,18 @@ function NewClientModal({
               </div>
             ) : null}
           </div>
-          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+          <div className="retainos-modal-footer sticky bottom-0 flex justify-end gap-3 px-6 py-4">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+              className="retainos-button-secondary"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving || !clientName.trim()}
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+              className="retainos-button-primary"
             >
               {saving ? "Creating..." : "Create Client"}
             </button>
@@ -1601,7 +1633,7 @@ function FilterInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] placeholder:text-[#98a2b3] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
       />
     </div>
   );
@@ -1615,11 +1647,11 @@ function EmptyState({
 }) {
   const classes =
     tone === "amber"
-      ? "border-amber-200 bg-amber-50/60 text-amber-900"
-      : "border-gray-300 bg-white text-gray-500";
+      ? "border-[#e0922f] bg-[#fcf3e6] text-[#7f4d11]"
+      : "border-[#cbd2dc] bg-white text-[#586273]";
   return (
     <div
-      className={`rounded-lg border border-dashed p-10 text-center ${classes}`}
+      className={`rounded-md border border-dashed p-10 text-center text-sm ${classes}`}
     >
       {text}
     </div>
@@ -1638,7 +1670,7 @@ function ViewButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${active ? "bg-indigo-600 text-white" : "text-gray-600 hover:bg-gray-50"}`}
+      className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${active ? "bg-[#162b3e] text-white shadow-sm" : "text-[#586273] hover:bg-[#eaf4fe] hover:text-[#162b3e]"}`}
     >
       {children}
     </button>
@@ -1647,10 +1679,10 @@ function ViewButton({
 function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <div className="text-xs uppercase tracking-wider text-gray-500">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#98a2b3]">
         {label}
       </div>
-      <div className="truncate font-medium text-gray-800">{value}</div>
+      <div className="mt-0.5 truncate font-medium text-[#162b3e]">{value}</div>
     </div>
   );
 }
@@ -1664,15 +1696,15 @@ function PilotReminders({
   if (reminders.length === 0) return null;
   const today = dateKey(new Date());
   return (
-    <section className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+    <section className="mb-6 rounded-md border border-[#f0c98f] bg-[#fcf3e6] p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-amber-950">Pilot reminders</h2>
-          <p className="mt-1 text-sm text-amber-800">
+          <h2 className="text-sm font-semibold text-[#162b3e]">Pilot reminders</h2>
+          <p className="mt-1 text-sm text-[#7f4d11]">
             Due or coming up in the next 7 days. Use the calendar for the full timeline.
           </p>
         </div>
-        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-800">
+        <span className="rounded-full border border-[#f0c98f] bg-white px-2.5 py-1 text-xs font-semibold text-[#7f4d11]">
           {reminders.length}
         </span>
       </div>
@@ -1685,10 +1717,10 @@ function PilotReminders({
               key={reminder.id}
               type="button"
               onClick={() => onOpenClient(reminder.client.glide_row_id)}
-              className="rounded-md border border-amber-200 bg-white px-3 py-2 text-left hover:border-amber-300 hover:bg-amber-100/40 cursor-pointer"
+              className="rounded-md border border-[#ead4b3] bg-white px-3 py-2 text-left transition hover:border-[#e0922f] hover:shadow-sm cursor-pointer"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-semibold text-gray-900">
+                <span className="truncate text-sm font-semibold text-[#162b3e]">
                   {reminder.client.client_name ?? "Unnamed client"}
                 </span>
                 <span
@@ -1701,7 +1733,7 @@ function PilotReminders({
                   {overdue ? "Overdue" : formatDate(reminder.date)}
                 </span>
               </div>
-              <div className="mt-1 text-xs text-gray-600">{reminder.label}</div>
+              <div className="mt-1 text-xs text-[#586273]">{reminder.label}</div>
             </button>
           );
         })}
@@ -1715,7 +1747,6 @@ export function Clients() {
   const {
     capabilities,
     effectiveCompanyId,
-    setViewAsCompanyId,
     teamMemberId,
   } = useAccountContext();
   const cachedState = useMemo(() => readClientsCache(), []);
@@ -1741,7 +1772,6 @@ export function Clients() {
       : (cachedState?.appliedFilters ?? emptyFilters),
   );
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [companiesLoading, setCompaniesLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -1892,7 +1922,6 @@ export function Clients() {
             .filter((id): id is string => typeof id === "string" && id !== ""),
         ),
       );
-      setCompaniesLoading(false);
     }
     void loadCompanies();
   }, [canUseCompanySwitcher, effectiveCompanyId]);
@@ -1953,11 +1982,19 @@ export function Clients() {
     let cancelled = false;
     async function loadOffers() {
       setOffersLoading(true);
-      const { data, error } = await supabase
-        .from("backup_company_offers")
-        .select("glide_row_id, name")
-        .eq("company_id", filters.companyId)
-        .order("name", { ascending: true });
+      const usesAppOffers = appClientCompanyIds.has(filters.companyId);
+      const { data, error } = usesAppOffers
+        ? await supabase
+            .from("company_offers")
+            .select("glide_row_id, name")
+            .eq("company_glide_row_id", filters.companyId)
+            .eq("status", "active")
+            .order("name", { ascending: true })
+        : await supabase
+            .from("backup_company_offers")
+            .select("glide_row_id, name")
+            .eq("company_id", filters.companyId)
+            .order("name", { ascending: true });
       if (cancelled) return;
       if (error) console.error("Failed to load offers:", error);
       const rows = (data ?? []) as Offer[];
@@ -1974,7 +2011,7 @@ export function Clients() {
     return () => {
       cancelled = true;
     };
-  }, [filters.companyId, filters.offerId]);
+  }, [appClientCompanyIds, filters.companyId, filters.offerId]);
   useEffect(() => {
     if (!filters.companyId || programChoices.length > 0) return;
     let cancelled = false;
@@ -2334,11 +2371,11 @@ export function Clients() {
       <img
         src={client.client_image}
         alt=""
-        className={`${size} rounded-xl border border-gray-200 bg-gray-50 object-cover`}
+        className={`${size} rounded-full border border-[#e4e9f0] bg-[#f7f9fc] object-cover`}
       />
     ) : (
       <div
-        className={`${size} flex items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700`}
+        className={`${size} flex items-center justify-center rounded-full border border-[#d6eafb] bg-[#eaf4fe] text-xs font-semibold text-[#2b79c4]`}
       >
         {getInitials(client.client_name)}
       </div>
@@ -2353,12 +2390,12 @@ export function Clients() {
     renewal: valueFrom(client, renewalColumns),
   });
   return (
-    <div>
-      <div className="mb-6">
+    <div className="space-y-6">
+      <div className="rounded-md border border-[#cbd2dc] bg-white px-5 py-4 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900">Clients</h1>
-            <p className="mt-1 text-sm text-gray-500">
+            <h1 className="text-xl font-semibold text-[#162b3e]">Clients</h1>
+            <p className="mt-1 text-sm text-[#586273]">
               {isUsingAppClients
                 ? "RetainOS pilot client data for this company. Quick Updates write to app-owned client state and history."
                 : "Read-only view of clients mirrored from Glide into Supabase."}
@@ -2368,7 +2405,7 @@ export function Clients() {
             <button
               type="button"
               onClick={() => setNewClientOpen(true)}
-              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 cursor-pointer"
+              className="rounded-full bg-[#59abf0] px-5 py-2.5 text-sm font-semibold text-[#162b3e] shadow-sm transition-colors hover:bg-[#3b8fd9] hover:text-white cursor-pointer"
             >
               + New Client
             </button>
@@ -2379,41 +2416,8 @@ export function Clients() {
         reminders={pilotReminders}
         onOpenClient={(id) => navigate(`/clients/${encodeURIComponent(id)}`)}
       />
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <label
-              htmlFor="clients-company-filter"
-              className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
-            >
-              Company
-            </label>
-            <select
-              id="clients-company-filter"
-              value={filters.companyId}
-              onChange={(e) => {
-                if (canUseCompanySwitcher) setViewAsCompanyId(e.target.value);
-                setFilters((prev) => ({
-                  ...prev,
-                  companyId: e.target.value,
-                  csmId: "",
-                  secondaryAssigneeId: "",
-                  offerId: "",
-                }));
-              }}
-              disabled={companiesLoading || !canUseCompanySwitcher}
-              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-            >
-              <option value="">
-                {companiesLoading ? "Loading companies..." : "Select a company"}
-              </option>
-              {companies.map((company) => (
-                <option key={company.glide_row_id} value={company.glide_row_id}>
-                  {company.name ?? "(unnamed)"}
-                </option>
-              ))}
-            </select>
-          </div>
           {filters.companyId && (
             <>
               <FilterInput
@@ -2426,14 +2430,14 @@ export function Clients() {
                 }
               />
               <fieldset ref={statusFilterRef} className="relative">
-                <legend className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                <legend className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]">
                   Status
                 </legend>
                 <button
                   type="button"
                   onClick={() => setStatusFilterOpen((open) => !open)}
                   disabled={programChoicesLoading}
-                  className="flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400 cursor-pointer"
+                  className="flex w-full items-center justify-between rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-left text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb] disabled:bg-[#f7f9fc] disabled:text-[#98a2b3] cursor-pointer"
                 >
                   <span>
                     {programChoicesLoading
@@ -2442,16 +2446,16 @@ export function Clients() {
                         ? "All statuses"
                         : `${filters.programs.length} selected`}
                   </span>
-                  <span className="text-gray-400">v</span>
+                  <span className="text-[#98a2b3]">⌄</span>
                 </button>
                 {statusFilterOpen && !programChoicesLoading && (
-                  <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-gray-200 bg-white p-2 shadow-lg">
+                  <div className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-[#cbd2dc] bg-white p-2 shadow-xl">
                     <button
                       type="button"
                       onClick={() =>
                         setFilters((prev) => ({ ...prev, programs: [] }))
                       }
-                      className="mb-1 w-full rounded px-2 py-1.5 text-left text-sm text-gray-600 hover:bg-gray-50 cursor-pointer"
+                      className="mb-1 w-full rounded px-2 py-1.5 text-left text-sm text-[#586273] hover:bg-[#eaf4fe] cursor-pointer"
                     >
                       All statuses
                     </button>
@@ -2462,7 +2466,7 @@ export function Clients() {
                       return (
                         <label
                           key={value}
-                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-[#162b3e] hover:bg-[#eaf4fe]"
                         >
                           <input
                             type="checkbox"
@@ -2477,7 +2481,7 @@ export function Clients() {
                                     ),
                               }))
                             }
-                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            className="h-4 w-4 rounded border-[#cbd2dc] text-[#3b8fd9] focus:ring-[#59abf0]"
                           />
                           <span>
                             {choice.program_emoji
@@ -2499,7 +2503,7 @@ export function Clients() {
                 <div>
                   <label
                     htmlFor="clients-csm-filter"
-                    className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
                   >
                     CSM
                   </label>
@@ -2510,7 +2514,7 @@ export function Clients() {
                       setFilters((prev) => ({ ...prev, csmId: e.target.value }))
                     }
                     disabled={teamMembersLoading}
-                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                    className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb] disabled:bg-[#f7f9fc] disabled:text-[#98a2b3]"
                   >
                     <option value="">
                       {teamMembersLoading ? "Loading team..." : "All CSMs"}
@@ -2529,7 +2533,7 @@ export function Clients() {
               <div>
                 <label
                   htmlFor="clients-offer-filter"
-                  className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+                  className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
                 >
                   Offer
                 </label>
@@ -2540,7 +2544,7 @@ export function Clients() {
                     setFilters((prev) => ({ ...prev, offerId: e.target.value }))
                   }
                   disabled={offersLoading}
-                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                  className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb] disabled:bg-[#f7f9fc] disabled:text-[#98a2b3]"
                 >
                   <option value="">
                     {offersLoading ? "Loading offers..." : "All offers"}
@@ -2556,7 +2560,7 @@ export function Clients() {
                 <div>
                   <label
                     htmlFor="clients-secondary-filter"
-                    className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
                   >
                     Secondary Assignee
                   </label>
@@ -2570,7 +2574,7 @@ export function Clients() {
                       }))
                     }
                     disabled={teamMembersLoading}
-                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+                    className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb] disabled:bg-[#f7f9fc] disabled:text-[#98a2b3]"
                   >
                     <option value="">All secondary assignees</option>
                     {availableTeamMembers.map((member) => (
@@ -2587,7 +2591,7 @@ export function Clients() {
               <div>
                 <label
                   htmlFor="clients-last-contact-filter"
-                  className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+                  className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
                 >
                   Last Contact
                 </label>
@@ -2601,7 +2605,7 @@ export function Clients() {
                       lastContact: event.target.value,
                     }))
                   }
-                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
                 />
               </div>
             </>
@@ -2612,14 +2616,14 @@ export function Clients() {
             type="button"
             onClick={applyFilters}
             disabled={!filters.companyId || clientsLoading}
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-indigo-600 cursor-pointer"
+            className="rounded-full bg-[#59abf0] px-5 py-2.5 text-sm font-semibold text-[#162b3e] shadow-sm transition-colors hover:bg-[#3b8fd9] hover:text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
           >
             Apply filters
           </button>
           <button
             type="button"
             onClick={clearFilters}
-            className="rounded-md px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 cursor-pointer"
+            className="rounded-full border border-[#cbd2dc] bg-white px-5 py-2.5 text-sm font-semibold text-[#586273] transition-colors hover:bg-[#f7f9fc] hover:text-[#162b3e] cursor-pointer"
           >
             Clear All Filters
           </button>
@@ -2631,18 +2635,18 @@ export function Clients() {
         <EmptyState text="Click Apply filters to load clients." tone="amber" />
       ) : (
         <div>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+              <h2 className="text-lg font-semibold text-[#162b3e]">
                 Client List
               </h2>
-              <p className="mt-1 text-sm text-gray-500">
+              <p className="mt-1 text-sm text-[#586273]">
                 {clientsLoading
                   ? "Loading clients..."
                   : `${totalClients.toLocaleString()} client${totalClients === 1 ? "" : "s"}`}
               </p>
             </div>
-            <div className="inline-flex rounded-md border border-gray-200 bg-white p-1 shadow-sm">
+            <div className="inline-flex rounded-md border border-[#e4e9f0] bg-white p-1 shadow-sm">
               <ViewButton
                 active={viewMode === "list"}
                 onClick={() => setViewMode("list")}
@@ -2666,7 +2670,7 @@ export function Clients() {
               <div className="flex flex-wrap items-center gap-2">
                 <label
                   htmlFor="clients-sort-field"
-                  className="text-xs font-medium uppercase tracking-wider text-gray-500"
+                  className="text-xs font-semibold uppercase tracking-wider text-[#586273]"
                 >
                   Sort
                 </label>
@@ -2677,7 +2681,7 @@ export function Clients() {
                     setSortField(event.target.value as SortField);
                     setPage(1);
                   }}
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
                 >
                   <option value="client_name">Client name</option>
                   <option value="onboarded">Onboarded date</option>
@@ -2691,7 +2695,7 @@ export function Clients() {
                     );
                     setPage(1);
                   }}
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-semibold text-[#586273] hover:bg-[#f7f9fc] hover:text-[#162b3e]"
                 >
                   {sortField === "client_name"
                     ? sortDirection === "asc"
@@ -2704,7 +2708,7 @@ export function Clients() {
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex rounded-md border border-gray-200 bg-white p-1 shadow-sm">
+                <div className="inline-flex rounded-md border border-[#e4e9f0] bg-white p-1 shadow-sm">
                   {(["month", "week", "day"] as CalendarMode[]).map((mode) => (
                     <ViewButton
                       key={mode}
@@ -2722,7 +2726,7 @@ export function Clients() {
                       addCalendarPeriod(date, calendarMode, -1),
                     )
                   }
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] hover:bg-[#f7f9fc]"
                 >
                   Previous
                 </button>
@@ -2744,7 +2748,7 @@ export function Clients() {
                       if (!Number.isNaN(next.getTime())) setCalendarDate(next);
                     }
                   }}
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
                 />
                 <button
                   type="button"
@@ -2753,7 +2757,7 @@ export function Clients() {
                       addCalendarPeriod(date, calendarMode, 1),
                     )
                   }
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] hover:bg-[#f7f9fc]"
                 >
                   Next
                 </button>
@@ -2784,7 +2788,7 @@ export function Clients() {
             />
           ) : clientsLoading ? (
             <div className="flex items-center justify-center py-20">
-              <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-600" />
+              <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
             </div>
           ) : clients.length === 0 ? (
             <EmptyState text="No clients matched these filters." />
@@ -2819,7 +2823,7 @@ export function Clients() {
           )}
           {viewMode !== "calendar" && !clientsLoading && totalClients > 0 && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-[#586273]">
                 Showing {pageStart}-{pageEnd} of {totalClients.toLocaleString()}
               </p>
               <div className="flex items-center gap-2">
@@ -2827,7 +2831,7 @@ export function Clients() {
                   type="button"
                   onClick={() => setPage((prev) => Math.max(1, prev - 1))}
                   disabled={page === 1}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
                 >
                   Previous
                 </button>
@@ -2840,7 +2844,7 @@ export function Clients() {
                     setPage((prev) => Math.min(totalPages, prev + 1))
                   }
                   disabled={page >= totalPages}
-                  className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
                 >
                   Next
                 </button>
@@ -2898,9 +2902,9 @@ function ClientTable({
   onQuickUpdate?: (client: ClientRow) => void;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+    <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white shadow-sm">
+      <table className="min-w-full divide-y divide-[#e4e9f0]">
+        <thead className="bg-[#f7f9fc]">
           <tr>
             {[
               "Client",
@@ -2916,20 +2920,20 @@ function ClientTable({
             ].map((heading) => (
               <th
                 key={heading}
-                className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
+                className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273]"
               >
                 {heading}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-200">
+        <tbody className="divide-y divide-[#e4e9f0]">
           {clients.map((client) => {
             const meta = clientMeta(client);
             return (
               <tr
                 key={client.glide_row_id}
-                className="transition-colors hover:bg-gray-50"
+                className="transition-colors hover:bg-[#f7f9fc]"
               >
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
@@ -2938,14 +2942,14 @@ function ClientTable({
                       <button
                         type="button"
                         onClick={() => onOpenClient(client.glide_row_id)}
-                        className="truncate text-left text-sm font-medium text-gray-900 hover:text-indigo-700 cursor-pointer"
+                        className="truncate text-left text-sm font-semibold text-[#162b3e] hover:text-[#2b79c4] cursor-pointer"
                       >
                         {client.client_name ?? "Unnamed client"}
                       </button>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
+                <td className="px-4 py-3 text-sm text-[#586273]">
                   {teamMemberNameById.get(client.csm_team_member_id ?? "") ??
                     "Unassigned"}
                 </td>
@@ -2955,16 +2959,16 @@ function ClientTable({
                     choices={programChoices}
                   />
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
+                <td className="px-4 py-3 text-sm text-[#586273]">
                   {formatDate(meta.onboarded)}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
+                <td className="px-4 py-3 text-sm text-[#586273]">
                   {formatDate(meta.renewal)}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
+                <td className="px-4 py-3 text-sm text-[#586273]">
                   {formatDate(meta.last)}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
+                <td className="px-4 py-3 text-sm text-[#586273]">
                   {formatDate(meta.next)}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
@@ -2981,7 +2985,7 @@ function ClientTable({
                         event.stopPropagation();
                         onQuickUpdate(client);
                       }}
-                      className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 cursor-pointer"
+                      className="rounded-full border border-[#59abf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#2b79c4] transition-colors hover:bg-[#eaf4fe] cursor-pointer"
                     >
                       Quick Update
                     </button>
@@ -3037,16 +3041,16 @@ function ClientCards({
                 onOpenClient(client.glide_row_id);
               }
             }}
-            className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition-all hover:border-indigo-300 hover:shadow-md cursor-pointer"
+            className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm transition-all hover:border-[#59abf0] hover:shadow-md cursor-pointer"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 {renderClientAvatar(client, "h-10 w-10")}
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-gray-900">
+                  <div className="truncate text-sm font-semibold text-[#162b3e]">
                     {client.client_name ?? "Unnamed client"}
                   </div>
-                  <div className="truncate text-xs text-gray-500">
+                  <div className="truncate text-xs text-[#586273]">
                     {teamMemberNameById.get(client.csm_team_member_id ?? "") ??
                       "Unassigned"}
                   </div>
@@ -3076,7 +3080,7 @@ function ClientCards({
                     event.stopPropagation();
                     onQuickUpdate(client);
                   }}
-                  className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 cursor-pointer"
+                  className="rounded-full border border-[#59abf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#2b79c4] transition-colors hover:bg-[#eaf4fe] cursor-pointer"
                 >
                   Quick Update
                 </button>
@@ -3104,7 +3108,7 @@ function eventSortOrder(type: CalendarEventType) {
 }
 
 function eventBorderClass(type: CalendarEventType) {
-  if (type === "next-contact") return "border-indigo-200";
+  if (type === "next-contact") return "border-[#59abf0]";
   if (type === "last-contact") return "border-emerald-200";
   if (type === "task") return "border-amber-200";
   if (type === "renewal") return "border-rose-200";
@@ -3112,7 +3116,7 @@ function eventBorderClass(type: CalendarEventType) {
 }
 
 function eventTagClass(type: CalendarEventType) {
-  if (type === "next-contact") return "bg-indigo-50 text-indigo-700";
+  if (type === "next-contact") return "bg-[#eaf4fe] text-[#2b79c4]";
   if (type === "last-contact") return "bg-emerald-50 text-emerald-700";
   if (type === "task") return "bg-amber-50 text-amber-700";
   if (type === "renewal") return "bg-rose-50 text-rose-700";
@@ -3275,13 +3279,13 @@ function ContactCalendar({
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
+    <div className="rounded-md border border-[#e4e9f0] bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e4e9f0] px-4 py-3">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+          <h3 className="text-sm font-semibold text-[#162b3e]">
             Contact Calendar
           </h3>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-[#586273]">
             {loading
               ? "Loading client timeline..."
               : `${eventCount.toLocaleString()} calendar event${eventCount === 1 ? "" : "s"} in ${rangeLabel}`}
@@ -3290,7 +3294,7 @@ function ContactCalendar({
         <CalendarLegend />
       </div>
       {mode !== "day" ? (
-        <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50 text-xs font-medium uppercase tracking-wider text-gray-500">
+        <div className="grid grid-cols-7 border-b border-[#e4e9f0] bg-[#f7f9fc] text-xs font-semibold uppercase tracking-wider text-[#586273]">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
             <div key={day} className="px-3 py-2">
               {day}
@@ -3300,7 +3304,7 @@ function ContactCalendar({
       ) : null}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-indigo-600" />
+          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
         </div>
       ) : (
         <div className={`grid grid-cols-1 ${mode === "day" ? "" : "sm:grid-cols-7"}`}>
@@ -3320,7 +3324,7 @@ function ContactCalendar({
                   <span
                     className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
                       isToday
-                        ? "bg-indigo-600 text-white"
+                        ? "bg-[#59abf0] text-[#162b3e]"
                         : inCurrentMonth
                           ? "text-gray-700"
                           : "text-gray-400"
@@ -3343,7 +3347,7 @@ function ContactCalendar({
                       <button
                         type="button"
                         onClick={() => onOpenClient(event.client.glide_row_id)}
-                        className="block w-full truncate text-left text-xs font-semibold text-gray-900 hover:text-indigo-700"
+                        className="block w-full truncate text-left text-xs font-semibold text-[#162b3e] hover:text-[#2b79c4]"
                         title={event.client.client_name ?? "Unnamed client"}
                       >
                         {event.client.client_name ?? "Unnamed client"}
@@ -3368,7 +3372,7 @@ function ContactCalendar({
                           <button
                             type="button"
                             onClick={() => onQuickUpdate(event.client)}
-                            className="rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100"
+                            className="rounded-full border border-[#59abf0] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#2b79c4] hover:bg-[#eaf4fe]"
                           >
                             Update
                           </button>

@@ -231,10 +231,11 @@ Deno.serve(async (req) => {
     }
 
     const { data: offer, error: offerError } = await supabase
-      .from("backup_company_offers")
-      .select("glide_row_id, company_id, name")
+      .from("company_offers")
+      .select("glide_row_id, company_glide_row_id, name, status")
       .eq("glide_row_id", requestedOfferId)
-      .eq("company_id", client.company_glide_row_id)
+      .eq("company_id", company.id)
+      .eq("status", "active")
       .maybeSingle();
 
     if (offerError) throw offerError;
@@ -246,10 +247,12 @@ Deno.serve(async (req) => {
     }
 
     const { data: offerMilestones, error: milestonesError } = await supabase
-      .from("backup_company_offer_milestones")
+      .from("company_offer_milestones")
       .select("*")
+      .eq("company_id", company.id)
       .eq("offer_id", requestedOfferId)
-      .order("order", { ascending: true, nullsFirst: false });
+      .eq("status", "active")
+      .order("position", { ascending: true, nullsFirst: false });
 
     if (milestonesError) throw milestonesError;
 
