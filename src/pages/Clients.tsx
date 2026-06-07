@@ -140,13 +140,54 @@ function writeClientsCache(state: ClientsCacheState) {
   window.localStorage.setItem(CLIENTS_CACHE_KEY, JSON.stringify(state));
 }
 function mapAppClientRow(row: Record<string, unknown>): ClientRow {
+  const companyId =
+    typeof row.company_glide_row_id === "string"
+      ? row.company_glide_row_id
+      : (row.company_id as string | null | undefined);
+  const lastContact =
+    row.csm_date_of_last_contact ?? row.last_contact_at ?? row.last_contact_date ?? null;
+  const nextContact =
+    row.csm_date_of_next_contact ?? row.next_contact_at ?? row.next_contact_date ?? null;
+  const success =
+    row.outcomes_success_for_filtering ??
+    row.outcomes_success_value_for_filtering ??
+    row.outcomes_success_value ??
+    row.success_status ??
+    null;
+  const progress =
+    row.outcomes_progress_for_filtering ??
+    row.outcomes_progress_value ??
+    row.progress_status ??
+    null;
+  const buyIn =
+    row.outcomes_buy_in_for_filtering ??
+    row.outcomes_buy_in_value ??
+    row.buy_in_status ??
+    null;
+
   return {
     ...row,
-    company_id:
-      typeof row.company_glide_row_id === "string"
-        ? row.company_glide_row_id
-        : (row.company_id as string | null | undefined),
-  } as ClientRow;
+    company_id: companyId,
+    company_glide_row_id: companyId,
+    csm_date_of_last_contact: lastContact,
+    last_contact: lastContact,
+    last_contact_date: lastContact,
+    date_of_last_contact: lastContact,
+    csm_date_of_next_contact: nextContact,
+    next_contact: nextContact,
+    next_contact_date: nextContact,
+    date_of_next_contact: nextContact,
+    outcomes_success_for_filtering: success,
+    outcomes_success_value_for_filtering: success,
+    outcomes_success_value: success,
+    success_status: success,
+    outcomes_progress_for_filtering: progress,
+    outcomes_progress_value: progress,
+    progress_status: progress,
+    outcomes_buy_in_for_filtering: buyIn,
+    outcomes_buy_in_value: buyIn,
+    buy_in_status: buyIn,
+  } as unknown as ClientRow;
 }
 const lastContactColumns = [
   "csm_date_of_last_contact",
@@ -465,6 +506,13 @@ function toDateTimeInputValue(value: unknown) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
 }
+function toDateInputValue(value: unknown) {
+  if (!value) return "";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
 function normalizeOutcome(value: unknown) {
   const raw = formatValue(value).trim();
   if (!raw || raw === "--" || raw.toLowerCase() === "x") return "";
@@ -659,9 +707,11 @@ function OutcomeSelect({
 function QuickUpdateModal({
   client,
   onClose,
+  onClientUpdated,
 }: {
   client: ClientRow;
   onClose: () => void;
+  onClientUpdated: (client: ClientRow) => void;
 }) {
   const [isPilotCompany, setIsPilotCompany] = useState(false);
   const [historyEvents, setHistoryEvents] = useState<ClientHistoryEvent[]>([]);
@@ -678,7 +728,7 @@ function QuickUpdateModal({
     toDateTimeInputValue(valueFrom(client, lastContactColumns)),
   );
   const [nextContactAt, setNextContactAt] = useState(
-    toDateTimeInputValue(valueFrom(client, nextContactColumns)),
+    toDateInputValue(valueFrom(client, nextContactColumns)),
   );
   const [successStatus, setSuccessStatus] = useState(
     normalizeOutcome(valueFrom(client, successColumns)),
@@ -916,6 +966,9 @@ function QuickUpdateModal({
         [data.event as ClientHistoryEvent, ...current].slice(0, 5),
       );
     }
+    if (data?.client) {
+      onClientUpdated(mapAppClientRow(data.client as Record<string, unknown>));
+    }
     setNotes("");
     setSaveMessage("Quick Update saved to RetainOS pilot history.");
   }
@@ -1060,7 +1113,7 @@ function QuickUpdateModal({
             <label className="block">
               <span className="retainos-field-label">Date of Next Contact</span>
               <input
-                type="datetime-local"
+                type="date"
                 disabled={!isPilotCompany || saving}
                 value={nextContactAt}
                 onChange={(event) => setNextContactAt(event.target.value)}
@@ -2857,6 +2910,14 @@ export function Clients() {
         <QuickUpdateModal
           client={quickUpdateClient}
           onClose={() => setQuickUpdateClient(null)}
+          onClientUpdated={(updatedClient) => {
+            setQuickUpdateClient(updatedClient);
+            setClients((current) =>
+              current.map((client) =>
+                client.glide_row_id === updatedClient.glide_row_id ? updatedClient : client,
+              ),
+            );
+          }}
         />
       )}
       {newClientOpen ? (

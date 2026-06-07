@@ -46,6 +46,7 @@ type OfferRow = Record<string, unknown> & {
   name?: string | null;
 };
 type ContractRow = Record<string, unknown> & {
+  id?: string | null;
   glide_row_id?: string | null;
   client_id?: string | null;
   start_date?: string | null;
@@ -54,9 +55,19 @@ type ContractRow = Record<string, unknown> & {
   reference_link?: string | null;
   notes?: string | null;
   auto_renew?: boolean | null;
+  status?: string | null;
+  archived_at?: string | null;
   last_modified_time?: string | null;
   last_modified_by?: string | null;
 };
+const contractTypeOptions = [
+  { value: "standard", label: "Standard" },
+  { value: "renewal", label: "Renewal" },
+  { value: "upsell", label: "Upsell" },
+  { value: "pause_extension", label: "Pause Extension" },
+  { value: "add_on", label: "Add-on" },
+  { value: "other", label: "Other" },
+];
 type ClientMilestoneRow = Record<string, unknown> & {
   id?: string | null;
   glide_row_id?: string | null;
@@ -112,13 +123,54 @@ type ClientHistoryEventRow = Record<string, unknown> & {
   created_at?: string | null;
 };
 function mapAppClientRow(row: Record<string, unknown>): ClientRow {
+  const companyId =
+    typeof row.company_glide_row_id === "string"
+      ? row.company_glide_row_id
+      : (row.company_id as string | null | undefined);
+  const lastContact =
+    row.csm_date_of_last_contact ?? row.last_contact_at ?? row.last_contact_date ?? null;
+  const nextContact =
+    row.csm_date_of_next_contact ?? row.next_contact_at ?? row.next_contact_date ?? null;
+  const success =
+    row.outcomes_success_for_filtering ??
+    row.outcomes_success_value_for_filtering ??
+    row.outcomes_success_value ??
+    row.success_status ??
+    null;
+  const progress =
+    row.outcomes_progress_for_filtering ??
+    row.outcomes_progress_value ??
+    row.progress_status ??
+    null;
+  const buyIn =
+    row.outcomes_buy_in_for_filtering ??
+    row.outcomes_buy_in_value ??
+    row.buy_in_status ??
+    null;
+
   return {
     ...row,
-    company_id:
-      typeof row.company_glide_row_id === "string"
-        ? row.company_glide_row_id
-        : (row.company_id as string | null | undefined),
-  } as ClientRow;
+    company_id: companyId,
+    company_glide_row_id: companyId,
+    csm_date_of_last_contact: lastContact,
+    last_contact: lastContact,
+    last_contact_date: lastContact,
+    date_of_last_contact: lastContact,
+    csm_date_of_next_contact: nextContact,
+    next_contact: nextContact,
+    next_contact_date: nextContact,
+    date_of_next_contact: nextContact,
+    outcomes_success_for_filtering: success,
+    outcomes_success_value_for_filtering: success,
+    outcomes_success_value: success,
+    success_status: success,
+    outcomes_progress_for_filtering: progress,
+    outcomes_progress_value: progress,
+    progress_status: progress,
+    outcomes_buy_in_for_filtering: buyIn,
+    outcomes_buy_in_value: buyIn,
+    buy_in_status: buyIn,
+  } as unknown as ClientRow;
 }
 const basicInfoFields: [string, string[]][] = [
   ["Business Name", ["business_name", "client_business", "client_name"]],
@@ -481,11 +533,40 @@ function contractEndDate(contract: Record<string, unknown>) {
 }
 
 function getContractStatus(contract: Record<string, unknown>) {
+  const status = valueFrom(contract, ["status"]);
+  if (typeof status === "string" && status.toLowerCase() === "archived") {
+    return "Archived";
+  }
+  if (isPresent(valueFrom(contract, ["archived_at"]))) return "Archived";
   const end = contractEndDate(contract);
   if (!isPresent(end)) return "Open";
   const endDate = new Date(String(end));
   if (Number.isNaN(endDate.getTime())) return "Open";
   return endDate.getTime() >= Date.now() ? "Active" : "Expired";
+}
+
+function isAppOwnedContract(contract: Record<string, unknown>) {
+  return (
+    typeof contract.id === "string" &&
+    typeof contract.glide_row_id === "string" &&
+    contract.glide_row_id.startsWith("contract_")
+  );
+}
+
+function getContractTypeValue(contract: Record<string, unknown>) {
+  const metadata = contract.metadata;
+  const value =
+    metadata && typeof metadata === "object" && "contract_type" in metadata
+      ? (metadata as Record<string, unknown>).contract_type
+      : valueFrom(contract, ["contract_type"]);
+  return typeof value === "string" && value.trim() ? value : "standard";
+}
+
+function getContractTypeLabel(contract: Record<string, unknown>) {
+  const value = getContractTypeValue(contract);
+  return (
+    contractTypeOptions.find((option) => option.value === value)?.label ?? "Standard"
+  );
 }
 
 function daysUntilDate(value: unknown) {
@@ -1268,6 +1349,169 @@ function ClientOutcomesEditModal({
   );
 }
 
+function ClientOutcomesInlineEditor({
+  client,
+  choices,
+  canEdit,
+  onSaved,
+}: {
+  client: ClientRow;
+  choices: OutcomeChoiceSets;
+  canEdit: boolean;
+  onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
+}) {
+  const currentSuccess = textInputValue(
+    valueFrom(client, [
+      "outcomes_success_value",
+      "outcomes_success_for_filtering",
+      "success_status",
+    ]),
+  );
+  const currentProgress = textInputValue(
+    valueFrom(client, [
+      "outcomes_progress_value",
+      "outcomes_progress_for_filtering",
+      "progress_status",
+    ]),
+  );
+  const currentBuyIn = textInputValue(
+    valueFrom(client, [
+      "outcomes_buy_in_value",
+      "outcomes_buy_in_for_filtering",
+      "buy_in_status",
+    ]),
+  );
+  const [successStatus, setSuccessStatus] = useState(currentSuccess);
+  const [progressStatus, setProgressStatus] = useState(currentProgress);
+  const [buyInStatus, setBuyInStatus] = useState(currentBuyIn);
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSuccessStatus(currentSuccess);
+    setProgressStatus(currentProgress);
+    setBuyInStatus(currentBuyIn);
+    setNotes("");
+    setSaveError(null);
+  }, [client.glide_row_id, currentBuyIn, currentProgress, currentSuccess]);
+
+  const hasChanges =
+    successStatus !== currentSuccess ||
+    progressStatus !== currentProgress ||
+    buyInStatus !== currentBuyIn ||
+    notes.trim() !== "";
+
+  async function handleSave() {
+    if (!canEdit || saving || !hasChanges) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-outcomes",
+      {
+        body: {
+          clientLegacyId: client.glide_row_id,
+          successStatus,
+          progressStatus,
+          buyInStatus,
+          notes,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+      setNotes("");
+    }
+  }
+
+  const renderSelect = (
+    label: string,
+    value: string,
+    options: OutcomeChoice[],
+    onChange: (value: string) => void,
+  ) => (
+    <label className="block rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[#586273]">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={!canEdit || saving}
+        className="w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#162b3e] disabled:bg-[#f1f4f8] disabled:text-[#7b8494]"
+      >
+        <option value="">Not set</option>
+        {options.map((choice) => (
+          <option key={choice.value} value={choice.value}>
+            {choice.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        {renderSelect("Success", successStatus, choices.success, setSuccessStatus)}
+        {renderSelect("Progress", progressStatus, choices.progress, setProgressStatus)}
+        {renderSelect("Buy-in", buyInStatus, choices.buyIn, setBuyInStatus)}
+      </div>
+      {canEdit ? (
+        <>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-[#586273]">
+              Notes for history
+            </span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={3}
+              disabled={saving}
+              placeholder="Optional context for this outcomes update"
+              className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] placeholder:text-[#7b8494] disabled:bg-[#f1f4f8]"
+            />
+          </label>
+          {saveError ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {saveError}
+            </div>
+          ) : null}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving || !hasChanges}
+              className="retainos-button-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Outcomes"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Outcomes are read-only for this client.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClientStatusModal({
   client,
   programChoices,
@@ -1514,10 +1758,12 @@ function ClientStatusModal({
 
 function NewContractModal({
   client,
+  contract,
   onClose,
   onSaved,
 }: {
   client: ClientRow;
+  contract?: ContractRow | null;
   onClose: () => void;
   onSaved: (
     contract: ContractRow,
@@ -1526,17 +1772,43 @@ function NewContractModal({
     retentionEvent: ClientHistoryEventRow | null,
   ) => void;
 }) {
+  const isEditing = Boolean(contract);
   const [startDate, setStartDate] = useState(
-    dateInputValue(valueFrom(client, ["current_contract_start_date"])),
+    dateInputValue(
+      isEditing
+        ? valueFrom(contract ?? {}, ["start_date"])
+        : valueFrom(client, ["current_contract_start_date"]),
+    ),
   );
-  const [endDate, setEndDate] = useState("");
-  const [contractDays, setContractDays] = useState("");
-  const [monthlyValue, setMonthlyValue] = useState("");
-  const [totalContractValue, setTotalContractValue] = useState("");
-  const [referenceLink, setReferenceLink] = useState("");
-  const [notes, setNotes] = useState("");
-  const [autoRenew, setAutoRenew] = useState(false);
-  const [status, setStatus] = useState("active");
+  const [endDate, setEndDate] = useState(
+    dateInputValue(valueFrom(contract ?? {}, ["end_date"])),
+  );
+  const [contractDays, setContractDays] = useState(
+    isPresent(valueFrom(contract ?? {}, ["contract_days"]))
+      ? String(valueFrom(contract ?? {}, ["contract_days"]))
+      : "",
+  );
+  const [monthlyValue, setMonthlyValue] = useState(
+    isPresent(valueFrom(contract ?? {}, ["monthly_value"]))
+      ? String(valueFrom(contract ?? {}, ["monthly_value"]))
+      : "",
+  );
+  const [totalContractValue, setTotalContractValue] = useState(
+    isPresent(valueFrom(contract ?? {}, ["total_contract_value"]))
+      ? String(valueFrom(contract ?? {}, ["total_contract_value"]))
+      : "",
+  );
+  const [referenceLink, setReferenceLink] = useState(
+    typeof contract?.reference_link === "string" ? contract.reference_link : "",
+  );
+  const [notes, setNotes] = useState(
+    typeof contract?.notes === "string" ? contract.notes : "",
+  );
+  const [autoRenew, setAutoRenew] = useState(Boolean(contract?.auto_renew));
+  const [status, setStatus] = useState(contract?.status ?? "active");
+  const [contractType, setContractType] = useState(
+    getContractTypeValue(contract ?? {}),
+  );
   const currentProgramStatus =
     typeof client.program_status_value === "string"
       ? client.program_status_value
@@ -1561,6 +1833,8 @@ function NewContractModal({
       {
         body: {
           clientLegacyId: client.glide_row_id,
+          action: isEditing ? "update" : "create",
+          contractId: contract?.glide_row_id,
           startDate,
           endDate,
           contractDays,
@@ -1570,9 +1844,10 @@ function NewContractModal({
           notes,
           autoRenew,
           status,
-          retentionType,
+          contractType,
+          retentionType: isEditing ? "none" : retentionType,
           retentionTargetStatus,
-          markSuccess,
+          markSuccess: isEditing ? false : markSuccess,
         },
       },
     );
@@ -1602,7 +1877,7 @@ function NewContractModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        aria-label="Close new contract"
+        aria-label={isEditing ? "Close edit contract" : "Close new contract"}
         onClick={onClose}
         className="absolute inset-0 bg-slate-900/40 cursor-pointer"
       />
@@ -1610,10 +1885,12 @@ function NewContractModal({
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              New Contract
+              {isEditing ? "Edit Contract" : "New Contract"}
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Saves to RetainOS pilot contract data and updates the client summary.
+              {isEditing
+                ? "Updates RetainOS pilot contract data and refreshes the client summary."
+                : "Saves to RetainOS pilot contract data and updates the client summary."}
             </p>
           </div>
           <button
@@ -1705,6 +1982,22 @@ function NewContractModal({
                   <option value="expired">Expired</option>
                 </select>
               </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Contract Type
+                </span>
+                <select
+                  value={contractType}
+                  onChange={(event) => setContractType(event.target.value)}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+                >
+                  {contractTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
               <input
@@ -1715,6 +2008,7 @@ function NewContractModal({
               />
               Auto renew
             </label>
+            {!isEditing ? (
             <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3">
               <label className="block">
                 <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-indigo-700">
@@ -1763,6 +2057,7 @@ function NewContractModal({
                 </p>
               ) : null}
             </div>
+            ) : null}
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Contract Link
@@ -1806,7 +2101,7 @@ function NewContractModal({
               disabled={saving}
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
-              {saving ? "Saving..." : "Save Contract"}
+              {saving ? "Saving..." : isEditing ? "Update Contract" : "Save Contract"}
             </button>
           </div>
         </form>
@@ -2263,16 +2558,25 @@ function ContractCard({
   title,
   contract,
   isLatest,
+  canManage,
+  onEdit,
+  onArchive,
 }: {
   title: string;
   contract: Record<string, unknown>;
   isLatest?: boolean;
+  canManage?: boolean;
+  onEdit?: (contract: ContractRow) => void;
+  onArchive?: (contract: ContractRow) => void;
 }) {
   const referenceLink = valueFrom(contract, [
     "reference_link",
     "current_contract_reference_link",
   ]);
   const notes = valueFrom(contract, ["notes", "current_contract_notes"]);
+  const isEditable = canManage && isAppOwnedContract(contract);
+  const status = getContractStatus(contract);
+  const contractTypeLabel = getContractTypeLabel(contract);
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
@@ -2286,17 +2590,43 @@ function ContractCard({
               Latest
             </span>
           )}
+          {!isEditable && !isAppOwnedContract(contract) ? (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+              Read-only mirror
+            </span>
+          ) : null}
           <span
             className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
-              getContractStatus(contract) === "Active"
+              status === "Active"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : getContractStatus(contract) === "Expired"
+                : status === "Expired" || status === "Archived"
                   ? "border-slate-200 bg-slate-50 text-slate-700"
                   : "border-gray-200 bg-gray-50 text-gray-600"
             }`}
           >
-            {getContractStatus(contract)}
+            {status}
           </span>
+          <span className="rounded-full border border-[#cbdff5] bg-[#f2f8fd] px-2 py-0.5 text-xs font-medium text-[#2b79c4]">
+            {contractTypeLabel}
+          </span>
+          {isEditable ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onEdit?.(contract as ContractRow)}
+                className="rounded-md border border-[#cbdff5] px-3 py-1 text-xs font-semibold text-[#2b79c4] hover:bg-[#f2f8fd] cursor-pointer"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => onArchive?.(contract as ContractRow)}
+                className="rounded-md border border-red-200 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 cursor-pointer"
+              >
+                Archive
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -2374,11 +2704,15 @@ function ContractSection({
   contracts,
   canCreateContract,
   onCreateContract,
+  onEditContract,
+  onArchiveContract,
 }: {
   client?: ClientRow;
   contracts: ContractRow[];
   canCreateContract: boolean;
   onCreateContract: () => void;
+  onEditContract: (contract: ContractRow) => void;
+  onArchiveContract: (contract: ContractRow) => void;
 }) {
   const [showOlderContracts, setShowOlderContracts] = useState(false);
   const showCurrent = hasCurrentContract(client);
@@ -2444,6 +2778,9 @@ function ContractSection({
           title={showCurrent ? "Latest Linked Contract" : "Linked Contract"}
           contract={latestLinkedContract}
           isLatest={!showCurrent}
+          canManage={canCreateContract}
+          onEdit={onEditContract}
+          onArchive={onArchiveContract}
         />
       )}
       {olderLinkedContracts.length > 0 && (
@@ -2470,6 +2807,9 @@ function ContractSection({
                   }
                   title={`Older Contract ${index + 1}`}
                   contract={contract}
+                  canManage={canCreateContract}
+                  onEdit={onEditContract}
+                  onArchive={onArchiveContract}
                 />
               ))}
             </div>
@@ -3028,6 +3368,8 @@ export function ClientDetail() {
   const [editingOutcomes, setEditingOutcomes] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
   const [creatingContract, setCreatingContract] = useState(false);
+  const [editingContract, setEditingContract] = useState<ContractRow | null>(null);
+  const [archivingContractId, setArchivingContractId] = useState<string | null>(null);
   const [milestoneAction, setMilestoneAction] = useState<{
     action: "start_milestone" | "complete_milestone";
     progress: ClientMilestoneRow | null;
@@ -3144,6 +3486,7 @@ export function ClientDetail() {
           .from("client_contracts")
           .select("*")
           .eq("client_id", nextClient.glide_row_id)
+          .is("archived_at", null)
           .order("end_date", { ascending: false, nullsFirst: false }),
         supabase
           .from("backup_choices")
@@ -3340,6 +3683,44 @@ export function ClientDetail() {
     !capabilities.canViewOnlyAssignedClients;
   const canChangeStatus = canEditProfile;
   const canCreateContract = canEditProfile;
+  async function archiveContract(contract: ContractRow) {
+    if (!client || !contract.glide_row_id || archivingContractId) return;
+    const confirmed = window.confirm(
+      "Archive this contract? It will be hidden from active contract management but kept in history.",
+    );
+    if (!confirmed) return;
+    setArchivingContractId(contract.glide_row_id);
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-contract",
+      {
+        body: {
+          action: "archive",
+          clientLegacyId: client.glide_row_id,
+          contractId: contract.glide_row_id,
+          notes: "Archived from client contract tab.",
+        },
+      },
+    );
+    setArchivingContractId(null);
+    if (error || data?.error) {
+      window.alert(data?.error ?? error?.message ?? "Could not archive contract.");
+      return;
+    }
+    if (data?.client) {
+      setClient(mapAppClientRow(data.client as Record<string, unknown>));
+    }
+    if (data?.contract) {
+      const archived = data.contract as ContractRow;
+      setContracts((current) =>
+        current.filter((row) => row.glide_row_id !== archived.glide_row_id),
+      );
+    }
+    if (data?.event) {
+      setHistoryEvents((current) =>
+        [data.event as ClientHistoryEventRow, ...current].slice(0, 25),
+      );
+    }
+  }
   const upsertMilestone = (milestone: ClientMilestoneRow) => {
     setClientMilestones((current) => [
       milestone,
@@ -3461,6 +3842,8 @@ export function ClientDetail() {
           contracts={contracts}
           canCreateContract={canCreateContract}
           onCreateContract={() => setCreatingContract(true)}
+          onEditContract={(contract) => setEditingContract(contract)}
+          onArchiveContract={(contract) => void archiveContract(contract)}
         />
       ) : activeTab === "pathways" ? (
         <PathwaysSection
@@ -3481,30 +3864,27 @@ export function ClientDetail() {
         />
       ) : activeTab === "outcomes" ? (
         <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="mb-4">
             <div>
               <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
                 Outcomes
               </h2>
               <p className="mt-1 text-sm text-gray-500">
-                Success, progress, and buy-in are saved to RetainOS history.
+                Update success, progress, and buy-in directly from this tab. Changes
+                are saved to RetainOS history.
               </p>
             </div>
-            {canEditProfile ? (
-              <button
-                type="button"
-                onClick={() => setEditingOutcomes(true)}
-                className="retainos-button-primary w-fit"
-              >
-                Edit Outcomes
-              </button>
-            ) : null}
           </div>
-          <FieldGrid
-            fields={activeFields}
+          <ClientOutcomesInlineEditor
             client={client}
-            programChoices={programChoices}
-            relationLookup={displayLookup}
+            choices={outcomeChoices}
+            canEdit={canEditProfile}
+            onSaved={(updatedClient, event) => {
+              setClient(updatedClient);
+              if (event) {
+                setHistoryEvents((current) => [event, ...current].slice(0, 25));
+              }
+            }}
           />
         </div>
       ) : (
@@ -3579,6 +3959,23 @@ export function ClientDetail() {
                   .filter((row): row is ClientHistoryEventRow => Boolean(row))
                   .slice(0, 25),
               );
+            }
+          }}
+        />
+      ) : null}
+      {editingContract ? (
+        <NewContractModal
+          client={client}
+          contract={editingContract}
+          onClose={() => setEditingContract(null)}
+          onSaved={(contract, updatedClient, event) => {
+            setClient(updatedClient);
+            setContracts((current) => [
+              contract,
+              ...current.filter((row) => row.glide_row_id !== contract.glide_row_id),
+            ]);
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
             }
           }}
         />

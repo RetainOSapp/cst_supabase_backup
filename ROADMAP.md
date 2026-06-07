@@ -10,6 +10,13 @@ Status key:
 - `[?]` Needs product/data decision
 - `[late]` Deliberately deferred until after migration-critical work
 
+Priority labels:
+
+- `[priority: high]` Migration-critical or pilot/source-of-truth critical.
+- `[priority: medium]` Needed before broader migration or important operating polish, but not blocking the current pilot.
+- `[priority: low]` Useful in the next 1-2 months, but not required for early migration readiness.
+- `[priority: later]` Valuable long-term, but intentionally not urgent while RetainOS is replacing Glide.
+
 ## Current Foundation
 
 - `[x]` Vite + React + TypeScript app connected to Supabase backup tables.
@@ -66,37 +73,38 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
     - `scripts/seed-ethical-scaling-pilot.mjs`
     - `scripts/qa-ethical-scaling-pilot.mjs`
     - `QA_WRITE_MODE_PILOT.md`
-- `[ ]` Remove Ethical Scaling-only assumptions before broader rollout.
+- `[~]` `[priority: high]` Remove Ethical Scaling-only assumptions before broader rollout.
   - Move successful pilot companies from `migration_status = 'pilot'` to `migration_status = 'migrated'`.
   - Keep non-migrated companies at `migration_status = 'mirror_only'`.
   - Generalize pilot scripts to accept a company identifier.
-- `[ ]` Convert SaaS Client/company management from disabled UI to controlled writes.
-- `[ ]` CRUD SaaS Clients.
-- `[ ]` SaaS Clients list filters: active, paused, archived.
+  - 2026-06-07: generic reconciliation command supports company name, app company id, and legacy Glide company id.
+- `[ ]` `[priority: medium]` Convert SaaS Client/company management from disabled UI to controlled writes.
+- `[ ]` `[priority: medium]` CRUD SaaS Clients.
+- `[ ]` `[priority: medium]` SaaS Clients list filters: active, paused, archived.
 - `[x]` Ethical Scaling pilot CRUD company team members.
   - Pilot create/update/archive uses `supabase/functions/manage-company-member`.
   - Archived members are visible through the Team tab Active/Archived toggle.
   - Broader rollout still needs generalized company migration and final authorization hardening.
   - Non-pilot companies remain read-only from the Glide mirror.
-- `[ ]` Company customization:
+- `[ ]` `[priority: high]` Company customization:
   - Custom fields.
   - Outcome definitions.
   - Churn reasons.
   - Notification settings.
   - Client/account management settings.
   - Client list view columns.
-- `[~]` Company Pathways & Milestones setup:
+- `[~]` `[priority: high]` Company Pathways & Milestones setup:
   - App-owned `company_offers` and `company_offer_milestones` tables seed pilot/migrated companies from Glide once.
   - Admin Hub / SaaS Company Detail lists offers and their ordered milestones.
   - Directors and SuperAdmins can create, edit, and archive offers/milestones for pilot companies.
   - Offers/milestones assigned to active clients cannot be archived until those clients move elsewhere.
   - Mirror-only companies retain a read-only Glide fallback.
   - Remaining: deploy migration/function, Ethical Scaling QA, and later reordering/unarchive polish.
-- `[ ]` Company settings:
+- `[ ]` `[priority: high]` Company settings:
   - Call and communication settings.
   - Advanced settings / embed enablement.
-- `[ ]` SaaS Client archive/offboard flow.
-- `[ ]` Zapier SaaS company automation, if this remains needed.
+- `[ ]` `[priority: medium]` SaaS Client archive/offboard flow.
+- `[ ]` `[priority: medium]` Zapier SaaS company automation, if this remains needed.
 
 ### Phase 2: Client Lifecycle MVP
 
@@ -107,7 +115,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
 - `[~]` App-owned clients current-state table and Ethical Scaling backfill.
   - `clients` now holds 154 Ethical Scaling pilot rows backfilled from `backup_company_clients`.
   - Clients list/detail prefer app-owned `clients` for pilot/migrated companies and fall back to the Glide mirror elsewhere.
-- `[~]` CRUD Clients.
+- `[~]` `[priority: medium]` CRUD Clients.
   - New Client v1 is enabled for app-owned pilot/migrated companies through `manage-client-create`.
   - SuperAdmin/Director/Support can create company clients.
   - CSMs can create clients, but the server assigns the created client to that CSM.
@@ -116,12 +124,12 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Paused/Suspended/Offboarded require a typed reason; Paused requires a return date and extends app-owned contract dates.
   - Remaining CRUD gaps: richer field coverage, archive/delete beyond lifecycle statuses, and bulk import.
 - `[~]` Clients list/card views and filters exist; Ethical Scaling now reads app-owned client rows.
-- `[ ]` Clients calendar view and filters.
-- `[~]` Client detail general information write flow.
+- `[x]` Clients calendar view and filters.
+- `[~]` `[priority: medium]` Client detail general information write flow.
   - Ethical Scaling pilot has profile edit v1 through `manage-client-profile`.
   - SuperAdmin/Director/Support can edit company clients; CSM can edit assigned clients only; Viewer is read-only.
   - Fields: client name, business name, email, archetype, North Star, and Director Notes for SuperAdmin/Director only.
-- `[~]` CRUD client contracts.
+- `[~]` `[priority: high]` CRUD client contracts.
   - New Contract v1 is enabled for app-owned pilot/migrated clients through `manage-client-contract`.
   - Creates app-owned `client_contracts`, updates the app-owned client current contract summary, and writes history/audit events.
   - Contract renewal prompt v1 is live for active clients whose contract ends within 30 days.
@@ -129,10 +137,10 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Renewal/upsell can optionally mark Success on the client outcome.
   - QA: Jay validated this flow on Shaan Kassam on 2026-06-04.
   - Remaining gaps: edit, archive/delete, richer multi-contract/LTV reporting, high-fidelity renewal UX, and automated renewal notifications.
-- `[~]` CRUD client program.
+- `[~]` `[priority: medium]` CRUD client program.
   - Status/program lifecycle v1 supports Front End, Back End, Paused, Suspended, and Offboarded for app-owned pilot/migrated clients.
   - Remaining gaps: program setup/configuration, status notifications, and deeper dashboard/reporting validation.
-- `[~]` CRUD client outcomes.
+- `[~]` `[priority: medium]` CRUD client outcomes.
   - Client Detail > Outcomes has Edit Outcomes v1 for app-owned pilot/migrated clients.
   - Success, Progress, and Buy-in use the same mirrored `backup_choices` dropdown values as Quick Update.
   - `manage-client-outcomes` writes app-owned `clients`, `client_history_events`, and `app_audit_events`; Glide mirror rows remain read-only.
@@ -143,7 +151,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - QA passed on 2026-06-06: Jay updated Ali Abdaal's Success, Progress, Buy-in, and notes; the values saved and appeared correctly in Client History.
   - Later polish: display friendly outcome labels/colors in History instead of raw lowercase stored values.
   - Remaining gaps: testimonial/review/referral write fields, company-owned outcome definitions, and high-fidelity Outcomes UX.
-- `[~]` CRUD client pathways and milestones.
+- `[~]` `[priority: high]` CRUD client pathways and milestones.
   - Pathways & Milestones v1 is enabled through `manage-client-milestone`.
   - App-owned `client_milestones` tracks milestone start date, completion date, duration, and time-to-hit for pilot/migrated clients.
   - SuperAdmin/Director can change the client's current offer/pathway and milestone.
@@ -151,15 +159,18 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Completing a milestone advances to the next configured milestone in the current offer.
   - Client detail timeline is filtered to the active/current offer so unrelated company pathway milestones are not shown.
   - Current offer and current milestone resolve by name, including auto-advanced milestones.
-  - Remaining gaps: secondary offers, company-level offer/milestone CRUD, final low-fi-aligned UX, and Quick Update milestone-progress flow.
-- `[ ]` CRUD client tasks.
+  - Remaining gaps: secondary offers, company-level offer/milestone CRUD, final low-fi-aligned UX, and deeper reporting/backfill validation.
+- `[ ]` `[priority: low]` CRUD client tasks.
 - `[~]` Quick Update write flow.
   - Ethical Scaling pilot writes app-owned history and app-owned client current state; Glide mirror fields remain unchanged.
   - Quick Update intentionally keeps North Star, Next Steps, last contact, and next contact as read-only context. North Star editing belongs in full client profile editing.
   - Success, Progress, and Buy In use dropdowns from mirrored `backup_choices` for the pilot UI.
-- `[ ]` Bulk upload clients through CSV.
-- `[ ]` Zapier client creation webhook with required server-validated `company_id`.
-- `[~]` Profile upkeep scoring.
+- `[ ]` `[priority: high]` Bulk upload clients through CSV.
+- `[~]` `[priority: high]` Zapier client creation webhook with required server-validated `company_id`.
+  - 2026-06-07: `zapier-create-client` Edge Function deployed with JWT verification disabled and protected by `ZAPIER_CLIENT_WEBHOOK_SECRET`.
+  - It accepts app-owned company UUID or legacy Glide company id, creates app-owned clients, optional initial contract, history, and audit events.
+  - Remaining: set Supabase secret, create Zapier QA zap, test idempotency/external id, and add stakeholder-facing setup instructions.
+- `[~]` `[priority: medium]` Profile upkeep scoring.
   - CSM Reports v1 exists for active clients with six-field freshness.
   - Dashboard duplicate was removed so Dashboard stays focused on KPI/chart reporting and CSM Reports owns field-upkeep compliance.
 - `[~]` Client history/change log.
@@ -186,8 +197,9 @@ Next session lock:
   - Confirmed zero invalid active CSM assignments.
   - Confirmed active clients have app-owned offer and milestone configuration available.
   - Non-blocking notes: invalid assignments exist only on offboarded clients; archived pilot/test offer and milestone rows exist app-side; historical mirrored contracts and client milestones are not fully app-backfilled yet.
+  - 2026-06-07: historical activity backfill dry-run script added. Ethical Scaling dry-run found 1 contract and 34 client milestone rows ready to backfill for active/pilot-relevant clients, with 0 unresolved milestone offer mappings. Applying remains an explicit review gate.
   - Remaining product/process decision: pilot-week source-of-truth rules so RetainOS and Glide do not receive conflicting edits.
-- `[high]` Reduce Glide mirror dependency for Ethical Scaling pilot surfaces after reconciliation is clean.
+- `[~]` `[priority: high]` Reduce Glide mirror dependency for Ethical Scaling pilot surfaces after reconciliation is clean.
   - Keep mirror fallback for non-pilot companies.
   - For Ethical Scaling pilot users, prefer app-owned tables wherever the app-owned equivalent exists.
   - Track any remaining backup-table reads that are still required only because the app-owned table is not built yet.
@@ -198,20 +210,20 @@ Next session lock:
     - Remaining likely mirror dependencies: company list/search shell, mirrored choices/status definitions, historical contracts, historical milestone rows, legacy tasks, and legacy dashboard history/contract calculations where app-owned equivalents are incomplete.
 
 - `[~]` Task manager board/list exists and now includes New Task v1 for app-owned pilot/migrated companies.
-- `[~]` CRUD Tasks.
+- `[~]` `[priority: low]` CRUD Tasks.
   - New Task v1 creates app-owned `client_tasks` through `manage-client-task`.
   - Task update/complete/dismiss is intentionally deferred. It will be needed later, but it is not core to the Ethical Scaling pilot because Ethical Scaling barely uses tasks today.
   - Remaining later gaps: edit/update status, complete, dismiss/archive, recurring rules, notifications.
-- `[ ]` Tasks list/board filters for entire SaaS company.
-- `[ ]` Task due dates, assignments, overdue state, and notifications.
+- `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
+- `[ ]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
 - `[~]` CSM Reports list view and filters.
   - Standalone `/csm-reports` page exists for SuperAdmin, Director, and Support.
   - V1 filters: company, CSM, Today, last 7/14/30 days, and custom date range.
   - Updated vs non-updated is based on app-owned `client_history_events` inside the selected date range.
   - Active-client denominator and active client-manager roster were QA-cleaned on 2026-06-02.
-- `[ ]` CSM in-progress details.
-- `[ ]` CSM Reports AI summary can remain later if AI is not live.
-- `[~]` Dashboard KPIs/charts exist; validate against canonical formulas.
+- `[ ]` `[priority: medium]` CSM in-progress details.
+- `[ ]` `[priority: later]` CSM Reports AI summary can remain later if AI is not live.
+- `[~]` `[priority: medium]` Dashboard KPIs/charts exist; validate against canonical formulas.
   - Charts read app-owned clients for pilot/migrated companies and fall back to the Glide mirror for mirror-only companies.
   - KPI cards now try `dashboard_kpi_counts_canonical` first, including offer and multi-program filters, then fall back to the prior app-owned/legacy calculation if the canonical RPC errors.
   - Performance follow-up v1 completed on 2026-06-06: Overview avoids hidden chart/upkeep loads and Charts lazy-loads heavier datasets by active tab.
@@ -219,10 +231,15 @@ Next session lock:
   - Retention now includes `client_retention_recorded` events for same-program renewals.
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
-- `[~]` Dashboard CSM list/workload/capacity views.
+- `[ ]` `[priority: medium]` Dashboard advanced filtering and sorting.
+  - Capture Ben pilot feedback: dashboard views should eventually support more operational filtering/sorting directly inside the dashboard.
+  - First named use case: show only upcoming renewals from dashboard metrics/drilldowns.
+  - Not urgent for pilot because renewal dates can already be sorted elsewhere, but likely to become a common coach/CSM request as usage grows.
+  - Future examples: filter chart/list views by renewal window, risk/status, offer, CSM, and operational follow-up buckets without forcing users back to Clients list.
+- `[~]` `[priority: medium]` Dashboard CSM list/workload/capacity views.
   - CSM Active Client Workload counts active clients by active client-managing CSM.
   - CSM Capacity displays active clients versus configured team-member capacity.
-- `[~]` Dashboard canonical formula validation.
+- `[~]` `[priority: medium]` Dashboard canonical formula validation.
   - Validate active, front-end/back-end, offboarded, churn, retention, renewal, workload, and capacity definitions against Ethical Scaling pilot data.
   - Working spec: `DASHBOARD_FORMULA_VALIDATION.md`.
   - Draft SQL starting point: `DASHBOARD_CANONICAL_RPC_DRAFT.sql`.
@@ -234,7 +251,7 @@ Next session lock:
   - Populated from onboarded date, renewal date, date of last contact, date of next contact, and linked task due dates.
   - Scoped by current company, CSM, program/status, offer, client search, and secondary assignee filters.
   - Jay QAed it as working on 2026-06-03.
-- `[~]` Profile upkeep scoring.
+- `[~]` `[priority: medium]` Profile upkeep scoring.
   - V1 exists on Dashboard Overview.
   - Score active clients only.
   - Score as a percentage, not binary updated/not updated.
@@ -244,43 +261,43 @@ Next session lock:
   - Dashboard v1 includes clickable field drilldowns and a clickable complete/incomplete profile drilldown.
   - CSM Reports now includes a Field Upkeep section as the operational/compliance home, using the selected report date range and separating client-level update rate from field-level upkeep score.
   - Remaining gaps: Jay QA with Ethical Scaling in CSM Reports, company-configurable freshness window, and eventual canonical SQL/RPC calculation.
-- `[ ]` Dashboard HTML export.
+- `[ ]` `[priority: medium]` Dashboard HTML export.
 
 ### Phase 4: Resources, User Management, Notifications, And Migration Readiness
 
 Goal: prepare RetainOS for real customer migration, support operations, and repeatable company setup.
 
-- `[ ]` CRUD Resources.
-- `[ ]` Resource list/search/categorization.
-- `[ ]` User Management CRUD Users.
-- `[ ]` Invite/provisioning flow for bulk/team users.
-- `[ ]` Notifications: in-app, email, and future push.
-- `[ ]` Reporting PDF generation:
+- `[ ]` `[priority: medium]` CRUD Resources.
+- `[ ]` `[priority: medium]` Resource list/search/categorization.
+- `[ ]` `[priority: medium]` User Management CRUD Users.
+- `[ ]` `[priority: medium]` Invite/provisioning flow for bulk/team users.
+- `[ ]` `[priority: medium]` Notifications: in-app, email, and future push.
+- `[ ]` `[priority: medium]` Reporting PDF generation:
   - Semi-monthly churn-risk / renewals / RGAs PDF.
   - Weekly CSM Metrics PDF.
-- `[ ]` Final migration validation with pilot company.
-- `[ ]` Parallel run with Glide before cutover.
-- `[ ]` Cutover and rollback plan.
+- `[ ]` `[priority: high]` Final migration validation with pilot company.
+- `[ ]` `[priority: high]` Parallel run with Glide before cutover.
+- `[ ]` `[priority: high]` Cutover and rollback plan.
 
 ### Phase 5: AI, Advanced Automations, Billing, And Later Enhancements
 
 Goal: add higher-tier intelligence and scale features after the first migrated companies are stable.
 
-- `[ ]` Groups / cohort management.
+- `[ ]` `[priority: later]` Groups / cohort management.
   - Deliberately late priority. Groups can be built after client migration because it is not blocking the Ethical Scaling pilot or early client migrations.
   - Future scope: CRUD groups, group list/detail views, group-client assignment flow, and group-scoped filters/reporting.
-- `[ ]` Call AI filters and list view.
-- `[ ]` Add new meeting transcript and run AI manually.
-- `[ ]` Automatic transcript ingestion through Fathom or equivalent.
-- `[ ]` Fixed AI prompts managed only by SuperAdmin.
-- `[ ]` Company-specific prompts for Pro/Enterprise, built by CST Dev Team.
-- `[ ]` Dashboard AI Insights generation.
-- `[ ]` Call AI summaries, red flags, green lights, sentiment, archetype, and call score.
-- `[ ]` Automated flagging for churn risk, renewals, and RGAs.
-- `[ ]` Stripe billing/subscriptions and tier enforcement.
-- `[ ]` Google SSO.
-- `[ ]` Offline functionality.
-- `[ ]` Dark mode.
+- `[ ]` `[priority: later]` Call AI filters and list view.
+- `[ ]` `[priority: later]` Add new meeting transcript and run AI manually.
+- `[ ]` `[priority: later]` Automatic transcript ingestion through Fathom or equivalent.
+- `[ ]` `[priority: later]` Fixed AI prompts managed only by SuperAdmin.
+- `[ ]` `[priority: later]` Company-specific prompts for Pro/Enterprise, built by CST Dev Team.
+- `[ ]` `[priority: low]` Dashboard AI Insights generation.
+- `[ ]` `[priority: later]` Call AI summaries, red flags, green lights, sentiment, archetype, and call score.
+- `[ ]` `[priority: medium]` Automated flagging for churn risk, renewals, and RGAs.
+- `[ ]` `[priority: later]` Stripe billing/subscriptions and tier enforcement.
+- `[ ]` `[priority: later]` Google SSO.
+- `[ ]` `[priority: low]` Offline functionality.
+- `[ ]` `[priority: low]` Dark mode.
 
 ## Functional Product Map
 
@@ -299,11 +316,11 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[x]` Contract read-only display with renewal-related fields where available.
 - `[x]` Offer filter and offer/milestone read-only mapping.
 - `[x]` Multiple assignee/CSM filtering, including secondary assignee matches.
-- `[ ]` Create clients manually.
-- `[ ]` Create clients via CSV import.
-- `[ ]` Create clients automatically through Zapier webhook with required server-validated `company_id`.
-- `[ ]` Support individual client and group/cohort client management models.
-- `[ ]` Assign multiple CSMs to a single client for different service offerings.
+- `[ ]` `[priority: medium]` Create clients manually.
+- `[ ]` `[priority: high]` Create clients via CSV import.
+- `[ ]` `[priority: high]` Create clients automatically through Zapier webhook with required server-validated `company_id`.
+- `[ ]` `[priority: later]` Support individual client and group/cohort client management models.
+- `[ ]` `[priority: medium]` Assign multiple CSMs to a single client for different service offerings.
 - `[~]` Quick Update write workflow for recording client interactions.
   - Pilot stores next steps, contact dates, outcome/status values, and notes in `client_history_events`.
   - Pilot also updates the app-owned `clients` current-state row for next steps, contact dates, and outcome values.
@@ -322,25 +339,25 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[x]` Active client and status/program reporting where source data is available.
 - `[~]` Retention and churn reporting exist; app-owned UI path was hardened for Ethical Scaling, but still needs canonical Supabase formulas before broad write-mode rollout.
 - `[~]` CSM workload/capacity areas exist conceptually but need final formula and data validation.
-- `[ ]` CSM performance reports.
-- `[ ]` At-risk client identification and tracking.
-- `[ ]` Tier-based dashboard customization.
-- `[ ]` Real AI Insights for higher subscription tiers.
-- `[ ]` Real-time data generation behavior without manual refresh requirements.
+- `[ ]` `[priority: medium]` CSM performance reports.
+- `[ ]` `[priority: medium]` At-risk client identification and tracking.
+- `[ ]` `[priority: later]` Tier-based dashboard customization.
+- `[ ]` `[priority: low]` Real AI Insights for higher subscription tiers.
+- `[ ]` `[priority: medium]` Real-time data generation behavior without manual refresh requirements.
 
 #### Call AI Integration
 
-- `[ ]` AI usage can launch after initial go-live.
+- `[ ]` `[priority: later]` AI usage can launch after initial go-live.
   - Not a blocker for the first 2-3 migrated companies.
   - Initial migration can proceed without full AI automation if core client, dashboard, task, and reporting workflows are stable.
-- `[ ]` Upload and process meeting transcripts manually.
-- `[ ]` Automatically ingest meeting transcripts through Fathom or equivalent integration.
-- `[ ]` Fixed AI prompts for sentiment analysis, call grading, and summaries.
-- `[ ]` Company-specific custom prompts for tailored analysis.
-- `[ ]` On-demand analysis for specific call scenarios.
-- `[ ]` Call sharing between team members.
-- `[ ]` Weekly automated reports on call analysis metrics.
-- `[ ]` Red flag identification and escalation alerts.
+- `[ ]` `[priority: later]` Upload and process meeting transcripts manually.
+- `[ ]` `[priority: later]` Automatically ingest meeting transcripts through Fathom or equivalent integration.
+- `[ ]` `[priority: later]` Fixed AI prompts for sentiment analysis, call grading, and summaries.
+- `[ ]` `[priority: later]` Company-specific custom prompts for tailored analysis.
+- `[ ]` `[priority: later]` On-demand analysis for specific call scenarios.
+- `[ ]` `[priority: later]` Call sharing between team members.
+- `[ ]` `[priority: later]` Weekly automated reports on call analysis metrics.
+- `[ ]` `[priority: later]` Red flag identification and escalation alerts.
 
 #### Task Management
 
@@ -351,9 +368,9 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[x]` Client detail Tasks tab wired read-only.
 - `[~]` Create tasks with due dates and team assignments.
   - New Task v1 creates app-owned tasks with due dates and assignment; update/complete/dismiss is deferred.
-- `[ ]` Update task status: pending, completed, overdue.
-- `[ ]` Task assignment and due-date notifications.
-- `[ ]` Clarify company-level tasks versus client-linked tasks in write mode.
+- `[ ]` `[priority: low]` Update task status: pending, completed, overdue.
+- `[ ]` `[priority: low]` Task assignment and due-date notifications.
+- `[ ]` `[priority: medium]` Clarify company-level tasks versus client-linked tasks in write mode.
 
 #### Offer And Milestone Tracking
 
@@ -369,11 +386,11 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[~]` Historical tracking of time spent in each milestone.
   - V1 stores duration and time-to-hit on `client_milestones`.
   - Needs dashboard/reporting validation before marking complete.
-- `[ ]` Company-specific offer definitions in RetainOS write mode.
-- `[ ]` Offer-specific milestone definitions.
-- `[ ]` Target completion times and automatic milestone-delay flagging.
-- `[ ]` Quick Update milestone-progress flow matching the intended CSM low-fi workflow.
-- `[ ]` Secondary offers/pathways.
+- `[ ]` `[priority: high]` Company-specific offer definitions in RetainOS write mode.
+- `[ ]` `[priority: high]` Offer-specific milestone definitions.
+- `[ ]` `[priority: medium]` Target completion times and automatic milestone-delay flagging.
+- `[x]` Quick Update milestone-progress flow matching the intended CSM low-fi workflow.
+- `[ ]` `[priority: medium]` Secondary offers/pathways.
 
 ### Supporting Features
 
@@ -384,69 +401,69 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[x]` SuperAdmin global access is not tied to companies.
 - `[x]` Company association for team members.
 - `[x]` Role-based route and capability gating.
-- `[ ]` Full activity logging for audit trails and change history.
-- `[ ]` Google login.
+- `[ ]` `[priority: medium]` Full activity logging for audit trails and change history.
+- `[ ]` `[priority: later]` Google login.
 
 #### Resource Library
 
-- `[ ]` Centralized resource library.
-- `[ ]` External resource link management for videos, docs, links, and training materials.
-- `[ ]` Resource access control by user role and company settings.
-- `[ ]` Resource search and categorization.
+- `[ ]` `[priority: medium]` Centralized resource library.
+- `[ ]` `[priority: medium]` External resource link management for videos, docs, links, and training materials.
+- `[ ]` `[priority: medium]` Resource access control by user role and company settings.
+- `[ ]` `[priority: medium]` Resource search and categorization.
 
 #### Admin Configuration Panel
 
 - `[~]` SuperAdmin SaaS Clients and company Team tab exist; pilot Team writes are enabled for app-owned companies only.
-- `[ ]` Custom field creation with text, dropdown, date, boolean, and future field types.
-- `[ ]` Outcome definitions for success, progress, and buy-in.
-- `[ ]` Notification preferences and automation settings.
+- `[ ]` `[priority: high]` Custom field creation with text, dropdown, date, boolean, and future field types.
+- `[ ]` `[priority: high]` Outcome definitions for success, progress, and buy-in.
+- `[ ]` `[priority: high]` Notification preferences and automation settings.
 - `[~]` Team member management and role assignments.
-- `[ ]` Company customization tabs:
+- `[ ]` `[priority: high]` Company customization tabs:
   - Customization.
   - Pathways & Milestones.
   - Company Settings.
 
 #### Automated Workflow Engine
 
-- `[ ]` Churn risk identification from buy-in/progress status and milestone delays.
+- `[ ]` `[priority: medium]` Churn risk identification from buy-in/progress status and milestone delays.
 - `[~]` Renewal notifications/prompts for contracts expiring within 30 days.
   - Client Detail > Contract now shows a local renewal prompt for active clients within 30 days of contract end.
   - Automated notifications remain future work.
-- `[ ]` Revenue-generating activity alerts for eligible clients.
-- `[ ]` Monthly dashboard reports delivered automatically.
-- `[ ]` Summary notifications for client conditions.
-- `[ ]` Real-time notifications for immediate issues and periodic reminders.
+- `[ ]` `[priority: medium]` Revenue-generating activity alerts for eligible clients.
+- `[ ]` `[priority: medium]` Monthly dashboard reports delivered automatically.
+- `[ ]` `[priority: medium]` Summary notifications for client conditions.
+- `[ ]` `[priority: medium]` Real-time notifications for immediate issues and periodic reminders.
 
 #### Reporting, Exports, And Imports
 
-- `[ ]` Report template system.
+- `[ ]` `[priority: medium]` Report template system.
   - Initial target: 2 distinct report templates/types.
   - Templates to be provided by Jay as core examples.
-- `[ ]` PDF report generation.
-- `[ ]` Semi-monthly client opportunity/risk PDF.
+- `[ ]` `[priority: medium]` PDF report generation.
+- `[ ]` `[priority: medium]` Semi-monthly client opportunity/risk PDF.
   - Schedule: every 1st and 14th.
   - Recipients: CSMs and Director.
   - Contents: clients at churn risk, clients up for renewal, and RGAs.
-- `[ ]` Weekly CSM Metrics PDF.
+- `[ ]` `[priority: medium]` Weekly CSM Metrics PDF.
   - Schedule: every Monday.
   - Recipient: Director.
   - Contents: Avg. Time to Success per CSM, Updated vs. Non-Updated Profiles, and other metrics from the data sheet.
-- `[ ]` Custom HTML export of Dashboard.
-- `[ ]` CSV upload and parse flow.
-- `[ ]` User bulk upload flow.
+- `[ ]` `[priority: medium]` Custom HTML export of Dashboard.
+- `[ ]` `[priority: high]` CSV upload and parse flow.
+- `[ ]` `[priority: medium]` User bulk upload flow.
 
 #### Billing And Subscription Management
 
-- `[ ]` Stripe integration.
-- `[ ]` Monthly recurring billing.
-- `[ ]` Tier-based feature access.
-- `[ ]` Subscription upgrade/downgrade workflow through SuperAdmin.
-- `[ ]` Usage monitoring and tier limit enforcement.
+- `[ ]` `[priority: later]` Stripe integration.
+- `[ ]` `[priority: later]` Monthly recurring billing.
+- `[ ]` `[priority: later]` Tier-based feature access.
+- `[ ]` `[priority: later]` Subscription upgrade/downgrade workflow through SuperAdmin.
+- `[ ]` `[priority: later]` Usage monitoring and tier limit enforcement.
 
 ### Future / Nice-To-Have
 
-- `[ ]` Dark mode.
-- `[ ]` Offline functionality.
+- `[ ]` `[priority: low]` Dark mode.
+- `[ ]` `[priority: low]` Offline functionality.
 
 ## End-To-End Flow Map
 
@@ -456,13 +473,13 @@ Use this section to connect feature work into operational flows. A feature is no
 
 ### Client Intake And Setup Flow
 
-- `[ ]` New client can be created manually.
-- `[ ]` New client can be imported from CSV with preview and validation.
-- `[ ]` New client can be created from Zapier with required `company_id`.
-- `[ ]` Client can be assigned to company, offer, pathway, milestone, CSM, and optional group/cohort.
+- `[~]` `[priority: medium]` New client can be created manually.
+- `[ ]` `[priority: high]` New client can be imported from CSV with preview and validation.
+- `[ ]` `[priority: high]` New client can be created from Zapier with required `company_id`.
+- `[~]` `[priority: medium]` Client can be assigned to company, offer, pathway, milestone, CSM, and optional group/cohort.
 - `[~]` Client setup captures contract details, start date, end/renewal logic, and external links.
   - New Contract v1 covers this for app-owned pilot/migrated clients from Client Detail > Contract.
-- `[ ]` Client appears correctly in roster, dashboard, CSM reports, tasks, and notification logic after creation.
+- `[ ]` `[priority: medium]` Client appears correctly in roster, dashboard, CSM reports, tasks, and notification logic after creation.
 
 ### Quick Update And Client Progress Flow
 
@@ -475,7 +492,7 @@ Use this section to connect feature work into operational flows. A feature is no
   - Pilot writes app-owned `client_history_events`.
 - `[~]` Quick Update refreshes profile upkeep scoring.
   - Quick Update history events now feed Dashboard Profile Upkeep Score v1.
-- `[ ]` Quick Update changes flow into dashboard KPIs, CSM Reports, alerts, and AI/reporting inputs.
+- `[ ]` `[priority: medium]` Quick Update changes flow into dashboard KPIs, CSM Reports, alerts, and AI/reporting inputs.
 
 ### Quality Control Flow
 
@@ -485,9 +502,9 @@ Use this section to connect feature work into operational flows. A feature is no
   - Field Upkeep supports field-level and complete/incomplete profile drill-through.
   - CSM Summary rows can drill into that CSM's active client update list.
   - QA passed on 2026-06-06: date ranges, CSM modal, not-updated-first order, and client profile links worked as expected.
-- `[ ]` Call AI shows call quality and coaching standard signals.
+- `[ ]` `[priority: later]` Call AI shows call quality and coaching standard signals.
 - `[~]` Directors can move from dashboard signal to affected client list to individual profile details.
-- `[ ]` CSMs can move from assigned client/task alerts to client updates.
+- `[ ]` `[priority: medium]` CSMs can move from assigned client/task alerts to client updates.
 - `[~]` Support can inspect company-wide operational data without AI Insights access.
 
 ### Task Manager Flow
@@ -497,15 +514,15 @@ Use this section to connect feature work into operational flows. A feature is no
   - Current v1 creates from top-level Tasks with an optional client link; direct Client Detail create button is still future.
 - `[x]` Task can be assigned to team members with due date and priority/status.
 - `[x]` Task appears in the global Task Manager and client profile when linked to a client.
-- `[ ]` Task status changes update related notifications and reporting.
+- `[ ]` `[priority: low]` Task status changes update related notifications and reporting.
   - Deferred until task usage becomes a higher pilot priority.
-- `[ ]` Overdue tasks are flagged and routed to the correct user.
+- `[ ]` `[priority: low]` Overdue tasks are flagged and routed to the correct user.
 
 ### Contract Renewal And Offboarding Flow
 
-- `[ ]` Contract expiration detection identifies clients up for renewal within configured windows.
-- `[ ]` Renewal opportunities can be surfaced to CSMs and Directors.
-- `[ ]` Client at churn risk can be flagged from progress/buy-in/milestone delays and related signals.
+- `[ ]` `[priority: medium]` Contract expiration detection identifies clients up for renewal within configured windows.
+- `[ ]` `[priority: medium]` Renewal opportunities can be surfaced to CSMs and Directors.
+- `[ ]` `[priority: medium]` Client at churn risk can be flagged from progress/buy-in/milestone delays and related signals.
 - `[~]` Client can be paused, suspended, offboarded, or archived through controlled write flows.
   - Pause/Suspended/Offboarded status changes are live for app-owned pilot clients.
   - Archive remains separate/future.
@@ -514,11 +531,11 @@ Use this section to connect feature work into operational flows. A feature is no
 
 ### Automated Flagging Flow
 
-- `[ ]` Automated workflows can find and flag churn-risk clients on configured schedules.
-- `[ ]` Automated workflows can find and flag clients up for renewal on configured schedules.
-- `[ ]` Automated workflows can find and flag Revenue Generating Activities on configured schedules.
-- `[ ]` Scheduled workflow outputs can feed notifications, reports, dashboard indicators, and task creation.
-- `[?]` Decide whether automated workflows run in Supabase scheduled functions, N8N, Zapier, or a hybrid approach.
+- `[ ]` `[priority: medium]` Automated workflows can find and flag churn-risk clients on configured schedules.
+- `[ ]` `[priority: medium]` Automated workflows can find and flag clients up for renewal on configured schedules.
+- `[ ]` `[priority: medium]` Automated workflows can find and flag Revenue Generating Activities on configured schedules.
+- `[ ]` `[priority: medium]` Scheduled workflow outputs can feed notifications, reports, dashboard indicators, and task creation.
+- `[?]` `[priority: medium]` Decide whether automated workflows run in Supabase scheduled functions, N8N, Zapier, or a hybrid approach.
 
 ## Sitemap And Navigation Coverage
 
@@ -532,112 +549,112 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[x]` SaaS Client detail view.
 - `[~]` New SaaS Client modal exists with disabled submit.
 - `[x]` View As / company support flow.
-- `[ ]` Resources list view.
-- `[ ]` New resource flow.
-- `[ ]` AI Prompts management for fixed prompts.
+- `[ ]` `[priority: medium]` Resources list view.
+- `[ ]` `[priority: medium]` New resource flow.
+- `[ ]` `[priority: later]` AI Prompts management for fixed prompts.
   - SuperAdmin has the ability to edit fixed AI prompts.
   - Directors cannot edit fixed prompts.
-- `[late]` Groups list and detail views across selected company.
-- `[ ]` Clients list, card, and calendar views across selected company.
-- `[ ]` New Client flow.
-- `[ ]` Bulk client upload.
-- `[ ]` Client detail edit/manage.
+- `[late]` `[priority: later]` Groups list and detail views across selected company.
+- `[x]` Clients list, card, and calendar views across selected company.
+- `[~]` `[priority: medium]` New Client flow.
+- `[ ]` `[priority: high]` Bulk client upload.
+- `[~]` `[priority: medium]` Client detail edit/manage.
 - `[x]` Dashboard / KPI dashboard for selected company.
-- `[~]` Generate AI Insights action exists as placeholder only.
-- `[ ]` CSM Reports updated-clients list and client detail flow.
-- `[ ]` Call AI filters/KPIs/analysis list view.
-- `[ ]` New meeting transcript flow.
-- `[ ]` Call analysis detail view and share-with-team action.
+- `[~]` `[priority: low]` Generate AI Insights action exists as placeholder only.
+- `[~]` `[priority: medium]` CSM Reports updated-clients list and client detail flow.
+- `[ ]` `[priority: later]` Call AI filters/KPIs/analysis list view.
+- `[ ]` `[priority: later]` New meeting transcript flow.
+- `[ ]` `[priority: later]` Call analysis detail view and share-with-team action.
 - `[x]` Tasks list view.
-- `[ ]` New Task flow.
-- `[ ]` Update Task flow.
+- `[~]` `[priority: low]` New Task flow.
+- `[ ]` `[priority: low]` Update Task flow.
 - `[x]` Admin Hub / Team Members exists through SaaS Client Team tab and company-side `/admin` route.
 - `[~]` New Team User flow.
-- `[ ]` User detail edit/manage.
-- `[ ]` Admin Hub settings:
+- `[ ]` `[priority: medium]` User detail edit/manage.
+- `[ ]` `[priority: high]` Admin Hub settings:
   - Company settings.
   - Customization.
   - Offers & Milestones.
-- `[ ]` Offers & Milestones list view.
-- `[ ]` New Offer flow.
-- `[ ]` New Milestone flow.
+- `[~]` `[priority: high]` Offers & Milestones list view.
+- `[~]` `[priority: high]` New Offer flow.
+- `[~]` `[priority: high]` New Milestone flow.
 
 ### Director Sitemap
 
-- `[late]` Groups list and detail views.
-- `[ ]` New Group flow.
-- `[ ]` Group edit/manage.
+- `[late]` `[priority: later]` Groups list and detail views.
+- `[late]` `[priority: later]` New Group flow.
+- `[late]` `[priority: later]` Group edit/manage.
 - `[x]` Clients list and card views.
-- `[ ]` Client calendar view.
-- `[ ]` New Client flow.
-- `[ ]` Bulk client upload.
-- `[ ]` Client detail edit/manage.
+- `[x]` Client calendar view.
+- `[~]` `[priority: medium]` New Client flow.
+- `[ ]` `[priority: high]` Bulk client upload.
+- `[~]` `[priority: medium]` Client detail edit/manage.
 - `[x]` Dashboard / KPI dashboard.
-- `[~]` Generate AI Insights action exists as placeholder only.
+- `[~]` `[priority: low]` Generate AI Insights action exists as placeholder only.
 - `[?]` Confirm whether dashboard should include clients at risk of churn by default for Director.
-- `[ ]` CSM Reports updated-clients list and client detail flow.
-- `[ ]` Call AI filters/KPIs/analysis list view.
-- `[ ]` New meeting transcript flow.
-- `[ ]` Call analysis detail view and share-with-team action.
+- `[~]` `[priority: medium]` CSM Reports updated-clients list and client detail flow.
+- `[ ]` `[priority: later]` Call AI filters/KPIs/analysis list view.
+- `[ ]` `[priority: later]` New meeting transcript flow.
+- `[ ]` `[priority: later]` Call analysis detail view and share-with-team action.
 - `[x]` Tasks list view.
-- `[ ]` New Task flow.
-- `[ ]` Update Task flow.
+- `[~]` `[priority: low]` New Task flow.
+- `[ ]` `[priority: low]` Update Task flow.
 - `[x]` Admin Hub team members.
 - `[x]` New Team User flow.
-- `[ ]` User detail edit/manage.
-- `[ ]` Admin Hub settings:
+- `[ ]` `[priority: medium]` User detail edit/manage.
+- `[ ]` `[priority: high]` Admin Hub settings:
   - Company settings.
   - Customization.
   - Offers & Milestones.
-- `[ ]` Resources list view.
-- `[ ]` Director customization excludes dynamic AI prompts.
+- `[ ]` `[priority: medium]` Resources list view.
+- `[ ]` `[priority: high]` Director customization excludes dynamic AI prompts.
   - Director can manage custom fields, outcome definitions, and churn reasons.
   - Director cannot customize dynamic AI prompts.
 
 ### CSM Sitemap
 
-- `[late]` Groups list and detail views, scoped to own clients where applicable.
+- `[late]` `[priority: later]` Groups list and detail views, scoped to own clients where applicable.
 - `[x]` Clients list/card access scoped to own clients.
-- `[ ]` Client calendar view scoped to own clients.
-- `[ ]` Client detail edit/manage for permitted fields.
+- `[x]` Client calendar view scoped to own clients.
+- `[~]` `[priority: medium]` Client detail edit/manage for permitted fields.
 - `[x]` Dashboard / KPI dashboard scoped to own clients.
 - `[x]` Tasks list view scoped to assigned tasks.
-- `[ ]` New Task flow.
-- `[ ]` Update Task flow.
-- `[ ]` Call AI list view for accessible calls.
-- `[ ]` Resources list view.
+- `[~]` `[priority: low]` New Task flow.
+- `[ ]` `[priority: low]` Update Task flow.
+- `[ ]` `[priority: later]` Call AI list view for accessible calls.
+- `[ ]` `[priority: medium]` Resources list view.
 - `[x]` CSM does not access Admin Hub.
 - `[x]` CSM does not access SaaS Clients.
 
 ### Support Sitemap
 
-- `[late]` Groups list and detail views.
-- `[ ]` New Group flow.
-- `[ ]` Group edit/manage.
+- `[late]` `[priority: later]` Groups list and detail views.
+- `[late]` `[priority: later]` New Group flow.
+- `[late]` `[priority: later]` Group edit/manage.
 - `[x]` Clients list and card views.
-- `[ ]` Client calendar view.
-- `[ ]` New Client flow.
-- `[ ]` Bulk client upload.
-- `[ ]` Client detail edit/manage for permitted fields.
+- `[x]` Client calendar view.
+- `[~]` `[priority: medium]` New Client flow.
+- `[ ]` `[priority: high]` Bulk client upload.
+- `[~]` `[priority: medium]` Client detail edit/manage for permitted fields.
 - `[x]` Dashboard / KPI dashboard.
 - `[x]` Support cannot access AI Insights.
 - `[x]` Tasks list view.
-- `[ ]` New Task flow.
-- `[ ]` Update Task flow.
-- `[ ]` Call AI list view.
-- `[ ]` New meeting transcript flow.
-- `[ ]` Share call analysis with team.
-- `[ ]` Resources list view.
+- `[~]` `[priority: low]` New Task flow.
+- `[ ]` `[priority: low]` Update Task flow.
+- `[ ]` `[priority: later]` Call AI list view.
+- `[ ]` `[priority: later]` New meeting transcript flow.
+- `[ ]` `[priority: later]` Share call analysis with team.
+- `[ ]` `[priority: medium]` Resources list view.
 - `[x]` Support does not access SaaS Clients.
 - `[?]` Confirm whether Support should access Admin Hub/team/settings or only operational areas.
 
 ### Viewer Sitemap
 
-- `[late]` Groups list and detail views.
+- `[late]` `[priority: later]` Groups list and detail views.
 - `[x]` Clients list and card views.
-- `[ ]` Client calendar view.
+- `[x]` Client calendar view.
 - `[x]` Dashboard / KPI dashboard.
-- `[ ]` Resources list view.
+- `[ ]` `[priority: medium]` Resources list view.
 - `[x]` Viewer is read-only.
 - `[x]` Viewer does not see Quick Update.
 - `[x]` Viewer does not access Tasks, Call AI, CSM Reports, Admin Hub, or SaaS Clients.
@@ -1330,7 +1347,7 @@ This phase should happen after core wiring/write-mode foundations are stable. Us
   - 12 columns.
   - 40px margin.
   - 20px gutter.
-- `[late]` Replace inline/prototype brand icons with final production logo assets during a pilot UI revision.
+- `[late]` `[priority: low]` Replace inline/prototype brand icons with final production logo assets during a pilot UI revision.
   - RetainOS wordmark.
   - RetainOS circular arrow mark.
   - Light, deep navy, and sky blue logo treatments.

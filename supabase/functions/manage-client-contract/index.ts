@@ -12,6 +12,7 @@ const CORS_HEADERS = {
 const WRITER_ROLES = new Set(["director", "support", "csm"]);
 const ACTIVE_STATUS_VALUES = new Set(["front-end", "back-end"]);
 const RETENTION_TYPES = new Set(["none", "renewal", "upsell"]);
+const CONTRACT_ACTIONS = new Set(["create", "update", "archive"]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -62,6 +63,20 @@ function nullableNumber(value: unknown) {
   return Number.isFinite(number) ? number : null;
 }
 
+function normalizeContractType(value: unknown) {
+  const text = cleanText(value).toLowerCase();
+  return [
+    "standard",
+    "renewal",
+    "upsell",
+    "pause_extension",
+    "add_on",
+    "other",
+  ].includes(text)
+    ? text
+    : "standard";
+}
+
 function calculateDays(startDate: string | null, endDate: string | null) {
   if (!startDate || !endDate) return null;
   const start = new Date(startDate);
@@ -71,6 +86,57 @@ function calculateDays(startDate: string | null, endDate: string | null) {
     0,
     Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)),
   );
+}
+
+async function syncClientContractSummary(
+  supabase: ReturnType<typeof createClient>,
+  clientId: string,
+  clientLegacyId: string,
+) {
+  const { data: latestContract, error: latestError } = await supabase
+    .from("client_contracts")
+    .select("*")
+    .eq("client_id", clientLegacyId)
+    .is("archived_at", null)
+    .neq("status", "archived")
+    .order("end_date", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestError) throw latestError;
+
+  const updatePayload: Record<string, unknown> = latestContract
+    ? {
+        current_contract_start_date: latestContract.start_date,
+        current_contract_of_days: latestContract.contract_days,
+        current_contract_end_date: latestContract.end_date,
+        current_contract_end_date_for_filtering: latestContract.end_date,
+        current_contract_monthly_value: latestContract.monthly_value,
+        current_contract_reference_link: latestContract.reference_link,
+        current_contract_notes: latestContract.notes,
+        current_contract_auto_renew: latestContract.auto_renew,
+      }
+    : {
+        current_contract_start_date: null,
+        current_contract_of_days: null,
+        current_contract_end_date: null,
+        current_contract_end_date_for_filtering: null,
+        current_contract_monthly_value: null,
+        current_contract_reference_link: null,
+        current_contract_notes: null,
+        current_contract_auto_renew: null,
+      };
+
+  const { data: updatedClient, error: updateClientError } = await supabase
+    .from("clients")
+    .update(updatePayload)
+    .eq("id", clientId)
+    .select("*")
+    .single();
+
+  if (updateClientError) throw updateClientError;
+  return { latestContract, updatedClient };
 }
 
 async function resolveActor(
@@ -145,6 +211,9 @@ Deno.serve(async (req) => {
 
     const userEmail = normalizeEmail(userData.user.email);
     const body = await req.json().catch(() => ({}));
+    const action = CONTRACT_ACTIONS.has(cleanText(body.action))
+      ? cleanText(body.action)
+      : "create";
     const clientLegacyId = cleanText(body.clientLegacyId);
 
     if (!clientLegacyId) {
@@ -197,6 +266,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    const contractId = cleanText(body.contractId);
+
+    if (action !== "create" && !contractId) {
+      return jsonResponse({ error: "Missing contract id." }, 400);
+    }
+
     const startDate = normalizeDate(body.startDate);
     const endDate = normalizeDate(body.endDate);
     const retentionType = RETENTION_TYPES.has(cleanText(body.retentionType))
@@ -223,7 +298,7 @@ Deno.serve(async (req) => {
         ? Number(((monthlyValue / 30) * contractDays).toFixed(2))
         : null);
 
-    if (!startDate && !endDate) {
+    if (action !== "archive" && !startDate && !endDate) {
       return jsonResponse(
         { error: "Add at least a start date or end date." },
         400,
@@ -245,6 +320,205 @@ Deno.serve(async (req) => {
       );
     }
 
+    if (action === "archive") {
+      const { data: existingContract, error: existingContractError } = await supabase
+        .from("client_contracts")
+        .select("*")
+        .eq("glide_row_id", contractId)
+        .eq("client_id", clientLegacyId)
+        .eq("company_id", company.id)
+        .is("archived_at", null)
+        .maybeSingle();
+
+      if (existingContractError) throw existingContractError;
+      if (!existingContract) {
+        return jsonResponse(
+          { error: "Contract not found or already archived." },
+          404,
+        );
+      }
+
+      const { data: contract, error: contractError } = await supabase
+        .from("client_contracts")
+        .update({
+          status: "archived",
+          archived_at: new Date().toISOString(),
+          metadata: {
+            ...(existingContract.metadata ?? {}),
+            archived_in: "retainos_contract_write_pilot",
+            archived_by_role: actor.role,
+          },
+        })
+        .eq("id", existingContract.id)
+        .select("*")
+        .single();
+
+      if (contractError) throw contractError;
+
+      const { updatedClient } = await syncClientContractSummary(
+        supabase,
+        client.id,
+        clientLegacyId,
+      );
+
+      const { data: event, error: historyError } = await supabase
+        .from("client_history_events")
+        .insert({
+          company_id: company.id,
+          legacy_client_glide_row_id: clientLegacyId,
+          actor_auth_user_id: userData.user.id,
+          actor_member_id: actor.memberId,
+          event_type: "contract_archived",
+          source: "contract_archive",
+          title: `Contract archived for ${updatedClient.client_name ?? "client"}`,
+          summary: endDate
+            ? `Archived contract ending ${endDate.slice(0, 10)}.`
+            : "Archived contract.",
+          notes: nullableText(body.notes),
+          payload: {
+            actor_role: actor.role,
+            contract,
+            client: updatedClient,
+          },
+        })
+        .select("*")
+        .single();
+
+      if (historyError) throw historyError;
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "contract_archived",
+        source: "contract_archive",
+        entity_table: "client_contracts",
+        entity_id: contract.id,
+        legacy_glide_row_id: contract.glide_row_id,
+        title: "Contract archived",
+        summary: `Archived contract for ${updatedClient.client_name ?? clientLegacyId}.`,
+        before_data: existingContract,
+        after_data: contract,
+        metadata: {
+          history_event_id: event.id,
+          actor_role: actor.role,
+          client_id: updatedClient.id,
+        },
+      });
+
+      return jsonResponse({
+        ok: true,
+        contract,
+        client: updatedClient,
+        event,
+      });
+    }
+
+    if (action === "update") {
+      const { data: existingContract, error: existingContractError } = await supabase
+        .from("client_contracts")
+        .select("*")
+        .eq("glide_row_id", contractId)
+        .eq("client_id", clientLegacyId)
+        .eq("company_id", company.id)
+        .is("archived_at", null)
+        .maybeSingle();
+
+      if (existingContractError) throw existingContractError;
+      if (!existingContract) {
+        return jsonResponse(
+          { error: "Contract not found or archived contracts cannot be edited." },
+          404,
+        );
+      }
+
+      const updatePayload = {
+        start_date: startDate,
+        end_date: endDate,
+        contract_days: contractDays,
+        monthly_value: monthlyValue,
+        total_contract_value: totalContractValue,
+        reference_link: nullableText(body.referenceLink),
+        notes: nullableText(body.notes),
+        auto_renew: body.autoRenew === true,
+        status: nullableText(body.status) ?? "active",
+        metadata: {
+          ...(existingContract.metadata ?? {}),
+          contract_type: normalizeContractType(body.contractType),
+          updated_in: "retainos_contract_write_pilot",
+          updated_by_role: actor.role,
+        },
+      };
+
+      const { data: contract, error: contractError } = await supabase
+        .from("client_contracts")
+        .update(updatePayload)
+        .eq("id", existingContract.id)
+        .select("*")
+        .single();
+
+      if (contractError) throw contractError;
+
+      const { updatedClient } = await syncClientContractSummary(
+        supabase,
+        client.id,
+        clientLegacyId,
+      );
+
+      const { data: event, error: historyError } = await supabase
+        .from("client_history_events")
+        .insert({
+          company_id: company.id,
+          legacy_client_glide_row_id: clientLegacyId,
+          actor_auth_user_id: userData.user.id,
+          actor_member_id: actor.memberId,
+          event_type: "contract_updated",
+          source: "contract_update",
+          title: `Contract updated for ${updatedClient.client_name ?? "client"}`,
+          summary: endDate
+            ? `Updated contract ending ${endDate.slice(0, 10)}.`
+            : "Updated contract.",
+          notes: nullableText(body.notes),
+          payload: {
+            actor_role: actor.role,
+            before: existingContract,
+            contract,
+            client: updatedClient,
+          },
+        })
+        .select("*")
+        .single();
+
+      if (historyError) throw historyError;
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "contract_updated",
+        source: "contract_update",
+        entity_table: "client_contracts",
+        entity_id: contract.id,
+        legacy_glide_row_id: contract.glide_row_id,
+        title: "Contract updated",
+        summary: `Updated contract for ${updatedClient.client_name ?? clientLegacyId}.`,
+        before_data: existingContract,
+        after_data: contract,
+        metadata: {
+          history_event_id: event.id,
+          actor_role: actor.role,
+          client_id: updatedClient.id,
+        },
+      });
+
+      return jsonResponse({
+        ok: true,
+        contract,
+        client: updatedClient,
+        event,
+      });
+    }
+
     const glideRowId = `contract_${crypto.randomUUID()}`;
     const contractPayload = {
       company_id: company.id,
@@ -261,6 +535,7 @@ Deno.serve(async (req) => {
       auto_renew: body.autoRenew === true,
       status: nullableText(body.status) ?? "active",
       metadata: {
+        contract_type: normalizeContractType(body.contractType),
         created_in: "retainos_contract_write_pilot",
         actor_role: actor.role,
       },

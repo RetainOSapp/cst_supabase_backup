@@ -246,7 +246,7 @@ Deno.serve(async (req) => {
       .update(clientUpdates)
       .eq("company_id", company.id)
       .eq("glide_row_id", clientLegacyId)
-      .select("id, glide_row_id, client_name")
+      .select("*")
       .maybeSingle();
 
     if (updateClientError) throw updateClientError;

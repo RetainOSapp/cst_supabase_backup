@@ -12,6 +12,7 @@ import { CsmReports } from "./pages/CsmReports.tsx";
 import { Clients } from "./pages/Clients.tsx";
 import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { Tasks } from "./pages/Tasks.tsx";
+import { Resources } from "./pages/Resources.tsx";
 import { SaasClients } from "./pages/SaasClients.tsx";
 import { SaasClientDetail } from "./pages/SaasClientDetail.tsx";
 import { ComingSoonPage } from "./components/ComingSoon.tsx";
@@ -151,6 +152,14 @@ function AccountShell() {
             element={
               <RequireCapability allowed={capabilities.canAccessTasks}>
                 <Tasks />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="resources"
+            element={
+              <RequireCapability allowed={capabilities.canAccessResources}>
+                <Resources />
               </RequireCapability>
             }
           />

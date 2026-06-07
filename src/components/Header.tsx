@@ -12,6 +12,7 @@ type IconName =
   | "dashboard"
   | "reports"
   | "clients"
+  | "resources"
   | "tasks"
   | "groups"
   | "admin"
@@ -42,6 +43,9 @@ function NavIcon({ name }: { name: IconName }) {
   }
   if (name === "clients" || name === "saas") {
     return <svg {...common}><path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75" {...strokeProps} /></svg>;
+  }
+  if (name === "resources") {
+    return <svg {...common}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5zM8 6h8M8 10h6" {...strokeProps} /></svg>;
   }
   if (name === "tasks") {
     return <svg {...common}><path d="m9 11 3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" {...strokeProps} /></svg>;
@@ -140,6 +144,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     { path: "/csm-reports", label: "CSM Reports", icon: "reports" as const, show: capabilities.canAccessCsmReports },
     { path: "/tasks", label: "Tasks", icon: "tasks" as const, show: capabilities.canAccessTasks },
     { path: "/groups", label: "Groups", icon: "groups" as const, show: capabilities.canAccessClients },
+    { path: "/resources", label: "Resources", icon: "resources" as const, show: capabilities.canAccessResources },
     { path: "/admin", label: "Admin Hub", icon: "admin" as const, show: capabilities.canAccessAdminHub },
     { path: "/saas-clients", label: "SaaS Clients", icon: "saas" as const, show: capabilities.canAccessSaasClients },
   ].filter((item) => item.show);

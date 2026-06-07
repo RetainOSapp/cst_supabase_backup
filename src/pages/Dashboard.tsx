@@ -3531,7 +3531,11 @@ export function Dashboard() {
                       key={client.glide_row_id}
                       className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4 border-b border-gray-100 py-3"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
+                      <Link
+                        to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
+                        onClick={closeDetailDrawer}
+                        className="flex min-w-0 items-center gap-3 rounded-lg -m-1 p-1 hover:bg-gray-50"
+                      >
                         {client.client_image ? (
                           <img
                             src={client.client_image}
@@ -3546,7 +3550,7 @@ export function Dashboard() {
                         <span className="truncate text-sm font-medium text-gray-900">
                           {client.client_name ?? "Unnamed client"}
                         </span>
-                      </div>
+                      </Link>
 
                       <div className="flex items-center gap-2 min-w-0">
                         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-700">

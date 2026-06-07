@@ -13,8 +13,9 @@
     "pilot:seed:ethical-scaling:clients": "node scripts/seed-ethical-scaling-clients-pilot.mjs --apply",
     "pilot:seed:ethical-scaling:clients:dry": "node scripts/seed-ethical-scaling-clients-pilot.mjs",
     "pilot:qa:ethical-scaling": "node scripts/qa-ethical-scaling-pilot.mjs",
-    "pilot:reconcile:ethical-scaling": "node scripts/reconcile-ethical-scaling-pilot.mjs",
-    "pilot:reconcile:company": "node scripts/reconcile-ethical-scaling-pilot.mjs"
+    "pilot:reconcile:ethical-scaling": "node scripts/reconcile-company-pilot.mjs --company=\"Ethical Scaling\"",
+    "pilot:reconcile:company": "node scripts/reconcile-company-pilot.mjs",
+    "pilot:backfill:company-activity": "node scripts/backfill-company-activity.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
