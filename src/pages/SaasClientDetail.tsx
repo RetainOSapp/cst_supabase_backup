@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
+import { loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
 import { supabase } from "../lib/supabase.ts";
-import { ComingSoonPanel } from "../components/ComingSoon.tsx";
 
 type DetailTab = "team" | "customization" | "pathways" | "settings";
 type TeamSource = "mirror" | "app_owned";
 type PathwaySource = "mirror" | "app_owned";
+type CustomizationSource = "mirror" | "app_owned";
+type SettingsSource = "mirror" | "app_owned";
 type TeamRole = "director" | "support" | "csm" | "viewer";
 type TeamStatusFilter = "active" | "archived";
 
@@ -75,6 +77,56 @@ interface CompanyOfferMilestoneRow {
   is_final_milestone?: boolean | null;
   final_milestone?: boolean | null;
   status?: "active" | "archived" | null;
+}
+
+interface CompanyOutcomeDefinitionRow {
+  id?: string;
+  outcome_type: "success" | "progress" | "buy_in" | "suitable";
+  value: string;
+  label: string;
+  color?: string | null;
+  emoji?: string | null;
+  positive_rank?: number | null;
+  position?: number | null;
+  is_default?: boolean | null;
+  status?: "active" | "archived" | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+interface CompanyChurnReasonRow {
+  id?: string;
+  value: string;
+  label: string;
+  category?: string | null;
+  requires_notes?: boolean | null;
+  counts_as_churn?: boolean | null;
+  position?: number | null;
+  status?: "active" | "archived" | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+interface CompanySettingsRow {
+  id?: string;
+  profile_upkeep_freshness_days: number;
+  default_client_view: "list" | "card" | "calendar";
+  default_calendar_mode: "month" | "week" | "day";
+  enable_secondary_assignee: boolean;
+  enable_call_ai_for_csms: boolean;
+  enable_embeds: boolean;
+  enable_zapier_client_create: boolean;
+  metadata?: Record<string, unknown> | null;
+  updated_at?: string | null;
+}
+
+interface PathwayUsageCounts {
+  offers: Record<string, number>;
+  milestones: Record<string, number>;
+}
+
+interface ArchiveAffectedClient {
+  glide_row_id?: string | null;
+  client_name?: string | null;
+  business_name?: string | null;
 }
 
 function getInitials(name: string | null | undefined) {
@@ -443,7 +495,7 @@ function NewTeamMemberModal({
             >
               {canManage
                 ? "Writes are enabled for this RetainOS pilot company."
-                : "Editing is locked while this reads from the Glide mirror."}
+                : "Editing is locked while this reads from CST into RetainOS."}
             </div>
             {error ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -538,9 +590,6 @@ function PathwaySetupModal({
   const isMilestone = milestone !== undefined;
   const isEditing = Boolean(offer || milestone);
   const [name, setName] = useState(offer?.name ?? milestone?.name ?? "");
-  const [position, setPosition] = useState(
-    String(milestone?.position ?? milestone?.order ?? 0),
-  );
   const [targetDays, setTargetDays] = useState(
     String(
       milestone?.target_days_to_complete ??
@@ -577,7 +626,6 @@ function PathwaySetupModal({
           entityId: milestone?.glide_row_id ?? offer?.glide_row_id,
           offerId: milestone?.offer_id ?? defaultOfferId,
           name,
-          position,
           targetDays,
           isTtvMilestone,
           isFinalMilestone,
@@ -622,16 +670,6 @@ function PathwaySetupModal({
             {isMilestone ? (
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block text-sm font-semibold text-[#364152]">
-                    Position
-                    <input
-                      type="number"
-                      min="0"
-                      value={position}
-                      onChange={(event) => setPosition(event.target.value)}
-                      className="mt-1 block w-full rounded-md border border-[#cbd2dc] px-3 py-2.5 text-sm"
-                    />
-                  </label>
                   <label className="block text-sm font-semibold text-[#364152]">
                     Target days from onboarding
                     <input
@@ -693,21 +731,42 @@ function PathwaysSetup({
   source,
   offers,
   milestones,
+  usageCounts,
   canManage,
   onReload,
+  onMilestonesReordered,
 }: {
   companyLegacyId: string;
   source: PathwaySource;
   offers: CompanyOfferRow[];
   milestones: CompanyOfferMilestoneRow[];
+  usageCounts: PathwayUsageCounts;
   canManage: boolean;
   onReload: () => void;
+  onMilestonesReordered: (offerId: string, milestones: CompanyOfferMilestoneRow[]) => void;
 }) {
   const [editingOffer, setEditingOffer] = useState<CompanyOfferRow | null | undefined>();
   const [editingMilestone, setEditingMilestone] =
     useState<CompanyOfferMilestoneRow | null | undefined>();
   const [newMilestoneOfferId, setNewMilestoneOfferId] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [reorderingOfferId, setReorderingOfferId] = useState<string | null>(null);
+
+  function archiveErrorMessage(
+    fallback: string,
+    data: Record<string, unknown> | null | undefined,
+  ) {
+    const count = typeof data?.affectedCount === "number" ? data.affectedCount : null;
+    const clients = Array.isArray(data?.affectedClients)
+      ? (data.affectedClients as ArchiveAffectedClient[])
+      : [];
+    if (!count || clients.length === 0) return fallback;
+    const sample = clients
+      .map((client) => client.client_name ?? client.business_name ?? client.glide_row_id)
+      .filter(Boolean)
+      .join(", ");
+    return `${fallback} Active clients: ${sample}${count > clients.length ? `, and ${count - clients.length} more` : ""}.`;
+  }
 
   async function archiveItem(
     action: "archive_offer" | "archive_milestone",
@@ -720,14 +779,81 @@ function PathwaysSetup({
       body: { action, companyLegacyId, entityId },
     });
     if (error || data?.error) {
-      setActionError(data?.error ?? error?.message ?? "Unable to archive.");
+      setActionError(
+        archiveErrorMessage(
+          data?.error ?? error?.message ?? "Unable to archive.",
+          data as Record<string, unknown> | null | undefined,
+        ),
+      );
       return;
     }
     onReload();
   }
 
+  async function unarchiveItem(
+    action: "unarchive_offer" | "unarchive_milestone",
+    entityId: string,
+    label: string,
+  ) {
+    if (!window.confirm(`Restore ${label}?`)) return;
+    setActionError(null);
+    const { data, error } = await supabase.functions.invoke("manage-company-pathway", {
+      body: { action, companyLegacyId, entityId },
+    });
+    if (error || data?.error) {
+      setActionError(data?.error ?? error?.message ?? "Unable to restore.");
+      return;
+    }
+    onReload();
+  }
+
+  async function reorderMilestone(
+    offerId: string,
+    offerMilestones: CompanyOfferMilestoneRow[],
+    milestoneId: string,
+    direction: "up" | "down",
+  ) {
+    const currentIndex = offerMilestones.findIndex(
+      (milestone) => milestone.glide_row_id === milestoneId,
+    );
+    const swapIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (currentIndex < 0 || swapIndex < 0 || swapIndex >= offerMilestones.length) return;
+    const nextOrder = offerMilestones.map((milestone) => milestone.glide_row_id);
+    [nextOrder[currentIndex], nextOrder[swapIndex]] = [
+      nextOrder[swapIndex],
+      nextOrder[currentIndex],
+    ];
+    setActionError(null);
+    setReorderingOfferId(offerId);
+    const { data, error } = await supabase.functions.invoke("manage-company-pathway", {
+      body: {
+        action: "reorder_milestones",
+        companyLegacyId,
+        offerId,
+        milestoneIds: nextOrder,
+      },
+    });
+    setReorderingOfferId(null);
+    if (error || data?.error) {
+      setActionError(data?.error ?? error?.message ?? "Unable to reorder milestones.");
+      return;
+    }
+    if (Array.isArray(data?.items)) {
+      onMilestonesReordered(offerId, data.items as CompanyOfferMilestoneRow[]);
+      return;
+    }
+    onReload();
+  }
+
+  function isArchivedTemporaryTestOffer(offer: CompanyOfferRow) {
+    return /temporary\s+test\s+offer/i.test(offer.name ?? "");
+  }
+
   const activeOffers = offers.filter((offer) => offer.status !== "archived");
-  const archivedOffers = offers.filter((offer) => offer.status === "archived");
+  const archivedOffers = offers.filter(
+    (offer) =>
+      offer.status === "archived" && !isArchivedTemporaryTestOffer(offer),
+  );
 
   return (
     <div className="mt-6 space-y-5">
@@ -746,7 +872,7 @@ function PathwaysSetup({
                 : "border-slate-200 bg-slate-50 text-slate-600"
             }`}
           >
-            {source === "app_owned" ? "RetainOS pilot data" : "Glide mirror data"}
+            {source === "app_owned" ? "RetainOS pilot data" : "CST preview data"}
           </span>
           <button
             type="button"
@@ -787,6 +913,16 @@ function PathwaysSetup({
               (a, b) =>
                 Number(a.position ?? a.order ?? 0) - Number(b.position ?? b.order ?? 0),
             );
+          const archivedMilestones = milestones
+            .filter(
+              (milestone) =>
+                milestone.offer_id === offer.glide_row_id &&
+                milestone.status === "archived",
+            )
+            .sort(
+              (a, b) =>
+                Number(a.position ?? a.order ?? 0) - Number(b.position ?? b.order ?? 0),
+            );
           return (
             <section
               key={offer.glide_row_id}
@@ -798,6 +934,9 @@ function PathwaysSetup({
                   <p className="mt-1 text-xs text-[#6c7684]">
                     {offerMilestones.length} active milestone
                     {offerMilestones.length === 1 ? "" : "s"}
+                    {" · "}
+                    {usageCounts.offers[offer.glide_row_id] ?? 0} active client
+                    {(usageCounts.offers[offer.glide_row_id] ?? 0) === 1 ? "" : "s"}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -867,10 +1006,54 @@ function PathwaysSetup({
                             {milestone.is_final_milestone || milestone.final_milestone
                               ? " · Final"
                               : ""}
+                            {" · "}
+                            {usageCounts.milestones[milestone.glide_row_id] ?? 0} active
+                            client
+                            {(usageCounts.milestones[milestone.glide_row_id] ?? 0) === 1
+                              ? ""
+                              : "s"}
                           </p>
                         </div>
                       </div>
                       <div className="flex gap-2">
+                        <button
+                          type="button"
+                          aria-label={`Move ${milestone.name ?? "milestone"} up`}
+                          title="Move up"
+                          disabled={!canManage || index === 0 || reorderingOfferId === offer.glide_row_id}
+                          onClick={() =>
+                            void reorderMilestone(
+                              offer.glide_row_id,
+                              offerMilestones,
+                              milestone.glide_row_id,
+                              "up",
+                            )
+                          }
+                          className="rounded-md border border-[#cbd2dc] px-2 py-1 text-sm font-semibold text-[#586273] disabled:opacity-40"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Move ${milestone.name ?? "milestone"} down`}
+                          title="Move down"
+                          disabled={
+                            !canManage ||
+                            index === offerMilestones.length - 1 ||
+                            reorderingOfferId === offer.glide_row_id
+                          }
+                          onClick={() =>
+                            void reorderMilestone(
+                              offer.glide_row_id,
+                              offerMilestones,
+                              milestone.glide_row_id,
+                              "down",
+                            )
+                          }
+                          className="rounded-md border border-[#cbd2dc] px-2 py-1 text-sm font-semibold text-[#586273] disabled:opacity-40"
+                        >
+                          ↓
+                        </button>
                         <button
                           type="button"
                           disabled={!canManage}
@@ -898,6 +1081,45 @@ function PathwaysSetup({
                   ))
                 )}
               </div>
+              {archivedMilestones.length > 0 ? (
+                <details className="border-t border-[#e4e9f0] bg-[#f7f9fc] px-5 py-4">
+                  <summary className="cursor-pointer text-sm font-semibold text-[#586273]">
+                    Archived milestones ({archivedMilestones.length})
+                  </summary>
+                  <div className="mt-3 divide-y divide-[#e4e9f0] rounded-md border border-[#e4e9f0] bg-white">
+                    {archivedMilestones.map((milestone) => (
+                      <div
+                        key={milestone.glide_row_id}
+                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-[#162b3e]">
+                            {milestone.name}
+                          </p>
+                          <p className="mt-1 text-xs text-[#6c7684]">
+                            Restoring appends this milestone to the end of the active
+                            order.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!canManage}
+                          onClick={() =>
+                            void unarchiveItem(
+                              "unarchive_milestone",
+                              milestone.glide_row_id,
+                              milestone.name ?? "milestone",
+                            )
+                          }
+                          className="rounded-md border border-emerald-200 px-3 py-1.5 text-sm font-semibold text-emerald-700 disabled:opacity-40"
+                        >
+                          Restore
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </section>
           );
         })
@@ -912,9 +1134,28 @@ function PathwaysSetup({
             {archivedOffers.map((offer) => (
               <div
                 key={offer.glide_row_id}
-                className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3 text-sm text-[#6c7684]"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3 text-sm text-[#6c7684]"
               >
-                {offer.name}
+                <div>
+                  <p className="font-semibold text-[#162b3e]">{offer.name}</p>
+                  <p className="mt-1 text-xs text-[#6c7684]">
+                    Milestones remain archived until restored individually.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!canManage}
+                  onClick={() =>
+                    void unarchiveItem(
+                      "unarchive_offer",
+                      offer.glide_row_id,
+                      offer.name ?? "offer",
+                    )
+                  }
+                  className="rounded-md border border-emerald-200 px-3 py-1.5 text-sm font-semibold text-emerald-700 disabled:opacity-40"
+                >
+                  Restore
+                </button>
               </div>
             ))}
           </div>
@@ -952,6 +1193,1012 @@ function PathwaysSetup({
   );
 }
 
+const outcomeTypeLabels: Record<CompanyOutcomeDefinitionRow["outcome_type"], string> = {
+  success: "Success",
+  progress: "Progress",
+  buy_in: "Buy-in",
+  suitable: "Suitable",
+};
+
+function titleize(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function CustomizationTextInput({
+  label,
+  value,
+  onChange,
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+}) {
+  return (
+    <label className="block text-sm font-medium text-[#344054]">
+      {label}
+      <input
+        required={required}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 block w-full rounded-md border border-[#d0d5dd] px-3 py-2 text-sm shadow-sm focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#59abf0]/20"
+      />
+    </label>
+  );
+}
+
+function OutcomeDefinitionModal({
+  companyLegacyId,
+  item,
+  onClose,
+  onSaved,
+}: {
+  companyLegacyId: string;
+  item: CompanyOutcomeDefinitionRow | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [outcomeType, setOutcomeType] =
+    useState<CompanyOutcomeDefinitionRow["outcome_type"]>(
+      item?.outcome_type ?? "progress",
+    );
+  const [value, setValue] = useState(item?.value ?? "");
+  const [label, setLabel] = useState(item?.label ?? "");
+  const [position, setPosition] = useState(String(item?.position ?? 0));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "upsert_outcome",
+          companyLegacyId,
+          entityId: item?.id,
+          outcomeType,
+          value,
+          label,
+          position: Number(position) || 0,
+          isDefault: item?.is_default ?? false,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError) {
+      setError(invokeError.message);
+      return;
+    }
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-[#101828]">
+              {item ? "Edit outcome" : "New outcome"}
+            </h2>
+            <p className="mt-1 text-sm text-[#667085]">
+              Values are stored in lowercase for validation and reporting.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-[#98a2b3]">
+            Close
+          </button>
+        </div>
+        <div className="mt-5 space-y-4">
+          <label className="block text-sm font-medium text-[#344054]">
+            Outcome type
+            <select
+              value={outcomeType}
+              onChange={(event) =>
+                setOutcomeType(
+                  event.target.value as CompanyOutcomeDefinitionRow["outcome_type"],
+                )
+              }
+              className="mt-1 block w-full rounded-md border border-[#d0d5dd] px-3 py-2 text-sm shadow-sm focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#59abf0]/20"
+            >
+              {Object.entries(outcomeTypeLabels).map(([type, display]) => (
+                <option key={type} value={type}>
+                  {display}
+                </option>
+              ))}
+            </select>
+          </label>
+          <CustomizationTextInput
+            label="Value"
+            value={value}
+            onChange={setValue}
+            required
+          />
+          <CustomizationTextInput
+            label="Label"
+            value={label}
+            onChange={setLabel}
+            required
+          />
+          <CustomizationTextInput
+            label="Position"
+            value={position}
+            onChange={setPosition}
+          />
+          {error ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-[#d0d5dd] px-4 py-2 text-sm font-medium text-[#344054]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-medium text-white hover:bg-[#3b95df] disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ChurnReasonModal({
+  companyLegacyId,
+  item,
+  onClose,
+  onSaved,
+}: {
+  companyLegacyId: string;
+  item: CompanyChurnReasonRow | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [value, setValue] = useState(item?.value ?? "");
+  const [label, setLabel] = useState(item?.label ?? "");
+  const [category, setCategory] = useState(item?.category ?? "");
+  const [position, setPosition] = useState(String(item?.position ?? 0));
+  const [requiresNotes, setRequiresNotes] = useState(
+    item?.requires_notes ?? false,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "upsert_churn_reason",
+          companyLegacyId,
+          entityId: item?.id,
+          value,
+          label,
+          category,
+          requiresNotes,
+          countsAsChurn: item?.counts_as_churn ?? true,
+          position: Number(position) || 0,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError) {
+      setError(invokeError.message);
+      return;
+    }
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-[#101828]">
+              {item ? "Edit churn reason" : "New churn reason"}
+            </h2>
+            <p className="mt-1 text-sm text-[#667085]">
+              Selected values continue to save into client churn reason fields.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-[#98a2b3]">
+            Close
+          </button>
+        </div>
+        <div className="mt-5 space-y-4">
+          <CustomizationTextInput
+            label="Value"
+            value={value}
+            onChange={setValue}
+            required
+          />
+          <CustomizationTextInput
+            label="Label"
+            value={label}
+            onChange={setLabel}
+            required
+          />
+          <CustomizationTextInput
+            label="Category"
+            value={category}
+            onChange={setCategory}
+          />
+          <CustomizationTextInput
+            label="Position"
+            value={position}
+            onChange={setPosition}
+          />
+          <label className="flex items-center gap-2 text-sm font-medium text-[#344054]">
+            <input
+              type="checkbox"
+              checked={requiresNotes}
+              onChange={(event) => setRequiresNotes(event.target.checked)}
+              className="h-4 w-4 rounded border-[#d0d5dd] text-[#59abf0]"
+            />
+            Requires notes
+          </label>
+          {error ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-[#d0d5dd] px-4 py-2 text-sm font-medium text-[#344054]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-medium text-white hover:bg-[#3b95df] disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CustomizationRow({
+  primary,
+  secondary,
+  badge,
+  status,
+  canManage,
+  onEdit,
+  onArchive,
+}: {
+  primary: string;
+  secondary: string;
+  badge?: string | null;
+  status?: string | null;
+  canManage: boolean;
+  onEdit: () => void;
+  onArchive: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-[#e4e9f0] bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-semibold text-[#101828]">{primary}</p>
+        <p className="mt-1 text-xs text-[#667085]">{secondary}</p>
+      </div>
+      <div className="flex items-center gap-3">
+        {badge ? (
+          <span className="rounded-full border border-[#d8e2ef] bg-[#f7f9fc] px-2.5 py-1 text-xs font-medium text-[#586273]">
+            {badge}
+          </span>
+        ) : null}
+        <span className="rounded-full border border-[#e4e9f0] bg-[#f7f9fc] px-2.5 py-1 text-xs font-medium text-[#667085]">
+          {status ?? "active"}
+        </span>
+        {canManage ? (
+          <div className="flex gap-2 text-xs font-medium">
+            <button type="button" onClick={onEdit} className="text-indigo-600">
+              Edit
+            </button>
+            <button type="button" onClick={onArchive} className="text-red-600">
+              Archive
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function customizationOriginLabel(item: {
+  metadata?: Record<string, unknown> | null;
+  is_default?: boolean | null;
+}) {
+  const seededFrom =
+    typeof item.metadata?.seeded_from === "string" ? item.metadata.seeded_from : "";
+  const createdFrom =
+    typeof item.metadata?.created_from === "string"
+      ? item.metadata.created_from
+      : "";
+  if (seededFrom === "safe_defaults" || item.is_default) return "Default";
+  if (seededFrom) return "Imported";
+  if (createdFrom) return "Custom";
+  return null;
+}
+
+function customizationSort<
+  T extends {
+    label?: string | null;
+    position?: number | null;
+    status?: string | null;
+  },
+>(a: T, b: T) {
+  const statusA = a.status === "archived" ? 1 : 0;
+  const statusB = b.status === "archived" ? 1 : 0;
+  if (statusA !== statusB) return statusA - statusB;
+  const positionA = typeof a.position === "number" ? a.position : 9999;
+  const positionB = typeof b.position === "number" ? b.position : 9999;
+  if (positionA !== positionB) return positionA - positionB;
+  return String(a.label ?? "").localeCompare(String(b.label ?? ""));
+}
+
+function CustomizationSetup({
+  companyLegacyId,
+  source,
+  outcomes,
+  churnReasons,
+  canManage,
+  onReload,
+}: {
+  companyLegacyId: string;
+  source: CustomizationSource;
+  outcomes: CompanyOutcomeDefinitionRow[];
+  churnReasons: CompanyChurnReasonRow[];
+  canManage: boolean;
+  onReload: () => void;
+}) {
+  const [editingOutcome, setEditingOutcome] =
+    useState<CompanyOutcomeDefinitionRow | null>();
+  const [editingChurnReason, setEditingChurnReason] =
+    useState<CompanyChurnReasonRow | null>();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const sortedOutcomes = [...outcomes].sort(customizationSort);
+  const activeOutcomes = sortedOutcomes.filter(
+    (item) => item.status !== "archived",
+  );
+  const archivedOutcomes = sortedOutcomes.filter(
+    (item) => item.status === "archived",
+  );
+  const sortedChurnReasons = [...churnReasons].sort(customizationSort);
+  const activeChurnReasons = sortedChurnReasons.filter(
+    (item) => item.status !== "archived",
+  );
+  const archivedChurnReasons = sortedChurnReasons.filter(
+    (item) => item.status === "archived",
+  );
+  const outcomesByType = activeOutcomes.reduce(
+    (grouped, item) => {
+      grouped[item.outcome_type] = grouped[item.outcome_type] ?? [];
+      grouped[item.outcome_type].push(item);
+      return grouped;
+    },
+    {} as Record<CompanyOutcomeDefinitionRow["outcome_type"], CompanyOutcomeDefinitionRow[]>,
+  );
+  const visibleOutcomeTypes = (
+    Object.keys(outcomeTypeLabels) as CompanyOutcomeDefinitionRow["outcome_type"][]
+  ).filter((type) => type !== "suitable" || (outcomesByType.suitable?.length ?? 0) > 0);
+
+  async function archiveItem(
+    action: "archive_outcome" | "archive_churn_reason",
+    entityId?: string,
+  ) {
+    if (!entityId) return;
+    const confirmed = window.confirm("Archive this customization item?");
+    if (!confirmed) return;
+    setActionError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      { body: { action, companyLegacyId, entityId } },
+    );
+    if (invokeError) {
+      setActionError(invokeError.message);
+      return;
+    }
+    if (data?.error) {
+      setActionError(data.error);
+      return;
+    }
+    onReload();
+  }
+
+  if (source === "mirror") {
+    return (
+      <div className="mt-6 space-y-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-5 py-4">
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+            CST preview
+          </span>
+          <h2 className="mt-4 text-lg font-semibold text-[#101828]">
+            Customization is read-only for this company
+          </h2>
+          <p className="mt-1 text-sm text-[#667085]">
+            Outcome choices are still loaded from CST until this
+            company is moved to pilot or migrated status.
+          </p>
+        </div>
+        {outcomes.length > 0 ? (
+          <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="text-sm font-semibold text-[#101828]">
+              Mirrored outcome choices
+            </h3>
+            <div className="mt-3 grid gap-4 lg:grid-cols-3">
+              {visibleOutcomeTypes.map((type) => {
+                const rows = outcomesByType[type] ?? [];
+                if (rows.length === 0) return null;
+                return (
+                  <div
+                    key={type}
+                    className="rounded-lg border border-[#e4e9f0] bg-white p-4"
+                  >
+                    <h4 className="text-sm font-semibold text-[#101828]">
+                      {outcomeTypeLabels[type]}
+                    </h4>
+                    <div className="mt-3 space-y-2">
+                      {rows.map((item) => (
+                        <div
+                          key={`${item.outcome_type}-${item.value}`}
+                          className="rounded-md border border-[#eef2f6] bg-[#f8fafc] px-3 py-2 text-sm"
+                        >
+                          <span className="font-medium text-[#101828]">
+                            {item.label}
+                          </span>
+                          <span className="ml-2 text-xs text-[#667085]">
+                            {item.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+            RetainOS customization
+          </span>
+          <h2 className="mt-3 text-lg font-semibold text-[#101828]">
+            Company Customization
+          </h2>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setEditingOutcome(null)}
+            className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-medium text-white hover:bg-[#3b95df]"
+          >
+            + Outcome
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditingChurnReason(null)}
+            className="rounded-md border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-medium text-[#344054] hover:bg-[#f7f9fc]"
+          >
+            + Churn Reason
+          </button>
+        </div>
+      </div>
+
+      {actionError ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </div>
+      ) : null}
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Outcome definitions
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Each outcome type has its own active definition list.
+          </p>
+        </div>
+        <div className="grid gap-4 p-4 xl:grid-cols-2">
+          {visibleOutcomeTypes.map((type) => {
+            const rows = outcomesByType[type] ?? [];
+            return (
+              <div
+                key={type}
+                className="rounded-lg border border-[#d8e2ef] bg-white p-4 shadow-sm"
+              >
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h4 className="text-base font-semibold text-[#101828]">
+                    {outcomeTypeLabels[type]}
+                  </h4>
+                  <span className="rounded-full border border-[#e4e9f0] bg-[#f7f9fc] px-2.5 py-1 text-xs font-medium text-[#667085]">
+                    {rows.length} active
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {rows.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-[#d0d5dd] bg-white px-4 py-3 text-sm text-[#667085]">
+                      No active definitions.
+                    </div>
+                  ) : (
+                    rows.map((item) => (
+                      <CustomizationRow
+                        key={item.id ?? `${item.outcome_type}-${item.value}`}
+                        primary={item.label}
+                        secondary={`${item.value} · position ${item.position ?? 0}`}
+                        badge={customizationOriginLabel(item)}
+                        status={item.status}
+                        canManage={canManage}
+                        onEdit={() => setEditingOutcome(item)}
+                        onArchive={() => archiveItem("archive_outcome", item.id)}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="px-4 pb-4">
+          {archivedOutcomes.length > 0 ? (
+            <details>
+              <summary className="cursor-pointer text-sm font-semibold text-[#586273]">
+                Archived outcomes ({archivedOutcomes.length})
+              </summary>
+              <div className="mt-3 space-y-2">
+                {archivedOutcomes.map((item) => (
+                  <CustomizationRow
+                    key={item.id ?? `${item.outcome_type}-${item.value}`}
+                    primary={item.label}
+                    secondary={`${outcomeTypeLabels[item.outcome_type]} · ${item.value}`}
+                    badge={customizationOriginLabel(item)}
+                    status="archived"
+                    canManage={false}
+                    onEdit={() => undefined}
+                    onArchive={() => undefined}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Churn reasons
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Active reasons are sorted by position, then label. Imported Glide
+            values are tagged separately from safe defaults and custom additions.
+          </p>
+        </div>
+        <div className="space-y-2 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+              Active reasons
+            </p>
+            <span className="rounded-full border border-[#e4e9f0] bg-white px-2.5 py-1 text-xs font-medium text-[#667085]">
+              {activeChurnReasons.length} active
+            </span>
+          </div>
+          {activeChurnReasons.length === 0 ? (
+            <div className="rounded-md border border-dashed border-[#d0d5dd] bg-white px-4 py-3 text-sm text-[#667085]">
+              No active churn reasons.
+            </div>
+          ) : (
+            activeChurnReasons.map((item) => (
+              <CustomizationRow
+                key={item.id ?? item.value}
+                primary={item.label}
+                secondary={`${item.value} · ${
+                  item.requires_notes ? "notes required" : "notes optional"
+                }`}
+                badge={customizationOriginLabel(item)}
+                status={item.status}
+                canManage={canManage}
+                onEdit={() => setEditingChurnReason(item)}
+                onArchive={() => archiveItem("archive_churn_reason", item.id)}
+              />
+            ))
+          )}
+          {archivedChurnReasons.length > 0 ? (
+            <details className="pt-2">
+              <summary className="cursor-pointer text-sm font-semibold text-[#586273]">
+                Archived churn reasons ({archivedChurnReasons.length})
+              </summary>
+              <div className="mt-3 space-y-2">
+                {archivedChurnReasons.map((item) => (
+                  <CustomizationRow
+                    key={item.id ?? item.value}
+                    primary={item.label}
+                    secondary={item.value}
+                    badge={customizationOriginLabel(item)}
+                    status="archived"
+                    canManage={false}
+                    onEdit={() => undefined}
+                    onArchive={() => undefined}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </section>
+
+      {editingOutcome !== undefined ? (
+        <OutcomeDefinitionModal
+          companyLegacyId={companyLegacyId}
+          item={editingOutcome}
+          onClose={() => setEditingOutcome(undefined)}
+          onSaved={() => {
+            setEditingOutcome(undefined);
+            onReload();
+          }}
+        />
+      ) : null}
+      {editingChurnReason !== undefined ? (
+        <ChurnReasonModal
+          companyLegacyId={companyLegacyId}
+          item={editingChurnReason}
+          onClose={() => setEditingChurnReason(undefined)}
+          onSaved={() => {
+            setEditingChurnReason(undefined);
+            onReload();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow {
+  const defaultView =
+    company?.view_override === "card" || company?.view_override === "calendar"
+      ? company.view_override
+      : "list";
+  return {
+    profile_upkeep_freshness_days: 14,
+    default_client_view: defaultView,
+    default_calendar_mode: "month",
+    enable_secondary_assignee: company?.enable_secondary_assignee === true,
+    enable_call_ai_for_csms: company?.enable_call_ai_for_csms === true,
+    enable_embeds: false,
+    enable_zapier_client_create: false,
+  };
+}
+
+function SettingsSelect<T extends string>({
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  disabled: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="block text-sm font-medium text-[#344054]">
+      {label}
+      <select
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+        className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function SettingsFlag({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-start gap-3 rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-1 h-4 w-4 rounded border-[#d0d5dd] text-[#59abf0] disabled:opacity-50"
+      />
+      <span>
+        <span className="block text-sm font-semibold text-[#101828]">{label}</span>
+        <span className="mt-1 block text-xs text-[#667085]">{description}</span>
+      </span>
+    </label>
+  );
+}
+
+function CompanySettingsSetup({
+  companyLegacyId,
+  source,
+  settings,
+  canManage,
+  onReload,
+}: {
+  companyLegacyId: string;
+  source: SettingsSource;
+  settings: CompanySettingsRow;
+  canManage: boolean;
+  onReload: () => void;
+}) {
+  const [draft, setDraft] = useState<CompanySettingsRow>(settings);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setDraft(settings);
+    setError(null);
+    setSaved(false);
+  }, [settings]);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!canManage) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "update_settings",
+          companyLegacyId,
+          profileUpkeepFreshnessDays: draft.profile_upkeep_freshness_days,
+          defaultClientView: draft.default_client_view,
+          defaultCalendarMode: draft.default_calendar_mode,
+          enableSecondaryAssignee: draft.enable_secondary_assignee,
+          enableCallAiForCsms: draft.enable_call_ai_for_csms,
+          enableEmbeds: draft.enable_embeds,
+          enableZapierClientCreate: draft.enable_zapier_client_create,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError) {
+      setError(invokeError.message);
+      return;
+    }
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+    setSaved(true);
+    onReload();
+  }
+
+  const disabled = !canManage || saving;
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              source === "app_owned"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-slate-50 text-slate-600"
+            }`}
+          >
+            {source === "app_owned" ? "RetainOS settings" : "CST preview"}
+          </span>
+          <h2 className="mt-3 text-lg font-semibold text-[#101828]">
+            Company Settings
+          </h2>
+        </div>
+        <button
+          type="submit"
+          disabled={disabled}
+          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save settings"}
+        </button>
+      </div>
+
+      {source === "mirror" ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Settings are read-only until this company is moved to RetainOS pilot or
+          migrated status.
+        </div>
+      ) : null}
+      {error ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+      {saved ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Company settings saved.
+        </div>
+      ) : null}
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Client workspace defaults
+          </h3>
+        </div>
+        <div className="grid gap-4 p-4 md:grid-cols-3">
+          <label className="block text-sm font-medium text-[#344054]">
+            Profile upkeep freshness days
+            <input
+              type="number"
+              min="1"
+              max="365"
+              disabled={disabled}
+              value={draft.profile_upkeep_freshness_days}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  profile_upkeep_freshness_days: Number(event.target.value) || 14,
+                }))
+              }
+              className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            />
+          </label>
+          <SettingsSelect
+            label="Default client view"
+            value={draft.default_client_view}
+            disabled={disabled}
+            options={[
+              { value: "list", label: "List" },
+              { value: "card", label: "Card" },
+              { value: "calendar", label: "Calendar" },
+            ]}
+            onChange={(value) =>
+              setDraft((current) => ({ ...current, default_client_view: value }))
+            }
+          />
+          <SettingsSelect
+            label="Default calendar mode"
+            value={draft.default_calendar_mode}
+            disabled={disabled}
+            options={[
+              { value: "month", label: "Month" },
+              { value: "week", label: "Week" },
+              { value: "day", label: "Day" },
+            ]}
+            onChange={(value) =>
+              setDraft((current) => ({ ...current, default_calendar_mode: value }))
+            }
+          />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">Simple flags</h3>
+        </div>
+        <div className="grid gap-3 p-4 lg:grid-cols-2">
+          <SettingsFlag
+            label="Secondary assignee"
+            description="Allow clients to carry a secondary CSM assignment."
+            checked={draft.enable_secondary_assignee}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_secondary_assignee: checked,
+              }))
+            }
+          />
+          <SettingsFlag
+            label="Call AI for CSMs"
+            description="Show the company-level Call AI capability flag."
+            checked={draft.enable_call_ai_for_csms}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_call_ai_for_csms: checked,
+              }))
+            }
+          />
+          <SettingsFlag
+            label="Embeds"
+            description="Reserve embedded surfaces for this company."
+            checked={draft.enable_embeds}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({ ...current, enable_embeds: checked }))
+            }
+          />
+          <SettingsFlag
+            label="Zapier client create"
+            description="Allow the existing Zapier client creation pathway when configured."
+            checked={draft.enable_zapier_client_create}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_zapier_client_create: checked,
+              }))
+            }
+          />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-dashed border-[#d0d5dd] bg-white px-5 py-4">
+        <h3 className="text-sm font-semibold text-[#101828]">Still coming soon</h3>
+        <p className="mt-1 text-sm text-[#667085]">
+          Custom fields, notification rules, dashboard preferences, and client-list
+          column presets are intentionally left out of this settings slice.
+        </p>
+      </section>
+    </form>
+  );
+}
+
 export function SaasClientDetail({
   companyIdOverride,
   mode = "super_admin",
@@ -980,8 +2227,26 @@ export function SaasClientDetail({
   const [offerMilestones, setOfferMilestones] = useState<
     CompanyOfferMilestoneRow[]
   >([]);
+  const [pathwayUsageCounts, setPathwayUsageCounts] = useState<PathwayUsageCounts>({
+    offers: {},
+    milestones: {},
+  });
   const [pathwaysLoading, setPathwaysLoading] = useState(false);
   const [pathwaysReloadKey, setPathwaysReloadKey] = useState(0);
+  const [customizationSource, setCustomizationSource] =
+    useState<CustomizationSource>("mirror");
+  const [outcomeDefinitions, setOutcomeDefinitions] = useState<
+    CompanyOutcomeDefinitionRow[]
+  >([]);
+  const [churnReasons, setChurnReasons] = useState<CompanyChurnReasonRow[]>([]);
+  const [customizationLoading, setCustomizationLoading] = useState(false);
+  const [customizationReloadKey, setCustomizationReloadKey] = useState(0);
+  const [settingsSource, setSettingsSource] = useState<SettingsSource>("mirror");
+  const [companySettings, setCompanySettings] = useState<CompanySettingsRow>(
+    defaultCompanySettings(null),
+  );
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsReloadKey, setSettingsReloadKey] = useState(0);
 
   useEffect(() => {
     if (!companyId) return;
@@ -993,30 +2258,28 @@ export function SaasClientDetail({
       setError(null);
       setTeamActionError(null);
 
-      const [{ data: companyData, error: companyError }, { data: appCompany }] =
-        await Promise.all([
-          supabase
-            .from("backup_companies")
-            .select(
-              "glide_row_id, name, archived, synced_at, view_override, enable_secondary_assignee, enable_call_ai_for_csms",
-            )
-            .eq("glide_row_id", legacyCompanyId)
-            .maybeSingle(),
-          supabase
-            .from("companies")
-            .select("id, legacy_glide_row_id, migration_status")
-            .eq("legacy_glide_row_id", legacyCompanyId)
-            .in("migration_status", ["pilot", "migrated"])
-            .maybeSingle(),
-        ]);
+      const [{ data: appCompany }, unifiedCompanyResult] = await Promise.all([
+        supabase
+          .from("companies")
+          .select("id, legacy_glide_row_id, migration_status")
+          .eq("legacy_glide_row_id", legacyCompanyId)
+          .in("migration_status", ["pilot", "migrated"])
+          .maybeSingle(),
+        loadUnifiedCompanyByLegacyId(legacyCompanyId)
+          .then((data) => ({ data, error: null as Error | null }))
+          .catch((error) => ({
+            data: null,
+            error: error instanceof Error ? error : new Error("Company load failed"),
+          })),
+      ]);
 
       if (cancelled) return;
 
-      if (companyError) {
-        setError(companyError.message);
+      if (unifiedCompanyResult.error) {
+        setError(unifiedCompanyResult.error.message);
         setCompany(null);
       } else {
-        setCompany(companyData as CompanyRow | null);
+        setCompany(unifiedCompanyResult.data as CompanyRow | null);
       }
 
       const appCompanyRow = appCompany as AppCompanyRow | null;
@@ -1084,7 +2347,7 @@ export function SaasClientDetail({
         .maybeSingle();
 
       if (appCompany) {
-        const [offersResult, milestonesResult] = await Promise.all([
+        const [offersResult, milestonesResult, usageResult] = await Promise.all([
           supabase
             .from("company_offers")
             .select("glide_row_id, name, status")
@@ -1097,13 +2360,41 @@ export function SaasClientDetail({
             )
             .eq("company_id", appCompany.id)
             .order("position", { ascending: true }),
+          supabase
+            .from("clients")
+            .select(
+              "offer_milestones_current_offer_id, offer_milestones_current_milestone_id",
+            )
+            .eq("company_id", appCompany.id)
+            .is("archived_at", null),
         ]);
         if (cancelled) return;
         if (!offersResult.error && !milestonesResult.error) {
+          const usageRows =
+            !usageResult.error && usageResult.data
+              ? (usageResult.data as {
+                  offer_milestones_current_offer_id?: string | null;
+                  offer_milestones_current_milestone_id?: string | null;
+                }[])
+              : [];
+          const nextUsageCounts: PathwayUsageCounts = { offers: {}, milestones: {} };
+          for (const row of usageRows) {
+            const offerId = row.offer_milestones_current_offer_id;
+            const milestoneId = row.offer_milestones_current_milestone_id;
+            if (offerId) {
+              nextUsageCounts.offers[offerId] =
+                (nextUsageCounts.offers[offerId] ?? 0) + 1;
+            }
+            if (milestoneId) {
+              nextUsageCounts.milestones[milestoneId] =
+                (nextUsageCounts.milestones[milestoneId] ?? 0) + 1;
+            }
+          }
           setOffers((offersResult.data ?? []) as CompanyOfferRow[]);
           setOfferMilestones(
             (milestonesResult.data ?? []) as CompanyOfferMilestoneRow[],
           );
+          setPathwayUsageCounts(nextUsageCounts);
           setPathwaySource("app_owned");
           setPathwaysLoading(false);
           return;
@@ -1136,6 +2427,7 @@ export function SaasClientDetail({
           (milestone) => milestone.offer_id && offerIds.has(milestone.offer_id),
         ),
       );
+      setPathwayUsageCounts({ offers: {}, milestones: {} });
       setPathwaySource("mirror");
       setPathwaysLoading(false);
     }
@@ -1145,6 +2437,158 @@ export function SaasClientDetail({
       cancelled = true;
     };
   }, [activeTab, companyId, pathwaysReloadKey]);
+
+  useEffect(() => {
+    if (!companyId || activeTab !== "customization") return;
+    const legacyCompanyId = companyId;
+    let cancelled = false;
+
+    async function loadCustomization() {
+      setCustomizationLoading(true);
+      const { data: appCompany } = await supabase
+        .from("companies")
+        .select("id, migration_status")
+        .eq("legacy_glide_row_id", legacyCompanyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+
+      if (appCompany?.id) {
+        const [outcomesResult, churnResult] = await Promise.all([
+          supabase
+            .from("company_outcome_definitions")
+            .select(
+              "id, outcome_type, value, label, color, emoji, positive_rank, position, is_default, status, metadata",
+            )
+            .eq("company_id", appCompany.id)
+            .order("outcome_type", { ascending: true })
+            .order("position", { ascending: true }),
+          supabase
+            .from("company_churn_reasons")
+            .select(
+              "id, value, label, category, requires_notes, counts_as_churn, position, status, metadata",
+            )
+            .eq("company_id", appCompany.id)
+            .order("position", { ascending: true }),
+        ]);
+        if (cancelled) return;
+        if (!outcomesResult.error && !churnResult.error) {
+          setOutcomeDefinitions(
+            (outcomesResult.data ?? []) as CompanyOutcomeDefinitionRow[],
+          );
+          setChurnReasons((churnResult.data ?? []) as CompanyChurnReasonRow[]);
+          setCustomizationSource("app_owned");
+          setCustomizationLoading(false);
+          return;
+        }
+        console.error(
+          "Failed to load app-owned company customization:",
+          outcomesResult.error ?? churnResult.error,
+        );
+        setOutcomeDefinitions([]);
+        setChurnReasons([]);
+        setCustomizationSource("app_owned");
+        setCustomizationLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("backup_choices")
+        .select(
+          "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display, index",
+        )
+        .order("index", { ascending: true });
+      if (cancelled) return;
+      if (error) console.error("Failed to load mirrored customization:", error);
+
+      const seen = new Set<string>();
+      const mirroredOutcomes: CompanyOutcomeDefinitionRow[] = [];
+      for (const row of (data ?? []) as Record<string, unknown>[]) {
+        (
+          [
+            ["success", row.success_value, row.success_display],
+            ["progress", row.progress_value, row.progress_display],
+            ["buy_in", row.buy_in_value, row.buy_in_display],
+          ] as const
+        ).forEach(([outcomeType, rawValue, rawLabel]) => {
+          const value =
+            typeof rawValue === "string" ? rawValue.trim().toLowerCase() : "";
+          if (!value || value === "offtrack") return;
+          const key = `${outcomeType}:${value}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const label =
+            typeof rawLabel === "string" && rawLabel.trim()
+              ? rawLabel.trim()
+              : titleize(value);
+          mirroredOutcomes.push({
+            outcome_type: outcomeType,
+            value,
+            label,
+            position: typeof row.index === "number" ? row.index : 0,
+            status: "active",
+          });
+        });
+      }
+      setOutcomeDefinitions(mirroredOutcomes);
+      setChurnReasons([]);
+      setCustomizationSource("mirror");
+      setCustomizationLoading(false);
+    }
+
+    void loadCustomization();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, companyId, customizationReloadKey]);
+
+  useEffect(() => {
+    if (!companyId || activeTab !== "settings") return;
+    const legacyCompanyId = companyId;
+    let cancelled = false;
+
+    async function loadSettings() {
+      setSettingsLoading(true);
+      const { data: appCompany } = await supabase
+        .from("companies")
+        .select("id, migration_status")
+        .eq("legacy_glide_row_id", legacyCompanyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+
+      if (appCompany?.id) {
+        const { data, error: settingsError } = await supabase
+          .from("company_settings")
+          .select(
+            "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, metadata, updated_at",
+          )
+          .eq("company_id", appCompany.id)
+          .maybeSingle();
+        if (cancelled) return;
+        if (!settingsError && data) {
+          setCompanySettings(data as CompanySettingsRow);
+          setSettingsSource("app_owned");
+          setSettingsLoading(false);
+          return;
+        }
+        if (settingsError) {
+          console.error("Failed to load app-owned company settings:", settingsError);
+        }
+        setCompanySettings(defaultCompanySettings(company));
+        setSettingsSource("app_owned");
+        setSettingsLoading(false);
+        return;
+      }
+
+      setCompanySettings(defaultCompanySettings(company));
+      setSettingsSource("mirror");
+      setSettingsLoading(false);
+    }
+
+    void loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, company, companyId, settingsReloadKey]);
 
   const groupedTeam = useMemo(() => {
     const activeMembers = teamMembers.filter((member) => member.is_archived !== true);
@@ -1335,16 +2779,18 @@ export function SaasClientDetail({
                 </span>
               ) : (
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                  Glide mirror data
+                  CST preview data
                 </span>
               )}
-              <button
-                type="button"
-                onClick={() => handleOpenTeamModal()}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-              >
-                + New Team Member
-              </button>
+              {canManagePilotTeam ? (
+                <button
+                  type="button"
+                  onClick={() => handleOpenTeamModal()}
+                  className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                >
+                  + New Team Member
+                </button>
+              ) : null}
             </div>
           </div>
 
@@ -1412,6 +2858,21 @@ export function SaasClientDetail({
             </section>
           )}
         </div>
+      ) : activeTab === "customization" ? (
+        customizationLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
+          </div>
+        ) : (
+          <CustomizationSetup
+            companyLegacyId={companyId ?? ""}
+            source={customizationSource}
+            outcomes={outcomeDefinitions}
+            churnReasons={churnReasons}
+            canManage={customizationSource === "app_owned"}
+            onReload={() => setCustomizationReloadKey((key) => key + 1)}
+          />
+        )
       ) : activeTab === "pathways" ? (
         pathwaysLoading ? (
           <div className="flex items-center justify-center py-20">
@@ -1423,25 +2884,40 @@ export function SaasClientDetail({
             source={pathwaySource}
             offers={offers}
             milestones={offerMilestones}
+            usageCounts={pathwayUsageCounts}
             canManage={pathwaySource === "app_owned"}
             onReload={() => setPathwaysReloadKey((key) => key + 1)}
+            onMilestonesReordered={(offerId, reorderedMilestones) => {
+              const reorderedById = new Map(
+                reorderedMilestones.map((milestone) => [
+                  milestone.glide_row_id,
+                  milestone,
+                ]),
+              );
+              setOfferMilestones((current) =>
+                current.map((milestone) => {
+                  if (milestone.offer_id !== offerId) return milestone;
+                  const reordered = reorderedById.get(milestone.glide_row_id);
+                  return reordered ? { ...milestone, ...reordered } : milestone;
+                }),
+              );
+            }}
           />
         )
       ) : (
-        <div className="mt-6">
-          <ComingSoonPanel
-            title={
-              activeTab === "customization"
-                ? "Company Customization"
-                : "Company Settings"
-            }
-            description={
-              activeTab === "customization"
-                ? "Custom fields, outcome definitions, churn reasons, and company-specific AI configuration will live here."
-                : "Company preferences, notification rules, subscription settings, and operational configuration will live here."
-            }
+        settingsLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
+          </div>
+        ) : (
+          <CompanySettingsSetup
+            companyLegacyId={companyId ?? ""}
+            source={settingsSource}
+            settings={companySettings}
+            canManage={settingsSource === "app_owned"}
+            onReload={() => setSettingsReloadKey((key) => key + 1)}
           />
-        </div>
+        )
       )}
 
       {showTeamModal && (

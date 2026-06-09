@@ -11,6 +11,11 @@ import {
   ProgramStatusPill,
   type ProgramChoice,
 } from "../lib/clientDisplay.tsx";
+import {
+  loadCompanyWorkspaceDefaults,
+  type DefaultCalendarMode,
+  type DefaultClientView,
+} from "../lib/companySettings.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
@@ -76,10 +81,19 @@ interface OfferMilestone {
 }
 interface PilotReminder {
   id: string;
-  type: "next-contact" | "renewal" | "paused-return";
+  type: "next-contact" | "renewal" | "paused-return" | "task-due";
   label: string;
   date: string;
   client: ClientRow;
+}
+interface NotificationRow {
+  id: string;
+  type: string;
+  title: string | null;
+  due_at: string | null;
+  client_id: string | null;
+  legacy_client_id: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 interface ClientFilters {
   companyId: string;
@@ -106,6 +120,11 @@ interface ClientsCacheState {
   appliedFilters: ClientFilters;
   page: number;
   viewMode: ViewMode;
+  viewModeCompanyId?: string;
+  viewModeUserOverride?: boolean;
+  calendarMode?: CalendarMode;
+  calendarModeCompanyId?: string;
+  calendarModeUserOverride?: boolean;
   sortField: SortField;
   sortDirection: SortDirection;
 }
@@ -125,6 +144,20 @@ function readClientsCache(): ClientsCacheState | null {
         parsed.viewMode === "card" || parsed.viewMode === "calendar"
           ? parsed.viewMode
           : "list",
+      viewModeCompanyId:
+        typeof parsed.viewModeCompanyId === "string"
+          ? parsed.viewModeCompanyId
+          : undefined,
+      viewModeUserOverride: parsed.viewModeUserOverride === true,
+      calendarMode:
+        parsed.calendarMode === "week" || parsed.calendarMode === "day"
+          ? parsed.calendarMode
+          : "month",
+      calendarModeCompanyId:
+        typeof parsed.calendarModeCompanyId === "string"
+          ? parsed.calendarModeCompanyId
+          : undefined,
+      calendarModeUserOverride: parsed.calendarModeUserOverride === true,
       sortField:
         parsed.sortField === "onboarded" || parsed.sortField === "renewal"
           ? parsed.sortField
@@ -138,6 +171,14 @@ function readClientsCache(): ClientsCacheState | null {
 
 function writeClientsCache(state: ClientsCacheState) {
   window.localStorage.setItem(CLIENTS_CACHE_KEY, JSON.stringify(state));
+}
+
+function toViewMode(value: DefaultClientView): ViewMode {
+  return value;
+}
+
+function toCalendarMode(value: DefaultCalendarMode): CalendarMode {
+  return value;
 }
 function mapAppClientRow(row: Record<string, unknown>): ClientRow {
   const companyId =
@@ -455,6 +496,79 @@ function dateKeyFromValue(value: unknown) {
   const date = new Date(String(value));
   return Number.isNaN(date.getTime()) ? "" : dateKey(date);
 }
+export function notificationReminderType(type: string): PilotReminder["type"] | null {
+  if (type === "next_contact_due") return "next-contact";
+  if (type === "renewal_due") return "renewal";
+  if (type === "paused_return_due") return "paused-return";
+  if (type === "task_due") return "task-due";
+  return null;
+}
+export function notificationReminderLabel(notification: NotificationRow) {
+  if (notification.type === "next_contact_due") return "Next contact";
+  if (notification.type === "renewal_due") return "Contract renewal";
+  if (notification.type === "paused_return_due") return "Paused client return";
+  if (notification.type === "task_due") return "Task due";
+  return notification.title ?? "Reminder";
+}
+export function buildClientFieldReminders(rawClients: Record<string, unknown>[]) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const oldest = new Date(start);
+  oldest.setDate(oldest.getDate() - 30);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 8);
+  const reminders: PilotReminder[] = [];
+
+  for (const rawClient of rawClients) {
+    const client = mapAppClientRow(rawClient);
+    const candidates = [
+      {
+        type: "next-contact" as const,
+        label: "Next contact",
+        date: client.csm_date_of_next_contact,
+        enabled: ["front-end", "back-end"].includes(
+          String(client.program_status_value ?? ""),
+        ),
+      },
+      {
+        type: "renewal" as const,
+        label: "Contract renewal",
+        date: client.current_contract_end_date_for_filtering,
+        enabled: ["front-end", "back-end"].includes(
+          String(client.program_status_value ?? ""),
+        ),
+      },
+      {
+        type: "paused-return" as const,
+        label: "Paused client return",
+        date: client.program_paused_return_date,
+        enabled: client.program_status_value === "paused",
+      },
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate.enabled || typeof candidate.date !== "string") continue;
+      const date = new Date(candidate.date);
+      if (Number.isNaN(date.getTime()) || date < oldest || date >= end) continue;
+      reminders.push({
+        id: `${client.glide_row_id}:${candidate.type}`,
+        type: candidate.type,
+        label: candidate.label,
+        date: candidate.date,
+        client,
+      });
+    }
+  }
+
+  reminders.sort(
+    (a, b) =>
+      new Date(a.date).getTime() - new Date(b.date).getTime() ||
+      String(a.client.client_name ?? "").localeCompare(
+        String(b.client.client_name ?? ""),
+      ),
+  );
+  return reminders;
+}
 function monthBounds(monthDate: Date) {
   const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
   const next = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
@@ -523,6 +637,10 @@ const defaultOutcomeChoices: OutcomeChoice[] = [
   { value: "yellow", display: "Yellow" },
   { value: "red", display: "Red" },
 ];
+const defaultSuccessChoices: OutcomeChoice[] = [
+  { value: "yes", display: "Yes" },
+  { value: "no", display: "No" },
+];
 
 function outcomeChoicesFromRows(
   rows: Record<string, unknown>[],
@@ -541,6 +659,19 @@ function outcomeChoicesFromRows(
     });
   }
   return choices;
+}
+
+function outcomeChoicesFromDefinitions(
+  rows: Record<string, unknown>[],
+  outcomeType: "success" | "progress" | "buy_in",
+) {
+  return rows
+    .filter((row) => row.outcome_type === outcomeType)
+    .map((row) => ({
+      value: normalizeOutcome(row.value),
+      display: normalizeOutcome(row.label) || titleize(normalizeOutcome(row.value)),
+    }))
+    .filter((choice) => choice.value);
 }
 
 function choiceDisplay(
@@ -762,6 +893,54 @@ function QuickUpdateModal({
     let cancelled = false;
 
     async function loadOutcomeChoices() {
+      const { data: appCompany } = companyLegacyId
+        ? await supabase
+            .from("companies")
+            .select("id")
+            .eq("legacy_glide_row_id", companyLegacyId)
+            .in("migration_status", ["pilot", "migrated"])
+            .maybeSingle()
+        : { data: null };
+
+      if (appCompany?.id) {
+        const { data: definitions, error: definitionsError } = await supabase
+          .from("company_outcome_definitions")
+          .select("outcome_type, value, label, position")
+          .eq("company_id", appCompany.id)
+          .eq("status", "active")
+          .order("position", { ascending: true });
+        if (cancelled) return;
+        if (!definitionsError) {
+          const rows = (definitions ?? []) as Record<string, unknown>[];
+          const nextSuccessChoices = outcomeChoicesFromDefinitions(rows, "success");
+          const nextProgressChoices = outcomeChoicesFromDefinitions(rows, "progress");
+          const nextBuyInChoices = outcomeChoicesFromDefinitions(rows, "buy_in");
+          setSuccessChoices(
+            nextSuccessChoices.length > 0
+              ? nextSuccessChoices
+              : defaultSuccessChoices,
+          );
+          setProgressChoices(
+            nextProgressChoices.length > 0
+              ? nextProgressChoices
+              : defaultOutcomeChoices,
+          );
+          setBuyInChoices(
+            nextBuyInChoices.length > 0 ? nextBuyInChoices : defaultOutcomeChoices,
+          );
+          return;
+        } else {
+          console.error(
+            "Failed to load app-owned outcome choices:",
+            definitionsError,
+          );
+        }
+        setSuccessChoices(defaultSuccessChoices);
+        setProgressChoices(defaultOutcomeChoices);
+        setBuyInChoices(defaultOutcomeChoices);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("backup_choices")
         .select(
@@ -807,7 +986,7 @@ function QuickUpdateModal({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [companyLegacyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1044,7 +1223,7 @@ function QuickUpdateModal({
             <p className="mt-1 text-sm text-[#586273]">
               {isPilotCompany
                 ? "Record the latest client context, outcomes, and journey progress."
-                : "Read-only preview while this company remains on the Glide mirror."}
+                : "Read-only preview while this company remains on CST data."}
             </p>
           </div>
           <button
@@ -1188,8 +1367,8 @@ function QuickUpdateModal({
             {loadingPilotState
               ? "Checking RetainOS write status..."
               : isPilotCompany
-                ? "Quick Updates save to RetainOS pilot history. Glide mirror fields remain unchanged."
-                : "Editing is locked for now while this reads from the Glide mirror."}
+                ? "Quick Updates save to RetainOS pilot history. CST preview fields remain unchanged."
+                : "Editing is locked for now while this reads from CST into RetainOS."}
           </div>
           {saveError ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -1739,59 +1918,101 @@ function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
-function PilotReminders({
+function ClientNotificationsBell({
   reminders,
   onOpenClient,
 }: {
   reminders: PilotReminder[];
   onOpenClient: (id: string) => void;
 }) {
-  if (reminders.length === 0) return null;
+  const [open, setOpen] = useState(false);
   const today = dateKey(new Date());
   return (
-    <section className="mb-6 rounded-md border border-[#f0c98f] bg-[#fcf3e6] p-4 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-[#162b3e]">Pilot reminders</h2>
-          <p className="mt-1 text-sm text-[#7f4d11]">
-            Due or coming up in the next 7 days. Use the calendar for the full timeline.
-          </p>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="retainos-focus relative grid h-11 w-11 place-items-center rounded-full border border-[#d6eafb] bg-[#f7fbff] text-[#2b79c4] shadow-sm transition hover:border-[#59abf0] hover:bg-[#eaf4fe]"
+        aria-label="Open notifications"
+        aria-expanded={open}
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        {reminders.length > 0 ? (
+          <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#e02d3c] px-1 text-[10px] font-bold text-white">
+            {reminders.length > 9 ? "9+" : reminders.length}
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-20 mt-3 w-[min(360px,calc(100vw-48px))] overflow-hidden rounded-md border border-[#dfe6ef] bg-white shadow-xl">
+          <div className="border-b border-[#edf1f5] px-4 py-3">
+            <div className="text-sm font-semibold text-[#162b3e]">
+              Notifications
+            </div>
+            <div className="mt-0.5 text-xs text-[#6c7684]">
+              Due or coming up in the next 7 days.
+            </div>
+          </div>
+          {reminders.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-[#6c7684]">
+              Nothing needs attention right now.
+            </div>
+          ) : (
+            <div className="max-h-[360px] overflow-y-auto py-1">
+              {reminders.slice(0, 12).map((reminder) => {
+                const reminderKey = dateKeyFromValue(reminder.date);
+                const overdue = Boolean(reminderKey && reminderKey < today);
+                return (
+                  <button
+                    key={reminder.id}
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      onOpenClient(reminder.client.glide_row_id);
+                    }}
+                    className="block w-full border-b border-[#f1f4f8] px-4 py-3 text-left transition hover:bg-[#f7fbff]"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-[#162b3e]">
+                          {reminder.client.client_name ?? "Unnamed client"}
+                        </div>
+                        <div className="mt-1 text-xs text-[#586273]">
+                          {reminder.label}
+                        </div>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          overdue
+                            ? "bg-red-50 text-red-700"
+                            : "bg-[#fcf3e6] text-[#9b5c0f]"
+                        }`}
+                      >
+                        {overdue ? "Overdue" : formatDate(reminder.date)}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
-        <span className="rounded-full border border-[#f0c98f] bg-white px-2.5 py-1 text-xs font-semibold text-[#7f4d11]">
-          {reminders.length}
-        </span>
-      </div>
-      <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-3">
-        {reminders.slice(0, 9).map((reminder) => {
-          const reminderKey = dateKeyFromValue(reminder.date);
-          const overdue = Boolean(reminderKey && reminderKey < today);
-          return (
-            <button
-              key={reminder.id}
-              type="button"
-              onClick={() => onOpenClient(reminder.client.glide_row_id)}
-              className="rounded-md border border-[#ead4b3] bg-white px-3 py-2 text-left transition hover:border-[#e0922f] hover:shadow-sm cursor-pointer"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-semibold text-[#162b3e]">
-                  {reminder.client.client_name ?? "Unnamed client"}
-                </span>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                    overdue
-                      ? "bg-red-50 text-red-700"
-                      : "bg-amber-100 text-amber-800"
-                  }`}
-                >
-                  {overdue ? "Overdue" : formatDate(reminder.date)}
-                </span>
-              </div>
-              <div className="mt-1 text-xs text-[#586273]">{reminder.label}</div>
-            </button>
-          );
-        })}
-      </div>
-    </section>
+      ) : null}
+    </div>
   );
 }
 export function Clients() {
@@ -1810,6 +2031,16 @@ export function Clients() {
     Boolean(cachedState) &&
     cachedState?.filters.companyId === initialCompanyId &&
     cachedState?.appliedFilters.companyId === initialCompanyId;
+  const cachedViewModeMatchesCompany =
+    cachedCompanyMatches &&
+    cachedState?.viewModeUserOverride === true &&
+    (!cachedState?.viewModeCompanyId ||
+      cachedState.viewModeCompanyId === initialCompanyId);
+  const cachedCalendarModeMatchesCompany =
+    cachedCompanyMatches &&
+    cachedState?.calendarModeUserOverride === true &&
+    (!cachedState?.calendarModeCompanyId ||
+      cachedState.calendarModeCompanyId === initialCompanyId);
   const [filters, setFilters] = useState<ClientFilters>(() =>
     cachedCompanyMatches
       ? (cachedState?.filters ?? emptyFilters)
@@ -1837,7 +2068,11 @@ export function Clients() {
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [calendarClients, setCalendarClients] = useState<ClientRow[]>([]);
   const [calendarTasks, setCalendarTasks] = useState<CalendarTaskRow[]>([]);
-  const [calendarMode, setCalendarMode] = useState<CalendarMode>("month");
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>(
+    cachedCalendarModeMatchesCompany
+      ? (cachedState?.calendarMode ?? "month")
+      : "month",
+  );
   const [calendarDate, setCalendarDate] = useState(() => new Date());
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
@@ -1847,7 +2082,7 @@ export function Clients() {
   const [totalClients, setTotalClients] = useState(0);
   const [page, setPage] = useState(cachedState?.page ?? 1);
   const [viewMode, setViewMode] = useState<ViewMode>(
-    cachedState?.viewMode ?? "list",
+    cachedViewModeMatchesCompany ? (cachedState?.viewMode ?? "list") : "list",
   );
   const [sortField, setSortField] = useState<SortField>(
     cachedState?.sortField ?? "client_name",
@@ -1857,6 +2092,9 @@ export function Clients() {
   );
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const statusFilterRef = useRef<HTMLFieldSetElement>(null);
+  const viewModeTouchedRef = useRef(cachedViewModeMatchesCompany);
+  const calendarModeTouchedRef = useRef(cachedCalendarModeMatchesCompany);
+  const defaultAppliedCompanyRef = useRef("");
   const [quickUpdateClient, setQuickUpdateClient] = useState<ClientRow | null>(
     null,
   );
@@ -1899,7 +2137,10 @@ export function Clients() {
     appliedFilters.companyId || filters.companyId,
   );
   const canCreateClient =
-    capabilities.canEditClient && Boolean(appliedFilters.companyId || filters.companyId);
+    capabilities.canEditClient &&
+    isUsingAppClients &&
+    Boolean(appliedFilters.companyId || filters.companyId);
+  const canQuickUpdateClients = capabilities.canQuickUpdate && isUsingAppClients;
 
   useEffect(() => {
     writeClientsCache({
@@ -1907,10 +2148,50 @@ export function Clients() {
       appliedFilters,
       page,
       viewMode,
+      viewModeCompanyId: appliedFilters.companyId || filters.companyId || "",
+      viewModeUserOverride: viewModeTouchedRef.current,
+      calendarMode,
+      calendarModeCompanyId: appliedFilters.companyId || filters.companyId || "",
+      calendarModeUserOverride: calendarModeTouchedRef.current,
       sortField,
       sortDirection,
     });
-  }, [appliedFilters, filters, page, sortDirection, sortField, viewMode]);
+  }, [
+    appliedFilters,
+    calendarMode,
+    filters,
+    page,
+    sortDirection,
+    sortField,
+    viewMode,
+  ]);
+
+  useEffect(() => {
+    const companyId = filters.companyId || appliedFilters.companyId;
+    if (!companyId) return;
+    if (defaultAppliedCompanyRef.current === companyId) return;
+
+    viewModeTouchedRef.current = false;
+    calendarModeTouchedRef.current = false;
+    let cancelled = false;
+
+    async function applyCompanyDefaults() {
+      const defaults = await loadCompanyWorkspaceDefaults(companyId);
+      if (cancelled) return;
+      if (!viewModeTouchedRef.current) {
+        setViewMode(toViewMode(defaults.defaultClientView));
+      }
+      if (!calendarModeTouchedRef.current) {
+        setCalendarMode(toCalendarMode(defaults.defaultCalendarMode));
+      }
+      defaultAppliedCompanyRef.current = companyId;
+    }
+
+    void applyCompanyDefaults();
+    return () => {
+      cancelled = true;
+    };
+  }, [appliedFilters.companyId, filters.companyId]);
   useEffect(() => {
     if (!statusFilterOpen) return;
     function closeStatusFilter(event: MouseEvent) {
@@ -2099,7 +2380,7 @@ export function Clients() {
     const useAppClients = appClientCompanyIds.has(appliedFilters.companyId);
     let query = supabase
       .from(useAppClients ? "clients" : "backup_company_clients")
-      .select("*", { count: "exact" })
+      .select("*", { count: useAppClients ? "exact" : "planned" })
       .eq(
         useAppClients ? "company_glide_row_id" : "company_id",
         appliedFilters.companyId,
@@ -2308,70 +2589,147 @@ export function Clients() {
         setPilotReminders([]);
         return;
       }
-      let query = supabase
+      let fallbackQuery = supabase
         .from("clients")
         .select("*")
         .eq("company_glide_row_id", appliedFilters.companyId)
         .range(0, 4999);
       if (assignedTeamMemberId) {
-        query = query.or(
+        fallbackQuery = fallbackQuery.or(
           `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
         );
       }
-      const { data, error } = await query;
-      if (cancelled) return;
-      if (error) {
-        console.error("Failed to load pilot reminders:", error);
-        setPilotReminders([]);
+
+      const { data: appCompany, error: appCompanyError } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("legacy_glide_row_id", appliedFilters.companyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+
+      const fallbackToClientFields = async () => {
+        const { data, error } = await fallbackQuery;
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to load pilot reminders:", error);
+          setPilotReminders([]);
+          return;
+        }
+        setPilotReminders(
+          buildClientFieldReminders((data ?? []) as Record<string, unknown>[]),
+        );
+      };
+
+      if (appCompanyError || !appCompany?.id) {
+        if (appCompanyError)
+          console.error("Failed to resolve app company reminders:", appCompanyError);
+        await fallbackToClientFields();
         return;
       }
+
+      const { error: generationError } = await supabase.rpc(
+        "generate_company_notifications",
+        { p_company_id: appCompany.id },
+      );
+      if (generationError) {
+        console.error("Failed to generate pilot notifications:", generationError);
+        await fallbackToClientFields();
+        return;
+      }
+
       const start = new Date();
       start.setHours(0, 0, 0, 0);
       const oldest = new Date(start);
       oldest.setDate(oldest.getDate() - 30);
       const end = new Date(start);
       end.setDate(end.getDate() + 8);
-      const reminders: PilotReminder[] = [];
-      for (const rawClient of (data ?? []) as Record<string, unknown>[]) {
-        const client = mapAppClientRow(rawClient);
-        const candidates = [
+      const { data: notificationRows, error: notificationsError } = await supabase
+        .from("notifications")
+        .select(
+          "id, type, title, due_at, client_id, legacy_client_id, metadata",
+        )
+        .eq("company_id", appCompany.id)
+        .is("resolved_at", null)
+        .is("dismissed_at", null)
+        .in("type", [
+          "next_contact_due",
+          "renewal_due",
+          "paused_return_due",
+          "task_due",
+        ])
+        .gte("due_at", oldest.toISOString())
+        .lt("due_at", end.toISOString())
+        .order("due_at", { ascending: true, nullsFirst: false })
+        .range(0, 199);
+      if (cancelled) return;
+      if (notificationsError) {
+        console.error("Failed to load pilot notifications:", notificationsError);
+        await fallbackToClientFields();
+        return;
+      }
+
+      const notifications = (notificationRows ?? []) as NotificationRow[];
+      const clientIds = [
+        ...new Set(
+          notifications
+            .map((notification) => notification.client_id)
+            .filter((id): id is string => typeof id === "string" && id !== ""),
+        ),
+      ];
+      if (clientIds.length === 0) {
+        setPilotReminders([]);
+        return;
+      }
+      const { data: clientRows, error: clientsError } = await supabase
+        .from("clients")
+        .select("*")
+        .in("id", clientIds)
+        .range(0, 199);
+      if (cancelled) return;
+      if (clientsError) {
+        console.error("Failed to load notification clients:", clientsError);
+        await fallbackToClientFields();
+        return;
+      }
+
+      const clientsById = new Map(
+        ((clientRows ?? []) as Record<string, unknown>[]).map((row) => [
+          String(row.id ?? ""),
+          mapAppClientRow(row),
+        ]),
+      );
+      const reminderRows = notifications.flatMap((notification) => {
+        const type = notificationReminderType(notification.type);
+        const date = notification.due_at;
+        const client = notification.client_id
+          ? clientsById.get(notification.client_id)
+          : undefined;
+        if (!type || !date || !client) return [];
+        if (
+          assignedTeamMemberId &&
+          client.csm_team_member_id !== assignedTeamMemberId &&
+          client.csm_secondary_assignee_id !== assignedTeamMemberId
+        ) {
+          return [];
+        }
+        return [
           {
-            type: "next-contact" as const,
-            label: "Next contact",
-            date: client.csm_date_of_next_contact,
-            enabled: ["front-end", "back-end"].includes(
-              String(client.program_status_value ?? ""),
-            ),
-          },
-          {
-            type: "renewal" as const,
-            label: "Contract renewal",
-            date: client.current_contract_end_date_for_filtering,
-            enabled: ["front-end", "back-end"].includes(
-              String(client.program_status_value ?? ""),
-            ),
-          },
-          {
-            type: "paused-return" as const,
-            label: "Paused client return",
-            date: client.program_paused_return_date,
-            enabled: client.program_status_value === "paused",
+            id: notification.id,
+            type,
+            label: notificationReminderLabel(notification),
+            date,
+            client,
           },
         ];
-        for (const candidate of candidates) {
-          if (!candidate.enabled || typeof candidate.date !== "string") continue;
-          const date = new Date(candidate.date);
-          if (Number.isNaN(date.getTime()) || date < oldest || date >= end) continue;
-          reminders.push({
-            id: `${client.glide_row_id}:${candidate.type}`,
-            type: candidate.type,
-            label: candidate.label,
-            date: candidate.date,
-            client,
-          });
-        }
-      }
-      reminders.sort(
+      });
+      const reminders = [
+        ...new Map(
+          reminderRows.map((reminder) => [
+            `${reminder.client.glide_row_id}:${reminder.type}:${dateKeyFromValue(reminder.date)}`,
+            reminder,
+          ]),
+        ).values(),
+      ].sort(
         (a, b) =>
           new Date(a.date).getTime() - new Date(b.date).getTime() ||
           String(a.client.client_name ?? "").localeCompare(
@@ -2402,9 +2760,11 @@ export function Clients() {
     });
   }
   function clearFilters() {
+    const defaultCompanyId =
+      effectiveCompanyId || filters.companyId || appliedFilters.companyId;
     const baseFilters = {
       ...emptyFilters,
-      companyId: effectiveCompanyId,
+      companyId: defaultCompanyId,
       csmId: assignedTeamMemberId,
     };
     setFilters(baseFilters);
@@ -2414,8 +2774,23 @@ export function Clients() {
     setPage(1);
     setSortField("client_name");
     setSortDirection("asc");
+    viewModeTouchedRef.current = false;
+    calendarModeTouchedRef.current = false;
+    defaultAppliedCompanyRef.current = "";
+    window.localStorage.removeItem(CLIENTS_CACHE_KEY);
     window.sessionStorage.removeItem(CLIENTS_CACHE_KEY);
-    setSearchParams(effectiveCompanyId ? { companyId: effectiveCompanyId } : {}, {
+    if (defaultCompanyId) {
+      void loadCompanyWorkspaceDefaults(defaultCompanyId).then((defaults) => {
+        if (!viewModeTouchedRef.current) {
+          setViewMode(toViewMode(defaults.defaultClientView));
+        }
+        if (!calendarModeTouchedRef.current) {
+          setCalendarMode(toCalendarMode(defaults.defaultCalendarMode));
+        }
+        defaultAppliedCompanyRef.current = defaultCompanyId;
+      });
+    }
+    setSearchParams(defaultCompanyId ? { companyId: defaultCompanyId } : {}, {
       replace: true,
     });
   }
@@ -2451,24 +2826,26 @@ export function Clients() {
             <p className="mt-1 text-sm text-[#586273]">
               {isUsingAppClients
                 ? "RetainOS pilot client data for this company. Quick Updates write to app-owned client state and history."
-                : "Read-only view of clients mirrored from Glide into Supabase."}
+                : "Read-only view of clients mirrored from CST into RetainOS."}
             </p>
           </div>
-          {canCreateClient ? (
-            <button
-              type="button"
-              onClick={() => setNewClientOpen(true)}
-              className="rounded-full bg-[#59abf0] px-5 py-2.5 text-sm font-semibold text-[#162b3e] shadow-sm transition-colors hover:bg-[#3b8fd9] hover:text-white cursor-pointer"
-            >
-              + New Client
-            </button>
-          ) : null}
+          <div className="flex items-center gap-3">
+            <ClientNotificationsBell
+              reminders={pilotReminders}
+              onOpenClient={(id) => navigate(`/clients/${encodeURIComponent(id)}`)}
+            />
+            {canCreateClient ? (
+              <button
+                type="button"
+                onClick={() => setNewClientOpen(true)}
+                className="rounded-full bg-[#59abf0] px-5 py-2.5 text-sm font-semibold text-[#162b3e] shadow-sm transition-colors hover:bg-[#3b8fd9] hover:text-white cursor-pointer"
+              >
+                + New Client
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
-      <PilotReminders
-        reminders={pilotReminders}
-        onOpenClient={(id) => navigate(`/clients/${encodeURIComponent(id)}`)}
-      />
       <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {filters.companyId && (
@@ -2702,19 +3079,34 @@ export function Clients() {
             <div className="inline-flex rounded-md border border-[#e4e9f0] bg-white p-1 shadow-sm">
               <ViewButton
                 active={viewMode === "list"}
-                onClick={() => setViewMode("list")}
+                onClick={() => {
+                  viewModeTouchedRef.current = true;
+                  defaultAppliedCompanyRef.current =
+                    appliedFilters.companyId || filters.companyId || "";
+                  setViewMode("list");
+                }}
               >
                 List
               </ViewButton>
               <ViewButton
                 active={viewMode === "card"}
-                onClick={() => setViewMode("card")}
+                onClick={() => {
+                  viewModeTouchedRef.current = true;
+                  defaultAppliedCompanyRef.current =
+                    appliedFilters.companyId || filters.companyId || "";
+                  setViewMode("card");
+                }}
               >
                 Cards
               </ViewButton>
               <ViewButton
                 active={viewMode === "calendar"}
-                onClick={() => setViewMode("calendar")}
+                onClick={() => {
+                  viewModeTouchedRef.current = true;
+                  defaultAppliedCompanyRef.current =
+                    appliedFilters.companyId || filters.companyId || "";
+                  setViewMode("calendar");
+                }}
               >
                 Calendar
               </ViewButton>
@@ -2766,7 +3158,12 @@ export function Clients() {
                     <ViewButton
                       key={mode}
                       active={calendarMode === mode}
-                      onClick={() => setCalendarMode(mode)}
+                      onClick={() => {
+                        calendarModeTouchedRef.current = true;
+                        defaultAppliedCompanyRef.current =
+                          appliedFilters.companyId || filters.companyId || "";
+                        setCalendarMode(mode);
+                      }}
                     >
                       {mode[0].toUpperCase() + mode.slice(1)}
                     </ViewButton>
@@ -2835,9 +3232,7 @@ export function Clients() {
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
-              onQuickUpdate={
-                capabilities.canQuickUpdate ? setQuickUpdateClient : undefined
-              }
+              onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
             />
           ) : clientsLoading ? (
             <div className="flex items-center justify-center py-20">
@@ -2855,9 +3250,7 @@ export function Clients() {
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
-              onQuickUpdate={
-                capabilities.canQuickUpdate ? setQuickUpdateClient : undefined
-              }
+              onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
             />
           ) : (
             <ClientCards
@@ -2869,9 +3262,7 @@ export function Clients() {
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
-              onQuickUpdate={
-                capabilities.canQuickUpdate ? setQuickUpdateClient : undefined
-              }
+              onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
             />
           )}
           {viewMode !== "calendar" && !clientsLoading && totalClients > 0 && (

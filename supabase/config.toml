@@ -1,0 +1,5 @@
+[functions.prepare-login]
+verify_jwt = false
+
+[functions.zapier-create-client]
+verify_jwt = false

@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
+import { loadUnifiedCompanies, loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
 import { supabase } from "../lib/supabase.ts";
 
 interface SidebarCompany {
   glide_row_id: string;
   name: string | null;
+  source?: "app_owned" | "mirror";
 }
 
 type IconName =
   | "dashboard"
+  | "pulse"
   | "reports"
   | "clients"
   | "resources"
@@ -37,6 +40,9 @@ function NavIcon({ name }: { name: IconName }) {
 
   if (name === "dashboard") {
     return <svg {...common}><path d="M4 4h6v6H4zM14 4h6v10h-6zM4 14h6v6H4zM14 18h6v2h-6z" {...strokeProps} /></svg>;
+  }
+  if (name === "pulse") {
+    return <svg {...common}><path d="M3 12h4l2-7 4 14 2-7h6" {...strokeProps} /></svg>;
   }
   if (name === "reports") {
     return <svg {...common}><path d="M4 19V9M10 19V5M16 19v-7M22 19H2" {...strokeProps} /></svg>;
@@ -98,13 +104,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       setCompanyName("");
       return;
     }
-    supabase
-      .from("backup_companies")
-      .select("name")
-      .eq("glide_row_id", effectiveCompanyId)
-      .maybeSingle()
-      .then(({ data }) => {
+    loadUnifiedCompanyByLegacyId(effectiveCompanyId)
+      .then((data) => {
         if (!cancelled) setCompanyName(data?.name ?? "");
+      })
+      .catch((error) => {
+        console.error("Failed to load active company name:", error);
+        if (!cancelled) setCompanyName("");
       });
     return () => {
       cancelled = true;
@@ -118,15 +124,26 @@ export function AppShell({ children }: { children: ReactNode }) {
       return;
     }
     setCompaniesLoading(true);
-    supabase
-      .from("backup_companies")
-      .select("glide_row_id, name")
-      .eq("archived", false)
-      .order("name", { ascending: true })
-      .then(({ data }) => {
+    loadUnifiedCompanies()
+      .then((data) => {
         if (cancelled) return;
-        setCompanies((data ?? []) as SidebarCompany[]);
+        setCompanies(
+          data
+            .filter((company) => company.archived !== true)
+            .map((company) => ({
+              glide_row_id: company.glide_row_id,
+              name: company.name,
+              source: company.source,
+            })),
+        );
         setCompaniesLoading(false);
+      })
+      .catch((error) => {
+        console.error("Failed to load company switcher:", error);
+        if (!cancelled) {
+          setCompanies([]);
+          setCompaniesLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -140,6 +157,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const nav = [
     { path: "/dashboard", label: "Dashboard", icon: "dashboard" as const, show: capabilities.canAccessDashboard },
+    { path: "/daily-pulse", label: "Daily Pulse", icon: "pulse" as const, show: capabilities.canAccessClients },
     { path: "/clients", label: "Clients", icon: "clients" as const, show: capabilities.canAccessClients },
     { path: "/csm-reports", label: "CSM Reports", icon: "reports" as const, show: capabilities.canAccessCsmReports },
     { path: "/tasks", label: "Tasks", icon: "tasks" as const, show: capabilities.canAccessTasks },

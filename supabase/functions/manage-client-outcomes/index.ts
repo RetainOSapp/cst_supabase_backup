@@ -12,6 +12,11 @@ const CORS_HEADERS = {
 const WRITER_ROLES = new Set(["director", "support", "csm"]);
 const SUCCESS_VALUES = new Set(["yes", "no"]);
 const HEALTH_VALUES = new Set(["green", "yellow", "red"]);
+const FALLBACK_OUTCOME_VALUES = {
+  success: SUCCESS_VALUES,
+  progress: HEALTH_VALUES,
+  buy_in: HEALTH_VALUES,
+};
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -101,6 +106,45 @@ function validateChoice(
   if (value && !allowed.has(value)) {
     throw new Error(`${label} is not a supported outcome value.`);
   }
+}
+
+async function loadAllowedOutcomeValues(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+) {
+  const { data, error } = await supabase
+    .from("company_outcome_definitions")
+    .select("outcome_type, value")
+    .eq("company_id", companyId)
+    .eq("status", "active");
+
+  if (error) {
+    console.error("Failed to load company outcome definitions:", error);
+    return FALLBACK_OUTCOME_VALUES;
+  }
+
+  const allowed = {
+    success: new Set<string>(),
+    progress: new Set<string>(),
+    buy_in: new Set<string>(),
+  };
+
+  for (const row of data ?? []) {
+    const type = row.outcome_type as keyof typeof allowed;
+    const value = cleanText(row.value).toLowerCase();
+    if (type in allowed && value) allowed[type].add(value);
+  }
+
+  return {
+    success:
+      allowed.success.size > 0 ? allowed.success : FALLBACK_OUTCOME_VALUES.success,
+    progress:
+      allowed.progress.size > 0
+        ? allowed.progress
+        : FALLBACK_OUTCOME_VALUES.progress,
+    buy_in:
+      allowed.buy_in.size > 0 ? allowed.buy_in : FALLBACK_OUTCOME_VALUES.buy_in,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -197,10 +241,11 @@ Deno.serve(async (req) => {
     const progressStatus = nullableText(body.progressStatus);
     const buyInStatus = nullableText(body.buyInStatus);
     const notes = nullableText(body.notes);
+    const allowedOutcomes = await loadAllowedOutcomeValues(supabase, company.id);
 
-    validateChoice("Success", successStatus, SUCCESS_VALUES);
-    validateChoice("Progress", progressStatus, HEALTH_VALUES);
-    validateChoice("Buy-in", buyInStatus, HEALTH_VALUES);
+    validateChoice("Success", successStatus, allowedOutcomes.success);
+    validateChoice("Progress", progressStatus, allowedOutcomes.progress);
+    validateChoice("Buy-in", buyInStatus, allowedOutcomes.buy_in);
 
     const nextOutcomes: Record<string, unknown> = {
       outcomes_success_value: successStatus,

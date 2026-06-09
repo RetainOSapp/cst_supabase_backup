@@ -13,9 +13,12 @@ const ACTIONS = new Set([
   "create_offer",
   "update_offer",
   "archive_offer",
+  "unarchive_offer",
   "create_milestone",
   "update_milestone",
   "archive_milestone",
+  "unarchive_milestone",
+  "reorder_milestones",
 ]);
 
 function jsonResponse(body: unknown, status = 200) {
@@ -51,6 +54,12 @@ function optionalInteger(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => cleanText(item)).filter(Boolean)
+    : [];
 }
 
 async function assertCanManageCompany(
@@ -144,9 +153,129 @@ Deno.serve(async (req) => {
     let beforeData: Record<string, unknown> | null = null;
     let saved: Record<string, unknown> | null = null;
 
+    if (action === "reorder_milestones") {
+      const offerId = cleanText(body.offerId);
+      const milestoneIds = stringArray(body.milestoneIds);
+      if (!offerId) return jsonResponse({ error: "Choose an offer first." }, 400);
+      if (milestoneIds.length === 0) {
+        return jsonResponse({ error: "Provide the ordered milestone ids." }, 400);
+      }
+      if (new Set(milestoneIds).size !== milestoneIds.length) {
+        return jsonResponse({ error: "Milestone order contains duplicates." }, 400);
+      }
+
+      const { data: offer, error: offerError } = await supabase
+        .from("company_offers")
+        .select("id, glide_row_id, name, status")
+        .eq("company_id", company.id)
+        .eq("glide_row_id", offerId)
+        .eq("status", "active")
+        .maybeSingle();
+      if (offerError) throw offerError;
+      if (!offer) return jsonResponse({ error: "Active offer not found." }, 404);
+
+      const { data: activeMilestones, error: milestoneError } = await supabase
+        .from("company_offer_milestones")
+        .select("id, glide_row_id, offer_id, name, position, status")
+        .eq("company_id", company.id)
+        .eq("offer_id", offerId)
+        .eq("status", "active")
+        .order("position", { ascending: true, nullsFirst: false });
+      if (milestoneError) throw milestoneError;
+
+      const existingIds = (activeMilestones ?? []).map((row) => row.glide_row_id);
+      const requestedIds = new Set(milestoneIds);
+      const missingIds = existingIds.filter((id) => !requestedIds.has(id));
+      const unknownIds = milestoneIds.filter((id) => !existingIds.includes(id));
+      if (missingIds.length > 0 || unknownIds.length > 0) {
+        return jsonResponse(
+          {
+            error:
+              "Reorder must include every active milestone for this offer and no milestones from another offer.",
+            details: { missingIds, unknownIds },
+          },
+          400,
+        );
+      }
+
+      const beforeOrder = (activeMilestones ?? []).map((row) => ({
+        glide_row_id: row.glide_row_id,
+        name: row.name,
+        position: row.position,
+      }));
+      const originalPositions = new Map(
+        (activeMilestones ?? []).map((row) => [row.glide_row_id, row.position ?? 0]),
+      );
+
+      try {
+        for (const [index, milestoneId] of milestoneIds.entries()) {
+          const { error: updateError } = await supabase
+            .from("company_offer_milestones")
+            .update({ position: index + 1 })
+            .eq("company_id", company.id)
+            .eq("offer_id", offerId)
+            .eq("glide_row_id", milestoneId)
+            .eq("status", "active");
+          if (updateError) throw updateError;
+        }
+      } catch (updateError) {
+        for (const [milestoneId, position] of originalPositions.entries()) {
+          await supabase
+            .from("company_offer_milestones")
+            .update({ position })
+            .eq("company_id", company.id)
+            .eq("offer_id", offerId)
+            .eq("glide_row_id", milestoneId);
+        }
+        throw updateError;
+      }
+
+      const { data: reordered, error: reorderedError } = await supabase
+        .from("company_offer_milestones")
+        .select("id, glide_row_id, offer_id, name, position, status")
+        .eq("company_id", company.id)
+        .eq("offer_id", offerId)
+        .eq("status", "active")
+        .order("position", { ascending: true, nullsFirst: false });
+      if (reorderedError) throw reorderedError;
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "company_pathway_reorder_milestones",
+        source: "company_pathway_admin",
+        entity_table: "company_offer_milestones",
+        entity_id: offer.id,
+        legacy_glide_row_id: offerId,
+        title: "reorder milestones",
+        summary: `${offer.name ?? "Offer"} milestones were reordered.`,
+        before_data: { offer, order: beforeOrder },
+        after_data: { offer, order: reordered ?? [] },
+      });
+
+      return jsonResponse({ ok: true, items: reordered ?? [] });
+    }
+
     if (action.startsWith("create_")) {
       if (!name) return jsonResponse({ error: "Name is required." }, 400);
       const stableId = `${isOfferAction ? "offer" : "milestone"}_${crypto.randomUUID()}`;
+      let nextMilestonePosition = optionalInteger(body.position);
+      if (!isOfferAction && nextMilestonePosition === null) {
+        const offerId = cleanText(body.offerId);
+        const { data: existingMilestones, error: existingMilestonesError } =
+          await supabase
+            .from("company_offer_milestones")
+            .select("position")
+            .eq("company_id", company.id)
+            .eq("offer_id", offerId)
+            .eq("status", "active")
+            .order("position", { ascending: false, nullsFirst: false })
+            .limit(1);
+        if (existingMilestonesError) throw existingMilestonesError;
+        const maxPosition = Number(existingMilestones?.[0]?.position ?? 0);
+        nextMilestonePosition = Number.isFinite(maxPosition) ? maxPosition + 1 : 1;
+      }
       const payload = isOfferAction
         ? {
             company_id: company.id,
@@ -161,7 +290,7 @@ Deno.serve(async (req) => {
             offer_id: cleanText(body.offerId),
             glide_row_id: stableId,
             name,
-            position: optionalInteger(body.position) ?? 0,
+            position: nextMilestonePosition ?? 0,
             target_days_to_complete: optionalInteger(body.targetDays),
             is_ttv_milestone: Boolean(body.isTtvMilestone),
             is_final_milestone: Boolean(body.isFinalMilestone),
@@ -198,29 +327,84 @@ Deno.serve(async (req) => {
           .is("archived_at", null);
         if (usageError) throw usageError;
         if ((count ?? 0) > 0) {
+          const { data: affectedClients, error: sampleError } = await supabase
+            .from("clients")
+            .select("glide_row_id, client_name, business_name")
+            .eq("company_id", company.id)
+            .eq(field, entityId)
+            .is("archived_at", null)
+            .order("client_name", { ascending: true })
+            .limit(5);
+          if (sampleError) throw sampleError;
           return jsonResponse(
             {
               error: `Move ${count} active client${count === 1 ? "" : "s"} off this ${
                 action === "archive_offer" ? "offer" : "milestone"
               } before archiving it.`,
+              affectedCount: count ?? 0,
+              affectedEntity: action === "archive_offer" ? "offer" : "milestone",
+              affectedClients: affectedClients ?? [],
             },
             400,
           );
         }
       }
 
-      const payload = action.startsWith("archive_")
-        ? { status: "archived", archived_at: new Date().toISOString() }
-        : isOfferAction
+      if (action === "unarchive_milestone") {
+        const offerId = cleanText(existing.offer_id);
+        if (!offerId) {
+          return jsonResponse({ error: "Milestone is missing an offer." }, 400);
+        }
+        const { data: parentOffer, error: parentOfferError } = await supabase
+          .from("company_offers")
+          .select("glide_row_id, status")
+          .eq("company_id", company.id)
+          .eq("glide_row_id", offerId)
+          .maybeSingle();
+        if (parentOfferError) throw parentOfferError;
+        if (!parentOffer || parentOffer.status !== "active") {
+          return jsonResponse(
+            { error: "Restore the parent offer before restoring this milestone." },
+            400,
+          );
+        }
+      }
+
+      let payload: Record<string, unknown>;
+      if (action.startsWith("archive_")) {
+        payload = { status: "archived", archived_at: new Date().toISOString() };
+      } else if (action.startsWith("unarchive_")) {
+        payload = { status: "active", archived_at: null };
+        if (action === "unarchive_milestone") {
+          const { data: existingMilestones, error: existingMilestonesError } =
+            await supabase
+              .from("company_offer_milestones")
+              .select("position")
+              .eq("company_id", company.id)
+              .eq("offer_id", cleanText(existing.offer_id))
+              .eq("status", "active")
+              .order("position", { ascending: false, nullsFirst: false })
+              .limit(1);
+          if (existingMilestonesError) throw existingMilestonesError;
+          const maxPosition = Number(existingMilestones?.[0]?.position ?? 0);
+          payload.position = Number.isFinite(maxPosition) ? maxPosition + 1 : 1;
+        }
+      } else {
+        payload = isOfferAction
           ? { name }
           : {
               name,
-              position: optionalInteger(body.position) ?? 0,
+              position: optionalInteger(body.position) ?? existing.position ?? 0,
               target_days_to_complete: optionalInteger(body.targetDays),
               is_ttv_milestone: Boolean(body.isTtvMilestone),
               is_final_milestone: Boolean(body.isFinalMilestone),
             };
-      if (!action.startsWith("archive_") && !name) {
+      }
+      if (
+        !action.startsWith("archive_") &&
+        !action.startsWith("unarchive_") &&
+        !name
+      ) {
         return jsonResponse({ error: "Name is required." }, 400);
       }
       const { data, error } = await supabase

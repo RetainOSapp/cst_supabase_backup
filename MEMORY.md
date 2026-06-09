@@ -116,6 +116,7 @@ Core decisions captured there:
 - Client assignment/reassignment v1 was added on 2026-06-06. SuperAdmin, Director, and Support can change Primary CSM through Edit Profile; CSMs cannot reassign clients. New Client and Edit Profile use app-owned active team members for pilot/migrated companies, and assignment changes are included in profile history/audit. `manage-client-profile` and `manage-client-create` were deployed; Jay QA remains.
 - Ethical Scaling reconciliation command: `npm run pilot:reconcile:ethical-scaling`. On 2026-06-06 it confirmed 154 mirrored and 154 app-owned clients with no missing/extra rows. The seven clients assigned to an archived member are all offboarded, so active-client assignment integrity is clean.
 - Reconciliation is a mandatory company-by-company migration gate. For future Glide companies run `npm run pilot:reconcile:company -- --company="Company Name"` before moving `mirror_only` to `pilot` and again before moving `pilot` to `migrated`. You can also target exact ids with `--company-id=<uuid>` or `--legacy-company-id=<glide id>`. Review client counts, app-only/missing rows, status distributions, assignments, current-state differences, app-owned activity, and team roles. Never auto-fix data from the reconciliation command.
+- Contract and renewal confidence were added to the reusable reconciliation gate on 2026-06-08. The command now accepts `--renewal-start=YYYY-MM-DD` and `--renewal-end=YYYY-MM-DD` (aliases: `--date-range-start`, `--date-range-end`) and defaults to the next 30 days when omitted. Review `contractConfidence` for mirrored/app contract counts, missing/app-only contract ids, matching field diffs, archived contract counts, and latest app contract vs client summary mismatches. Review `renewalConfidence` for renewal ids from client summaries, app contract history, legacy contract history, retained ids, active up-for-renewal ids, and offboarded-denominator warnings. This is now part of the company-by-company migration trust checklist.
 - Historical activity backfill now has a dry-run/apply script: `npm run pilot:backfill:company-activity -- --company="Company Name"`. It backfills missing historical app-owned `client_contracts` and `client_milestones` from the Glide mirror for active/pilot-relevant clients only by default. Always run dry-run first and review `unresolvedClientMilestonesSkipped` before adding `--apply`; use `--include-archived` only when intentionally migrating historical/offboarded records too.
 - Clients roster filters, applied filters, page, view, and sort are persisted in browser local storage. The status multi-select closes on outside click.
 - New Client v1 is enabled for app-owned pilot/migrated companies through `supabase/functions/manage-client-create`. Migration `supabase/migrations/20260531103000_client_create_pilot.sql` allows `client_created` history events. SuperAdmin/Director/Support can create company clients; CSMs can create clients too, but the server assigns the new client to that CSM so it stays inside their assigned-client scope. New clients are written only to `clients`, with `client_history_events` and `app_audit_events`; `backup_company_clients` remains untouched.
@@ -129,8 +130,21 @@ Core decisions captured there:
 - Supabase CLI auth rule: the default Supabase CLI account is currently authenticated to the RetainOS organization and can see project `zjauqflzxzsbpnivzsct`. Do not pass `--profile retainos`; that named profile is malformed and causes `Unsupported Config Type ""`. Run RetainOS Supabase commands from this workspace using the default profile.
 - CSM Reports drill-through cleanup was added on 2026-06-05. Field Upkeep already drills into field-level and complete/incomplete client lists; CSM Summary rows now open a CSM-specific active client update list with links to client profiles.
 - CSM Reports drill-through QA passed on 2026-06-06: date ranges, CSM modal, not-updated-first order, and client profile links worked correctly.
-- Canonical dashboard KPI RPC v1 was applied on 2026-06-05 through `supabase/migrations/20260605103000_dashboard_kpi_counts_canonical.sql`. Function name: `dashboard_kpi_counts_canonical`. It supports legacy/app company id normalization, multi-program filters, offer filters, CSM filters, date filters, app-owned pilot/migrated `clients`, and mirror-only fallback. Smoke-tested against Ethical Scaling and returned active/front/back/offboard/churn/retention/renewal counts. As of 2026-06-06, the Dashboard KPI strip tries this canonical RPC first for active/front/back/offboard/churn/retention/renewal numbers, including offer and multi-program filters, then falls back to the existing working client-side/legacy RPC calculation if the canonical function errors.
+- Canonical dashboard KPI RPC v1 was applied on 2026-06-05 through `supabase/migrations/20260605103000_dashboard_kpi_counts_canonical.sql`. Function name: `dashboard_kpi_counts_canonical`. It supports legacy/app company id normalization, multi-program filters, offer filters, CSM filters, date filters, app-owned pilot/migrated `clients`, and mirror-only fallback. Smoke-tested against Ethical Scaling and returned active/front/back/offboard/churn/retention/renewal counts. As of 2026-06-06, the Dashboard KPI strip tries this canonical RPC first for active/front/back/offboard/churn/retention/renewal numbers, including offer and multi-program filters, then falls back to the existing working client-side/legacy RPC calculation if the canonical function errors. 2026-06-09 note: for mirror-only default walkthrough views such as Moves Method, the UI intentionally uses the lighter split KPI path unless app-owned, offer, or multi-program filters require canonical logic. This keeps large CST-preview demos fast, but the final broader-migration fix is optimized canonical reporting RPCs/views plus indexes/summaries for counts, retention, renewal, drill-throughs, and chart breakdowns.
 - Canonical Dashboard RPC QA passed on 2026-06-06 for the full Ethical Scaling result and Front End-only filter; returned values matched the expected baseline.
+
+## Company Customization And Settings
+
+- App-owned company customization v1 is live for pilot/migrated companies. Migration: `supabase/migrations/20260608100000_company_customization_v1.sql`. Edge Function: `supabase/functions/manage-company-customization`.
+- App-owned outcome definitions and churn reasons are seeded from the Glide mirror/defaults and editable from Admin Hub / SaaS Company Detail > Customization for SuperAdmins and Directors. Mirror-only companies stay read-only from Glide.
+- Client Outcomes dropdowns prefer app-owned company outcome definitions for pilot/migrated companies and fall back to mirrored `backup_choices` elsewhere.
+- Company Settings v1 saves profile upkeep freshness days, default client view, default calendar mode, secondary assignee flag, Call AI for CSMs flag, embed flag, and Zapier client-create flag. Jay QAed that the page saves on 2026-06-08.
+- Client Workspace defaults are now consumed for pilot/migrated companies:
+  - Clients roster starts from the company default view (`list`, `card`, or `calendar`) when there is no stronger cached user/company preference.
+  - Clients calendar starts from the company default calendar mode (`month`, `week`, or `day`) when there is no stronger cached user/company preference.
+  - CSM Reports Field Upkeep uses the company profile-upkeep freshness window instead of a fixed/default 14-day assumption. The selected CSM Reports date range still controls client-level update-rate/report rows.
+  - 2026-06-08 QA note: stale roster cache initially blocked defaults from showing. Fix tracks explicit view/calendar user overrides separately, so old cached state no longer prevents company defaults from applying. Jay confirmed default Card/Day behavior works.
+- Remaining customization gaps: custom fields, notification settings, dashboard/client-list preferences, client list columns, and deeper company-level configuration.
 
 ## Client Workspace
 
@@ -146,7 +160,7 @@ Recent client detail wiring:
 - Client detail tabs currently include Client Details, Contract, Program, Outcomes, Pathways & Milestones, and Tasks.
 - Date fields should render as readable dates, not raw ISO strings.
 - Client Age is calculated as days since `client_age_date_onboarded`.
-- `/clients` stores company/filter/page/view state in `sessionStorage` under `cst.clientsRosterState.v1` so returning from a detail page does not reset the roster.
+- `/clients` stores company/filter/page/view/calendar state under `cst.clientsRosterState.v1` so returning from a detail page does not reset the roster. Company defaults apply unless the cached state has an explicit user override for view/calendar mode.
 
 ## Contract Wiring
 
@@ -190,7 +204,9 @@ Important distinction:
 - Pathways & Milestones now use app-owned offer/milestone configuration for pilot/migrated companies and Glide mirror configuration for read-only fallback companies.
 - On 2026-06-06, Company Pathways & Milestones Setup V1 introduced app-owned `company_offers` and `company_offer_milestones` for pilot/migrated companies. The migration seeds their existing Glide configuration once; `manage-company-pathway` controls Director/SuperAdmin create, edit, and archive actions. Mirror-only companies remain read-only from Glide.
 - Pilot client creation, milestone progression, Client Detail, Clients offer filters, Dashboard offer filters, and Quick Update milestone labels prefer the app-owned journey configuration.
-- Offers or milestones assigned to active clients cannot be archived. Reordering controls and unarchive remain later polish.
+- Offers or milestones assigned to active clients cannot be archived.
+- Company Pathways polish added active-client usage counts, move up/down ordering controls, clearer archive blockers, and restore/unarchive for archived offers/milestones. Restored milestones append to the end of the active order. Drag/drop ordering is deferred as a later UI/UX optimization.
+- The archived `Temporary test offer` from QA is hidden from normal active views. Hard-delete cleanup should only happen after explicit approval and SQL review.
 - SuperAdmins and Directors can change a client's current offer/pathway and milestone.
 - Assigned CSMs can start and complete milestones for assigned clients only.
 - Support does not write milestones in v1.
@@ -199,8 +215,22 @@ Important distinction:
 - Client Detail > Pathways & Milestones now shows a filtered timeline for the client's active/current offer only. The app may load all company milestones for lookup/name resolution, but the visible timeline must not show milestones from unrelated offers/pathways.
 - The active milestone should render by configured name, not raw Glide id. Example: Ali Abdaal advanced from `Onboarding` to `Touchpoint Mapping`; the current milestone id `xsZ4WRBhRF-RrJvZeexBrQ` must display as `Touchpoint Mapping`.
 - Pathways v1 is functionally acceptable for the Ethical Scaling pilot after QA/polish, but the modal/user-flow UI does not yet match the low-fi designs. Treat design fidelity as a later pass after wiring is stable.
-- Secondary offer/milestone fields are deferred until the primary offer flow is validated.
+- Secondary offer/milestone fields are deferred until the primary offer flow is validated and can be grouped into a later company setup phase.
 - On 2026-06-06, pilot workflow polish added current-milestone completion to Quick Update, optional initial offer/milestone/contract setup to New Client, and a compact Clients-page reminder strip for next contacts, renewals, and paused return dates. Jay QA passed milestone completion against Ali Abdaal and Matt Shiver, approved both optional New Client setup paths, and accepted reminders as a pilot starting point. Keep pathway changes on the full Client Detail page; Quick Update handles milestone progress only.
+- On 2026-06-08, Notifications V1 foundation moved pilot reminders toward an app-owned source of truth:
+  - Migration `20260608134751_notifications_v1.sql` creates `notifications` and `notification_preferences`.
+  - RPC `generate_company_notifications` idempotently generates in-app reminders for next contact, renewal, paused return, and client-linked task due dates for pilot/migrated companies only.
+  - Email remains disabled and the full notification inbox stays hidden until read/dismiss/count behavior is built.
+  - Clients page now prefers notification rows and falls back to current client fields if the migration/RPC is unavailable.
+  - Local-only UX test on 2026-06-08 replaced the wide Clients pilot reminder strip with a compact bell/dropdown in the Clients header. Jay QAed it and said it feels right. Do not commit/deploy this until final notification UX is reviewed, but keep it as the preferred direction.
+- On 2026-06-08, Daily Pulse V2 was added as a read-only operating page at `/daily-pulse`.
+  - Daily Pulse is distinct from dismissible notifications: it is a persistent start-of-day action view.
+  - Buckets are Today, This Week, and This Month, with sections auto-expanded only when they contain active signals.
+  - Current signals include next contacts, paused returns, renewals, churn-risk outcomes, RGA candidates, and quiet profiles.
+  - CSM users see only clients assigned/secondarily assigned to them.
+  - SuperAdmin, Director, and Support users see the selected company by default and can filter the page by active client-managing CSM.
+  - Progress and Buy-in outcome signals are combined into one client card to avoid duplicate RGA/churn rows for the same client.
+  - Calculations are local page logic from current client rows plus app-owned history where available. Move to canonical SQL/RPC after UX validation and before broader migration-scale reporting.
 - `PILOT_ONBOARDING.md` is the recording script/checklist for onboarding Ben and Emily into the Ethical Scaling internal pilot.
 
 Example found during debugging:

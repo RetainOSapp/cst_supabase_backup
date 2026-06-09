@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { ProgramStatusPill, type ProgramChoice } from "../lib/clientDisplay.tsx";
+import { loadCompanyWorkspaceDefaults } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 
 type DatePreset = "today" | "7" | "14" | "30" | "custom";
@@ -69,6 +70,14 @@ interface HistoryEventRow {
   created_at: string | null;
 }
 
+interface MirrorHistoryRow {
+  client_id: string | null;
+  change_type_code: string | null;
+  value: string | null;
+  original_value: string | null;
+  modified_date: string | null;
+}
+
 interface ReportRow {
   client: ClientRow;
   csmName: string;
@@ -111,6 +120,13 @@ function daysAgo(days: number) {
 
 function defaultEndDate() {
   return isoDateInput(new Date());
+}
+
+function freshnessStartDate(days: number) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - Math.max(1, Math.round(days)));
+  return date;
 }
 
 function presetStartDate(preset: Exclude<DatePreset, "custom">) {
@@ -334,6 +350,8 @@ export function CsmReports() {
   const [preset, setPreset] = useState<DatePreset>("30");
   const [startDate, setStartDate] = useState(presetStartDate("30"));
   const [endDate, setEndDate] = useState(defaultEndDate());
+  const [profileUpkeepFreshnessDays, setProfileUpkeepFreshnessDays] =
+    useState(14);
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [profileUpkeep, setProfileUpkeep] =
     useState<ProfileUpkeepSummary | null>(null);
@@ -570,7 +588,9 @@ export function CsmReports() {
     }
     let cancelled = false;
     async function loadTeam() {
-      const appCompany = appCompanyByLegacyId.get(companyId);
+      const appCompany = usesAppClients
+        ? appCompanyByLegacyId.get(companyId)
+        : null;
       if (appCompany) {
         const { data, error } = await supabase
           .from("company_members")
@@ -616,7 +636,24 @@ export function CsmReports() {
     return () => {
       cancelled = true;
     };
-  }, [appCompanyByLegacyId, companyId, csmId]);
+  }, [appCompanyByLegacyId, companyId, csmId, usesAppClients]);
+
+  useEffect(() => {
+    if (!companyId) {
+      setProfileUpkeepFreshnessDays(14);
+      return;
+    }
+    let cancelled = false;
+    async function loadWorkspaceDefaults() {
+      const defaults = await loadCompanyWorkspaceDefaults(companyId);
+      if (cancelled) return;
+      setProfileUpkeepFreshnessDays(defaults.profileUpkeepFreshnessDays);
+    }
+    void loadWorkspaceDefaults();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   useEffect(() => {
     if (programChoices.length > 0) return;
@@ -676,7 +713,6 @@ export function CsmReports() {
           "csm_team_member_id",
           "csm_secondary_assignee_id",
           "program_status_value",
-          "outcomes_success_for_filtering",
           "outcomes_progress_for_filtering",
           "outcomes_buy_in_for_filtering",
           "next_steps_value",
@@ -717,11 +753,20 @@ export function CsmReports() {
         )
       : ((clientData ?? []) as unknown as ClientRow[])).filter(isActiveClient);
     const clientIds = clients.map((client) => client.glide_row_id);
-    const appCompany = appCompanyByLegacyId.get(companyId);
+    const appCompany = usesAppClients
+      ? appCompanyByLegacyId.get(companyId)
+      : null;
 
     let historyRows: HistoryEventRow[] = [];
     const reportStartDate = new Date(`${startDate}T00:00:00.000Z`);
     const reportEndDate = new Date(`${endDate}T23:59:59.999Z`);
+    const upkeepStartDate = freshnessStartDate(profileUpkeepFreshnessDays);
+    const upkeepEndDate = new Date();
+    upkeepEndDate.setHours(23, 59, 59, 999);
+    const historyStartDate =
+      reportStartDate < upkeepStartDate ? reportStartDate : upkeepStartDate;
+    const historyEndDate =
+      reportEndDate > upkeepEndDate ? reportEndDate : upkeepEndDate;
     if (appCompany && clientIds.length > 0) {
       const { data: historyData, error: historyError } = await supabase
         .from("client_history_events")
@@ -744,14 +789,45 @@ export function CsmReports() {
         )
         .eq("company_id", appCompany.id)
         .in("legacy_client_glide_row_id", clientIds)
-        .gte("created_at", reportStartDate.toISOString())
-        .lte("created_at", `${endDate}T23:59:59.999Z`)
+        .gte("created_at", historyStartDate.toISOString())
+        .lte("created_at", historyEndDate.toISOString())
         .order("created_at", { ascending: false });
 
       if (historyError) {
         setError(historyError.message);
       } else {
         historyRows = (historyData ?? []) as unknown as HistoryEventRow[];
+      }
+    } else if (clientIds.length > 0) {
+      const { data: mirrorHistoryData, error: mirrorHistoryError } = await supabase
+        .from("backup_company_clients_history")
+        .select("client_id, change_type_code, value, original_value, modified_date")
+        .in("client_id", clientIds)
+        .gte("modified_date", historyStartDate.toISOString())
+        .lte("modified_date", historyEndDate.toISOString())
+        .order("modified_date", { ascending: false })
+        .limit(5000);
+
+      if (mirrorHistoryError) {
+        console.error("Failed to load mirror CSM report history:", mirrorHistoryError);
+      } else {
+        historyRows = ((mirrorHistoryData ?? []) as MirrorHistoryRow[])
+          .filter((row) => row.client_id && row.modified_date)
+          .map((row, index) => ({
+            id: `mirror-${row.client_id}-${row.modified_date}-${index}`,
+            legacy_client_glide_row_id: row.client_id as string,
+            actor_member_id: null,
+            event_type: row.change_type_code ?? "glide_profile_change",
+            title: row.change_type_code
+              ? `CST ${row.change_type_code} change`
+              : "CST profile change",
+            summary:
+              row.original_value || row.value
+                ? `${row.original_value ?? "--"} -> ${row.value ?? "--"}`
+                : null,
+            notes: null,
+            created_at: row.modified_date,
+          }));
       }
     }
 
@@ -788,8 +864,8 @@ export function CsmReports() {
       calculateProfileUpkeep(
         reportRows,
         historyRows,
-        reportStartDate,
-        reportEndDate,
+        upkeepStartDate,
+        upkeepEndDate,
       ),
     );
     setLoading(false);
@@ -799,6 +875,7 @@ export function CsmReports() {
     companyId,
     csmId,
     endDate,
+    profileUpkeepFreshnessDays,
     startDate,
     teamMemberId,
     teamNameByMemberId,
@@ -936,9 +1013,9 @@ export function CsmReports() {
                   Field Upkeep
                 </h2>
                 <p className="mt-1 text-xs text-gray-500">
-                  Active clients only. This is field-level completeness inside the
-                  selected report date range; the top cards are client-level update
-                  counts.
+                  Active clients only. Field freshness uses this company's
+                  {` ${profileUpkeepFreshnessDays}`}-day upkeep window; client
+                  update rate uses the selected report date range.
                 </p>
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
@@ -1060,11 +1137,13 @@ export function CsmReports() {
                   CSM Summary
                 </h2>
                 <p className="mt-1 text-xs text-gray-500">
-                  Updated means at least one RetainOS history event in the selected date range.
+                  Updated means at least one{" "}
+                  {usesAppClients ? "RetainOS history event" : "CST history change"}{" "}
+                  in the selected date range.
                 </p>
               </div>
               <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">
-                {usesAppClients ? "RetainOS pilot data" : "Glide mirror roster"}
+                {usesAppClients ? "RetainOS pilot data" : "CST roster preview"}
               </span>
             </div>
 

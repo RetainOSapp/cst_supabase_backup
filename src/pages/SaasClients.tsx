@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
-import { supabase } from "../lib/supabase.ts";
+import {
+  loadUnifiedCompanies,
+  loadUnifiedTeamMembers,
+  type DataSource,
+} from "../lib/appOwnedData.ts";
 
 type StatusFilter = "active" | "paused" | "archived";
 
 interface CompanyRow {
   glide_row_id: string;
+  app_company_id?: string | null;
+  public_company_id?: string | null;
   name: string | null;
   archived: boolean | null;
   admin_access_id: string | null;
@@ -14,10 +20,13 @@ interface CompanyRow {
   view_override: string | null;
   enable_secondary_assignee: boolean | null;
   enable_call_ai_for_csms: boolean | null;
+  migration_status?: string | null;
+  source?: DataSource;
 }
 
 interface TeamRow {
   glide_row_id: string;
+  app_member_id?: string | null;
   company_id: string | null;
   name: string | null;
   email: string | null;
@@ -27,6 +36,7 @@ interface TeamRow {
   role_hide_from_csm_list: boolean | null;
   role_read_only_user: boolean | null;
   is_archived: boolean | null;
+  source?: DataSource;
 }
 
 function getInitials(name: string | null | undefined) {
@@ -173,41 +183,30 @@ export function SaasClients() {
       setLoading(true);
       setError(null);
 
-      const { data, error: companiesError } = await supabase
-        .from("backup_companies")
-        .select(
-          "glide_row_id, name, archived, admin_access_id, synced_at, view_override, enable_secondary_assignee, enable_call_ai_for_csms",
-        )
-        .order("name", { ascending: true });
+      let companyRows: CompanyRow[] = [];
+      let teamRows: TeamRow[] = [];
+      let loadError: string | null = null;
+
+      try {
+        const unifiedCompanies = await loadUnifiedCompanies();
+        companyRows = unifiedCompanies as CompanyRow[];
+        teamRows = (await loadUnifiedTeamMembers(unifiedCompanies)) as TeamRow[];
+      } catch (error) {
+        loadError = error instanceof Error ? error.message : "Failed to load SaaS clients.";
+      }
 
       if (cancelled) return;
 
-      if (companiesError) {
+      if (loadError) {
         setCompanies([]);
         setTeamMembers([]);
-        setError(companiesError.message);
+        setError(loadError);
         setLoading(false);
         return;
       }
 
-      const companyRows = (data ?? []) as CompanyRow[];
       setCompanies(companyRows);
-
-      const companyIds = companyRows.map((company) => company.glide_row_id);
-      if (companyIds.length > 0) {
-        const { data: team, error: teamError } = await supabase
-          .from("backup_company_team")
-          .select(
-            "glide_row_id, company_id, name, email, photo, role_id, role_is_saa_s_admin, role_hide_from_csm_list, role_read_only_user, is_archived",
-          )
-          .in("company_id", companyIds)
-          .limit(5000);
-
-        if (!cancelled) {
-          if (teamError) console.error("Failed to load SaaS client teams:", teamError);
-          setTeamMembers((team ?? []) as TeamRow[]);
-        }
-      }
+      setTeamMembers(teamRows);
 
       if (!cancelled) setLoading(false);
     }
@@ -391,7 +390,9 @@ export function SaasClients() {
                     <div>
                       <div className="uppercase tracking-wider">Synced</div>
                       <div className="mt-0.5 font-semibold text-gray-900">
-                        {formatDate(company.synced_at)}
+                        {company.source === "app_owned"
+                          ? "RetainOS"
+                          : formatDate(company.synced_at)}
                       </div>
                     </div>
                   </div>

@@ -9,6 +9,7 @@ import { TableDetail } from "./pages/TableDetail.tsx";
 import { SyncLog } from "./pages/SyncLog.tsx";
 import { Dashboard } from "./pages/Dashboard.tsx";
 import { CsmReports } from "./pages/CsmReports.tsx";
+import { DailyPulse } from "./pages/DailyPulse.tsx";
 import { Clients } from "./pages/Clients.tsx";
 import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { Tasks } from "./pages/Tasks.tsx";
@@ -128,6 +129,14 @@ function AccountShell() {
             element={
               <RequireCapability allowed={capabilities.canAccessCsmReports}>
                 <CsmReports />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="daily-pulse"
+            element={
+              <RequireCapability allowed={capabilities.canAccessClients}>
+                <DailyPulse />
               </RequireCapability>
             }
           />

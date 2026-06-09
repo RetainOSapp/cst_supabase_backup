@@ -1657,7 +1657,10 @@ export function Dashboard() {
       setTeamMembersLoading(true);
 
       const appCompany = appCompanyByLegacyId.get(pendingFilters.companyId);
-      if (appCompany) {
+      const usesAppCompany =
+        appCompany?.migration_status === "pilot" ||
+        appCompany?.migration_status === "migrated";
+      if (appCompany && usesAppCompany) {
         const { data, error } = await supabase
           .from("company_members")
           .select(
@@ -1718,7 +1721,10 @@ export function Dashboard() {
       setOffersLoading(true);
 
       const appCompany = appCompanyByLegacyId.get(pendingFilters.companyId);
-      const { data, error } = appCompany
+      const usesAppCompany =
+        appCompany?.migration_status === "pilot" ||
+        appCompany?.migration_status === "migrated";
+      const { data, error } = appCompany && usesAppCompany
         ? await supabase
             .from("company_offers")
             .select("glide_row_id, name")
@@ -2291,8 +2297,15 @@ export function Dashboard() {
     }
 
     void (async () => {
-      const loadedCanonical = await loadCanonicalKpis();
-      if (cancelled || loadedCanonical) return;
+      const shouldUseCanonicalKpis =
+        appliedUsesAppClients ||
+        Boolean(appliedFilters.offerId) ||
+        appliedProgramValues.length > 1;
+
+      if (shouldUseCanonicalKpis) {
+        const loadedCanonical = await loadCanonicalKpis();
+        if (cancelled || loadedCanonical) return;
+      }
 
       if (
         appliedUsesAppClients ||

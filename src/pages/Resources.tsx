@@ -287,6 +287,247 @@ function ParameterTable() {
   );
 }
 
+function IntegrationParameterTable({
+  rows,
+}: {
+  rows: Array<[string, "Required" | "Optional", string]>;
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-[#e4e9f0]">
+      <table className="min-w-full divide-y divide-[#e4e9f0] text-sm">
+        <thead className="bg-[#f1f4f9] text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7686]">
+          <tr>
+            <th className="px-4 py-3">Parameter</th>
+            <th className="px-4 py-3">Type</th>
+            <th className="px-4 py-3">Notes</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#eef2f6] bg-white text-[#364152]">
+          {rows.map(([parameter, type, notes]) => (
+            <tr key={parameter}>
+              <td className="px-4 py-3 font-semibold text-[#162b3e]">{parameter}</td>
+              <td className="px-4 py-3">{type}</td>
+              <td className="px-4 py-3">{notes}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PlaceholderEndpointNotice() {
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+      These endpoint examples are setup placeholders for the future RetainOS
+      webhook functions. They are intentionally not active yet, so use this guide
+      for planning provider setup only.
+    </div>
+  );
+}
+
+function CallTranscriptWebhookGuide({
+  endpointUrl,
+  companyId,
+  bodyTemplate,
+}: {
+  endpointUrl: string;
+  companyId: string;
+  bodyTemplate: string;
+}) {
+  const rows: Array<[string, "Required" | "Optional", string]> = [
+    ["companyId", "Required", "Your selected company ID. RetainOS uses this to route the transcript to the right account."],
+    ["transcript", "Required", "The full text transcript from Fathom, Otter, Grain, n8n, Zapier, Make, or another transcription source."],
+    ["title", "Optional", "Meeting title or call descriptor."],
+    ["attendeeEmails", "Optional", "Comma-separated participant emails. Useful for future client matching."],
+    ["timestamp", "Optional", "Call date/time. Use ISO format when possible."],
+    ["url", "Optional", "Recording, transcript, or meeting URL."],
+  ];
+
+  return (
+    <>
+      <PlaceholderEndpointNotice />
+
+      <Section
+        title="1. Copy the Webhook Endpoint"
+        action={<CopyButton value={endpointUrl} />}
+      >
+        <p className="mb-3 text-sm text-[#586273]">
+          Use this future RetainOS endpoint with any tool that can send a POST
+          request, including Fathom, Otter, Grain, Zapier, n8n, Make, or a CRM
+          automation.
+        </p>
+        <div className="break-all rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4 text-sm font-semibold text-[#162b3e]">
+          {endpointUrl}
+        </div>
+      </Section>
+
+      <Section title="2. Configure Method and Header">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7686]">
+              Method
+            </p>
+            <CodeBlock value="POST" />
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7686]">
+              Header
+            </p>
+            <CodeBlock value="Content-Type: application/json" />
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="3. Add Your Company ID"
+        action={<CopyButton value={companyId} />}
+      >
+        <p className="mb-3 text-sm text-[#586273]">
+          This ID is unique for the selected company and must be included in every
+          transcript request.
+        </p>
+        <div className="break-all rounded-lg border border-[#d6eafb] bg-[#eaf4fe] p-4 text-sm font-semibold text-[#162b3e]">
+          {companyId}
+        </div>
+      </Section>
+
+      <Section
+        title="4. Copy the Request Body"
+        action={<CopyButton value={bodyTemplate} />}
+      >
+        <p className="mb-3 text-sm text-[#586273]">
+          Map each value from your transcription provider or automation tool. Only
+          companyId and transcript are required for this future flow.
+        </p>
+        <CodeBlock value={bodyTemplate} />
+      </Section>
+
+      <Section title="Required and Optional Fields">
+        <IntegrationParameterTable rows={rows} />
+      </Section>
+
+      <Section title="Verify and Troubleshoot">
+        <div className="grid gap-4 text-sm text-[#586273] md:grid-cols-2">
+          <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="font-semibold text-[#162b3e]">After sending the webhook</h3>
+            <p className="mt-2">
+              Future transcripts should appear in Call AI under New Calls, where
+              the team can review details, link clients, and queue processing.
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="font-semibold text-[#162b3e]">If the call does not appear</h3>
+            <p className="mt-2">
+              Check that companyId is exact, the JSON payload is valid, required
+              fields are present, and attendeeEmails are comma-separated.
+            </p>
+          </div>
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function ClientCallSummaryWebhookGuide({
+  endpointUrl,
+  companyId,
+  bodyTemplate,
+}: {
+  endpointUrl: string;
+  companyId: string;
+  bodyTemplate: string;
+}) {
+  const rows: Array<[string, "Required" | "Optional", string]> = [
+    ["companyId", "Required", "Your selected company ID. RetainOS uses this to route the summary to the right account."],
+    ["clientEmail", "Required", "The exact client email as it appears in RetainOS."],
+    ["notes", "Required", "The summary, notes, or next steps to save for the client."],
+  ];
+
+  return (
+    <>
+      <PlaceholderEndpointNotice />
+
+      <Section
+        title="1. Copy the Webhook Endpoint"
+        action={<CopyButton value={endpointUrl} />}
+      >
+        <p className="mb-3 text-sm text-[#586273]">
+          Use this future RetainOS endpoint when a call recording or automation
+          tool has a summary that should update a specific client.
+        </p>
+        <div className="break-all rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4 text-sm font-semibold text-[#162b3e]">
+          {endpointUrl}
+        </div>
+      </Section>
+
+      <Section title="2. Configure Method and Header">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7686]">
+              Method
+            </p>
+            <CodeBlock value="POST" />
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7686]">
+              Header
+            </p>
+            <CodeBlock value="Content-Type: application/json" />
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="3. Add Your Company ID"
+        action={<CopyButton value={companyId} />}
+      >
+        <p className="mb-3 text-sm text-[#586273]">
+          This ID is unique for the selected company and must be included in every
+          notes update request.
+        </p>
+        <div className="break-all rounded-lg border border-[#d6eafb] bg-[#eaf4fe] p-4 text-sm font-semibold text-[#162b3e]">
+          {companyId}
+        </div>
+      </Section>
+
+      <Section
+        title="4. Copy the Request Body"
+        action={<CopyButton value={bodyTemplate} />}
+      >
+        <p className="mb-3 text-sm text-[#586273]">
+          The client email must match exactly. When this future endpoint is built,
+          RetainOS should write the previous notes or next steps into history.
+        </p>
+        <CodeBlock value={bodyTemplate} />
+      </Section>
+
+      <Section title="Required Fields">
+        <IntegrationParameterTable rows={rows} />
+      </Section>
+
+      <Section title="Verify and Troubleshoot">
+        <div className="grid gap-4 text-sm text-[#586273] md:grid-cols-2">
+          <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="font-semibold text-[#162b3e]">After sending the webhook</h3>
+            <p className="mt-2">
+              Future summaries should update the client notes or next steps and
+              preserve the prior value in client history.
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="font-semibold text-[#162b3e]">If the client does not update</h3>
+            <p className="mt-2">
+              Check companyId, exact clientEmail, valid JSON formatting, and that
+              notes is present before retrying.
+            </p>
+          </div>
+        </div>
+      </Section>
+    </>
+  );
+}
+
 function ResourceEditModal({
   resource,
   onClose,
@@ -512,6 +753,8 @@ export function Resources() {
   const [resourceError, setResourceError] = useState<string | null>(null);
 
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/zapier-create-client`;
+  const callTranscriptWebhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ingest-call-transcript`;
+  const clientCallSummaryWebhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ingest-client-call-summary`;
   const selectedResource = resources.find((resource) => resource.id === selectedResourceId);
 
   const bodyTemplate = useMemo(
@@ -540,6 +783,37 @@ export function Resources() {
           customfield5: "{{customfield5}}",
           customfield6: "{{customfield6}}",
           customfield7: "{{customfield7}}",
+        },
+        null,
+        2,
+      ),
+    [effectiveCompanyId],
+  );
+
+  const callTranscriptBodyTemplate = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          companyId: effectiveCompanyId || "{{companyId}}",
+          title: "{{meeting_title}}",
+          attendeeEmails: "{{attendee_emails}}",
+          transcript: "{{full_transcript}}",
+          timestamp: "{{call_timestamp}}",
+          url: "{{recording_or_transcript_url}}",
+        },
+        null,
+        2,
+      ),
+    [effectiveCompanyId],
+  );
+
+  const clientCallSummaryBodyTemplate = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          companyId: effectiveCompanyId || "{{companyId}}",
+          clientEmail: "{{client_email}}",
+          notes: "{{call_summary_or_next_steps}}",
         },
         null,
         2,
@@ -703,6 +977,9 @@ export function Resources() {
 
   if (selectedResource) {
     const isZapierGuide = selectedResource.dynamic_key === "zapier_client_webhook";
+    const isCallTranscriptGuide = selectedResource.dynamic_key === "call_transcript_webhook";
+    const isClientCallSummaryGuide =
+      selectedResource.dynamic_key === "client_call_summary_webhook";
 
     return (
       <div className="space-y-6">
@@ -875,6 +1152,18 @@ export function Resources() {
               </div>
             </Section>
           </>
+        ) : isCallTranscriptGuide ? (
+          <CallTranscriptWebhookGuide
+            endpointUrl={callTranscriptWebhookUrl}
+            companyId={effectiveCompanyId}
+            bodyTemplate={callTranscriptBodyTemplate}
+          />
+        ) : isClientCallSummaryGuide ? (
+          <ClientCallSummaryWebhookGuide
+            endpointUrl={clientCallSummaryWebhookUrl}
+            companyId={effectiveCompanyId}
+            bodyTemplate={clientCallSummaryBodyTemplate}
+          />
         ) : (
           <GenericResourceDetail resource={selectedResource} />
         )}

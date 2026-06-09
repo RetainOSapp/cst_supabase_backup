@@ -787,6 +787,19 @@ function outcomeChoicesFromRows(rows: OutcomeChoiceRow[] | null | undefined) {
 
   return choices;
 }
+
+function outcomeChoicesFromDefinitions(rows: Record<string, unknown>[] | null | undefined) {
+  const choices: OutcomeChoiceSets = { success: [], progress: [], buyIn: [] };
+  for (const row of rows ?? []) {
+    const value = normalizeOutcome(row.value);
+    if (!value) continue;
+    const label = normalizeOutcome(row.label) || outcomeLabel(value);
+    if (row.outcome_type === "success") choices.success.push({ value, label });
+    if (row.outcome_type === "progress") choices.progress.push({ value, label });
+    if (row.outcome_type === "buy_in") choices.buyIn.push({ value, label });
+  }
+  return choices;
+}
 async function functionErrorMessage(error: unknown) {
   if (error && typeof error === "object" && "context" in error) {
     const context = (error as { context?: unknown }).context;
@@ -924,6 +937,9 @@ function daysBetweenValues(startValue: unknown, endValue: unknown) {
 }
 
 function milestoneStatusClasses(status: string) {
+  if (status === "Final completed") {
+    return "border-emerald-300 bg-emerald-100 text-emerald-800";
+  }
   if (status === "Completed") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   }
@@ -2114,6 +2130,8 @@ function MilestoneActionModal({
   client,
   action,
   currentMilestoneName,
+  offerMilestones,
+  relationLookup,
   existingProgress,
   onClose,
   onSaved,
@@ -2121,6 +2139,8 @@ function MilestoneActionModal({
   client: ClientRow;
   action: "start_milestone" | "complete_milestone";
   currentMilestoneName: string;
+  offerMilestones: OfferMilestoneRow[];
+  relationLookup: Map<string, string>;
   existingProgress: ClientMilestoneRow | null;
   onClose: () => void;
   onSaved: (
@@ -2137,6 +2157,33 @@ function MilestoneActionModal({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const isComplete = action === "complete_milestone";
+  const currentOfferId =
+    existingProgress?.offer_id ??
+    textInputValue(valueFrom(client, ["offer_milestones_current_offer_id"]));
+  const currentMilestoneId =
+    existingProgress?.milestone_id ??
+    textInputValue(valueFrom(client, ["offer_milestones_current_milestone_id"]));
+  const orderedMilestones = offerMilestones
+    .filter((milestone) => String(milestone.offer_id ?? "") === String(currentOfferId))
+    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+  const currentMilestoneIndex = orderedMilestones.findIndex(
+    (milestone) => String(milestone.glide_row_id ?? "") === String(currentMilestoneId),
+  );
+  const currentConfiguredMilestone =
+    currentMilestoneIndex >= 0 ? orderedMilestones[currentMilestoneIndex] : null;
+  const nextConfiguredMilestone =
+    currentMilestoneIndex >= 0
+      ? orderedMilestones[currentMilestoneIndex + 1] ?? null
+      : null;
+  const completesFinalMilestone =
+    isComplete &&
+    (Boolean(currentConfiguredMilestone?.final_milestone) || !nextConfiguredMilestone);
+  const previewDuration = isComplete
+    ? daysBetweenValues(startDate, completionDate)
+    : null;
+  const previewTimeToHit = isComplete
+    ? daysBetweenValues(valueFrom(client, ["client_age_date_onboarded"]), completionDate)
+    : null;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -2212,6 +2259,38 @@ function MilestoneActionModal({
         </div>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 px-5 py-5">
+            {isComplete ? (
+              <div className="grid gap-3 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wider text-indigo-700">
+                    Completing
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-indigo-950">
+                    {displayValue(
+                      currentConfiguredMilestone?.name ?? currentMilestoneName,
+                      relationLookup,
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wider text-indigo-700">
+                    Next State
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-indigo-950">
+                    {completesFinalMilestone
+                      ? "Final milestone completed"
+                      : displayValue(nextConfiguredMilestone?.name, relationLookup)}
+                  </div>
+                </div>
+                <div className="text-xs text-indigo-800">
+                  Duration: {previewDuration === null ? "--" : `${previewDuration} days`}
+                </div>
+                <div className="text-xs text-indigo-800">
+                  Time to hit:{" "}
+                  {previewTimeToHit === null ? "--" : `${previewTimeToHit} days`}
+                </div>
+              </div>
+            ) : null}
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Start Date
@@ -2902,6 +2981,22 @@ function PathwaysSection({
           milestone_id: String(milestoneValue),
         } as ClientMilestoneRow)
       : null);
+  const currentConfiguredMilestone = sortedOfferMilestones.find(
+    (milestone) =>
+      isPresent(milestone.glide_row_id) &&
+      String(milestone.glide_row_id) === String(milestoneValue),
+  );
+  const currentConfiguredIndex = currentConfiguredMilestone
+    ? sortedOfferMilestones.findIndex(
+        (milestone) =>
+          String(milestone.glide_row_id ?? "") ===
+          String(currentConfiguredMilestone.glide_row_id ?? ""),
+      )
+    : -1;
+  const nextConfiguredMilestone =
+    currentConfiguredIndex >= 0
+      ? sortedOfferMilestones[currentConfiguredIndex + 1] ?? null
+      : null;
   const canShowActions =
     canAdvanceMilestones && isPresent(offerValue) && isPresent(milestoneValue);
   const configuredMilestoneIds = new Set(
@@ -2917,7 +3012,13 @@ function PathwaysSection({
     const isCurrent =
       isPresent(milestoneId) && String(milestoneId) === String(milestoneValue);
     let status = "Not started";
-    if (isPresent(progress?.completion_date)) status = "Completed";
+    if (
+      isCurrent &&
+      isPresent(progress?.completion_date) &&
+      (milestone.final_milestone || !nextConfiguredMilestone)
+    ) {
+      status = "Final completed";
+    } else if (isPresent(progress?.completion_date)) status = "Completed";
     else if (isCurrent) status = "Current";
     else if (isPresent(progress?.start_date)) status = "Started";
 
@@ -2968,6 +3069,9 @@ function PathwaysSection({
   const lastCompletedMilestone = completedMilestones[0] ?? null;
   const hasCurrentStarted = isPresent(currentProgress?.start_date);
   const hasCurrentCompleted = isPresent(currentProgress?.completion_date);
+  const hasFinalCompleted =
+    hasCurrentCompleted &&
+    (Boolean(currentConfiguredMilestone?.final_milestone) || !nextConfiguredMilestone);
   const showStartAction = canShowActions && !hasCurrentStarted;
   const showCompleteAction = canShowActions && !hasCurrentCompleted;
   const daysInCurrentMilestone =
@@ -2989,7 +3093,13 @@ function PathwaysSection({
             <span className="font-medium text-[#162b3e]">
               {displayValue(milestoneValue, relationLookup)}
             </span>
-            {isPresent(currentProgress?.start_date) ? (
+            {hasFinalCompleted ? (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                Final milestone completed
+              </span>
+            ) : hasCurrentCompleted ? (
+              <span>Completed {formatDate(currentProgress?.completion_date)}</span>
+            ) : isPresent(currentProgress?.start_date) ? (
               <span>Started {formatDate(currentProgress?.start_date)}</span>
             ) : (
               <span>Not started yet</span>
@@ -3370,6 +3480,7 @@ export function ClientDetail() {
   const [creatingContract, setCreatingContract] = useState(false);
   const [editingContract, setEditingContract] = useState<ContractRow | null>(null);
   const [archivingContractId, setArchivingContractId] = useState<string | null>(null);
+  const [isAppOwnedClient, setIsAppOwnedClient] = useState(false);
   const [milestoneAction, setMilestoneAction] = useState<{
     action: "start_milestone" | "complete_milestone";
     progress: ClientMilestoneRow | null;
@@ -3406,6 +3517,7 @@ export function ClientDetail() {
       if (clientError) {
         setError(clientError.message);
         setClient(null);
+        setIsAppOwnedClient(false);
         setLoading(false);
         return;
       }
@@ -3413,6 +3525,7 @@ export function ClientDetail() {
       if (effectiveCompanyId && nextClient.company_id !== effectiveCompanyId) {
         setError("This client is outside your current company access.");
         setClient(null);
+        setIsAppOwnedClient(false);
         setLoading(false);
         return;
       }
@@ -3423,10 +3536,12 @@ export function ClientDetail() {
       ) {
         setError("This client is not assigned to your account.");
         setClient(null);
+        setIsAppOwnedClient(false);
         setLoading(false);
         return;
       }
       setClient(nextClient);
+      setIsAppOwnedClient(Boolean(appClient));
       const relationIds = pathwayFields.flatMap(([, candidates]) =>
         extractGlideIds(valueFrom(nextClient, candidates)),
       );
@@ -3493,12 +3608,19 @@ export function ClientDetail() {
           .select("program_value, program_label, program_emoji")
           .not("program_value", "is", null)
           .order("index", { ascending: true }),
-        supabase
-          .from("backup_choices")
-          .select(
-            "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display",
-          )
-          .order("index", { ascending: true }),
+        appPathwayCompany?.id
+          ? supabase
+              .from("company_outcome_definitions")
+              .select("outcome_type, value, label, position")
+              .eq("company_id", appPathwayCompany.id)
+              .eq("status", "active")
+              .order("position", { ascending: true })
+          : supabase
+              .from("backup_choices")
+              .select(
+                "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display",
+              )
+              .order("index", { ascending: true }),
         supabase
           .from("backup_company_clients_milestones")
           .select("*")
@@ -3548,8 +3670,36 @@ export function ClientDetail() {
           ...((contractRows ?? []) as ContractRow[]),
         ]);
         setProgramChoices((choices ?? []) as ProgramChoice[]);
+        const nextOutcomeChoices = appPathwayCompany?.id
+          ? outcomeChoicesFromDefinitions(
+              (outcomeChoiceRows ?? []) as Record<string, unknown>[],
+            )
+          : outcomeChoicesFromRows(
+              (outcomeChoiceRows ?? []) as OutcomeChoiceRow[],
+            );
+        const hasAppOutcomeChoices =
+          nextOutcomeChoices.success.length > 0 ||
+          nextOutcomeChoices.progress.length > 0 ||
+          nextOutcomeChoices.buyIn.length > 0;
         setOutcomeChoices(
-          outcomeChoicesFromRows((outcomeChoiceRows ?? []) as OutcomeChoiceRow[]),
+          appPathwayCompany?.id && !hasAppOutcomeChoices
+            ? {
+                success: [
+                  { value: "yes", label: "Yes" },
+                  { value: "no", label: "No" },
+                ],
+                progress: [
+                  { value: "green", label: "Green" },
+                  { value: "yellow", label: "Yellow" },
+                  { value: "red", label: "Red" },
+                ],
+                buyIn: [
+                  { value: "green", label: "Green" },
+                  { value: "yellow", label: "Yellow" },
+                  { value: "red", label: "Red" },
+                ],
+              }
+            : nextOutcomeChoices,
         );
         setOffers((companyOfferRows ?? []) as OfferRow[]);
         setClientMilestones([
@@ -3676,7 +3826,7 @@ export function ClientDetail() {
   const activeFields =
     tabs.find((tab) => tab.key === activeTab)?.fields ?? basicInfoFields;
   const canEditProfile =
-    capabilities.canEditClient && Boolean(client.company_glide_row_id);
+    capabilities.canEditClient && isAppOwnedClient;
   const canManageAssignment =
     canEditProfile &&
     capabilities.canViewAllClients &&
@@ -3852,8 +4002,8 @@ export function ClientDetail() {
           clientMilestones={clientMilestones}
           offerMilestones={offerMilestones}
           relationLookup={displayLookup}
-          canAdvanceMilestones={capabilities.canAdvanceClientMilestones}
-          canManagePathways={capabilities.canManageClientPathways}
+          canAdvanceMilestones={canEditProfile && capabilities.canAdvanceClientMilestones}
+          canManagePathways={canEditProfile && capabilities.canManageClientPathways}
           onStartMilestone={(progress) =>
             setMilestoneAction({ action: "start_milestone", progress })
           }
@@ -3993,6 +4143,8 @@ export function ClientDetail() {
               ]),
             displayLookup,
           )}
+          offerMilestones={offerMilestones}
+          relationLookup={displayLookup}
           existingProgress={milestoneAction.progress}
           onClose={() => setMilestoneAction(null)}
           onSaved={(updatedClient, milestone, event) => {
