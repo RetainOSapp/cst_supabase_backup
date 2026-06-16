@@ -50,6 +50,42 @@ npm run preview
 
 `npm run build` is the quickest local verification before sharing changes.
 
+## Graphify Architecture Map
+
+Graphify is used as a local orientation layer for RetainOS. It helps identify likely related files, flows, and communities before larger changes. It does not replace `rg` or direct file reads.
+
+Local secrets for Graphify live in `.env.graphify`, which is ignored by git. The generated output lives in `graphify-out/`, which is also ignored by git.
+
+Start-of-session checks:
+
+```bash
+set -a
+source .env.graphify
+set +a
+uvx --from 'graphifyy[gemini]' graphify explain "Project Memory" --graph graphify-out/graph.json
+uvx --from 'graphifyy[gemini]' graphify explain "RetainOS Roadmap" --graph graphify-out/graph.json
+```
+
+Before a larger change, anchor the query to a known node or function:
+
+```bash
+uvx --from 'graphifyy[gemini]' graphify affected "manage-client-quick-update Edge Function" --graph graphify-out/graph.json
+uvx --from 'graphifyy[gemini]' graphify explain "Company Pilot Reconciliation" --graph graphify-out/graph.json
+```
+
+Regenerate after a major milestone:
+
+```bash
+set -a
+source .env.graphify
+set +a
+uvx --from 'graphifyy[gemini]' graphify extract . --backend gemini --max-concurrency 1
+uvx --from 'graphifyy[gemini]' graphify cluster-only . --backend gemini
+uvx --from graphifyy graphify tree --graph graphify-out/graph.json --output graphify-out/GRAPH_TREE.html --root . --label RetainOS
+```
+
+Keep generated files local. Commit distilled architecture notes to `ARCHITECTURE_MAP.md` only when the map meaningfully changes.
+
 ## Supabase Pieces Expected By The App
 
 The frontend assumes these tables and RPCs already exist in the connected

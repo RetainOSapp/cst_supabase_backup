@@ -12,7 +12,7 @@ const CORS_HEADERS = {
 const WRITER_ROLES = new Set(["director", "support", "csm"]);
 const ACTIVE_STATUS_VALUES = new Set(["front-end", "back-end"]);
 const RETENTION_TYPES = new Set(["none", "renewal", "upsell"]);
-const CONTRACT_ACTIONS = new Set(["create", "update", "archive"]);
+const CONTRACT_ACTIONS = new Set(["create", "update", "archive", "delete"]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -260,7 +260,7 @@ Deno.serve(async (req) => {
           client.csm_secondary_assignee_id === actor.legacyMemberId);
       if (!isAssigned) {
         return jsonResponse(
-          { error: "CSMs can create contracts for assigned clients only." },
+          { error: "CSMs can manage contracts for assigned clients only." },
           403,
         );
       }
@@ -270,6 +270,13 @@ Deno.serve(async (req) => {
 
     if (action !== "create" && !contractId) {
       return jsonResponse({ error: "Missing contract id." }, 400);
+    }
+
+    if (action === "delete" && actor.role !== "super_admin") {
+      return jsonResponse(
+        { error: "Only SuperAdmins can delete contracts." },
+        403,
+      );
     }
 
     const startDate = normalizeDate(body.startDate);
@@ -298,7 +305,7 @@ Deno.serve(async (req) => {
         ? Number(((monthlyValue / 30) * contractDays).toFixed(2))
         : null);
 
-    if (action !== "archive" && !startDate && !endDate) {
+    if (!["archive", "delete"].includes(action) && !startDate && !endDate) {
       return jsonResponse(
         { error: "Add at least a start date or end date." },
         400,
@@ -409,6 +416,86 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ok: true,
         contract,
+        client: updatedClient,
+        event,
+      });
+    }
+
+    if (action === "delete") {
+      const { data: existingContract, error: existingContractError } = await supabase
+        .from("client_contracts")
+        .select("*")
+        .eq("glide_row_id", contractId)
+        .eq("client_id", clientLegacyId)
+        .eq("company_id", company.id)
+        .maybeSingle();
+
+      if (existingContractError) throw existingContractError;
+      if (!existingContract) {
+        return jsonResponse({ error: "Contract not found." }, 404);
+      }
+
+      const deletedAt = new Date().toISOString();
+      const { data: event, error: historyError } = await supabase
+        .from("client_history_events")
+        .insert({
+          company_id: company.id,
+          legacy_client_glide_row_id: clientLegacyId,
+          actor_auth_user_id: userData.user.id,
+          actor_member_id: actor.memberId,
+          event_type: "contract_archived",
+          source: "contract_delete",
+          title: `Contract deleted for ${client.client_name ?? "client"}`,
+          summary: "SuperAdmin deleted an app-owned contract row.",
+          notes: nullableText(body.notes),
+          payload: {
+            actor_role: actor.role,
+            deleted_at: deletedAt,
+            contract: existingContract,
+            client,
+          },
+        })
+        .select("*")
+        .single();
+
+      if (historyError) throw historyError;
+
+      const { error: deleteError } = await supabase
+        .from("client_contracts")
+        .delete()
+        .eq("id", existingContract.id);
+
+      if (deleteError) throw deleteError;
+
+      const { updatedClient } = await syncClientContractSummary(
+        supabase,
+        client.id,
+        clientLegacyId,
+      );
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "contract_archived",
+        source: "contract_delete",
+        entity_table: "client_contracts",
+        entity_id: existingContract.id,
+        legacy_glide_row_id: existingContract.glide_row_id,
+        title: "Contract deleted",
+        summary: `Deleted contract for ${updatedClient.client_name ?? clientLegacyId}.`,
+        before_data: existingContract,
+        metadata: {
+          history_event_id: event.id,
+          actor_role: actor.role,
+          client_id: updatedClient.id,
+          deleted_at: deletedAt,
+        },
+      });
+
+      return jsonResponse({
+        ok: true,
+        deletedContractId: existingContract.glide_row_id,
         client: updatedClient,
         event,
       });

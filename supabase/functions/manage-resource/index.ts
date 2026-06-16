@@ -12,6 +12,7 @@ const CORS_HEADERS = {
 const ACTIONS = new Set(["create_resource", "update_resource", "archive_resource"]);
 const RESOURCE_TYPES = new Set(["guide", "video", "template"]);
 const STATUSES = new Set(["draft", "published", "archived"]);
+const RESOURCE_SCOPES = new Set(["retainos_help", "company"]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -134,6 +135,8 @@ Deno.serve(async (req) => {
     const loomEmbedUrl = cleanText(body.loomEmbedUrl);
     const sortOrder = optionalInteger(body.sortOrder);
     const slug = slugify(cleanText(body.slug) || title);
+    const scope = cleanText(body.scope) || "retainos_help";
+    const companyLegacyId = cleanText(body.companyLegacyId);
 
     if (!title) return jsonResponse({ error: "Title is required." }, 400);
     if (!slug) return jsonResponse({ error: "Slug is required." }, 400);
@@ -142,6 +145,12 @@ Deno.serve(async (req) => {
     }
     if (!STATUSES.has(status)) {
       return jsonResponse({ error: "Choose a valid resource status." }, 400);
+    }
+    if (!RESOURCE_SCOPES.has(scope)) {
+      return jsonResponse({ error: "Choose a valid resource library." }, 400);
+    }
+    if (scope === "company" && !companyLegacyId) {
+      return jsonResponse({ error: "Choose a company for company resources." }, 400);
     }
 
     const payload = {
@@ -155,6 +164,8 @@ Deno.serve(async (req) => {
       sort_order: sortOrder,
       is_dynamic: Boolean(body.isDynamic),
       dynamic_key: cleanText(body.dynamicKey) || null,
+      scope,
+      company_legacy_id: scope === "company" ? companyLegacyId : null,
       updated_at: now,
     };
 

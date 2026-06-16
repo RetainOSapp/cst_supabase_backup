@@ -772,62 +772,41 @@ export function Tasks() {
     async function loadTasks() {
       setLoadingTasks(true);
       setTasksError(null);
-      let backupQuery = supabase
-        .from("backup_company_clients_tasks")
+      const usesAppTasks = appTaskCompanyIds.has(companyId);
+      let tasksQuery = supabase
+        .from(usesAppTasks ? "client_tasks" : "backup_company_clients_tasks")
         .select("*")
-        .eq("company_id", companyId);
-
-      let appQuery = supabase
-        .from("client_tasks")
-        .select("*")
-        .eq("company_glide_row_id", companyId);
+        .eq(usesAppTasks ? "company_glide_row_id" : "company_id", companyId);
 
       if (assignedTeamMemberId) {
-        backupQuery = backupQuery.eq("assigned_to_id", assignedTeamMemberId);
-        appQuery = appQuery.eq("assigned_to_id", assignedTeamMemberId);
+        tasksQuery = tasksQuery.eq("assigned_to_id", assignedTeamMemberId);
       } else if (csmId) {
-        backupQuery = backupQuery.eq("assigned_to_id", csmId);
-        appQuery = appQuery.eq("assigned_to_id", csmId);
+        tasksQuery = tasksQuery.eq("assigned_to_id", csmId);
       }
       if (search.trim()) {
         const q = `%${search.trim()}%`;
-        backupQuery = backupQuery.or(
+        tasksQuery = tasksQuery.or(
           `task_name.ilike.${q},task_description.ilike.${q}`,
         );
-        appQuery = appQuery.or(`task_name.ilike.${q},task_description.ilike.${q}`);
       }
-      backupQuery = backupQuery.order("task_due_date", {
-        ascending: true,
-        nullsFirst: false,
-      });
-      appQuery = appQuery.order("task_due_date", {
+      tasksQuery = tasksQuery.order("task_due_date", {
         ascending: true,
         nullsFirst: false,
       });
 
-      const [backupResult, appResult] = await Promise.all([
-        backupQuery.limit(250),
-        appTaskCompanyIds.has(companyId)
-          ? appQuery.limit(250)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+      const tasksResult = await tasksQuery.limit(250);
       if (cancelled) return;
-      if (backupResult.error || appResult.error) {
+      if (tasksResult.error) {
         setTasks([]);
         setClientById(new Map());
         setTasksError(
-          backupResult.error?.message ??
-            appResult.error?.message ??
-            "Failed to load tasks",
+          tasksResult.error?.message ?? "Failed to load tasks",
         );
         setLoadingTasks(false);
         return;
       }
 
-      let rows = [
-        ...((appResult.data ?? []) as TaskRow[]),
-        ...((backupResult.data ?? []) as TaskRow[]),
-      ];
+      let rows = (tasksResult.data ?? []) as TaskRow[];
       if (statusMode === "open") rows = rows.filter((task) => !isClosedTask(task));
       if (statusMode === "closed") rows = rows.filter(isClosedTask);
       setTasks(rows);
@@ -836,27 +815,14 @@ export function Tasks() {
         ...new Set(rows.map((task) => task.client_id).filter(Boolean)),
       ] as string[];
       if (clientIds.length > 0) {
-        const [backupClientsResult, appClientsResult] = await Promise.all([
-          supabase
-            .from("backup_company_clients")
-            .select("glide_row_id, client_name, client_image, program_status_value")
-            .in("glide_row_id", clientIds),
-          appTaskCompanyIds.has(companyId)
-            ? supabase
-                .from("clients")
-                .select("glide_row_id, client_name, client_image, program_status_value")
-                .in("glide_row_id", clientIds)
-            : Promise.resolve({ data: [], error: null }),
-        ]);
+        const clientsResult = await supabase
+          .from(usesAppTasks ? "clients" : "backup_company_clients")
+          .select("glide_row_id, client_name, client_image, program_status_value")
+          .in("glide_row_id", clientIds);
         if (!cancelled) {
-          if (backupClientsResult.error)
-            console.error("Failed to load backup task clients:", backupClientsResult.error);
-          if (appClientsResult.error)
-            console.error("Failed to load app task clients:", appClientsResult.error);
-          const clients = [
-            ...((backupClientsResult.data ?? []) as ClientRow[]),
-            ...((appClientsResult.data ?? []) as ClientRow[]),
-          ];
+          if (clientsResult.error)
+            console.error("Failed to load task clients:", clientsResult.error);
+          const clients = (clientsResult.data ?? []) as ClientRow[];
           setClientById(
             new Map(
               clients.map((client) => [
@@ -912,7 +878,7 @@ export function Tasks() {
           <h1 className="text-xl font-semibold text-gray-900">Tasks</h1>
           <p className="mt-1 text-sm text-gray-500">
             {isUsingAppTasks
-              ? "RetainOS pilot tasks plus CST preview tasks for this company."
+              ? "RetainOS pilot task data for this company."
               : "Read-only task view mirrored from CST into RetainOS."}
           </p>
         </div>

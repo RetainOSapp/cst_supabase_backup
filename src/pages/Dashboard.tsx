@@ -2813,9 +2813,12 @@ export function Dashboard() {
       }
 
       let tasksQuery = supabase
-        .from("backup_company_clients_tasks")
+        .from(appliedUsesAppClients ? "client_tasks" : "backup_company_clients_tasks")
         .select("status_value, assigned_to_id")
-        .eq("company_id", appliedFilters.companyId)
+        .eq(
+          appliedUsesAppClients ? "company_glide_row_id" : "company_id",
+          appliedFilters.companyId,
+        )
         .range(0, 4999);
       if (assignedTeamMemberId) {
         tasksQuery = tasksQuery.eq("assigned_to_id", assignedTeamMemberId);

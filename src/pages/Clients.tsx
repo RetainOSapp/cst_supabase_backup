@@ -44,8 +44,47 @@ interface ClientHistoryEvent {
   progress_status: string | null;
   buy_in_status: string | null;
   notes: string | null;
+  metadata?: {
+    custom_fields?: CustomFieldChange[];
+  } | null;
   created_at: string;
 }
+type CompanyCustomFieldRow = {
+  id: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  field_type:
+    | "text"
+    | "textarea"
+    | "number"
+    | "date"
+    | "boolean"
+    | "single_select"
+    | "multi_select"
+    | "url"
+    | "email";
+  options?: { value: string; label: string }[] | null;
+  position?: number | null;
+  source_key?: string | null;
+  status?: "active" | "archived" | null;
+};
+type ClientCustomFieldValueRow = {
+  id: string;
+  custom_field_id: string;
+  field_key: string;
+  value_text?: string | null;
+  value_json?: unknown;
+  source_key?: string | null;
+};
+type CustomFieldDrafts = Record<string, string>;
+type CustomFieldChange = {
+  id: string;
+  key?: string | null;
+  label?: string | null;
+  before?: string | null;
+  after?: string | null;
+};
 interface CalendarTaskRow {
   glide_row_id: string;
   client_id: string | null;
@@ -114,6 +153,19 @@ const emptyFilters: ClientFilters = {
   lastContact: "",
 };
 const CLIENTS_CACHE_KEY = "cst.clientsRosterState.v1";
+
+function clientFiltersEqual(left: ClientFilters, right: ClientFilters) {
+  return (
+    left.companyId === right.companyId &&
+    left.csmId === right.csmId &&
+    left.secondaryAssigneeId === right.secondaryAssigneeId &&
+    left.offerId === right.offerId &&
+    left.clientName === right.clientName &&
+    left.lastContact === right.lastContact &&
+    left.programs.length === right.programs.length &&
+    left.programs.every((program) => right.programs.includes(program))
+  );
+}
 
 interface ClientsCacheState {
   filters: ClientFilters;
@@ -416,6 +468,192 @@ function formatValue(value: unknown) {
   if (typeof value === "number" || typeof value === "boolean")
     return String(value);
   return JSON.stringify(value);
+}
+
+function customFieldRawValueFromClient(
+  client: ClientRow,
+  field: CompanyCustomFieldRow,
+) {
+  const metadata =
+    client.metadata && typeof client.metadata === "object" && !Array.isArray(client.metadata)
+      ? (client.metadata as Record<string, unknown>)
+      : {};
+  const customFields =
+    metadata.custom_fields &&
+    typeof metadata.custom_fields === "object" &&
+    !Array.isArray(metadata.custom_fields)
+      ? (metadata.custom_fields as Record<string, unknown>)
+      : {};
+  const candidates = [
+    field.key,
+    field.source_key,
+    `custom_fields.${field.key}`,
+    `custom_fields.${field.source_key ?? field.key}`,
+  ].filter((key): key is string => Boolean(key));
+
+  for (const key of candidates) {
+    if (key.startsWith("custom_fields.")) {
+      const nestedKey = key.replace("custom_fields.", "");
+      const value = customFields[nestedKey];
+      if (isPresent(value)) return value;
+      continue;
+    }
+    const directValue = client[key];
+    if (isPresent(directValue)) return directValue;
+    const metadataValue = metadata[key];
+    if (isPresent(metadataValue)) return metadataValue;
+    const customValue = customFields[key];
+    if (isPresent(customValue)) return customValue;
+  }
+
+  return null;
+}
+
+function customFieldInputValue(
+  field: CompanyCustomFieldRow,
+  valueRow: ClientCustomFieldValueRow | undefined,
+  client: ClientRow,
+) {
+  const value =
+    valueRow?.value_json ?? valueRow?.value_text ?? customFieldRawValueFromClient(client, field);
+  if (!isPresent(value)) return "";
+  if (field.field_type === "boolean") {
+    const normalized = String(value).trim().toLowerCase();
+    if (["true", "yes", "1"].includes(normalized)) return "true";
+    if (["false", "no", "0"].includes(normalized)) return "false";
+  }
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
+  return String(value);
+}
+
+function customFieldDraftsFromValues(
+  fields: CompanyCustomFieldRow[],
+  values: ClientCustomFieldValueRow[],
+  client: ClientRow,
+) {
+  const valueByFieldId = new Map(values.map((row) => [row.custom_field_id, row]));
+  return fields.reduce<CustomFieldDrafts>((drafts, field) => {
+    drafts[field.id] = customFieldInputValue(
+      field,
+      valueByFieldId.get(field.id),
+      client,
+    );
+    return drafts;
+  }, {});
+}
+
+function CustomFieldEditorGrid({
+  client,
+  fields,
+  values,
+  drafts,
+  disabled,
+  onChange,
+}: {
+  client: ClientRow;
+  fields: CompanyCustomFieldRow[];
+  values: ClientCustomFieldValueRow[];
+  drafts: CustomFieldDrafts;
+  disabled: boolean;
+  onChange: (fieldId: string, value: string) => void;
+}) {
+  const valueByFieldId = new Map(values.map((row) => [row.custom_field_id, row]));
+  const activeFields = fields
+    .filter((field) => field.status !== "archived")
+    .sort((a, b) => {
+      const positionA = typeof a.position === "number" ? a.position : 9999;
+      const positionB = typeof b.position === "number" ? b.position : 9999;
+      if (positionA !== positionB) return positionA - positionB;
+      return a.label.localeCompare(b.label);
+    });
+
+  if (activeFields.length === 0) return null;
+
+  return (
+    <section className="retainos-section overflow-hidden">
+      <div className="border-b border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
+        <h3 className="retainos-section-title">Custom fields</h3>
+        <p className="retainos-section-copy mt-1">
+          Update company-specific tracking fields for this client.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 px-4 py-4 md:grid-cols-2">
+        {activeFields.map((field) => {
+          const value =
+            drafts[field.id] ??
+            customFieldInputValue(field, valueByFieldId.get(field.id), client);
+          return (
+            <label key={field.id} className="block">
+              <span className="retainos-field-label">{field.label}</span>
+              {field.field_type === "textarea" ? (
+                <textarea
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  rows={3}
+                  className="retainos-input"
+                />
+              ) : field.field_type === "boolean" ? (
+                <select
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  className="retainos-input"
+                >
+                  <option value="">Not set</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              ) : field.field_type === "single_select" &&
+                (field.options?.length ?? 0) > 0 ? (
+                <select
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  className="retainos-input"
+                >
+                  <option value="">Not set</option>
+                  {(field.options ?? []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={
+                    field.field_type === "number"
+                      ? "number"
+                      : field.field_type === "date"
+                        ? "date"
+                        : field.field_type === "email"
+                          ? "email"
+                          : field.field_type === "url"
+                            ? "url"
+                            : "text"
+                  }
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  placeholder={
+                    field.field_type === "multi_select"
+                      ? "Comma-separated values"
+                      : undefined
+                  }
+                  className="retainos-input"
+                />
+              )}
+              {field.description ? (
+                <span className="mt-1 block text-xs text-[#7b8494]">
+                  {field.description}
+                </span>
+              ) : null}
+            </label>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 const displayNameKeys = [
   "name",
@@ -873,6 +1111,11 @@ function QuickUpdateModal({
   const [successChoices, setSuccessChoices] = useState<OutcomeChoice[]>([]);
   const [progressChoices, setProgressChoices] = useState<OutcomeChoice[]>([]);
   const [buyInChoices, setBuyInChoices] = useState<OutcomeChoice[]>([]);
+  const [customFields, setCustomFields] = useState<CompanyCustomFieldRow[]>([]);
+  const [customFieldValues, setCustomFieldValues] = useState<
+    ClientCustomFieldValueRow[]
+  >([]);
+  const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>({});
   const [notes, setNotes] = useState("");
   const [currentOfferName, setCurrentOfferName] = useState("");
   const [currentMilestoneName, setCurrentMilestoneName] = useState("");
@@ -1068,27 +1311,70 @@ function QuickUpdateModal({
       if (companyError || !company) {
         setIsPilotCompany(false);
         setHistoryEvents([]);
+        setCustomFields([]);
+        setCustomFieldValues([]);
+        setCustomFieldDrafts({});
         setLoadingPilotState(false);
         return;
       }
 
       setIsPilotCompany(true);
-      const { data: events, error: eventsError } = await supabase
-        .from("client_history_events")
-        .select(
-          "id, legacy_client_glide_row_id, next_steps, last_contact_at, next_contact_at, success_status, progress_status, buy_in_status, notes, created_at",
-        )
-        .eq("legacy_client_glide_row_id", client.glide_row_id)
-        .order("created_at", { ascending: false })
-        .limit(5);
+      const [eventsResult, customFieldsResult, customFieldValuesResult] =
+        await Promise.all([
+          supabase
+            .from("client_history_events")
+            .select(
+              "id, legacy_client_glide_row_id, next_steps, last_contact_at, next_contact_at, success_status, progress_status, buy_in_status, notes, metadata, created_at",
+            )
+            .eq("legacy_client_glide_row_id", client.glide_row_id)
+            .order("created_at", { ascending: false })
+            .limit(5),
+          supabase
+            .from("company_custom_fields")
+            .select(
+              "id, key, label, description, field_type, options, position, source_key, status",
+            )
+            .eq("company_id", company.id)
+            .eq("entity_type", "client")
+            .eq("status", "active")
+            .order("position", { ascending: true })
+            .order("label", { ascending: true }),
+          supabase
+            .from("client_custom_field_values")
+            .select(
+              "id, custom_field_id, field_key, value_text, value_json, source_key",
+            )
+            .eq("company_id", company.id)
+            .eq("client_id", client.glide_row_id),
+        ]);
 
       if (cancelled) return;
 
-      if (eventsError) {
-        setSaveError(eventsError.message);
+      if (eventsResult.error) {
+        setSaveError(eventsResult.error.message);
       } else {
-        setHistoryEvents((events ?? []) as ClientHistoryEvent[]);
+        setHistoryEvents((eventsResult.data ?? []) as ClientHistoryEvent[]);
       }
+      const nextCustomFields = customFieldsResult.error
+        ? []
+        : ((customFieldsResult.data ?? []) as CompanyCustomFieldRow[]);
+      const nextCustomFieldValues = customFieldValuesResult.error
+        ? []
+        : ((customFieldValuesResult.data ?? []) as ClientCustomFieldValueRow[]);
+      if (customFieldsResult.error) {
+        console.error("Failed to load custom fields:", customFieldsResult.error);
+      }
+      if (customFieldValuesResult.error) {
+        console.error(
+          "Failed to load custom field values:",
+          customFieldValuesResult.error,
+        );
+      }
+      setCustomFields(nextCustomFields);
+      setCustomFieldValues(nextCustomFieldValues);
+      setCustomFieldDrafts(
+        customFieldDraftsFromValues(nextCustomFields, nextCustomFieldValues, client),
+      );
       setLoadingPilotState(false);
     }
 
@@ -1102,6 +1388,28 @@ function QuickUpdateModal({
       cancelled = true;
     };
   }, [client.glide_row_id, companyLegacyId]);
+
+  function applyCustomFieldChanges(changes: CustomFieldChange[]) {
+    if (changes.length === 0) return;
+    setCustomFieldValues((current) => {
+      const byFieldId = new Map(current.map((row) => [row.custom_field_id, row]));
+      for (const change of changes) {
+        const updated: ClientCustomFieldValueRow = {
+          ...(byFieldId.get(change.id) ?? {
+            id: change.id,
+            custom_field_id: change.id,
+            field_key: change.key ?? "",
+          }),
+          custom_field_id: change.id,
+          field_key: change.key ?? byFieldId.get(change.id)?.field_key ?? "",
+          value_text: change.after ?? null,
+          value_json: null,
+        };
+        byFieldId.set(change.id, updated);
+      }
+      return Array.from(byFieldId.values());
+    });
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1123,6 +1431,10 @@ function QuickUpdateModal({
           successStatus,
           progressStatus,
           buyInStatus,
+          customFields: customFields.map((field) => ({
+            id: field.id,
+            value: customFieldDrafts[field.id] ?? "",
+          })),
           notes,
         },
       },
@@ -1145,11 +1457,15 @@ function QuickUpdateModal({
         [data.event as ClientHistoryEvent, ...current].slice(0, 5),
       );
     }
+    const customFieldChanges = Array.isArray(data?.customFields)
+      ? (data.customFields as CustomFieldChange[])
+      : [];
+    applyCustomFieldChanges(customFieldChanges);
     if (data?.client) {
       onClientUpdated(mapAppClientRow(data.client as Record<string, unknown>));
     }
     setNotes("");
-    setSaveMessage("Quick Update saved to RetainOS pilot history.");
+    onClose();
   }
 
   async function completeCurrentMilestone() {
@@ -1323,6 +1639,19 @@ function QuickUpdateModal({
               onChange={setBuyInStatus}
             />
           </div>
+          <CustomFieldEditorGrid
+            client={client}
+            fields={customFields}
+            values={customFieldValues}
+            drafts={customFieldDrafts}
+            disabled={!isPilotCompany || saving}
+            onChange={(fieldId, value) =>
+              setCustomFieldDrafts((current) => ({
+                ...current,
+                [fieldId]: value,
+              }))
+            }
+          />
           <section className="retainos-section overflow-hidden">
             <div className="border-b border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
               <h3 className="retainos-section-title">Journey progress</h3>
@@ -1365,9 +1694,9 @@ function QuickUpdateModal({
             }`}
           >
             {loadingPilotState
-              ? "Checking RetainOS write status..."
+              ? "Checking write status..."
               : isPilotCompany
-                ? "Quick Updates save to RetainOS pilot history. CST preview fields remain unchanged."
+                ? "Quick Updates save to client history. CST preview fields remain unchanged."
                 : "Editing is locked for now while this reads from CST into RetainOS."}
           </div>
           {saveError ? (
@@ -1384,7 +1713,7 @@ function QuickUpdateModal({
             <section className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc]">
               <div className="border-b border-[#e4e9f0] px-4 py-3">
                 <h3 className="text-sm font-semibold text-[#162b3e]">
-                  RetainOS pilot history
+                  Client history
                 </h3>
               </div>
               <div className="divide-y divide-gray-200">
@@ -1433,6 +1762,15 @@ function QuickUpdateModal({
                           )}
                         </span>
                       ) : null}
+                      {(historyEvent.metadata?.custom_fields ?? []).map((field) => (
+                        <span
+                          key={`${historyEvent.id}-${field.id}`}
+                          className="rounded-full bg-white px-2 py-1"
+                        >
+                          {field.label ?? field.key ?? "Custom field"}:{" "}
+                          {field.after ?? "--"}
+                        </span>
+                      ))}
                     </div>
                   </article>
                 ))}
@@ -1961,15 +2299,15 @@ function ClientNotificationsBell({
         <div className="absolute right-0 z-20 mt-3 w-[min(360px,calc(100vw-48px))] overflow-hidden rounded-md border border-[#dfe6ef] bg-white shadow-xl">
           <div className="border-b border-[#edf1f5] px-4 py-3">
             <div className="text-sm font-semibold text-[#162b3e]">
-              Notifications
+              Reminder bell
             </div>
             <div className="mt-0.5 text-xs text-[#6c7684]">
-              Due or coming up in the next 7 days.
+              Short-term client reminders. Use Daily Pulse for the full operating view.
             </div>
           </div>
           {reminders.length === 0 ? (
             <div className="px-4 py-6 text-sm text-[#6c7684]">
-              Nothing needs attention right now.
+              No generated reminders are due or coming up in the next 7 days.
             </div>
           ) : (
             <div className="max-h-[360px] overflow-y-auto py-1">
@@ -2380,7 +2718,7 @@ export function Clients() {
     const useAppClients = appClientCompanyIds.has(appliedFilters.companyId);
     let query = supabase
       .from(useAppClients ? "clients" : "backup_company_clients")
-      .select("*", { count: useAppClients ? "exact" : "planned" })
+      .select("*", { count: "exact" })
       .eq(
         useAppClients ? "company_glide_row_id" : "company_id",
         appliedFilters.companyId,
@@ -2743,6 +3081,24 @@ export function Clients() {
       cancelled = true;
     };
   }, [appClientCompanyIds, appliedFilters.companyId, assignedTeamMemberId]);
+  const hasPendingFilterChanges = useMemo(() => {
+    if (!filters.companyId) return false;
+    const nextAppliedFilters = {
+      ...filters,
+      companyId: effectiveCompanyId || filters.companyId,
+      csmId: assignedTeamMemberId || filters.csmId,
+      secondaryAssigneeId: showSecondaryAssigneeFilter
+        ? filters.secondaryAssigneeId
+        : "",
+    };
+    return !clientFiltersEqual(nextAppliedFilters, appliedFilters);
+  }, [
+    appliedFilters,
+    assignedTeamMemberId,
+    effectiveCompanyId,
+    filters,
+    showSecondaryAssigneeFilter,
+  ]);
   function applyFilters() {
     if (!filters.companyId) return;
     const next = {
@@ -2824,9 +3180,7 @@ export function Clients() {
           <div>
             <h1 className="text-xl font-semibold text-[#162b3e]">Clients</h1>
             <p className="mt-1 text-sm text-[#586273]">
-              {isUsingAppClients
-                ? "RetainOS pilot client data for this company. Quick Updates write to app-owned client state and history."
-                : "Read-only view of clients mirrored from CST into RetainOS."}
+              Manage the selected company's roster, follow-ups, contracts, and client operating views.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -3042,6 +3396,11 @@ export function Clients() {
           )}
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+          {hasPendingFilterChanges ? (
+            <p className="mr-auto text-sm font-medium text-[#9b5c0f]">
+              Apply filters to update results.
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={applyFilters}
@@ -3239,7 +3598,21 @@ export function Clients() {
               <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
             </div>
           ) : clients.length === 0 ? (
-            <EmptyState text="No clients matched these filters." />
+            <div className="rounded-md border border-dashed border-[#cbd2dc] bg-white p-10 text-center">
+              <p className="text-sm font-semibold text-[#162b3e]">
+                No clients matched these filters.
+              </p>
+              <p className="mx-auto mt-2 max-w-md text-sm text-[#586273]">
+                Try clearing status, CSM, offer, date, or search filters to see more clients.
+              </p>
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="mt-4 rounded-full border border-[#cbd2dc] bg-white px-5 py-2.5 text-sm font-semibold text-[#586273] transition-colors hover:bg-[#f7f9fc] hover:text-[#162b3e] cursor-pointer"
+              >
+                Clear filters
+              </button>
+            </div>
           ) : viewMode === "list" ? (
             <ClientTable
               clients={clients}

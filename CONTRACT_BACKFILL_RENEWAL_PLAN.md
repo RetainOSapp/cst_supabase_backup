@@ -1,6 +1,6 @@
 # Contract Backfill And Renewal Reporting Plan
 
-Scope for this document: plan only. Do not change app source, migrations, Edge Functions, `ROADMAP.md`, or `MEMORY.md` until this plan is accepted.
+Scope for this document: implementation guidance and QA gates. Contract backfills remain dry-run/read-only unless `--apply` is explicitly approved for a selected company.
 
 ## Current Implemented State
 
@@ -29,7 +29,8 @@ Scope for this document: plan only. Do not change app source, migrations, Edge F
   - It is dry-run by default and writes only with `--apply`.
 - Generic reconciliation exists in `scripts/reconcile-company-pilot.mjs`.
   - It checks client counts, missing/app-only client rows, status distributions, selected current-state field diffs, assignment validity, app-owned offers/milestones, missing historical app contracts/milestones, history count, audit count, and rollout blockers.
-  - It does not yet compare contract field parity, latest-contract-to-client-summary parity, renewal denominator parity, or formula output parity.
+  - It now reports contract field parity, latest app/mirrored contract-to-client-summary parity, renewal denominator source parity, retention source parity, active up-for-renewal ids, and active-client renewal date source confidence.
+  - Formula output parity against the Dashboard UI/RPC is still a manual QA step.
 - Dashboard KPI canonical RPC v1 exists in `supabase/migrations/20260605103000_dashboard_kpi_counts_canonical.sql`.
   - It supports app-owned pilot/migrated `clients` and mirror-only fallback.
   - It supports multi-program, offer, CSM, secondary CSM, onboarded-date, and reporting-date filters.
@@ -58,11 +59,14 @@ Backfill should be company-by-company and idempotent.
    - `npm run pilot:backfill:company-activity -- --company="Company Name"`
    - Review `contractsToBackfill`, `contractSample`, `clientMilestonesToBackfill`, and `unresolvedClientMilestonesSkipped`.
    - Use the default active/pilot-relevant scope for the first rollout unless product explicitly wants offboarded historical reporting in app-owned tables immediately.
+   - Do not add `--apply` until reconciliation has been captured for the same date range and Jay/Ben accepts the dry-run samples.
 4. Apply the backfill only after the dry-run sample is accepted:
    - `npm run pilot:backfill:company-activity -- --company="Company Name" --apply`
 5. Re-run reconciliation.
    - Missing app contracts should shrink to zero for the selected scope.
    - Remaining missing contracts should be explainable by excluded offboarded/archived clients if `--include-archived` was not used.
+   - Review `contractConfidence.activeClientCoverage.renewalDateSources`; active clients should usually resolve from `client_summary_filtering_date` or `client_summary_end_date`, with any `missing` entries manually explained.
+   - Review `renewalConfidence.currentSummaryOnlyRenewingIds` and `renewalConfidence.historyOnlyRenewingIds` for the selected period before trusting Dashboard renewal reporting.
 6. For companies with meaningful historical reporting needs, run a second dry-run with `--include-archived`.
    - Apply only if the company needs full historical/offboarded contract reporting before pilot use.
 

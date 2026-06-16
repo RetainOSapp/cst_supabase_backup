@@ -571,6 +571,7 @@ Pilot marker cleanup:
 - Keep non-migrated companies at `migration_status = 'mirror_only'`.
 - Before broader rollout, generalize Ethical Scaling scripts to accept a company identifier.
 - Remove UI assumptions that special-case Ethical Scaling.
+- Use `ETHICAL_SCALING_APP_OWNED_AUDIT.md` as the migration-readiness source ledger. It documents which app-owned tables are authoritative for pilot/migrated companies, which `backup_*` reads are intentional mirror-only fallbacks, and which historical contract/milestone/history backfills still need approval.
 
 ## Required Company-By-Company Reconciliation Gate
 
@@ -593,6 +594,9 @@ The report must be reviewed for:
   hidden team members.
 - Offer, milestone, contract, and outcome current-state differences.
 - App-owned contracts, milestones, history events, and audit events.
+- Contract/renewal confidence, including active clients missing app-owned
+  contract history, missing all contract history, missing current renewal dates,
+  and latest app or mirrored contract summary mismatches.
 - Company team roles, active/archived status, and assignment identifiers.
 
 Expected differences caused by validated RetainOS pilot writes are acceptable
@@ -623,6 +627,11 @@ Ethical Scaling checkpoint:
   - Archived pilot/test app-owned offer and milestone rows exist.
   - Historical mirrored contracts and client milestone records are not fully
     backfilled app-side yet; pilot writes are app-owned from this point forward.
+  - Active-client renewal confidence should be reviewed with
+    `npm run pilot:reconcile:company -- --company="Ethical Scaling" --renewal-start=YYYY-MM-DD --renewal-end=YYYY-MM-DD`
+    before broader migration. The `contractConfidence.activeClientCoverage`
+    section shows which active clients still rely on current summaries or
+    mirrored history instead of app-owned `client_contracts`.
 
 ## Open Decisions
 

@@ -108,6 +108,150 @@ function validateChoice(
   }
 }
 
+function parseCustomFieldValue(field: Record<string, unknown>, value: unknown) {
+  const fieldType = cleanText(field.field_type) || "text";
+  const options = Array.isArray(field.options)
+    ? (field.options as Record<string, unknown>[])
+    : [];
+  const optionValues = new Set(
+    options
+      .flatMap((option) => [cleanText(option.value), cleanText(option.label)])
+      .filter(Boolean)
+      .map((option) => option.toLowerCase()),
+  );
+
+  if (value === null || value === undefined || value === "") {
+    return { valueText: null, valueJson: null };
+  }
+
+  if (fieldType === "boolean") {
+    const raw = String(value).trim().toLowerCase();
+    if (!["true", "false", "yes", "no", "1", "0"].includes(raw)) {
+      throw new Error(`${field.label ?? "Custom field"} must be yes or no.`);
+    }
+    const bool = raw === "true" || raw === "yes" || raw === "1";
+    return { valueText: String(bool), valueJson: bool };
+  }
+
+  if (fieldType === "number") {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      throw new Error(`${field.label ?? "Custom field"} must be a number.`);
+    }
+    return { valueText: String(numeric), valueJson: numeric };
+  }
+
+  if (fieldType === "date") {
+    const raw = cleanText(value);
+    const date = new Date(raw);
+    if (!raw || Number.isNaN(date.getTime())) {
+      throw new Error(`${field.label ?? "Custom field"} must be a valid date.`);
+    }
+    return { valueText: raw.slice(0, 10), valueJson: raw.slice(0, 10) };
+  }
+
+  if (fieldType === "multi_select") {
+    const values = Array.isArray(value)
+      ? value.map((item) => cleanText(item)).filter(Boolean)
+      : cleanText(value)
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+    if (optionValues.size > 0) {
+      for (const item of values) {
+        if (!optionValues.has(item.toLowerCase())) {
+          throw new Error(`${field.label ?? "Custom field"} has an unsupported option.`);
+        }
+      }
+    }
+    return { valueText: values.join(", "), valueJson: values };
+  }
+
+  const text = cleanText(value);
+  if (fieldType === "single_select" && text && optionValues.size > 0) {
+    if (!optionValues.has(text.toLowerCase())) {
+      throw new Error(`${field.label ?? "Custom field"} has an unsupported option.`);
+    }
+  }
+  return { valueText: text || null, valueJson: text || null };
+}
+
+async function prepareCustomFieldUpdates(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  clientLegacyId: string,
+  customFields: unknown,
+) {
+  const rows = Array.isArray(customFields) ? customFields : [];
+  const requested = rows
+    .map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>) : null))
+    .filter((row): row is Record<string, unknown> => Boolean(row && cleanText(row.id)));
+
+  if (requested.length === 0) return { changes: [], upserts: [] };
+
+  const ids = [...new Set(requested.map((row) => cleanText(row.id)))];
+  const { data: definitions, error: definitionsError } = await supabase
+    .from("company_custom_fields")
+    .select("id, key, label, field_type, options")
+    .eq("company_id", companyId)
+    .eq("entity_type", "client")
+    .eq("status", "active")
+    .in("id", ids);
+
+  if (definitionsError) throw definitionsError;
+  const definitionById = new Map(
+    ((definitions ?? []) as Record<string, unknown>[]).map((row) => [String(row.id), row]),
+  );
+
+  const { data: existing, error: existingError } = await supabase
+    .from("client_custom_field_values")
+    .select("custom_field_id, value_text, value_json")
+    .eq("company_id", companyId)
+    .eq("client_id", clientLegacyId)
+    .in("custom_field_id", ids);
+
+  if (existingError) throw existingError;
+  const existingById = new Map(
+    ((existing ?? []) as Record<string, unknown>[]).map((row) => [
+      String(row.custom_field_id),
+      row,
+    ]),
+  );
+
+  const changes: Record<string, unknown>[] = [];
+  const upserts: Record<string, unknown>[] = [];
+
+  for (const item of requested) {
+    const id = cleanText(item.id);
+    const definition = definitionById.get(id);
+    if (!definition) throw new Error("A custom field is not enabled for this company.");
+    const parsed = parseCustomFieldValue(definition, item.value);
+    const before = existingById.get(id)?.value_text ?? null;
+    if ((before ?? null) === (parsed.valueText ?? null)) continue;
+    changes.push({
+      id,
+      key: definition.key,
+      label: definition.label,
+      before,
+      after: parsed.valueText,
+    });
+    upserts.push({
+      company_id: companyId,
+      client_id: clientLegacyId,
+      custom_field_id: id,
+      field_key: definition.key,
+      value_text: parsed.valueText,
+      value_json: parsed.valueJson,
+      source_table: "client_custom_field_values",
+      metadata: {
+        updated_from: "client_outcomes",
+      },
+    });
+  }
+
+  return { changes, upserts };
+}
+
 async function loadAllowedOutcomeValues(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
@@ -246,6 +390,12 @@ Deno.serve(async (req) => {
     validateChoice("Success", successStatus, allowedOutcomes.success);
     validateChoice("Progress", progressStatus, allowedOutcomes.progress);
     validateChoice("Buy-in", buyInStatus, allowedOutcomes.buy_in);
+    const customFieldUpdates = await prepareCustomFieldUpdates(
+      supabase,
+      company.id,
+      clientLegacyId,
+      body.customFields,
+    );
 
     const nextOutcomes: Record<string, unknown> = {
       outcomes_success_value: successStatus,
@@ -267,7 +417,11 @@ Deno.serve(async (req) => {
     }
 
     const changes = changedFields(client, nextOutcomes);
-    if (changes.length === 0 && !notes) {
+    if (
+      changes.length === 0 &&
+      customFieldUpdates.changes.length === 0 &&
+      !notes
+    ) {
       return jsonResponse({ error: "No outcome changes to save." }, 400);
     }
 
@@ -282,6 +436,15 @@ Deno.serve(async (req) => {
 
     if (updateError) throw updateError;
 
+    if (customFieldUpdates.upserts.length > 0) {
+      const { error: customFieldsError } = await supabase
+        .from("client_custom_field_values")
+        .upsert(customFieldUpdates.upserts, {
+          onConflict: "company_id,client_id,custom_field_id",
+        });
+      if (customFieldsError) throw customFieldsError;
+    }
+
     const { data: event, error: historyError } = await supabase
       .from("client_history_events")
       .insert({
@@ -294,7 +457,13 @@ Deno.serve(async (req) => {
         title: `Outcomes updated for ${updatedClient.client_name ?? "client"}`,
         summary:
           notes ??
-          `Updated ${changes.length > 0 ? changes.join(", ") : "outcome notes"}.`,
+          `Updated ${
+            changes.length > 0
+              ? changes.join(", ")
+              : customFieldUpdates.changes.length > 0
+                ? "custom fields"
+                : "outcome notes"
+          }.`,
         success_status: successStatus,
         progress_status: progressStatus,
         buy_in_status: buyInStatus,
@@ -312,6 +481,7 @@ Deno.serve(async (req) => {
             outcomes_progress_value: updatedClient.outcomes_progress_value ?? null,
             outcomes_buy_in_value: updatedClient.outcomes_buy_in_value ?? null,
           },
+          custom_fields: customFieldUpdates.changes,
         },
       })
       .select("*")
@@ -334,11 +504,17 @@ Deno.serve(async (req) => {
       after_data: updatedClient,
       metadata: {
         changed_fields: changes,
+        custom_fields: customFieldUpdates.changes,
         history_event_id: event.id,
       },
     });
 
-    return jsonResponse({ ok: true, client: updatedClient, event });
+    return jsonResponse({
+      ok: true,
+      client: updatedClient,
+      event,
+      customFields: customFieldUpdates.changes,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return jsonResponse({ error: message }, 500);

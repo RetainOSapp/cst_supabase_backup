@@ -262,11 +262,12 @@ on conflict (company_id, value) do nothing;
 
 with defaults(value, label, category, position, requires_notes) as (
   values
-    ('budget', 'Budget', 'commercial', 10, false),
-    ('no_longer_needed', 'No longer needed', 'fit', 20, false),
-    ('poor_fit', 'Poor fit', 'fit', 30, true),
-    ('switched_provider', 'Switched provider', 'competitive', 40, false),
-    ('other', 'Other', 'other', 50, true)
+    ('financial', 'Financial', 'commercial', 10, false),
+    ('overwhelm', 'Overwhelm', 'capacity', 20, false),
+    ('paused', 'Paused', 'paused', 30, false),
+    ('spousal', 'Spousal', 'family', 40, false),
+    ('uncertainty', 'Uncertainty', 'uncertainty', 50, false),
+    ('other', 'Other', 'other', 60, true)
 )
 insert into public.company_churn_reasons (
   company_id,

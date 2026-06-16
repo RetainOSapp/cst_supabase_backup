@@ -6,6 +6,11 @@ import {
   type ProgramChoice,
 } from "../lib/clientDisplay.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
+import {
+  loadCompanyNotificationPreferences,
+  mergeNotificationPreferences,
+  type NotificationPreference,
+} from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 
 type ClientRow = Record<string, unknown> & {
@@ -60,6 +65,7 @@ type ContractRow = Record<string, unknown> & {
   last_modified_time?: string | null;
   last_modified_by?: string | null;
 };
+type ContractFilter = "active" | "old" | "archived" | "all";
 const contractTypeOptions = [
   { value: "standard", label: "Standard" },
   { value: "renewal", label: "Renewal" },
@@ -121,6 +127,52 @@ type ClientHistoryEventRow = Record<string, unknown> & {
   buy_in_status?: string | null;
   notes?: string | null;
   created_at?: string | null;
+};
+type CompanyCustomFieldRow = {
+  id: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  field_type:
+    | "text"
+    | "textarea"
+    | "number"
+    | "date"
+    | "boolean"
+    | "single_select"
+    | "multi_select"
+    | "url"
+    | "email";
+  options?: { value: string; label: string }[] | null;
+  is_visible_on_client_detail?: boolean | null;
+  position?: number | null;
+  source_key?: string | null;
+  status?: "active" | "archived" | null;
+};
+type ClientCustomFieldValueRow = {
+  id: string;
+  custom_field_id: string;
+  field_key: string;
+  value_text?: string | null;
+  value_json?: unknown;
+  source_table?: string | null;
+  source_key?: string | null;
+};
+type CustomFieldDrafts = Record<string, string>;
+type CustomFieldChange = {
+  id: string;
+  key?: string | null;
+  label?: string | null;
+  before?: string | null;
+  after?: string | null;
+};
+type ClientLinkRow = {
+  id: string;
+  label: string;
+  url: string;
+  link_type: "audit" | "drive" | "supporting_doc" | "other" | string;
+  status?: string | null;
+  sort_order?: number | null;
 };
 function mapAppClientRow(row: Record<string, unknown>): ClientRow {
   const companyId =
@@ -532,6 +584,68 @@ function contractEndDate(contract: Record<string, unknown>) {
   );
 }
 
+function renewalDateConfidence(contract: Record<string, unknown>) {
+  const linkedEndDate = valueFrom(contract, ["end_date"]);
+  if (isPresent(linkedEndDate)) {
+    return {
+      value: linkedEndDate,
+      sourceLabel: "Linked contract end date",
+      confidenceLabel: "High",
+    };
+  }
+
+  const filteringDate = valueFrom(contract, ["current_contract_end_date_for_filtering"]);
+  if (isPresent(filteringDate)) {
+    return {
+      value: filteringDate,
+      sourceLabel: "Client summary filtering date",
+      confidenceLabel: "High",
+    };
+  }
+
+  const explicitEndDate = valueFrom(contract, ["current_contract_end_date"]);
+  if (isPresent(explicitEndDate)) {
+    return {
+      value: explicitEndDate,
+      sourceLabel: "Client summary end date",
+      confidenceLabel: "High",
+    };
+  }
+
+  const calculatedEndDate = addDays(
+    valueFrom(contract, ["start_date", "current_contract_start_date"]),
+    valueFrom(contract, ["current_contract_of_days", "contract_days", "days"]),
+  );
+  if (isPresent(calculatedEndDate)) {
+    return {
+      value: calculatedEndDate,
+      sourceLabel: "Calculated from start date and days",
+      confidenceLabel: "Medium",
+    };
+  }
+
+  return {
+    value: null,
+    sourceLabel: "Missing renewal date",
+    confidenceLabel: "Missing",
+  };
+}
+
+function contractSourceLabel(contract: Record<string, unknown>) {
+  if (isCurrentSummaryContract(contract)) return "Client current summary";
+  if (typeof contract.id === "string") return "RetainOS contract history";
+  return "Glide mirror history";
+}
+
+function isCurrentSummaryContract(contract: Record<string, unknown>) {
+  return [
+    "current_contract_start_date",
+    "current_contract_of_days",
+    "current_contract_end_date",
+    "current_contract_end_date_for_filtering",
+  ].some((key) => isPresent(contract[key]));
+}
+
 function getContractStatus(contract: Record<string, unknown>) {
   const status = valueFrom(contract, ["status"]);
   if (typeof status === "string" && status.toLowerCase() === "archived") {
@@ -543,6 +657,17 @@ function getContractStatus(contract: Record<string, unknown>) {
   const endDate = new Date(String(end));
   if (Number.isNaN(endDate.getTime())) return "Open";
   return endDate.getTime() >= Date.now() ? "Active" : "Expired";
+}
+
+function contractMatchesFilter(
+  contract: Record<string, unknown>,
+  filter: ContractFilter,
+) {
+  if (filter === "all") return true;
+  const status = getContractStatus(contract);
+  if (filter === "archived") return status === "Archived";
+  if (filter === "old") return status === "Expired";
+  return status === "Active" || status === "Open";
 }
 
 function isAppOwnedContract(contract: Record<string, unknown>) {
@@ -646,6 +771,196 @@ function displayValue(value: unknown, lookup = new Map<string, string>()): strin
     }
   }
   return formatValue(value);
+}
+
+function customFieldRawValueFromClient(
+  client: ClientRow,
+  field: CompanyCustomFieldRow,
+) {
+  const metadata =
+    client.metadata && typeof client.metadata === "object" && !Array.isArray(client.metadata)
+      ? (client.metadata as Record<string, unknown>)
+      : {};
+  const customFields =
+    metadata.custom_fields &&
+    typeof metadata.custom_fields === "object" &&
+    !Array.isArray(metadata.custom_fields)
+      ? (metadata.custom_fields as Record<string, unknown>)
+      : {};
+  const candidates = [
+    field.key,
+    field.source_key,
+    `custom_fields.${field.key}`,
+    `custom_fields.${field.source_key ?? field.key}`,
+  ].filter((key): key is string => Boolean(key));
+
+  for (const key of candidates) {
+    if (key.startsWith("custom_fields.")) {
+      const nestedKey = key.replace("custom_fields.", "");
+      const value = customFields[nestedKey];
+      if (isPresent(value)) return value;
+      continue;
+    }
+    const directValue = client[key];
+    if (isPresent(directValue)) return directValue;
+    const metadataValue = metadata[key];
+    if (isPresent(metadataValue)) return metadataValue;
+    const customValue = customFields[key];
+    if (isPresent(customValue)) return customValue;
+  }
+
+  return null;
+}
+
+function customFieldInputValue(
+  field: CompanyCustomFieldRow,
+  valueRow: ClientCustomFieldValueRow | undefined,
+  client: ClientRow,
+) {
+  const value =
+    valueRow?.value_json ?? valueRow?.value_text ?? customFieldRawValueFromClient(client, field);
+  if (!isPresent(value)) return "";
+  if (field.field_type === "boolean") {
+    const normalized = String(value).trim().toLowerCase();
+    if (["true", "yes", "1"].includes(normalized)) return "true";
+    if (["false", "no", "0"].includes(normalized)) return "false";
+  }
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
+  return String(value);
+}
+
+function customFieldDraftsFromValues(
+  fields: CompanyCustomFieldRow[],
+  values: ClientCustomFieldValueRow[],
+  client: ClientRow,
+) {
+  const valueByFieldId = new Map(values.map((row) => [row.custom_field_id, row]));
+  return fields.reduce<CustomFieldDrafts>((drafts, field) => {
+    drafts[field.id] = customFieldInputValue(
+      field,
+      valueByFieldId.get(field.id),
+      client,
+    );
+    return drafts;
+  }, {});
+}
+
+function CustomFieldEditorGrid({
+  client,
+  fields,
+  values,
+  drafts,
+  disabled,
+  onChange,
+}: {
+  client: ClientRow;
+  fields: CompanyCustomFieldRow[];
+  values: ClientCustomFieldValueRow[];
+  drafts: CustomFieldDrafts;
+  disabled: boolean;
+  onChange: (fieldId: string, value: string) => void;
+}) {
+  const valueByFieldId = new Map(values.map((row) => [row.custom_field_id, row]));
+  const activeFields = fields
+    .filter((field) => field.status !== "archived")
+    .sort((a, b) => {
+      const positionA = typeof a.position === "number" ? a.position : 9999;
+      const positionB = typeof b.position === "number" ? b.position : 9999;
+      if (positionA !== positionB) return positionA - positionB;
+      return a.label.localeCompare(b.label);
+    });
+
+  if (activeFields.length === 0) return null;
+
+  return (
+    <section className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
+      <div className="mb-4">
+        <h3 className="text-sm font-semibold text-[#162b3e]">Custom fields</h3>
+        <p className="mt-1 text-sm text-[#586273]">
+          Update company-specific tracking fields for this client.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {activeFields.map((field) => {
+          const value =
+            drafts[field.id] ??
+            customFieldInputValue(field, valueByFieldId.get(field.id), client);
+          const commonClass =
+            "mt-1 w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] disabled:bg-[#f1f4f8] disabled:text-[#7b8494]";
+          return (
+            <label key={field.id} className="block">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#586273]">
+                {field.label}
+              </span>
+              {field.field_type === "textarea" ? (
+                <textarea
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  rows={3}
+                  className={commonClass}
+                />
+              ) : field.field_type === "boolean" ? (
+                <select
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  className={commonClass}
+                >
+                  <option value="">Not set</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              ) : field.field_type === "single_select" &&
+                (field.options?.length ?? 0) > 0 ? (
+                <select
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  className={commonClass}
+                >
+                  <option value="">Not set</option>
+                  {(field.options ?? []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={
+                    field.field_type === "number"
+                      ? "number"
+                      : field.field_type === "date"
+                        ? "date"
+                        : field.field_type === "email"
+                          ? "email"
+                          : field.field_type === "url"
+                            ? "url"
+                            : "text"
+                  }
+                  value={value}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                  disabled={disabled}
+                  placeholder={
+                    field.field_type === "multi_select"
+                      ? "Comma-separated values"
+                      : undefined
+                  }
+                  className={commonClass}
+                />
+              )}
+              {field.description ? (
+                <span className="mt-1 block text-xs text-[#7b8494]">
+                  {field.description}
+                </span>
+              ) : null}
+            </label>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function extractGlideIds(value: unknown): string[] {
@@ -952,6 +1267,124 @@ function milestoneStatusClasses(status: string) {
   return "border-gray-200 bg-gray-50 text-gray-600";
 }
 
+type ProgramTimelineMarkerTone =
+  | "purple"
+  | "green"
+  | "amber"
+  | "orange"
+  | "gray"
+  | "navy";
+
+type ProgramTimelineMarker = {
+  key: string;
+  label: string;
+  day: number;
+  tone: ProgramTimelineMarkerTone;
+  position?: "top" | "bottom";
+  labelLane?: number;
+};
+
+const PROGRAM_TIMELINE_OPTIONS = [
+  { label: "3-month", days: 90 },
+  { label: "6-month", days: 180 },
+  { label: "12-month", days: 365 },
+  { label: "2-year", days: 730 },
+];
+
+const PROGRAM_TIMELINE_TONE_CLASSES: Record<
+  ProgramTimelineMarkerTone,
+  { dot: string; text: string }
+> = {
+  purple: { dot: "bg-[#5b54c6]", text: "text-[#5b54c6]" },
+  green: { dot: "bg-[#2db585]", text: "text-[#16845f]" },
+  amber: { dot: "bg-[#f59e0b]", text: "text-[#b86f00]" },
+  orange: { dot: "bg-[#e4572e]", text: "text-[#c2411f]" },
+  gray: { dot: "bg-[#b7bbc3]", text: "text-[#8c919b]" },
+  navy: { dot: "bg-[#162b3e]", text: "text-[#162b3e]" },
+};
+
+function nearestProgramTimelineOption(days: number | null) {
+  if (!days || days <= 0) return PROGRAM_TIMELINE_OPTIONS[0];
+  return PROGRAM_TIMELINE_OPTIONS.reduce((nearest, option) =>
+    Math.abs(option.days - days) < Math.abs(nearest.days - days)
+      ? option
+      : nearest,
+  );
+}
+
+function assignProgramTimelineLanes(
+  markers: ProgramTimelineMarker[],
+  totalDays: number,
+) {
+  const plannedMarkers = markers
+    .filter((marker) => marker.key !== "kickoff" && marker.key !== "program-end")
+    .sort((a, b) => a.day - b.day);
+  const laneByKey = new Map<string, number>();
+  let previousPercent: number | null = null;
+  let nextLane = 0;
+
+  for (const marker of plannedMarkers) {
+    const percent = (marker.day / totalDays) * 100;
+    if (previousPercent !== null && Math.abs(percent - previousPercent) < 7) {
+      nextLane = nextLane === 0 ? 1 : 0;
+    } else {
+      nextLane = 0;
+    }
+    laneByKey.set(marker.key, nextLane);
+    previousPercent = percent;
+  }
+
+  return markers.map((marker) => ({
+    ...marker,
+    labelLane: laneByKey.get(marker.key) ?? 0,
+  }));
+}
+
+function ProgramTimelineMarkerDot({
+  marker,
+  totalDays,
+}: {
+  marker: ProgramTimelineMarker;
+  totalDays: number;
+}) {
+  const tone = PROGRAM_TIMELINE_TONE_CLASSES[marker.tone];
+  const percent = Math.max(0, Math.min(100, (marker.day / totalDays) * 100));
+  const left = `${percent}%`;
+  const edgePosition =
+    percent <= 4
+      ? "translate-x-0 items-start text-left"
+      : percent >= 96
+        ? "-translate-x-full items-end text-right"
+        : "-translate-x-1/2 items-center text-center";
+  const dotPosition =
+    percent <= 4
+      ? "translate-x-0"
+      : percent >= 96
+        ? "-translate-x-full"
+        : "-translate-x-1/2";
+  const labelOffset = marker.labelLane === 1 ? "bottom-11" : "bottom-5";
+  const label = (
+    <div
+      className={`w-32 text-xs font-semibold leading-4 sm:w-36 ${tone.text}`}
+    >
+      <div>{marker.label}</div>
+      <div className="font-medium text-[#6c7684]">Day {marker.day}</div>
+    </div>
+  );
+
+  return (
+    <div
+      className="absolute top-0 z-20 -translate-y-1/2"
+      style={{ left }}
+    >
+      <div className={`absolute ${labelOffset} ${edgePosition}`}>{label}</div>
+      <div
+        className={`h-4 w-4 ${dotPosition} rounded-full border-2 border-white shadow-sm ${tone.dot}`}
+      />
+    </div>
+  );
+}
+
 function ClientProfileEditModal({
   client,
   teamMembers,
@@ -1047,7 +1480,7 @@ function ClientProfileEditModal({
               Edit Client Profile
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Saves to RetainOS pilot client data and history.
+              Saves client profile changes and history.
             </p>
           </div>
           <button
@@ -1179,13 +1612,21 @@ function ClientProfileEditModal({
 function ClientOutcomesEditModal({
   client,
   choices,
+  customFields,
+  customFieldValues,
   onClose,
   onSaved,
 }: {
   client: ClientRow;
   choices: OutcomeChoiceSets;
+  customFields: CompanyCustomFieldRow[];
+  customFieldValues: ClientCustomFieldValueRow[];
   onClose: () => void;
-  onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
+  onSaved: (
+    client: ClientRow,
+    event: ClientHistoryEventRow | null,
+    customFields: CustomFieldChange[],
+  ) => void;
 }) {
   const [successStatus, setSuccessStatus] = useState(
     textInputValue(
@@ -1215,8 +1656,16 @@ function ClientOutcomesEditModal({
     ),
   );
   const [notes, setNotes] = useState("");
+  const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>(
+    () => customFieldDraftsFromValues(customFields, customFieldValues, client),
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  useEffect(() => {
+    setCustomFieldDrafts(
+      customFieldDraftsFromValues(customFields, customFieldValues, client),
+    );
+  }, [client.glide_row_id, customFieldValues, customFields, client]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1233,6 +1682,10 @@ function ClientOutcomesEditModal({
           progressStatus,
           buyInStatus,
           notes,
+          customFields: customFields.map((field) => ({
+            id: field.id,
+            value: customFieldDrafts[field.id] ?? "",
+          })),
         },
       },
     );
@@ -1251,6 +1704,7 @@ function ClientOutcomesEditModal({
       onSaved(
         mapAppClientRow(data.client as Record<string, unknown>),
         (data.event as ClientHistoryEventRow | undefined) ?? null,
+        (data.customFields as CustomFieldChange[] | undefined) ?? [],
       );
       onClose();
     }
@@ -1337,6 +1791,24 @@ function ClientOutcomesEditModal({
             />
           </label>
 
+          {customFields.length > 0 ? (
+            <div className="mt-4">
+              <CustomFieldEditorGrid
+                client={client}
+                fields={customFields}
+                values={customFieldValues}
+                drafts={customFieldDrafts}
+                disabled={saving}
+                onChange={(fieldId, value) =>
+                  setCustomFieldDrafts((current) => ({
+                    ...current,
+                    [fieldId]: value,
+                  }))
+                }
+              />
+            </div>
+          ) : null}
+
           {saveError ? (
             <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {saveError}
@@ -1369,12 +1841,20 @@ function ClientOutcomesInlineEditor({
   client,
   choices,
   canEdit,
+  customFields,
+  customFieldValues,
   onSaved,
 }: {
   client: ClientRow;
   choices: OutcomeChoiceSets;
   canEdit: boolean;
-  onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
+  customFields: CompanyCustomFieldRow[];
+  customFieldValues: ClientCustomFieldValueRow[];
+  onSaved: (
+    client: ClientRow,
+    event: ClientHistoryEventRow | null,
+    customFields: CustomFieldChange[],
+  ) => void;
 }) {
   const currentSuccess = textInputValue(
     valueFrom(client, [
@@ -1401,21 +1881,41 @@ function ClientOutcomesInlineEditor({
   const [progressStatus, setProgressStatus] = useState(currentProgress);
   const [buyInStatus, setBuyInStatus] = useState(currentBuyIn);
   const [notes, setNotes] = useState("");
+  const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>(
+    () => customFieldDraftsFromValues(customFields, customFieldValues, client),
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const currentCustomFieldDrafts = useMemo(
+    () => customFieldDraftsFromValues(customFields, customFieldValues, client),
+    [client, customFieldValues, customFields],
+  );
 
   useEffect(() => {
     setSuccessStatus(currentSuccess);
     setProgressStatus(currentProgress);
     setBuyInStatus(currentBuyIn);
+    setCustomFieldDrafts(currentCustomFieldDrafts);
     setNotes("");
     setSaveError(null);
-  }, [client.glide_row_id, currentBuyIn, currentProgress, currentSuccess]);
+  }, [
+    client.glide_row_id,
+    currentBuyIn,
+    currentCustomFieldDrafts,
+    currentProgress,
+    currentSuccess,
+  ]);
 
   const hasChanges =
     successStatus !== currentSuccess ||
     progressStatus !== currentProgress ||
     buyInStatus !== currentBuyIn ||
+    customFields.some(
+      (field) =>
+        (customFieldDrafts[field.id] ?? "") !==
+        (currentCustomFieldDrafts[field.id] ?? ""),
+    ) ||
     notes.trim() !== "";
 
   async function handleSave() {
@@ -1432,6 +1932,10 @@ function ClientOutcomesInlineEditor({
           progressStatus,
           buyInStatus,
           notes,
+          customFields: customFields.map((field) => ({
+            id: field.id,
+            value: customFieldDrafts[field.id] ?? "",
+          })),
         },
       },
     );
@@ -1450,6 +1954,7 @@ function ClientOutcomesInlineEditor({
       onSaved(
         mapAppClientRow(data.client as Record<string, unknown>),
         (data.event as ClientHistoryEventRow | undefined) ?? null,
+        (data.customFields as CustomFieldChange[] | undefined) ?? [],
       );
       setNotes("");
     }
@@ -1488,6 +1993,21 @@ function ClientOutcomesInlineEditor({
         {renderSelect("Progress", progressStatus, choices.progress, setProgressStatus)}
         {renderSelect("Buy-in", buyInStatus, choices.buyIn, setBuyInStatus)}
       </div>
+      {customFields.length > 0 ? (
+        <CustomFieldEditorGrid
+          client={client}
+          fields={customFields}
+          values={customFieldValues}
+          drafts={customFieldDrafts}
+          disabled={!canEdit || saving}
+          onChange={(fieldId, value) =>
+            setCustomFieldDrafts((current) => ({
+              ...current,
+              [fieldId]: value,
+            }))
+          }
+        />
+      ) : null}
       {canEdit ? (
         <>
           <label className="block">
@@ -1905,8 +2425,8 @@ function NewContractModal({
             </h2>
             <p className="mt-1 text-sm text-gray-500">
               {isEditing
-                ? "Updates RetainOS pilot contract data and refreshes the client summary."
-                : "Saves to RetainOS pilot contract data and updates the client summary."}
+                ? "Updates contract history and refreshes the client summary."
+                : "Saves contract history and updates the client summary."}
             </p>
           </div>
           <button
@@ -1945,7 +2465,7 @@ function NewContractModal({
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Contract Days
+                  Expected Duration Days
                 </span>
                 <input
                   type="number"
@@ -1955,6 +2475,10 @@ function NewContractModal({
                   placeholder="Optional"
                   className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
                 />
+                <p className="mt-1 text-xs text-gray-500">
+                  Used when no end/renewal date is set. If dates are set, the
+                  renewal date wins.
+                </p>
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -2616,6 +3140,321 @@ function FieldGrid({
   );
 }
 
+type ClientExternalLink = {
+  key: string;
+  label: string;
+  url: string;
+  description: string;
+};
+
+function firstUrlFrom(client: ClientRow, candidates: string[]) {
+  const value = valueFrom(client, candidates);
+  if (!isPresent(value)) return null;
+  const text = String(value).trim();
+  const match = text.match(/https?:\/\/[^\s<>"')]+/i);
+  if (!match) return null;
+  return match[0].replace(/[.,;:]+$/, "");
+}
+
+function getClientExternalLinks(client: ClientRow): ClientExternalLink[] {
+  const definitions: Array<Omit<ClientExternalLink, "url"> & { candidates: string[] }> = [
+    {
+      key: "audits",
+      label: "Audits",
+      description: "Audit, diagnostic, or review document.",
+      candidates: [
+        "audit_link",
+        "audits_link",
+        "audit_url",
+        "audits_url",
+        "audit_folder",
+        "audits_folder",
+        "audit_drive_folder",
+        "client_audit_link",
+        "client_audits_link",
+        "diagnostics_link",
+        "diagnostic_link",
+        "diagnostics_url",
+        "diagnostic_url",
+        "diagnostics_folder",
+        "diagnostic_folder",
+        "client_diagnostics_link",
+      ],
+    },
+    {
+      key: "drive",
+      label: "Google Drive",
+      description: "Client folder, assets, or shared workspace.",
+      candidates: [
+        "google_drive_folder",
+        "google_drive_url",
+        "google_drive_link",
+        "drive_folder",
+        "drive_folder_url",
+        "drive_folder_link",
+        "drive_link",
+        "folder_url",
+        "client_drive_folder",
+        "client_drive_link",
+        "client_folder",
+      ],
+    },
+    {
+      key: "workspace",
+      label: "External Link",
+      description: "Other operational link for this client.",
+      candidates: [
+        "external_link",
+        "client_link",
+        "notes_link",
+        "document_link",
+        "supporting_doc_link",
+        "supporting_docs_link",
+        "supporting_document_link",
+        "workspace_link",
+        "client_workspace_link",
+        "slack_channel_link",
+        "folder_link",
+        "url",
+      ],
+    },
+  ];
+
+  const seen = new Set<string>();
+  return definitions.flatMap((definition) => {
+    const url = firstUrlFrom(client, definition.candidates);
+    if (!url || seen.has(url)) return [];
+    seen.add(url);
+    return [
+      {
+        key: definition.key,
+        label: definition.label,
+        description: definition.description,
+        url,
+      },
+    ];
+  });
+}
+
+function ClientExternalLinksSection({ client }: { client: ClientRow }) {
+  const { capabilities } = useAccountContext();
+  const detectedLinks = getClientExternalLinks(client);
+  const [appLinks, setAppLinks] = useState<ClientLinkRow[]>([]);
+  const [isLoadingLinks, setIsLoadingLinks] = useState(false);
+  const [linkLabel, setLinkLabel] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkType, setLinkType] = useState("supporting_doc");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [isSavingLink, setIsSavingLink] = useState(false);
+  const clientLegacyId =
+    typeof client.glide_row_id === "string" ? client.glide_row_id : "";
+  const isAppOwnedClient =
+    Boolean(clientLegacyId) &&
+    typeof client.id === "string" &&
+    typeof client.company_glide_row_id === "string";
+  const canManageLinks =
+    isAppOwnedClient && capabilities.canEditClient && Boolean(clientLegacyId);
+
+  useEffect(() => {
+    if (!clientLegacyId || !isAppOwnedClient) {
+      setAppLinks([]);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadLinks() {
+      setIsLoadingLinks(true);
+      const { data, error } = await supabase
+        .from("client_links")
+        .select("id, label, url, link_type, status, sort_order")
+        .eq("legacy_client_glide_row_id", clientLegacyId)
+        .eq("status", "active")
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load client links:", error);
+        setAppLinks([]);
+      } else {
+        setAppLinks((data ?? []) as ClientLinkRow[]);
+      }
+      setIsLoadingLinks(false);
+    }
+
+    loadLinks();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientLegacyId, isAppOwnedClient]);
+
+  async function addClientLink(event: FormEvent) {
+    event.preventDefault();
+    if (!canManageLinks) return;
+    setLinkError(null);
+    setIsSavingLink(true);
+    const { data, error } = await supabase.functions.invoke("manage-client-link", {
+      body: {
+        action: "create",
+        clientLegacyId,
+        label: linkLabel,
+        url: linkUrl,
+        linkType,
+      },
+    });
+    setIsSavingLink(false);
+    if (error || data?.error) {
+      setLinkError(data?.error ?? error?.message ?? "Unable to add link.");
+      return;
+    }
+    if (data?.item) {
+      setAppLinks((links) => [...links, data.item as ClientLinkRow]);
+      setLinkLabel("");
+      setLinkUrl("");
+      setLinkType("supporting_doc");
+    }
+  }
+
+  async function archiveClientLink(link: ClientLinkRow) {
+    if (!canManageLinks) return;
+    setLinkError(null);
+    const { data, error } = await supabase.functions.invoke("manage-client-link", {
+      body: {
+        action: "archive",
+        clientLegacyId,
+        linkId: link.id,
+      },
+    });
+    if (error || data?.error) {
+      setLinkError(data?.error ?? error?.message ?? "Unable to archive link.");
+      return;
+    }
+    setAppLinks((links) => links.filter((item) => item.id !== link.id));
+  }
+
+  const links = [
+    ...appLinks.map((link) => ({
+      key: link.id,
+      label: link.label,
+      description:
+        link.link_type === "audit"
+          ? "Audit or diagnostic workspace."
+          : link.link_type === "drive"
+            ? "Client Drive folder."
+            : "Supporting operational document.",
+      url: link.url,
+      source: "app" as const,
+      appLink: link,
+    })),
+    ...detectedLinks.map((link) => ({
+      ...link,
+      source: "detected" as const,
+      appLink: null,
+    })),
+  ];
+
+  return (
+    <div className="mt-5 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-[#586273]">
+            Client Links
+          </h2>
+          <p className="mt-1 text-sm text-[#6b7686]">
+            Operational URLs such as audits, Drive folders, and supporting docs.
+          </p>
+        </div>
+        <span className="rounded-full border border-[#e4e9f0] bg-[#f7f9fc] px-3 py-1 text-xs font-semibold text-[#586273]">
+          {canManageLinks ? "RetainOS links" : "Read-only"}
+        </span>
+      </div>
+      {canManageLinks ? (
+        <form
+          onSubmit={addClientLink}
+          className="mt-4 grid gap-3 rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4 lg:grid-cols-[1fr_1.4fr_180px_auto]"
+        >
+          <input
+            value={linkLabel}
+            onChange={(event) => setLinkLabel(event.target.value)}
+            placeholder="Label"
+            className="rounded-md border border-[#d6dde8] bg-white px-3 py-2 text-sm"
+          />
+          <input
+            value={linkUrl}
+            onChange={(event) => setLinkUrl(event.target.value)}
+            placeholder="https://..."
+            className="rounded-md border border-[#d6dde8] bg-white px-3 py-2 text-sm"
+          />
+          <select
+            value={linkType}
+            onChange={(event) => setLinkType(event.target.value)}
+            className="rounded-md border border-[#d6dde8] bg-white px-3 py-2 text-sm"
+          >
+            <option value="supporting_doc">Supporting doc</option>
+            <option value="audit">Audit</option>
+            <option value="drive">Drive folder</option>
+            <option value="other">Other</option>
+          </select>
+          <button
+            type="submit"
+            disabled={isSavingLink}
+            className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-semibold text-[#162b3e] disabled:opacity-50"
+          >
+            {isSavingLink ? "Adding..." : "Add link"}
+          </button>
+        </form>
+      ) : null}
+      {linkError ? (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {linkError}
+        </div>
+      ) : null}
+      {links.length > 0 ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {links.map((link) => (
+            <div
+              key={`${link.key}-${link.url}`}
+              className="retainos-focus rounded-lg border border-[#d6eafb] bg-[#f7fbff] p-4 text-sm transition hover:border-[#59abf0] hover:bg-white"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="font-semibold text-[#162b3e]">{link.label}</div>
+                {link.source === "app" && canManageLinks ? (
+                  <button
+                    type="button"
+                    onClick={() => archiveClientLink(link.appLink)}
+                    className="text-xs font-semibold text-[#ba2532]"
+                  >
+                    Archive
+                  </button>
+                ) : null}
+              </div>
+              <p className="mt-1 text-xs leading-5 text-[#6b7686]">
+                {link.description}
+              </p>
+              <a
+                href={link.url}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 block truncate text-xs font-semibold text-[#2b79c4]"
+              >
+                Open link
+              </a>
+            </div>
+          ))}
+        </div>
+      ) : isLoadingLinks ? (
+        <div className="mt-4 rounded-lg border border-dashed border-[#cbd2dc] bg-[#f7f9fc] px-4 py-5 text-sm text-[#6b7686]">
+          Loading client links...
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-dashed border-[#cbd2dc] bg-[#f7f9fc] px-4 py-5 text-sm text-[#6b7686]">
+          No client-level links found yet. Add audit, Drive, or supporting-document
+          URLs as part of the company migration mapping.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContractField({
   label,
   value,
@@ -2638,15 +3477,19 @@ function ContractCard({
   contract,
   isLatest,
   canManage,
+  canDelete,
   onEdit,
   onArchive,
+  onDelete,
 }: {
   title: string;
   contract: Record<string, unknown>;
   isLatest?: boolean;
   canManage?: boolean;
+  canDelete?: boolean;
   onEdit?: (contract: ContractRow) => void;
   onArchive?: (contract: ContractRow) => void;
+  onDelete?: (contract: ContractRow) => void;
 }) {
   const referenceLink = valueFrom(contract, [
     "reference_link",
@@ -2654,8 +3497,11 @@ function ContractCard({
   ]);
   const notes = valueFrom(contract, ["notes", "current_contract_notes"]);
   const isEditable = canManage && isAppOwnedContract(contract);
+  const isCurrentSummary = isCurrentSummaryContract(contract);
   const status = getContractStatus(contract);
+  const isArchived = status === "Archived";
   const contractTypeLabel = getContractTypeLabel(contract);
+  const renewalDate = renewalDateConfidence(contract);
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
@@ -2669,11 +3515,14 @@ function ContractCard({
               Latest
             </span>
           )}
-          {!isEditable && !isAppOwnedContract(contract) ? (
+          {!isEditable && !isAppOwnedContract(contract) && !isCurrentSummary ? (
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
               Read-only mirror
             </span>
           ) : null}
+          <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600">
+            {contractSourceLabel(contract)}
+          </span>
           <span
             className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
               status === "Active"
@@ -2688,7 +3537,7 @@ function ContractCard({
           <span className="rounded-full border border-[#cbdff5] bg-[#f2f8fd] px-2 py-0.5 text-xs font-medium text-[#2b79c4]">
             {contractTypeLabel}
           </span>
-          {isEditable ? (
+          {isEditable && !isArchived ? (
             <>
               <button
                 type="button"
@@ -2706,6 +3555,15 @@ function ContractCard({
               </button>
             </>
           ) : null}
+          {canDelete && isAppOwnedContract(contract) ? (
+            <button
+              type="button"
+              onClick={() => onDelete?.(contract as ContractRow)}
+              className="rounded-md border border-red-300 px-3 py-1 text-xs font-semibold text-red-800 hover:bg-red-50 cursor-pointer"
+            >
+              Delete
+            </button>
+          ) : null}
         </div>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -2717,7 +3575,11 @@ function ContractCard({
         />
         <ContractField label="End Date" value={formatDate(contractEndDate(contract))} />
         <ContractField
-          label="Contract Days"
+          label="Renewal Source"
+          value={`${renewalDate.sourceLabel} (${renewalDate.confidenceLabel})`}
+        />
+        <ContractField
+          label="Expected Duration Days"
           value={displayValue(
             valueFrom(contract, [
               "current_contract_of_days",
@@ -2782,25 +3644,44 @@ function ContractSection({
   client,
   contracts,
   canCreateContract,
+  canDeleteContract,
   onCreateContract,
   onEditContract,
   onArchiveContract,
+  onDeleteContract,
 }: {
   client?: ClientRow;
   contracts: ContractRow[];
   canCreateContract: boolean;
+  canDeleteContract: boolean;
   onCreateContract: () => void;
   onEditContract: (contract: ContractRow) => void;
   onArchiveContract: (contract: ContractRow) => void;
+  onDeleteContract: (contract: ContractRow) => void;
 }) {
   const [showOlderContracts, setShowOlderContracts] = useState(false);
-  const showCurrent = hasCurrentContract(client);
-  const [latestLinkedContract, ...olderLinkedContracts] = contracts;
+  const [contractFilter, setContractFilter] = useState<ContractFilter>("active");
+  const showCurrent =
+    hasCurrentContract(client) &&
+    contractMatchesFilter((client ?? {}) as Record<string, unknown>, contractFilter);
+  const filteredContracts = contracts.filter((contract) =>
+    contractMatchesFilter(contract, contractFilter),
+  );
+  const [latestLinkedContract, ...olderLinkedContracts] = filteredContracts;
+  const showCurrentSummary = showCurrent && filteredContracts.length === 0;
+  const filterOptions: { value: ContractFilter; label: string }[] = [
+    { value: "active", label: "Active" },
+    { value: "old", label: "Old" },
+    { value: "archived", label: "Archived" },
+    { value: "all", label: "All" },
+  ];
   const clientStatus =
     typeof client?.program_status_value === "string"
       ? client.program_status_value
       : "";
-  const currentRenewalDate = contractEndDate((client ?? {}) as Record<string, unknown>);
+  const currentRenewalDate = renewalDateConfidence(
+    (client ?? {}) as Record<string, unknown>,
+  ).value;
   const daysUntilRenewal = daysUntilDate(currentRenewalDate);
   const showRenewalPrompt =
     canCreateContract &&
@@ -2810,7 +3691,26 @@ function ContractSection({
   return (
     <div className="space-y-4">
       {canCreateContract ? (
-        <div className="flex justify-end">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {filterOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  setContractFilter(option.value);
+                  setShowOlderContracts(false);
+                }}
+                className={`rounded-md border px-3 py-2 text-sm font-semibold transition cursor-pointer ${
+                  contractFilter === option.value
+                    ? "border-[#162b3e] bg-[#162b3e] text-white"
+                    : "border-gray-200 bg-white text-gray-700 hover:border-[#59abf0]"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={onCreateContract}
@@ -2819,7 +3719,27 @@ function ContractSection({
             + New Contract
           </button>
         </div>
-      ) : null}
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {filterOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                setContractFilter(option.value);
+                setShowOlderContracts(false);
+              }}
+              className={`rounded-md border px-3 py-2 text-sm font-semibold transition cursor-pointer ${
+                contractFilter === option.value
+                  ? "border-[#162b3e] bg-[#162b3e] text-white"
+                  : "border-gray-200 bg-white text-gray-700 hover:border-[#59abf0]"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
       {showRenewalPrompt ? (
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2849,17 +3769,31 @@ function ContractSection({
           </div>
         </div>
       ) : null}
-      {showCurrent && (
-        <ContractCard title="Current Contract" contract={client as ClientRow} isLatest />
+      {showCurrentSummary && (
+        <ContractCard
+          title="Current Contract Summary"
+          contract={client as ClientRow}
+          isLatest
+        />
       )}
       {latestLinkedContract && (
         <ContractCard
-          title={showCurrent ? "Latest Linked Contract" : "Linked Contract"}
+          title={
+            contractFilter === "archived"
+              ? "Archived Contract"
+              : contractFilter === "old"
+                ? "Past Contract"
+                : contractFilter === "all"
+                  ? "Latest Contract"
+                  : "Current Contract"
+          }
           contract={latestLinkedContract}
-          isLatest={!showCurrent}
+          isLatest={!showCurrentSummary}
           canManage={canCreateContract}
+          canDelete={canDeleteContract}
           onEdit={onEditContract}
           onArchive={onArchiveContract}
+          onDelete={onDeleteContract}
         />
       )}
       {olderLinkedContracts.length > 0 && (
@@ -2887,17 +3821,20 @@ function ContractSection({
                   title={`Older Contract ${index + 1}`}
                   contract={contract}
                   canManage={canCreateContract}
+                  canDelete={canDeleteContract}
                   onEdit={onEditContract}
                   onArchive={onArchiveContract}
+                  onDelete={onDeleteContract}
                 />
               ))}
             </div>
           )}
         </div>
       )}
-      {!showCurrent && !latestLinkedContract && (
+      {!showCurrentSummary && !latestLinkedContract && (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
-          No contract rows found for this client.
+          No {contractFilter === "all" ? "" : `${contractFilter} `}contract rows found
+          for this client.
         </div>
       )}
     </div>
@@ -2910,6 +3847,7 @@ function PathwaysSection({
   clientMilestones,
   offerMilestones,
   relationLookup,
+  notificationPreferences,
   canAdvanceMilestones,
   canManagePathways,
   onStartMilestone,
@@ -2921,6 +3859,7 @@ function PathwaysSection({
   clientMilestones: ClientMilestoneRow[];
   offerMilestones: OfferMilestoneRow[];
   relationLookup: Map<string, string>;
+  notificationPreferences: NotificationPreference[];
   canAdvanceMilestones: boolean;
   canManagePathways: boolean;
   onStartMilestone: (progress: ClientMilestoneRow | null) => void;
@@ -3078,6 +4017,125 @@ function PathwaysSection({
     hasCurrentStarted && !hasCurrentCompleted
       ? daysBetweenValues(currentProgress?.start_date, new Date().toISOString())
       : null;
+  const totalConfiguredMilestones = sortedOfferMilestones.length;
+  const completedConfiguredMilestones = sortedOfferMilestones.filter((milestone) => {
+    const milestoneId = milestone.glide_row_id;
+    if (!isPresent(milestoneId)) return false;
+    return isPresent(progressByMilestoneId.get(String(milestoneId))?.completion_date);
+  }).length;
+  const milestoneProgressPercent =
+    totalConfiguredMilestones > 0
+      ? Math.round((completedConfiguredMilestones / totalConfiguredMilestones) * 100)
+      : null;
+  const contractStart = valueFrom(client, [
+    "current_contract_start_date",
+    "contract_start_date",
+    "start_date",
+  ]);
+  const contractEnd = valueFrom(client, [
+    "current_contract_end_date_for_filtering",
+    "current_contract_end_date",
+    "contract_end_date",
+    "renewal_date",
+    "end_date",
+  ]);
+  const contractStartDate = dateFromValue(contractStart);
+  const contractEndDate = dateFromValue(contractEnd);
+  const now = new Date();
+  const contractTotalDays =
+    contractStartDate && contractEndDate
+      ? daysBetweenValues(contractStartDate.toISOString(), contractEndDate.toISOString())
+      : null;
+  const contractElapsedDays =
+    contractStartDate && contractEndDate
+      ? Math.min(
+          contractTotalDays ?? 0,
+          daysBetweenValues(contractStartDate.toISOString(), now.toISOString()) ?? 0,
+        )
+      : null;
+  const contractProgressPercent =
+    contractTotalDays && contractTotalDays > 0 && contractElapsedDays !== null
+      ? Math.max(0, Math.min(100, Math.round((contractElapsedDays / contractTotalDays) * 100)))
+      : null;
+  const defaultTimelineOption = nearestProgramTimelineOption(contractTotalDays);
+  const [timelineDays, setTimelineDays] = useState(defaultTimelineOption.days);
+  useEffect(() => {
+    setTimelineDays(defaultTimelineOption.days);
+  }, [defaultTimelineOption.days]);
+  const selectedTimelineDays = Math.max(30, timelineDays || defaultTimelineOption.days);
+  const notificationPreferenceByType = new Map(
+    mergeNotificationPreferences(notificationPreferences).map((preference) => [
+      preference.notification_type,
+      preference,
+    ]),
+  );
+  const diagnosticPreference = notificationPreferenceByType.get("diagnostic_due");
+  const strategicReviewPreference = notificationPreferenceByType.get(
+    "strategic_review_due",
+  );
+  const diagnosticDay = Math.max(1, diagnosticPreference?.lead_days || 56);
+  const diagnosticRecurrence =
+    diagnosticPreference?.metadata?.recurrence === "recurring"
+      ? "recurring"
+      : "once";
+  const diagnosticMarkers: ProgramTimelineMarker[] =
+    diagnosticPreference?.in_app_enabled === false
+      ? []
+      : diagnosticRecurrence === "recurring"
+        ? Array.from(
+            {
+              length: Math.max(1, Math.floor(selectedTimelineDays / diagnosticDay)),
+            },
+            (_, index) => ({
+              key: `diagnostic-${index + 1}`,
+              label: `Configured check-in ${index + 1}`,
+              day: diagnosticDay * (index + 1),
+              tone: "amber" as ProgramTimelineMarkerTone,
+              position: "bottom" as const,
+            }),
+          )
+        : [
+            {
+              key: "peak-diagnostic",
+              label: "Peak Diagnostic",
+              day: diagnosticDay,
+              tone: "amber",
+              position: "bottom",
+            },
+          ];
+  const strategicReviewDay = Math.max(
+    1,
+    selectedTimelineDays - Math.max(0, strategicReviewPreference?.lead_days ?? 35),
+  );
+  const timelineMarkerCandidates: ProgramTimelineMarker[] = [
+    { key: "kickoff", label: "Kickoff", day: 1, tone: "purple" },
+    ...diagnosticMarkers,
+    ...(strategicReviewPreference?.in_app_enabled === false
+      ? []
+      : [
+          {
+            key: "strategic-review",
+            label: "Strategic review",
+            day: strategicReviewDay,
+            tone: "orange" as ProgramTimelineMarkerTone,
+            position: "bottom" as const,
+          },
+        ]),
+    {
+      key: "program-end",
+      label: "Program end",
+      day: selectedTimelineDays,
+      tone: "gray",
+    },
+  ];
+  const timelineMarkers = assignProgramTimelineLanes(
+    timelineMarkerCandidates.filter((marker) => marker.day <= selectedTimelineDays),
+    selectedTimelineDays,
+  );
+  const currentTimelineDay =
+    contractElapsedDays !== null
+      ? Math.max(1, Math.min(selectedTimelineDays, contractElapsedDays + 1))
+      : null;
 
   return (
     <div className="space-y-5 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
@@ -3149,6 +4207,137 @@ function PathwaysSection({
             ) : null}
           </div>
         )}
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg border border-[#d6eafb] bg-[#f7fbff] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                Milestone Progress
+              </div>
+              <div className="mt-1 text-sm font-semibold text-[#162b3e]">
+                {milestoneProgressPercent === null
+                  ? "No configured milestone map"
+                  : `${completedConfiguredMilestones}/${totalConfiguredMilestones} milestones complete`}
+              </div>
+            </div>
+            <span className="text-2xl font-semibold text-[#2b79c4]">
+              {milestoneProgressPercent === null ? "--" : `${milestoneProgressPercent}%`}
+            </span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#dbeafe]">
+            <div
+              className="h-full rounded-full bg-[#59abf0]"
+              style={{ width: `${milestoneProgressPercent ?? 0}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                Contract / Program Timing
+              </div>
+              <div className="mt-1 text-sm font-semibold text-[#162b3e]">
+                {contractProgressPercent === null
+                  ? "Contract timing unavailable"
+                  : `${formatDate(contractStart)} to ${formatDate(contractEnd)}`}
+              </div>
+            </div>
+            <span className="text-2xl font-semibold text-[#162b3e]">
+              {contractProgressPercent === null ? "--" : `${contractProgressPercent}%`}
+            </span>
+          </div>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e2e8f0]">
+            <div
+              className="h-full rounded-full bg-[#162b3e]"
+              style={{ width: `${contractProgressPercent ?? 0}%` }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-[#e4e9f0] bg-white p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
+              Program Timeline
+            </div>
+            <p className="mt-1 text-sm text-[#6c7684]">
+              Read-only operating map using contract/program timing and
+              company-configured Daily Pulse checkpoints.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {PROGRAM_TIMELINE_OPTIONS.map((option) => (
+              <button
+                key={option.days}
+                type="button"
+                onClick={() => setTimelineDays(option.days)}
+                className={`rounded-md border px-3 py-2 text-sm font-semibold transition ${
+                  selectedTimelineDays === option.days
+                    ? "border-[#162b3e] bg-[#162b3e] text-white"
+                    : "border-[#d0d5dd] bg-white text-[#344054] hover:border-[#59abf0]"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold text-[#586273]">
+          {Array.from(
+            new Map(
+              timelineMarkers.map((marker) => [marker.label, marker.tone]),
+            ).entries(),
+          ).map(([label, tone]) => {
+            const toneClasses =
+              PROGRAM_TIMELINE_TONE_CLASSES[tone as ProgramTimelineMarkerTone];
+            return (
+              <span key={label} className="inline-flex items-center gap-2">
+                <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.dot}`} />
+                {label}
+              </span>
+            );
+          })}
+        </div>
+        <div className="relative mt-6 h-44 overflow-hidden px-8">
+          <div className="absolute left-10 right-10 top-[88px]">
+            <div className="absolute inset-x-0 top-0 h-1 -translate-y-1/2 rounded-full bg-[#e5e7eb]" />
+            {currentTimelineDay !== null ? (
+              <div
+                className="absolute top-0 z-10 -translate-x-1/2 -translate-y-1/2"
+                style={{
+                  left: `${Math.max(
+                    0,
+                    Math.min(100, (currentTimelineDay / selectedTimelineDays) * 100),
+                  )}%`,
+                }}
+              >
+                <div className="h-5 w-5 rounded-full border-2 border-white bg-[#162b3e] shadow-md" />
+                <div className="mt-1 w-20 -translate-x-[30px] text-center text-[11px] font-semibold text-[#162b3e]">
+                  Current
+                </div>
+              </div>
+            ) : null}
+            {timelineMarkers.map((marker) => (
+              <ProgramTimelineMarkerDot
+                key={marker.key}
+                marker={marker}
+                totalDays={selectedTimelineDays}
+              />
+            ))}
+          </div>
+          <div className="absolute bottom-0 left-10 right-10 flex justify-between text-xs font-medium text-[#6c7684]">
+            <span>0</span>
+            <span>{Math.round(selectedTimelineDays / 4)}</span>
+            <span>{Math.round(selectedTimelineDays / 2)}</span>
+            <span>{Math.round((selectedTimelineDays * 3) / 4)}</span>
+            <span>{selectedTimelineDays}</span>
+          </div>
+        </div>
       </div>
 
       <FieldGrid
@@ -3378,6 +4567,25 @@ function TasksSection({
   );
 }
 
+function getHistorySourceLabel(event: ClientHistoryEventRow) {
+  const eventType = String(event.event_type ?? "");
+  const source = String(event.source ?? "");
+
+  if (eventType === "call_summary_webhook") {
+    return "Updated via webhook";
+  }
+
+  if (source === "webhook" || source === "integration") {
+    return "Updated via webhook";
+  }
+
+  if (source && !["manual", "retainos", "quick_update"].includes(source)) {
+    return `Updated via ${source}`;
+  }
+
+  return null;
+}
+
 function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
   if (events.length === 0) {
     return (
@@ -3389,73 +4597,90 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
 
   return (
     <div className="space-y-4">
-      {events.map((event) => (
-        <article
-          key={event.id}
-          className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
-        >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">
-                {event.title ?? "Quick Update"}
-              </h2>
-              <p className="mt-1 text-xs text-gray-500">
-                {formatDateTime(event.created_at)}
-              </p>
-            </div>
-            <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-              RetainOS history
-            </span>
-          </div>
-          {event.notes ? (
-            <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
-              {event.notes}
-            </p>
-          ) : event.summary ? (
-            <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
-              {event.summary}
-            </p>
-          ) : null}
-          {event.next_steps ? (
-            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-              <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                Next Steps
+      {events.map((event) => {
+        const sourceLabel = getHistorySourceLabel(event);
+
+        return (
+          <article
+            key={event.id}
+            className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">
+                  {event.title ?? "Quick Update"}
+                </h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  {formatDateTime(event.created_at)}
+                </p>
+                {sourceLabel ? (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {sourceLabel}. Event time is when RetainOS received it.
+                  </p>
+                ) : null}
               </div>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">
-                {event.next_steps}
-              </p>
+              <div className="flex flex-wrap gap-2">
+                <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                  RetainOS history
+                </span>
+                {sourceLabel ? (
+                  <span className="w-fit rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
+                    {sourceLabel}
+                  </span>
+                ) : null}
+              </div>
             </div>
-          ) : null}
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <ContractField
-              label="Last Contact"
-              value={formatDate(event.last_contact_at)}
-            />
-            <ContractField
-              label="Next Contact"
-              value={formatDate(event.next_contact_at)}
-            />
-            <ContractField
-              label="Success"
-              value={event.success_status || "--"}
-            />
-            <ContractField
-              label="Progress"
-              value={event.progress_status || "--"}
-            />
-            <ContractField
-              label="Buy In"
-              value={event.buy_in_status || "--"}
-            />
-          </div>
-        </article>
-      ))}
+            {event.notes ? (
+              <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
+                {event.notes}
+              </p>
+            ) : event.summary ? (
+              <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
+                {event.summary}
+              </p>
+            ) : null}
+            {event.next_steps ? (
+              <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Next Steps
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">
+                  {event.next_steps}
+                </p>
+              </div>
+            ) : null}
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <ContractField
+                label="Last Contact"
+                value={formatDate(event.last_contact_at)}
+              />
+              <ContractField
+                label="Next Contact"
+                value={formatDate(event.next_contact_at)}
+              />
+              <ContractField
+                label="Success"
+                value={event.success_status || "--"}
+              />
+              <ContractField
+                label="Progress"
+                value={event.progress_status || "--"}
+              />
+              <ContractField
+                label="Buy In"
+                value={event.buy_in_status || "--"}
+              />
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
 export function ClientDetail() {
   const { clientId } = useParams<{ clientId: string }>();
-  const { capabilities, effectiveCompanyId, teamMemberId } = useAccountContext();
+  const { capabilities, effectiveCompanyId, isSuperAdmin, teamMemberId } =
+    useAccountContext();
   const [client, setClient] = useState<ClientRow | null>(null);
   const [contracts, setContracts] = useState<ContractRow[]>([]);
   const [offers, setOffers] = useState<OfferRow[]>([]);
@@ -3463,6 +4688,10 @@ export function ClientDetail() {
   const [offerMilestones, setOfferMilestones] = useState<OfferMilestoneRow[]>([]);
   const [tasks, setTasks] = useState<ClientTaskRow[]>([]);
   const [historyEvents, setHistoryEvents] = useState<ClientHistoryEventRow[]>([]);
+  const [customFields, setCustomFields] = useState<CompanyCustomFieldRow[]>([]);
+  const [customFieldValues, setCustomFieldValues] = useState<
+    ClientCustomFieldValueRow[]
+  >([]);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
   const [outcomeChoices, setOutcomeChoices] = useState<OutcomeChoiceSets>({
     success: [],
@@ -3471,6 +4700,9 @@ export function ClientDetail() {
   });
   const [relationLookup, setRelationLookup] = useState(new Map<string, string>());
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [notificationPreferences, setNotificationPreferences] = useState<
+    NotificationPreference[]
+  >(mergeNotificationPreferences(null));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
@@ -3518,6 +4750,8 @@ export function ClientDetail() {
         setError(clientError.message);
         setClient(null);
         setIsAppOwnedClient(false);
+        setCustomFields([]);
+        setCustomFieldValues([]);
         setLoading(false);
         return;
       }
@@ -3526,6 +4760,8 @@ export function ClientDetail() {
         setError("This client is outside your current company access.");
         setClient(null);
         setIsAppOwnedClient(false);
+        setCustomFields([]);
+        setCustomFieldValues([]);
         setLoading(false);
         return;
       }
@@ -3537,6 +4773,8 @@ export function ClientDetail() {
         setError("This client is not assigned to your account.");
         setClient(null);
         setIsAppOwnedClient(false);
+        setCustomFields([]);
+        setCustomFieldValues([]);
         setLoading(false);
         return;
       }
@@ -3577,9 +4815,13 @@ export function ClientDetail() {
               .eq("company_id", companyGlideRowId)
               .order("name", { ascending: true })
         : { data: [] };
+      const notificationPreferenceResult = companyGlideRowId
+        ? await loadCompanyNotificationPreferences(companyGlideRowId)
+        : { preferences: mergeNotificationPreferences(null), source: "fallback" as const };
       const companyOfferIds =
         companyOfferRows?.map((offer) => offer.glide_row_id).filter(Boolean) ??
         [];
+      const useAppOwnedHistoricalActivity = Boolean(appPathwayCompany?.id);
       const [
         { data: contractRows },
         { data: appContractRows },
@@ -3591,17 +4833,20 @@ export function ClientDetail() {
         { data: taskRows },
         { data: appTaskRows },
         { data: historyRows },
+        customFieldsResult,
+        customFieldValuesResult,
       ] = await Promise.all([
-        supabase
-          .from("backup_company_clients_contracts")
-          .select("*")
-          .eq("client_id", nextClient.glide_row_id)
-          .order("end_date", { ascending: false, nullsFirst: false }),
+        useAppOwnedHistoricalActivity
+          ? Promise.resolve({ data: [] })
+          : supabase
+              .from("backup_company_clients_contracts")
+              .select("*")
+              .eq("client_id", nextClient.glide_row_id)
+              .order("end_date", { ascending: false, nullsFirst: false }),
         supabase
           .from("client_contracts")
           .select("*")
           .eq("client_id", nextClient.glide_row_id)
-          .is("archived_at", null)
           .order("end_date", { ascending: false, nullsFirst: false }),
         supabase
           .from("backup_choices")
@@ -3621,11 +4866,13 @@ export function ClientDetail() {
                 "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display",
               )
               .order("index", { ascending: true }),
-        supabase
-          .from("backup_company_clients_milestones")
-          .select("*")
-          .eq("client_id", nextClient.glide_row_id)
-          .order("start_date", { ascending: false, nullsFirst: false }),
+        useAppOwnedHistoricalActivity
+          ? Promise.resolve({ data: [] })
+          : supabase
+              .from("backup_company_clients_milestones")
+              .select("*")
+              .eq("client_id", nextClient.glide_row_id)
+              .order("start_date", { ascending: false, nullsFirst: false }),
         supabase
           .from("client_milestones")
           .select("*")
@@ -3647,24 +4894,57 @@ export function ClientDetail() {
                 .in("offer_id", companyOfferIds.length > 0 ? companyOfferIds : offerIds)
                 .order("order", { ascending: true, nullsFirst: false })
           : Promise.resolve({ data: [] }),
-        supabase
-          .from("backup_company_clients_tasks")
-          .select("*")
-          .eq("client_id", nextClient.glide_row_id)
-          .order("task_due_date", { ascending: true, nullsFirst: false }),
-        supabase
-          .from("client_tasks")
-          .select("*")
-          .eq("client_id", nextClient.glide_row_id)
-          .order("task_due_date", { ascending: true, nullsFirst: false }),
+        appPathwayCompany?.id
+          ? Promise.resolve({ data: [] })
+          : supabase
+              .from("backup_company_clients_tasks")
+              .select("*")
+              .eq("client_id", nextClient.glide_row_id)
+              .order("task_due_date", { ascending: true, nullsFirst: false }),
+        appPathwayCompany?.id
+          ? supabase
+              .from("client_tasks")
+              .select("*")
+              .eq("client_id", nextClient.glide_row_id)
+              .order("task_due_date", { ascending: true, nullsFirst: false })
+          : Promise.resolve({ data: [] }),
         supabase
           .from("client_history_events")
           .select("*")
           .eq("legacy_client_glide_row_id", nextClient.glide_row_id)
           .order("created_at", { ascending: false })
           .limit(25),
+        appPathwayCompany?.id
+          ? supabase
+              .from("company_custom_fields")
+              .select(
+                "id, key, label, description, field_type, options, is_visible_on_client_detail, position, source_key, status",
+              )
+              .eq("company_id", appPathwayCompany.id)
+              .eq("entity_type", "client")
+              .eq("status", "active")
+              .order("position", { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
+        appPathwayCompany?.id
+          ? supabase
+              .from("client_custom_field_values")
+              .select(
+                "id, custom_field_id, field_key, value_text, value_json, source_table, source_key",
+              )
+              .eq("company_id", appPathwayCompany.id)
+              .eq("client_id", nextClient.glide_row_id)
+          : Promise.resolve({ data: [], error: null }),
       ]);
       if (!cancelled) {
+        if (customFieldsResult.error) {
+          console.error("Failed to load company custom fields:", customFieldsResult.error);
+        }
+        if (customFieldValuesResult.error) {
+          console.error(
+            "Failed to load client custom field values:",
+            customFieldValuesResult.error,
+          );
+        }
         setContracts([
           ...((appContractRows ?? []) as ContractRow[]),
           ...((contractRows ?? []) as ContractRow[]),
@@ -3712,6 +4992,17 @@ export function ClientDetail() {
           ...((taskRows ?? []) as ClientTaskRow[]),
         ]);
         setHistoryEvents((historyRows ?? []) as ClientHistoryEventRow[]);
+        setCustomFields(
+          customFieldsResult.error
+            ? []
+            : ((customFieldsResult.data ?? []) as CompanyCustomFieldRow[]),
+        );
+        setCustomFieldValues(
+          customFieldValuesResult.error
+            ? []
+            : ((customFieldValuesResult.data ?? []) as ClientCustomFieldValueRow[]),
+        );
+        setNotificationPreferences(notificationPreferenceResult.preferences);
       }
       const milestoneRelationIds = [
         ...((milestoneRows ?? []) as ClientMilestoneRow[]),
@@ -3833,6 +5124,33 @@ export function ClientDetail() {
     !capabilities.canViewOnlyAssignedClients;
   const canChangeStatus = canEditProfile;
   const canCreateContract = canEditProfile;
+  const canDeleteContract = canEditProfile && isSuperAdmin;
+  function applyCustomFieldChanges(changes: CustomFieldChange[]) {
+    if (changes.length === 0) return;
+    setCustomFieldValues((current) => {
+      let next = current;
+      for (const change of changes) {
+        const field = customFields.find((item) => item.id === change.id);
+        if (!field) continue;
+        const existing = next.find((item) => item.custom_field_id === change.id);
+        const updated: ClientCustomFieldValueRow = {
+          id: existing?.id ?? `local-${change.id}`,
+          custom_field_id: change.id,
+          field_key: field.key,
+          value_text: change.after ?? null,
+          value_json: change.after ?? null,
+          source_table: "client_custom_field_values",
+          source_key: field.source_key ?? field.key,
+        };
+        next = existing
+          ? next.map((item) =>
+              item.custom_field_id === change.id ? { ...item, ...updated } : item,
+            )
+          : [...next, updated];
+      }
+      return next;
+    });
+  }
   async function archiveContract(contract: ContractRow) {
     if (!client || !contract.glide_row_id || archivingContractId) return;
     const confirmed = window.confirm(
@@ -3862,7 +5180,46 @@ export function ClientDetail() {
     if (data?.contract) {
       const archived = data.contract as ContractRow;
       setContracts((current) =>
-        current.filter((row) => row.glide_row_id !== archived.glide_row_id),
+        current.map((row) =>
+          row.glide_row_id === archived.glide_row_id ? archived : row,
+        ),
+      );
+    }
+    if (data?.event) {
+      setHistoryEvents((current) =>
+        [data.event as ClientHistoryEventRow, ...current].slice(0, 25),
+      );
+    }
+  }
+  async function deleteContract(contract: ContractRow) {
+    if (!client || !contract.glide_row_id || archivingContractId) return;
+    const confirmed = window.confirm(
+      "Delete this app-owned contract forever? Contract history and audit will record the deletion before the row is removed.",
+    );
+    if (!confirmed) return;
+    setArchivingContractId(contract.glide_row_id);
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-contract",
+      {
+        body: {
+          action: "delete",
+          clientLegacyId: client.glide_row_id,
+          contractId: contract.glide_row_id,
+          notes: "Deleted from client contract tab.",
+        },
+      },
+    );
+    setArchivingContractId(null);
+    if (error || data?.error) {
+      window.alert(data?.error ?? error?.message ?? "Could not delete contract.");
+      return;
+    }
+    if (data?.client) {
+      setClient(mapAppClientRow(data.client as Record<string, unknown>));
+    }
+    if (data?.deletedContractId) {
+      setContracts((current) =>
+        current.filter((row) => row.glide_row_id !== data.deletedContractId),
       );
     }
     if (data?.event) {
@@ -3939,15 +5296,11 @@ export function ClientDetail() {
                 Edit Profile
               </button>
             ) : null}
-            <div
-              className={`rounded-md border px-3 py-2 text-sm ${
-                canEditProfile
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                  : "border-amber-200 bg-amber-50 text-amber-800"
-              }`}
-            >
-              {canEditProfile ? "RetainOS pilot data" : "Read-only preview"}
-            </div>
+            {!canEditProfile ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Read-only preview
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -3991,9 +5344,11 @@ export function ClientDetail() {
           client={client}
           contracts={contracts}
           canCreateContract={canCreateContract}
+          canDeleteContract={canDeleteContract}
           onCreateContract={() => setCreatingContract(true)}
           onEditContract={(contract) => setEditingContract(contract)}
           onArchiveContract={(contract) => void archiveContract(contract)}
+          onDeleteContract={(contract) => void deleteContract(contract)}
         />
       ) : activeTab === "pathways" ? (
         <PathwaysSection
@@ -4002,6 +5357,7 @@ export function ClientDetail() {
           clientMilestones={clientMilestones}
           offerMilestones={offerMilestones}
           relationLookup={displayLookup}
+          notificationPreferences={notificationPreferences}
           canAdvanceMilestones={canEditProfile && capabilities.canAdvanceClientMilestones}
           canManagePathways={canEditProfile && capabilities.canManageClientPathways}
           onStartMilestone={(progress) =>
@@ -4029,8 +5385,11 @@ export function ClientDetail() {
             client={client}
             choices={outcomeChoices}
             canEdit={canEditProfile}
-            onSaved={(updatedClient, event) => {
+            customFields={customFields}
+            customFieldValues={customFieldValues}
+            onSaved={(updatedClient, event, customFieldChanges) => {
               setClient(updatedClient);
+              applyCustomFieldChanges(customFieldChanges);
               if (event) {
                 setHistoryEvents((current) => [event, ...current].slice(0, 25));
               }
@@ -4038,14 +5397,17 @@ export function ClientDetail() {
           />
         </div>
       ) : (
-        <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
-          <FieldGrid
-            fields={activeFields}
-            client={client}
-            programChoices={programChoices}
-            relationLookup={displayLookup}
-          />
-        </div>
+        <>
+          <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
+            <FieldGrid
+              fields={activeFields}
+              client={client}
+              programChoices={programChoices}
+              relationLookup={displayLookup}
+            />
+          </div>
+          {activeTab === "details" ? <ClientExternalLinksSection client={client} /> : null}
+        </>
       )}
       {editingProfile ? (
         <ClientProfileEditModal
@@ -4066,9 +5428,12 @@ export function ClientDetail() {
         <ClientOutcomesEditModal
           client={client}
           choices={outcomeChoices}
+          customFields={customFields}
+          customFieldValues={customFieldValues}
           onClose={() => setEditingOutcomes(false)}
-          onSaved={(updatedClient, event) => {
+          onSaved={(updatedClient, event, customFieldChanges) => {
             setClient(updatedClient);
+            applyCustomFieldChanges(customFieldChanges);
             if (event) {
               setHistoryEvents((current) => [event, ...current].slice(0, 25));
             }

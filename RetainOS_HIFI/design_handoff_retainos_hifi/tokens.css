@@ -1,0 +1,93 @@
+/* ===========================================================================
+   RetainOS — Design Tokens
+   Derived from brand assets (logo, color spec, type spec).
+   PROVISIONAL hexes off the screenshots — to be reconciled w/ the Figma export.
+   Maps 1:1 to a Tailwind theme.extend.colors block for the production port.
+   =========================================================================== */
+
+:root {
+  /* --- Brand / Primary (navy) ------------------------------------------- */
+  --navy-900: #0E1B29;
+  --navy-800: #162B3E;   /* PRIMARY brand navy — sidebar, primary buttons */
+  --navy-700: #1E3A52;
+  --navy-600: #2B4D6A;
+  --navy-500: #3D6485;
+
+  /* --- Secondary (blue) ------------------------------------------------- */
+  --blue-700: #2B79C4;
+  --blue-600: #3B8FD9;   /* accent button (AA-safe on white text) */
+  --blue-500: #59ABF0;   /* brand blue — links, highlights, focus */
+  --blue-100: #D6EAFB;
+  --blue-50:  #EAF4FE;
+
+  /* --- Neutral scale ---------------------------------------------------- */
+  --gray-900: #14181D;
+  --gray-800: #232932;
+  --gray-700: #3C4450;
+  --gray-600: #586273;
+  --gray-500: #6B7686;
+  --gray-400: #98A2B3;
+  --gray-300: #CBD2DC;
+  --gray-200: #E4E9F0;
+  --gray-100: #F1F4F9;
+  --gray-50:  #F7F9FC;
+  --white:    #FFFFFF;
+
+  /* --- Semantic --------------------------------------------------------- */
+  --success-600: #2A9272;   /* darker brand green */
+  --success-500: #34B389;   /* brand green — exact from Figma "pilot data" badge */
+  --success-50:  #E7F6F0;
+  --warning-600: #C77C1E;
+  --warning-500: #E0922F;
+  --warning-50:  #FCF3E6;
+  --danger-600:  #C13A33;
+  --danger-500:  #D6453D;
+  --danger-50:   #FCEBEA;
+
+  /* --- Surfaces & text -------------------------------------------------- */
+  --bg-app:        var(--gray-50);
+  --bg-surface:    var(--white);
+  --bg-sunken:     var(--gray-100);
+  --border:        var(--gray-200);
+  --border-strong: var(--gray-300);
+  --text-primary:   var(--navy-800);
+  --text-secondary: var(--gray-600);
+  --text-muted:     var(--gray-400);
+  --text-on-dark:   #E8EEF5;
+  --text-on-dark-muted: #8FA3B8;
+
+  /* --- Type ------------------------------------------------------------- */
+  --font-sans: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --h1: 32px; --h2: 28px; --h3: 24px; --h4: 20px; --h5: 18px; --h6: 16px;
+  --body-xl: 18px; --body-l: 16px; --body-m: 14px; --body-s: 13px; --body-xs: 12px;
+
+  /* --- Radius ----------------------------------------------------------- */
+  --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
+
+  /* --- Spacing (4pt base) ----------------------------------------------- */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px;
+
+  /* --- Elevation -------------------------------------------------------- */
+  --shadow-xs: 0 1px 2px rgba(16,27,41,.06);
+  --shadow-sm: 0 1px 3px rgba(16,27,41,.08), 0 1px 2px rgba(16,27,41,.04);
+  --shadow-md: 0 4px 12px rgba(16,27,41,.08);
+  --shadow-lg: 0 12px 32px rgba(16,27,41,.12);
+}
+
+/* ---------- Base ---------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-app);
+  font-size: var(--body-m);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+h1,h2,h3,h4,h5,h6 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+a { color: var(--blue-600); text-decoration: none; }
+button { font-family: inherit; cursor: pointer; }
+::selection { background: var(--blue-100); }

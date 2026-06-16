@@ -15,7 +15,10 @@
     "pilot:qa:ethical-scaling": "node scripts/qa-ethical-scaling-pilot.mjs",
     "pilot:reconcile:ethical-scaling": "node scripts/reconcile-company-pilot.mjs --company=\"Ethical Scaling\"",
     "pilot:reconcile:company": "node scripts/reconcile-company-pilot.mjs",
-    "pilot:backfill:company-activity": "node scripts/backfill-company-activity.mjs"
+    "migration:readiness:company": "node scripts/migration-readiness-snapshot.mjs",
+    "migration:readiness:moves": "node scripts/migration-readiness-snapshot.mjs --company=\"Moves Method\"",
+    "pilot:backfill:company-activity": "node scripts/backfill-company-activity.mjs",
+    "pilot:backfill:company-contracts": "node scripts/backfill-company-contracts.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",

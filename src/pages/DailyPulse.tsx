@@ -7,10 +7,23 @@ import {
   type UnifiedCompany,
   type UnifiedTeamMember,
 } from "../lib/appOwnedData.ts";
+import {
+  enabledNotificationTypes,
+  loadCompanyNotificationPreferences,
+  mergeNotificationPreferences,
+  type NotificationPreference,
+  type NotificationPreferenceType,
+} from "../lib/companySettings.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 type PulseWindow = "today" | "week" | "month";
+
+const PULSE_WINDOW_LABELS: Record<PulseWindow, string> = {
+  today: "today",
+  week: "this week",
+  month: "this month",
+};
 
 interface PulseClient {
   glide_row_id: string;
@@ -155,6 +168,27 @@ function daysBetween(later: Date, earlier: Date) {
   );
 }
 
+function dateOnlyIso(date: Date) {
+  return startOfDay(date).toISOString();
+}
+
+function recurringDueDateInRange(
+  anchorValue: string | null | undefined,
+  intervalDays: number,
+  start: Date,
+  end: Date,
+) {
+  const anchor = parseDate(anchorValue);
+  if (!anchor || intervalDays <= 0) return null;
+  const anchorDay = startOfDay(anchor);
+  if (anchorDay >= end) return null;
+
+  const daysFromAnchor = Math.max(0, daysBetween(start, anchorDay));
+  const intervalsElapsed = Math.max(1, Math.ceil(daysFromAnchor / intervalDays));
+  const dueDate = addDays(anchorDay, intervalsElapsed * intervalDays);
+  return dueDate >= start && dueDate < end ? dueDate : null;
+}
+
 function formatDate(value: string | null | undefined) {
   const date = parseDate(value);
   if (!date) return "--";
@@ -294,6 +328,8 @@ function buildPulseSections(
   clients: PulseClient[],
   latestHistoryByClient: Map<string, string>,
   window: PulseWindow,
+  enabledTypes = enabledNotificationTypes([]),
+  notificationPreferences: NotificationPreference[] = [],
 ) {
   const today = startOfDay();
   const ranges = {
@@ -306,10 +342,28 @@ function buildPulseSections(
   const pausedClients = clients.filter(
     (client) => client.program_status_value === "paused",
   );
+  const preferenceByType = new Map(
+    mergeNotificationPreferences(notificationPreferences).map((preference) => [
+      preference.notification_type,
+      preference,
+    ]),
+  );
+  const diagnosticPreference = preferenceByType.get("diagnostic_due");
+  const configuredDiagnosticCadence = diagnosticPreference?.lead_days ?? 56;
+  const diagnosticCadenceDays =
+    configuredDiagnosticCadence > 0 ? configuredDiagnosticCadence : 56;
+  const diagnosticRecurrence =
+    diagnosticPreference?.metadata?.recurrence === "recurring"
+      ? "recurring"
+      : "once";
+  const strategicReviewLeadDays = Math.max(
+    0,
+    preferenceByType.get("strategic_review_due")?.lead_days ?? 35,
+  );
 
   const sections: PulseSection[] = [];
 
-  if (window === "today") {
+  if (window === "today" && enabledTypes.has("next_contact_due")) {
     sections.push({
       id: "contact-today",
       title: "Needs Contact Today",
@@ -329,132 +383,219 @@ function buildPulseSections(
     });
   }
 
-  sections.push({
-    id: `pause-return-${window}`,
-    title:
-      window === "today"
-        ? "Pause Returns Today"
-        : window === "week"
-          ? "Pause Returns This Week"
-          : "Pause Returns This Month",
-    description: "Paused clients whose agreed return date lands in this period.",
-    items: pausedClients
-      .filter((client) => isWithin(client.program_paused_return_date, range.start, range.end))
-      .map((client) =>
-        makeItem(
-          `pause-return-${window}`,
-          client,
-          "Pause return",
-          `Return date is ${formatDate(client.program_paused_return_date)}`,
-          "amber",
-          client.program_paused_return_date,
-        ),
-      ),
-  });
-
-  sections.push({
-    id: `renewals-${window}`,
-    title:
-      window === "today"
-        ? "Renewals Due Today"
-        : window === "week"
-          ? "Renewals Due This Week"
-          : "Renewals Due This Month",
-    description:
-      "Active clients whose current contract/renewal date lands in this period.",
-    items: activeClients
-      .filter((client) =>
-        isWithin(client.current_contract_end_date_for_filtering, range.start, range.end),
-      )
-      .map((client) =>
-        makeItem(
-          `renewals-${window}`,
-          client,
-          "Renewal",
-          `Renewal date is ${formatDate(client.current_contract_end_date_for_filtering)}`,
-          "amber",
-          client.current_contract_end_date_for_filtering,
-        ),
-      ),
-  });
-
-  if (window !== "month") {
-    const thresholdDays = window === "today" ? 14 : 7;
+  if (enabledTypes.has("paused_return_due")) {
     sections.push({
-      id: `churn-risk-${window}`,
+      id: `pause-return-${window}`,
       title:
         window === "today"
-          ? "Churn Risk Signals"
-          : "Churn Risk Signals This Week",
-      description: `Active clients red on Progress or Buy-in for ${thresholdDays}+ days.`,
-      items: outcomeSignalItems({
-        clients: activeClients,
-        sectionId: `churn-risk-${window}`,
-        outcomeValue: "red",
-        thresholdDays,
-        today,
-        tone: "red",
-      }),
-    });
-
-    sections.push({
-      id: `rga-${window}`,
-      title: window === "today" ? "RGA Candidates" : "RGA Candidates This Week",
-      description: `Active clients green on Progress or Buy-in for ${thresholdDays}+ days.`,
-      items: outcomeSignalItems({
-        clients: activeClients,
-        sectionId: `rga-${window}`,
-        outcomeValue: "green",
-        thresholdDays,
-        today,
-        tone: "green",
-      }),
+          ? "Pause Returns Today"
+          : window === "week"
+            ? "Pause Returns This Week"
+            : "Pause Returns This Month",
+      description: "Paused clients whose agreed return date lands in this period.",
+      items: pausedClients
+        .filter((client) =>
+          isWithin(client.program_paused_return_date, range.start, range.end),
+        )
+        .map((client) =>
+          makeItem(
+            `pause-return-${window}`,
+            client,
+            "Pause return",
+            `Return date is ${formatDate(client.program_paused_return_date)}`,
+            "amber",
+            client.program_paused_return_date,
+          ),
+        ),
     });
   }
 
+  if (enabledTypes.has("renewal_due")) {
+    sections.push({
+      id: `renewals-${window}`,
+      title:
+        window === "today"
+          ? "Renewals Due Today"
+          : window === "week"
+            ? "Renewals Due This Week"
+            : "Renewals Due This Month",
+      description:
+        "Active clients whose current contract/renewal date lands in this period.",
+      items: activeClients
+        .filter((client) =>
+          isWithin(client.current_contract_end_date_for_filtering, range.start, range.end),
+        )
+        .map((client) =>
+          makeItem(
+            `renewals-${window}`,
+            client,
+            "Renewal",
+            `Renewal date is ${formatDate(client.current_contract_end_date_for_filtering)}`,
+            "amber",
+            client.current_contract_end_date_for_filtering,
+          ),
+        ),
+    });
+  }
+
+  if (enabledTypes.has("diagnostic_due")) {
+    sections.push({
+      id: `diagnostics-${window}`,
+      title:
+        window === "today"
+          ? "Peak Diagnostics Due Today"
+          : window === "week"
+            ? "Peak Diagnostics Due This Week"
+            : "Peak Diagnostics Due This Month",
+      description:
+        diagnosticRecurrence === "recurring"
+          ? `Active clients due for recurring Peak Diagnostic check-ins every ${diagnosticCadenceDays} days from onboarding.`
+          : `Active clients due for their one-time Peak Diagnostic ${diagnosticCadenceDays} days from onboarding.`,
+      items: activeClients
+        .map((client) => {
+          const dueDate =
+            diagnosticRecurrence === "recurring"
+              ? recurringDueDateInRange(
+                  client.client_age_date_onboarded,
+                  diagnosticCadenceDays,
+                  range.start,
+                  range.end,
+                )
+              : (() => {
+                  const onboarded = parseDate(client.client_age_date_onboarded);
+                  if (!onboarded) return null;
+                  const date = addDays(startOfDay(onboarded), diagnosticCadenceDays);
+                  return isWithin(dateOnlyIso(date), range.start, range.end)
+                    ? date
+                    : null;
+                })();
+          if (!dueDate) return null;
+          return makeItem(
+            `diagnostics-${window}`,
+            client,
+            "Peak Diagnostic",
+            `Peak Diagnostic is due ${formatDate(dateOnlyIso(dueDate))}`,
+            "blue",
+            dateOnlyIso(dueDate),
+          );
+        })
+        .filter((item): item is PulseItem => Boolean(item)),
+    });
+  }
+
+  if (enabledTypes.has("strategic_review_due")) {
+    sections.push({
+      id: `strategic-review-${window}`,
+      title:
+        window === "today"
+          ? "Strategic Reviews Today"
+          : window === "week"
+            ? "Strategic Reviews This Week"
+            : "Strategic Reviews This Month",
+      description:
+        `Active clients ${strategicReviewLeadDays} days before renewal or contract end for strategic review planning.`,
+      items: activeClients
+        .map((client) => {
+          const contractEnd = parseDate(client.current_contract_end_date_for_filtering);
+          if (!contractEnd) return null;
+          const reviewDate = addDays(startOfDay(contractEnd), -strategicReviewLeadDays);
+          if (reviewDate < range.start || reviewDate >= range.end) return null;
+          return makeItem(
+            `strategic-review-${window}`,
+            client,
+            "Strategic review",
+            `Review before renewal on ${formatDate(client.current_contract_end_date_for_filtering)}`,
+            "amber",
+            dateOnlyIso(reviewDate),
+          );
+        })
+        .filter((item): item is PulseItem => Boolean(item)),
+    });
+  }
+
+  if (window !== "month") {
+    const thresholdDays = window === "today" ? 14 : 7;
+    if (enabledTypes.has("churn_risk")) {
+      sections.push({
+        id: `churn-risk-${window}`,
+        title:
+          window === "today"
+            ? "Churn Risk Signals"
+            : "Churn Risk Signals This Week",
+        description: `Active clients red on Progress or Buy-in for ${thresholdDays}+ days.`,
+        items: outcomeSignalItems({
+          clients: activeClients,
+          sectionId: `churn-risk-${window}`,
+          outcomeValue: "red",
+          thresholdDays,
+          today,
+          tone: "red",
+        }),
+      });
+    }
+
+    if (enabledTypes.has("rga_candidate")) {
+      sections.push({
+        id: `rga-${window}`,
+        title: window === "today" ? "RGA Candidates" : "RGA Candidates This Week",
+        description: `Active clients green on Progress or Buy-in for ${thresholdDays}+ days.`,
+        items: outcomeSignalItems({
+          clients: activeClients,
+          sectionId: `rga-${window}`,
+          outcomeValue: "green",
+          thresholdDays,
+          today,
+          tone: "green",
+        }),
+      });
+    }
+  }
+
   const staleDays = window === "week" ? 14 : 30;
-  sections.push({
-    id: `stale-${window}`,
-    title:
-      window === "week"
-        ? "Profiles Quiet 14+ Days"
-        : "Profiles Quiet 30+ Days",
-    description: "Active clients without a recent RetainOS history/profile signal.",
-    items: activeClients
-      .filter((client) => {
-        const latestHistory = latestHistoryByClient.get(client.glide_row_id);
-        const latest = mostRecentDate([
-          latestHistory,
-          client.csm_date_of_next_contact,
-          client.csm_date_of_last_contact,
-          client.outcomes_progress_date,
-          client.outcomes_buy_in_date,
-          client.client_age_date_onboarded,
-        ]);
-        return !latest || daysBetween(today, latest) >= staleDays;
-      })
-      .map((client) => {
-        const latestHistory = latestHistoryByClient.get(client.glide_row_id);
-        const latest = mostRecentDate([
-          latestHistory,
-          client.csm_date_of_next_contact,
-          client.csm_date_of_last_contact,
-          client.outcomes_progress_date,
-          client.outcomes_buy_in_date,
-          client.client_age_date_onboarded,
-        ]);
-        return makeItem(
-          `stale-${window}`,
-          client,
-          "Profile quiet",
-          latest
-            ? `Last signal was ${formatDate(latest.toISOString())}`
-            : "No profile activity signal found",
-          "slate",
-          latest?.toISOString() ?? null,
-        );
-      }),
-  });
+  if (enabledTypes.has("quiet_profile")) {
+    sections.push({
+      id: `stale-${window}`,
+      title:
+        window === "week"
+          ? "Profiles Quiet 14+ Days"
+          : "Profiles Quiet 30+ Days",
+      description: "Active clients without a recent RetainOS history/profile signal.",
+      items: activeClients
+        .filter((client) => {
+          const latestHistory = latestHistoryByClient.get(client.glide_row_id);
+          const latest = mostRecentDate([
+            latestHistory,
+            client.csm_date_of_next_contact,
+            client.csm_date_of_last_contact,
+            client.outcomes_progress_date,
+            client.outcomes_buy_in_date,
+            client.client_age_date_onboarded,
+          ]);
+          return !latest || daysBetween(today, latest) >= staleDays;
+        })
+        .map((client) => {
+          const latestHistory = latestHistoryByClient.get(client.glide_row_id);
+          const latest = mostRecentDate([
+            latestHistory,
+            client.csm_date_of_next_contact,
+            client.csm_date_of_last_contact,
+            client.outcomes_progress_date,
+            client.outcomes_buy_in_date,
+            client.client_age_date_onboarded,
+          ]);
+          return makeItem(
+            `stale-${window}`,
+            client,
+            "Profile quiet",
+            latest
+              ? `Last signal was ${formatDate(latest.toISOString())}`
+              : "No profile activity signal found",
+            "slate",
+            latest?.toISOString() ?? null,
+          );
+        }),
+    });
+  }
 
   return sections.map((section) => ({
     ...section,
@@ -529,7 +670,7 @@ function PulseSectionCard({ section }: { section: PulseSection }) {
         <div className="border-t border-[#eef2f6] px-5 py-4">
           {section.items.length === 0 ? (
             <div className="rounded-lg border border-dashed border-[#d9e2ec] bg-[#f8fafc] px-4 py-6 text-sm text-[#697586]">
-              Nothing needs attention here.
+              No clients match this signal in the selected window.
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -581,6 +722,12 @@ export function DailyPulse() {
   const [latestHistoryByClient, setLatestHistoryByClient] = useState(
     new Map<string, string>(),
   );
+  const [enabledTypes, setEnabledTypes] = useState<Set<NotificationPreferenceType>>(
+    enabledNotificationTypes([]),
+  );
+  const [notificationPreferences, setNotificationPreferences] = useState<
+    NotificationPreference[]
+  >(mergeNotificationPreferences([]));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canFilterByCsm = !capabilities.canViewOnlyAssignedClients;
@@ -590,6 +737,8 @@ export function DailyPulse() {
     if (!effectiveCompanyId) {
       setCompanyName("");
       setCsmOptions([]);
+      setEnabledTypes(enabledNotificationTypes([]));
+      setNotificationPreferences(mergeNotificationPreferences([]));
       return;
     }
     loadUnifiedCompanyByLegacyId(effectiveCompanyId)
@@ -599,6 +748,27 @@ export function DailyPulse() {
       .catch(() => {
         if (!cancelled) setCompanyName("");
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCompanyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPreferences() {
+      if (!effectiveCompanyId) {
+        setEnabledTypes(enabledNotificationTypes([]));
+        setNotificationPreferences(mergeNotificationPreferences([]));
+        return;
+      }
+      const result = await loadCompanyNotificationPreferences(effectiveCompanyId);
+      if (!cancelled) {
+        setEnabledTypes(enabledNotificationTypes(result.preferences));
+        setNotificationPreferences(mergeNotificationPreferences(result.preferences));
+      }
+    }
+
+    void loadPreferences();
     return () => {
       cancelled = true;
     };
@@ -743,11 +913,19 @@ export function DailyPulse() {
   ]);
 
   const sections = useMemo(
-    () => buildPulseSections(clients, latestHistoryByClient, windowMode),
-    [clients, latestHistoryByClient, windowMode],
+    () =>
+      buildPulseSections(
+        clients,
+        latestHistoryByClient,
+        windowMode,
+        enabledTypes,
+        notificationPreferences,
+      ),
+    [clients, enabledTypes, latestHistoryByClient, notificationPreferences, windowMode],
   );
 
   const totalItems = sections.reduce((sum, section) => sum + section.items.length, 0);
+  const enabledSignalCount = enabledTypes.size;
 
   if (!effectiveCompanyId) {
     return (
@@ -769,8 +947,9 @@ export function DailyPulse() {
               Daily Pulse
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-[#697586]">
-              Start-of-day operating view for CSM action items. Signals stay visible here
-              even when individual notifications are dismissed.
+              Start-of-day operating view for CSM action items. Daily Pulse is
+              persistent by design; the notification bell stays lightweight for
+              short-term reminders.
             </p>
           </div>
           <div className="rounded-full bg-[#eef6ff] px-4 py-2 text-sm font-semibold text-[#2f73b8]">
@@ -823,8 +1002,26 @@ export function DailyPulse() {
         <div className="rounded-lg border border-[#e2e8f0] bg-white p-8 text-center text-sm text-[#697586] shadow-sm">
           Loading Daily Pulse...
         </div>
+      ) : sections.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[#d9e2ec] bg-white p-8 text-center shadow-sm">
+          <h2 className="text-base font-semibold text-[#162b3e]">
+            Daily Pulse is hidden for this company
+          </h2>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-[#697586]">
+            No Daily Pulse sections are enabled in Company Settings. The
+            compact bell can still show generated reminders that do not belong
+            on the persistent operating page.
+          </p>
+        </div>
       ) : (
         <div className="space-y-4">
+          {totalItems === 0 ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+              No open Daily Pulse signals {PULSE_WINDOW_LABELS[windowMode]} across{" "}
+              {enabledSignalCount} enabled signal
+              {enabledSignalCount === 1 ? "" : "s"}.
+            </div>
+          ) : null}
           {sections.map((section) => (
             <PulseSectionCard key={section.id} section={section} />
           ))}

@@ -3,3 +3,9 @@ verify_jwt = false
 
 [functions.zapier-create-client]
 verify_jwt = false
+
+[functions.ingest-client-call-summary]
+verify_jwt = false
+
+[functions.webhook-update-client]
+verify_jwt = false

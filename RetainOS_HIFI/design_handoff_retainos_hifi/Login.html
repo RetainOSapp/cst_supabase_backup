@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RetainOS — Sign In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  body { min-height: 100vh; background: var(--gray-100); display: grid; place-items: center; padding: 32px 16px; }
+  .login-shell { width: 100%; max-width: 1040px; min-height: 640px; display: grid; grid-template-columns: 1fr 1fr;
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow-lg); }
+  /* left */
+  .login-form-col { display: flex; align-items: center; justify-content: center; padding: 56px 40px; }
+  .login-inner { width: 100%; max-width: 380px; }
+  .login-head { text-align: center; margin-bottom: 36px; }
+  .login-mark { width: 56px; height: 56px; border-radius: var(--r-pill); background: var(--navy-800);
+    display: grid; place-items: center; margin: 0 auto 16px; }
+  .login-mark svg { width: 30px; height: 30px; }
+  .login-head h1 { font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .login-head p { color: var(--text-secondary); font-size: 14px; margin: 14px 0 0; }
+  .login-panel { background: var(--gray-50); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 28px; }
+  .login-field { margin-bottom: 18px; }
+  .login-field label { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 7px; }
+  .login-field input { width: 100%; border: 1px solid var(--border-strong); border-radius: var(--r-md);
+    padding: 11px 13px; font-size: 14px; font-family: inherit; color: var(--text-primary); background: #fff; }
+  .login-field input:focus { outline: none; border-color: var(--blue-500); box-shadow: 0 0 0 3px var(--blue-50); }
+  .login-field input.code { text-align: center; letter-spacing: .4em; font-weight: 600; }
+  .login-btn { width: 100%; border: none; border-radius: var(--r-md); background: var(--navy-800); color: #fff;
+    font-family: inherit; font-size: 14px; font-weight: 600; padding: 13px; cursor: pointer; transition: background .12s; }
+  .login-btn:hover { background: var(--navy-700); }
+  .login-note { background: #fff; border: 1px solid var(--border); border-radius: var(--r-md);
+    padding: 11px 13px; font-size: 13px; color: var(--text-secondary); margin-bottom: 18px; }
+  .login-note strong { color: var(--text-primary); }
+  .login-textbtn { width: 100%; background: none; border: none; font-family: inherit; font-size: 13px; font-weight: 500;
+    color: var(--text-muted); margin-top: 14px; cursor: pointer; }
+  .login-textbtn:hover { color: var(--text-secondary); }
+  .login-or { display: flex; align-items: center; gap: 14px; margin: 28px 0; }
+  .login-or .ln { height: 1px; flex: 1; background: var(--border-strong); }
+  .login-or span { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+  .login-google { width: 100%; display: flex; align-items: center; justify-content: center; gap: 11px;
+    border: 1px solid var(--border-strong); background: #fff; border-radius: var(--r-md);
+    padding: 12px; font-size: 14px; font-weight: 600; color: var(--text-muted); cursor: not-allowed; }
+  /* right brand panel */
+  .login-brand-col { background: linear-gradient(155deg, var(--navy-700), var(--navy-900));
+    display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; color: var(--text-on-dark); position: relative; overflow: hidden; }
+  .login-brand-col::after { content: ""; position: absolute; width: 460px; height: 460px; border-radius: 50%;
+    border: 1px solid rgba(89,171,240,.12); top: -120px; right: -120px; }
+  .login-brand-mark { width: 120px; height: 120px; border-radius: var(--r-pill); background: rgba(89,171,240,.1);
+    display: grid; place-items: center; margin-bottom: 28px; }
+  .login-brand-mark svg { width: 64px; height: 64px; }
+  .login-brand-col h2 { font-size: 24px; font-weight: 700; color: #fff; text-align: center; letter-spacing: -.02em; }
+  .login-brand-col p { color: var(--text-on-dark-muted); font-size: 14px; text-align: center; margin: 12px 0 0; max-width: 320px; line-height: 1.6; }
+  @media (max-width: 860px) {
+    .login-shell { grid-template-columns: 1fr; min-height: 0; }
+    .login-brand-col { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="login-shell">
+    <section class="login-form-col">
+      <div class="login-inner">
+        <div class="login-head">
+          <div class="login-mark">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M20.5 8.5A9 9 0 1 0 21 13" stroke="#59ABF0" stroke-width="2.6" stroke-linecap="round"/>
+              <path d="M20.8 3.6 21.4 9 16 8.2z" fill="#59ABF0"/>
+            </svg>
+          </div>
+          <h1>RetainOS</h1>
+          <p>Enter your credentials to access your account</p>
+        </div>
+
+        <div class="login-panel">
+          <!-- step 1: email -->
+          <form id="step-email" onsubmit="return goCode(event)">
+            <div class="login-field">
+              <label for="email">Email address*</label>
+              <input id="email" type="email" required autofocus placeholder="you@example.com" />
+            </div>
+            <button class="login-btn" type="submit">Sign In</button>
+          </form>
+
+          <!-- step 2: code -->
+          <form id="step-code" style="display:none" onsubmit="return verify(event)">
+            <div class="login-note">We sent a login code to <strong id="sent-to">you@example.com</strong></div>
+            <div class="login-field">
+              <label for="code">Verification code*</label>
+              <input id="code" class="code" type="text" inputmode="numeric" placeholder="123456" />
+            </div>
+            <button class="login-btn" type="submit">Verify &amp; Sign In</button>
+            <button class="login-textbtn" type="button" onclick="backToEmail()">Use a different email</button>
+          </form>
+
+          <div class="login-or"><span class="ln"></span><span>Or</span><span class="ln"></span></div>
+          <button class="login-google" type="button" title="Google sign-in is not enabled yet">
+            <span style="font-size:16px;font-weight:700;color:var(--text-secondary)">G</span> Continue with Google
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="login-brand-col">
+      <div class="login-brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M20.5 8.5A9 9 0 1 0 21 13" stroke="#59ABF0" stroke-width="2.4" stroke-linecap="round"/>
+          <path d="M20.8 3.6 21.4 9 16 8.2z" fill="#59ABF0"/>
+        </svg>
+      </div>
+      <h2>Retention, on autopilot</h2>
+      <p>Track every client through onboarding, renewal, and beyond — one source of truth for your CSM team.</p>
+    </section>
+  </div>
+
+<script>
+  function goCode(e){ e.preventDefault();
+    var email = document.getElementById('email').value || 'you@example.com';
+    document.getElementById('sent-to').textContent = email;
+    document.getElementById('step-email').style.display = 'none';
+    document.getElementById('step-code').style.display = 'block';
+    setTimeout(function(){ document.getElementById('code').focus(); }, 30);
+    return false;
+  }
+  function backToEmail(){
+    document.getElementById('step-code').style.display = 'none';
+    document.getElementById('step-email').style.display = 'block';
+    document.getElementById('email').focus();
+  }
+  function verify(e){ e.preventDefault();
+    window.location.href = 'RetainOS HiFi.html';
+    return false;
+  }
+</script>
+</body>
+</html>

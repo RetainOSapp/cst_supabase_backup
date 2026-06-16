@@ -187,7 +187,7 @@ async function main() {
           .in("client_id", clientIds),
         supabase
           .from("client_milestones")
-          .select("glide_row_id")
+          .select("glide_row_id, client_id, milestone_id, archived_at")
           .eq("company_id", company.id),
         supabase
           .from("company_offer_milestones")
@@ -218,6 +218,12 @@ async function main() {
   const existingMilestoneIds = new Set(
     (existingMilestonesResult.data ?? []).map((milestone) => milestone.glide_row_id),
   );
+  const existingActiveMilestoneKeys = new Set(
+    (existingMilestonesResult.data ?? [])
+      .filter((milestone) => !milestone.archived_at)
+      .filter((milestone) => milestone.client_id && milestone.milestone_id)
+      .map((milestone) => `${milestone.client_id}::${milestone.milestone_id}`),
+  );
   const offerIdByMilestoneId = new Map(
     (appOfferMilestonesResult.data ?? []).map((milestone) => [
       milestone.glide_row_id,
@@ -230,15 +236,43 @@ async function main() {
     .filter((contract) => !existingContractIds.has(contract.glide_row_id))
     .map((contract) => contractPayload(contract, company));
 
-  const milestoneCandidates = (sourceMilestonesResult.data ?? [])
-    .filter((milestone) => milestone.glide_row_id && activeClientIds.has(milestone.client_id))
-    .filter((milestone) => !existingMilestoneIds.has(milestone.glide_row_id))
-    .map((milestone) => ({
+  const plannedActiveMilestoneKeys = new Set();
+  const activeMilestoneConflictSkips = [];
+  const duplicateActiveMilestoneSkips = [];
+  const milestoneCandidates = [];
+
+  for (const milestone of sourceMilestonesResult.data ?? []) {
+    if (!milestone.glide_row_id || !activeClientIds.has(milestone.client_id)) continue;
+    if (existingMilestoneIds.has(milestone.glide_row_id)) continue;
+
+    const activeKey = milestone.client_id && milestone.milestone_id
+      ? `${milestone.client_id}::${milestone.milestone_id}`
+      : null;
+    const skipDetails = {
+      glide_row_id: milestone.glide_row_id,
+      client_id: milestone.client_id,
+      milestone_id: milestone.milestone_id,
+    };
+
+    if (activeKey && existingActiveMilestoneKeys.has(activeKey)) {
+      activeMilestoneConflictSkips.push(skipDetails);
+      continue;
+    }
+
+    if (activeKey && plannedActiveMilestoneKeys.has(activeKey)) {
+      duplicateActiveMilestoneSkips.push(skipDetails);
+      continue;
+    }
+
+    if (activeKey) plannedActiveMilestoneKeys.add(activeKey);
+
+    milestoneCandidates.push({
       source: milestone,
       resolvedOfferId: cleanText(milestone.offer_id) ??
         offerIdByMilestoneId.get(milestone.milestone_id) ??
         null,
-    }));
+    });
+  }
   const unresolvedMilestones = milestoneCandidates
     .filter((milestone) => !milestone.resolvedOfferId)
     .map((milestone) => ({
@@ -262,6 +296,8 @@ async function main() {
       contractsToBackfill: contractPayloads.length,
       clientMilestonesToBackfill: milestonePayloads.length,
       unresolvedClientMilestonesSkipped: unresolvedMilestones.length,
+      activeClientMilestoneConflictsSkipped: activeMilestoneConflictSkips.length,
+      duplicateActiveClientMilestonesSkipped: duplicateActiveMilestoneSkips.length,
       contractSample: sample(
         contractPayloads.map((contract) => ({
           glide_row_id: contract.glide_row_id,
@@ -281,6 +317,8 @@ async function main() {
         })),
       ),
       unresolvedMilestoneSample: sample(unresolvedMilestones),
+      activeMilestoneConflictSample: sample(activeMilestoneConflictSkips),
+      duplicateActiveMilestoneSample: sample(duplicateActiveMilestoneSkips),
     },
   };
 
@@ -307,11 +345,17 @@ async function main() {
     company_id: company.id,
     event_type: "historical_activity_backfill",
     source: "script",
+    entity_table: "companies",
+    entity_id: null,
+    legacy_glide_row_id: company.legacy_glide_row_id,
     title: "Historical client activity backfilled",
     summary: `Backfilled ${contractPayloads.length} contracts and ${milestonePayloads.length} client milestone rows.`,
     after_data: {
       contracts: contractPayloads.length,
       client_milestones: milestonePayloads.length,
+      unresolved_client_milestones_skipped: unresolvedMilestones.length,
+      active_client_milestone_conflicts_skipped: activeMilestoneConflictSkips.length,
+      duplicate_active_client_milestones_skipped: duplicateActiveMilestoneSkips.length,
       include_archived: includeArchived,
     },
   });

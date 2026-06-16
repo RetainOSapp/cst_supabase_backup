@@ -1,6 +1,6 @@
 # Ethical Scaling App-Owned Dependency Audit
 
-Date: 2026-06-08
+Date: 2026-06-10
 
 Purpose: identify remaining Glide mirror dependencies that affect the Ethical Scaling pilot and classify what should move to app-owned Supabase data before broader company migrations. This is a planning/audit document only; no implementation is included here.
 
@@ -22,6 +22,56 @@ The remaining mirror dependencies fall into four categories:
 3. Historical data and reporting still read mirrored contracts, milestones, tasks, and history as fallback/backfill sources.
 4. Dev/sync surfaces intentionally remain mirror-specific and should not be migrated for the pilot.
 
+## Migration-Readiness Checklist
+
+Use this checklist before moving a company from CST mirror preview into a RetainOS pilot or fully migrated state.
+
+### Safe App-Owned Runtime Sources
+
+For companies with `migration_status` of `pilot` or `migrated`, these surfaces should use app-owned tables first and only keep mirror reads for explicit fallback/backfill scenarios:
+
+- **Company shell:** `companies` is the preferred company record; `backup_companies` remains only for SuperAdmin discovery and mirror-only companies.
+- **Team and assignment:** `company_members` is the preferred source for active CSM/director/support lists, assignment dropdowns, capacity, and role visibility.
+- **Client roster/detail/reporting:** `clients` is the preferred source for current client state.
+- **Offers and templates:** `company_offers` and `company_offer_milestones` are the preferred source for current pathway setup.
+- **Client milestone progress:** `client_milestones` is the preferred source for current/future progress; mirrored historical rows require a backfill/display decision.
+- **Contracts:** `client_contracts` is the preferred source for current/future contract actions; mirrored historical rows require a backfill/display decision.
+- **Tasks:** `client_tasks` is the preferred source for task list, client detail tasks, client calendar task events, and Dashboard task-status charts.
+- **History:** `client_history_events` is the preferred source for RetainOS-created Quick Update, status, profile, outcome, contract, and milestone events.
+- **Company customization:** `company_outcome_definitions`, `company_churn_reasons`, and `company_settings` are the preferred sources for pilot/migrated companies.
+
+### Intentional Mirror Dependencies To Keep For Now
+
+These `backup_*` reads are still expected and should not be removed until the named prerequisite is complete:
+
+- `backup_companies`: SuperAdmin discovery and mirror-only walkthroughs. Remove only after every active SaaS client has an app-owned `companies` row and the old Glide mirror is retired.
+- `backup_choices`: program/status label and emoji reference. Remove after an app-owned canonical status definition table or static config is implemented.
+- `backup_company_clients_history`: retention/status-transition confidence and legacy activity comparison. Remove from runtime only after historical activity import is approved per company.
+- `backup_company_clients_contracts`: historical contract/renewal confidence. Remove from pilot runtime after contract backfill dry-run/apply is approved and duplicate display is resolved.
+- `backup_company_clients_milestones`: historical milestone confidence. Remove from pilot runtime after milestone backfill dry-run/apply is approved and duplicate display is resolved.
+- `backup_company_team`, `backup_company_clients`, `backup_company_offers`, `backup_company_offer_milestones`, and `backup_company_clients_tasks`: mirror-only company fallback. These should not be used for pilot/migrated companies unless an app-owned row is missing and the UI explicitly treats the result as legacy/imported.
+- `src/lib/dashboardKpiSql.ts`: mirror-only performance fallback for large CST-preview walkthroughs. Replace with optimized canonical reporting views/RPCs before broad migration.
+- `src/pages/Tables.tsx`, `src/pages/TableDetail.tsx`, `src/pages/SyncLog.tsx`, and `sync-glide*` functions: SuperAdmin-only dev/sync tooling. Leave until Glide is fully retired and exported.
+
+### Per-Company Gate Before Pilot
+
+1. Run the Glide/CST sync for the target company while users are paused from editing in Glide.
+2. Run `npm run pilot:reconcile:company -- --company="Company Name"` and review missing/app-only rows, status distributions, assignments, activity, contracts, and milestone confidence.
+3. Confirm active team members exist in `company_members` and archived/non-client-managing members are hidden from CSM dropdowns.
+4. Confirm active clients exist in `clients`, with assigned CSM ids matching active app-owned team members.
+5. Confirm active offers and milestones exist in `company_offers` / `company_offer_milestones`.
+6. Dry-run historical backfill with `npm run pilot:backfill:company-activity -- --company="Company Name"` when contract/milestone history matters for reporting.
+7. Decide whether to apply historical backfill. If applied, QA that Client Detail does not show confusing duplicate legacy/imported rows.
+8. Move the company to `pilot` only after Jay approves the reconciliation report and QA checklist.
+
+### Per-Company Gate Before Fully Migrated
+
+1. Confirm RetainOS is the operational source of truth and Glide/CST editing is disabled for that company.
+2. Re-run reconciliation after at least one real operating cycle in RetainOS.
+3. Confirm write flows work for the company roles that will use the pilot: Quick Update, outcomes, status, profile, contracts, milestones, assignments, resources, and notifications/Daily Pulse as applicable.
+4. Confirm dashboard/CSM report formulas are acceptable for that company volume.
+5. Mark remaining mirror reads as either intentional archive/reference reads or blockers before setting `migration_status = migrated`.
+
 ## Implementation Note - 2026-06-08
 
 Safe slices implemented after this audit:
@@ -31,6 +81,7 @@ Safe slices implemented after this audit:
 - Updated the Super Admin SaaS Clients list to show app-owned companies/team members first while preserving mirror-only company discovery.
 - Updated SaaS company detail loading to prefer the app-owned company shell.
 - Stopped pilot/migrated company outcome dropdowns from quietly falling back to mirrored `backup_choices`; app-owned definitions are authoritative and safe defaults are used if definitions are empty.
+- 2026-06-10: stopped pilot/migrated task surfaces from merging CST preview tasks where `client_tasks` already exists. `/tasks`, Client Detail > Tasks, Clients calendar task events, and Dashboard task-status charts now use `client_tasks` for app-owned companies and keep `backup_company_clients_tasks` only for mirror-only companies.
 
 Decision still required before changing historical display behavior:
 
@@ -38,6 +89,28 @@ Decision still required before changing historical display behavior:
 - **Milestones:** should pilot/migrated companies show mirrored historical milestone rows beside app-owned milestone progress, or only show app-owned/imported rows once backfill is approved?
 
 Current recommendation: keep historical mirror rows visible only until a per-company dry-run/backfill is approved, then switch that company to app-owned/imported historical rows only. This avoids duplicate timelines and keeps RetainOS as the operating source of truth.
+
+## Implementation Note - 2026-06-15
+
+Historical contract/milestone runtime pass:
+
+- Applied `npm run pilot:backfill:company-contracts -- --company="Ethical Scaling" --include-paused-suspended --apply`.
+  - Backfilled 7 current-summary contracts into `client_contracts`.
+  - Follow-up dry-run now reports `totalContractsToBackfill = 0`.
+- Applied `npm run pilot:backfill:company-activity -- --company="Ethical Scaling" --apply`.
+  - Backfilled 32 historical client milestone rows into `client_milestones`.
+  - Follow-up dry-run now reports `clientMilestonesToBackfill = 0`.
+  - 2 CST mirror milestone rows were intentionally skipped because active `client_id + milestone_id` rows already existed; the script now reports these as active milestone conflicts instead of failing.
+- Client Detail now skips `backup_company_clients_contracts` and `backup_company_clients_milestones` for `pilot` / `migrated` companies, while preserving mirror fallback for mirror-only companies.
+- Remaining intentional dependencies for Ethical Scaling:
+  - `backup_choices` / status references until canonical app-owned status definitions exist.
+  - SuperAdmin/dev sync surfaces.
+  - Reconciliation scripts.
+
+Jay QA required:
+
+- Verify Ethical Scaling contract and milestone tabs no longer show duplicate CST/imported rows.
+- Spot-check Moves Method still loads read-only mirror contracts/milestones.
 
 ## Classification Key
 
@@ -454,8 +527,8 @@ Risk: medium. Requires product confirmation on field types and where values appe
    - Safer than program statuses because the custom definition table is already in place.
 
 4. **Task mirror usage defer/label.**
-   - Not core to Ethical Scaling.
-   - Best handled later unless pilot users notice duplicate/stale task rows.
+   - 2026-06-10: current task views now use `client_tasks` for pilot/migrated companies and `backup_company_clients_tasks` for mirror-only companies.
+   - Remaining task work is CRUD/edit/archive polish, not mirror source selection for current pilot task reads.
 
 ## Open Questions Before Implementation
 

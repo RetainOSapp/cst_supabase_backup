@@ -131,6 +131,41 @@ function calculatedContractEndDate(client) {
   return addDays(start, days).toISOString();
 }
 
+function clientRenewalDateConfidence(client) {
+  const filteringDate = normalizeDate(client.current_contract_end_date_for_filtering);
+  if (filteringDate) {
+    return {
+      date: filteringDate,
+      source: "client_summary_filtering_date",
+      confidence: "high",
+    };
+  }
+
+  const explicitEndDate = normalizeDate(client.current_contract_end_date);
+  if (explicitEndDate) {
+    return {
+      date: explicitEndDate,
+      source: "client_summary_end_date",
+      confidence: "high",
+    };
+  }
+
+  const calculatedEndDate = normalizeDate(calculatedContractEndDate(client));
+  if (calculatedEndDate) {
+    return {
+      date: calculatedEndDate,
+      source: "calculated_from_start_date_and_days",
+      confidence: "medium",
+    };
+  }
+
+  return {
+    date: null,
+    source: "missing",
+    confidence: "missing",
+  };
+}
+
 function countBy(rows, key) {
   return rows.reduce((counts, row) => {
     const value = normalized(row[key]) ?? "not_set";
@@ -630,6 +665,33 @@ async function main() {
     }
   }
 
+  const latestLegacyContractByClientId = new Map();
+  for (const contract of sourceContracts) {
+    const previous = latestLegacyContractByClientId.get(contract.client_id);
+    const contractEnd = contract.end_date ? new Date(contract.end_date).getTime() : -Infinity;
+    const previousEnd = previous?.end_date ? new Date(previous.end_date).getTime() : -Infinity;
+    if (!previous || contractEnd > previousEnd) {
+      latestLegacyContractByClientId.set(contract.client_id, contract);
+    }
+  }
+
+  const appContractCountByClientId = new Map();
+  for (const contract of appUnarchivedContracts) {
+    if (!contract.client_id) continue;
+    appContractCountByClientId.set(
+      contract.client_id,
+      (appContractCountByClientId.get(contract.client_id) ?? 0) + 1,
+    );
+  }
+  const legacyContractCountByClientId = new Map();
+  for (const contract of sourceContracts) {
+    if (!contract.client_id) continue;
+    legacyContractCountByClientId.set(
+      contract.client_id,
+      (legacyContractCountByClientId.get(contract.client_id) ?? 0) + 1,
+    );
+  }
+
   const latestContractSummaryMismatches = appClients
     .map((client) => {
       const contract = latestAppContractByClientId.get(client.glide_row_id);
@@ -681,6 +743,89 @@ async function main() {
     })
     .filter(Boolean);
 
+  const latestLegacyContractSummaryMismatches = appClients
+    .map((client) => {
+      const contract = latestLegacyContractByClientId.get(client.glide_row_id);
+      if (!contract) return null;
+      const checks = [
+        {
+          field: "current_contract_start_date",
+          clientSummary: normalizeDate(client.current_contract_start_date),
+          latestLegacyContract: normalizeDate(contract.start_date),
+        },
+        {
+          field: "current_contract_end_date",
+          clientSummary: normalizeDate(client.current_contract_end_date),
+          latestLegacyContract: normalizeDate(contract.end_date),
+        },
+        {
+          field: "current_contract_end_date_for_filtering",
+          clientSummary: normalizeDate(client.current_contract_end_date_for_filtering),
+          latestLegacyContract: normalizeDate(contract.end_date),
+        },
+        {
+          field: "current_contract_monthly_value",
+          clientSummary: normalizeNumber(client.current_contract_monthly_value),
+          latestLegacyContract: normalizeNumber(contract.monthly_value),
+        },
+        {
+          field: "current_contract_reference_link",
+          clientSummary: cleanText(client.current_contract_reference_link),
+          latestLegacyContract: cleanText(contract.reference_link),
+        },
+        {
+          field: "current_contract_auto_renew",
+          clientSummary: normalizeBoolean(client.current_contract_auto_renew),
+          latestLegacyContract: normalizeBoolean(contract.auto_renew),
+        },
+      ];
+      const diffs = checks.filter(
+        (check) => check.clientSummary !== check.latestLegacyContract,
+      );
+      if (diffs.length === 0) return null;
+      return {
+        clientId: client.glide_row_id,
+        clientName: client.client_name,
+        programStatus: client.program_status_value,
+        latestLegacyContractId: contract.glide_row_id,
+        latestLegacyContractEndDate: normalizeDate(contract.end_date),
+        diffs,
+      };
+    })
+    .filter(Boolean);
+
+  const activeClientContractCoverage = activeClients.map((client) => {
+    const renewalDate = clientRenewalDateConfidence(client);
+    return {
+      clientId: client.glide_row_id,
+      clientName: client.client_name,
+      programStatus: client.program_status_value,
+      currentContractEnd: renewalDate.date,
+      renewalDateSource: renewalDate.source,
+      renewalDateConfidence: renewalDate.confidence,
+      appContractCount: appContractCountByClientId.get(client.glide_row_id) ?? 0,
+      legacyContractCount:
+        legacyContractCountByClientId.get(client.glide_row_id) ?? 0,
+      hasAppContractHistory:
+        (appContractCountByClientId.get(client.glide_row_id) ?? 0) > 0,
+      hasLegacyContractHistory:
+        (legacyContractCountByClientId.get(client.glide_row_id) ?? 0) > 0,
+      hasCurrentRenewalDate: Boolean(renewalDate.date),
+    };
+  });
+  const activeClientsMissingAppContracts = activeClientContractCoverage.filter(
+    (client) => !client.hasAppContractHistory,
+  );
+  const activeClientsMissingAllContractHistory = activeClientContractCoverage.filter(
+    (client) => !client.hasAppContractHistory && !client.hasLegacyContractHistory,
+  );
+  const activeClientsMissingCurrentRenewalDate =
+    activeClientContractCoverage.filter((client) => !client.hasCurrentRenewalDate);
+  const activeClientRenewalDateSources = countBy(
+    activeClientContractCoverage,
+    "renewalDateSource",
+  );
+
   const renewingFromCurrentSummary = new Set();
   const renewingFromAppContractHistory = new Set();
   const renewingFromLegacyContractHistory = new Set();
@@ -691,7 +836,7 @@ async function main() {
   );
 
   for (const client of appClients) {
-    if (dateInRange(calculatedContractEndDate(client), renewalRange)) {
+    if (dateInRange(clientRenewalDateConfidence(client).date, renewalRange)) {
       renewingFromCurrentSummary.add(client.glide_row_id);
     }
   }
@@ -798,6 +943,12 @@ async function main() {
   if (sourceContracts.length > appContracts.length) {
     notes.push("Mirrored historical contracts are not fully backfilled app-side yet; pilot writes are app-owned from this point forward.");
   }
+  if (activeClientsMissingAppContracts.length > 0) {
+    notes.push(`${activeClientsMissingAppContracts.length} active clients do not yet have app-owned contract history; current client summaries and/or mirrored contract history still support renewal confidence until historical backfill is applied.`);
+  }
+  if (activeClientsMissingCurrentRenewalDate.length > 0) {
+    notes.push(`${activeClientsMissingCurrentRenewalDate.length} active clients do not have a current contract renewal date in the app-owned client summary.`);
+  }
   if (sourceClientMilestones.length > appClientMilestones.length) {
     notes.push("Mirrored historical client milestone records are not fully backfilled app-side yet; pilot progress writes are app-owned from this point forward.");
   }
@@ -899,6 +1050,23 @@ async function main() {
           latestUnarchivedAppContractVsClientSummaryMismatches: summarizeRows(
             latestContractSummaryMismatches,
           ),
+          latestMirroredContractVsClientSummaryMismatches: summarizeRows(
+            latestLegacyContractSummaryMismatches,
+          ),
+          activeClientCoverage: {
+            activeClientCount: activeClients.length,
+            renewalDateSources: activeClientRenewalDateSources,
+            activeClientsMissingAppContractHistory: summarizeRows(
+              activeClientsMissingAppContracts,
+            ),
+            activeClientsMissingAllContractHistory: summarizeRows(
+              activeClientsMissingAllContractHistory,
+            ),
+            activeClientsMissingCurrentRenewalDate: summarizeRows(
+              activeClientsMissingCurrentRenewalDate,
+            ),
+            sample: sampleRows(activeClientContractCoverage, 10),
+          },
           archivedAppContractCount: archivedAppContracts.length,
         },
         renewalConfidence: {

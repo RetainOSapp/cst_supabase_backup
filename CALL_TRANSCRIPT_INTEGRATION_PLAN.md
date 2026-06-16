@@ -1,6 +1,6 @@
-# Call Transcript Integration Plan
+# RetainOS Integration Intake Plan
 
-Purpose: design a provider-agnostic inbound transcript flow for Fathom, Otter, Grain, and similar tools. This is a proposal only; no code has been implemented from this plan yet.
+Purpose: design the provider-agnostic inbound integration layer for RetainOS. This includes Fathom/Otter/Grain call workflows, CRM client creation/update webhooks, LMS course-completion webhooks, and the later Call AI pipeline. This is a proposal/coordination file unless a section explicitly says an endpoint is live.
 
 ## Current Context
 
@@ -8,15 +8,75 @@ Purpose: design a provider-agnostic inbound transcript flow for Fathom, Otter, G
 - Client write flows already use app-owned tables for pilot/migrated companies and write `client_history_events` plus `app_audit_events`.
 - Quick Update currently updates notes, next steps, last contact, next contact, outcomes, and history for app-owned clients.
 - Resources already supports global guides, dynamic company-specific IDs, editable resources, and Loom embeds.
-- Call AI is still a later roadmap area, but transcript ingestion is a useful foundation because it can power notes, last-contact updates, call records, and future analysis.
+- Call AI is still a later roadmap area. Transcript ingestion is useful as a foundation, but summary-to-next-steps should be treated as a distinct workflow because it is lighter, safer, and available to companies that may not have Call AI.
+
+## Integration Types
+
+RetainOS needs five integration families to reach parity with CST/Glide patterns.
+
+### 1. Call AI Transcript Intake
+
+Purpose: receive full call transcripts from Fathom, Otter, Grain, or another recorder and queue them for future Call AI analysis/QC.
+
+- Endpoint family: `ingest-call-transcript`.
+- Payload: full transcript, attendee emails, meeting title, timestamp, recording URL, provider metadata.
+- Matching: conservative client match by explicit client email or attendee email; no `client_id` should be required because providers normally do not know RetainOS ids.
+- Rollout: later, after migration-critical workflows are stable.
+- Tiering: gated by Call AI access/subscription because high-volume companies can generate heavy AI usage.
+
+### 2. Call Summary To Client Next Steps
+
+Purpose: receive a lighter provider-generated call summary and write it into the matched client's next steps/history, while updating Date of Last Contact.
+
+- Endpoint family: `ingest-client-call-summary`.
+- Payload: company id, client email, summary/next steps, call timestamp, recording URL/provider metadata.
+- Matching: explicit `client_email` first. Attendee matching can be a later fallback, but v1 should ask Zapier/n8n/Make to send the exact client email.
+- Behavior:
+  - match client inside the supplied company;
+  - write previous next steps into history;
+  - update current `next_steps_value`;
+  - update `csm_date_of_last_contact` to the call timestamp/date;
+  - create a `client_history_events` row with source `call_summary_webhook`.
+- Rollout: can ship before Call AI because it is operationally useful and lower cost.
+- Tiering: available to companies without Call AI, e.g. Moves Method.
+
+### 3. New Client Webhook
+
+Purpose: create a new app-owned RetainOS client from a CRM/sales/marketing automation.
+
+- Endpoint: `zapier-create-client` exists.
+- Required: `company_id`, client name/email.
+- Existing status: baseline structure exists and should be QAed before each company migration.
+- Future: support n8n/Make as alternatives to Zapier using the same RetainOS endpoint contract.
+
+### 4. Update Client Webhook
+
+Purpose: update an existing client from an external system when the client can be matched.
+
+- Endpoint: `webhook-update-client`.
+- V1 docs: `CLIENT_UPDATE_WEBHOOK.md`.
+- Matching: company id + exact client email in v1, or explicit app-owned `client_id` when it belongs to the submitted company and optional email also matches.
+- Updatable fields: `next_steps`, `notes` as history context, `last_contact`, `next_contact`, active `offer_id`, `assigned_to`, and active company `custom_fields`.
+- Status/program updates are deliberately rejected in V1 so lifecycle side effects stay inside the RetainOS status flow.
+- Auth prefers company-scoped `company_integration_secrets` rows with SHA-256 token hashes, with a temporary global secret fallback only for companies that do not have active client-update secret rows yet.
+- Unmatched or ambiguous requests write `integration_intake_events.status = 'needs_review'` and do not mutate clients.
+- Successful requests update only app-owned tables (`clients`, `client_custom_field_values`, `client_history_events`, `app_audit_events`, and intake status). They do not mutate `backup_*`.
+
+### 5. Course Completion Webhook
+
+Purpose: receive LMS progress/completion pings, commonly as a percentage, and store/update a client custom field or dedicated course-progress record.
+
+- Recommended endpoint: `webhook-course-completion`.
+- Matching: company id + exact client email in v1.
+- Payload: course id/name, completion percentage, completed_at, provider metadata.
+- V1 destination can be a client custom field if configured; a later dedicated `client_course_progress` table may be cleaner for multiple courses.
 
 ## Goals
 
-- Accept meeting transcript events from Fathom, Otter, Grain, or an automation layer such as Zapier, n8n, or Make.
+- Accept call transcript and call-summary events from Fathom, Otter, Grain, or an automation layer such as Zapier, n8n, or Make.
 - Store each call/transcript as app-owned data, scoped to one company.
 - Match the call to a client when possible.
-- Optionally write the provider summary into client history/notes.
-- Optionally update the client's date of last contact when the call is linked to a client.
+- For the summary endpoint, write the provider summary into client next steps/history and update Date of Last Contact.
 - Queue the transcript for future Call AI analysis without blocking ingestion.
 - Provide a Resources setup guide similar to the client-creation webhook guide.
 
@@ -28,7 +88,7 @@ Purpose: design a provider-agnostic inbound transcript flow for Fathom, Otter, G
 - Do not auto-create clients from call attendees in V1.
 - Do not send notifications until notification preferences are defined.
 
-## Provider-Agnostic Endpoint
+## Provider-Agnostic Call AI Endpoint
 
 Recommended function name:
 
@@ -45,15 +105,17 @@ Recommended public URL:
 Auth pattern:
 
 - Disable JWT verification for provider webhooks.
-- Require a server-side shared secret in either:
-  - `Authorization: Bearer {CALL_TRANSCRIPT_WEBHOOK_SECRET}`
-  - `x-webhook-secret: {CALL_TRANSCRIPT_WEBHOOK_SECRET}`
 - Require `company_id`.
+- Require a company-specific integration token in either:
+  - `Authorization: Bearer {COMPANY_INTEGRATION_TOKEN}`
+  - `x-retainos-integration-token: {COMPANY_INTEGRATION_TOKEN}`
+  - `x-webhook-secret: {COMPANY_INTEGRATION_TOKEN}` for tools that cannot set bearer auth.
+- Validate the submitted token against the submitted company before processing.
 - Accept either app-owned company UUID or legacy Glide company id, matching the existing client webhook pattern.
 - Only allow companies with `migration_status in ('pilot', 'migrated')`.
 - Optionally require a company setting such as `enable_call_transcript_ingestion = true` before accepting requests.
 
-## Request Shape
+## Call AI Request Shape
 
 Providers vary a lot, so V1 should accept a normalized payload and preserve raw provider payload in metadata.
 
@@ -69,7 +131,6 @@ Providers vary a lot, so V1 should accept a normalized payload and preserve raw 
   "summary": "{{provider_summary}}",
   "transcript": "{{full_transcript}}",
   "recording_url": "{{recording_url}}",
-  "client_id": "{{optional_retainos_client_id_or_legacy_id}}",
   "client_email": "{{optional_client_email}}",
   "client_name": "{{optional_client_name}}",
   "csm_email": "{{optional_csm_email}}",
@@ -77,11 +138,73 @@ Providers vary a lot, so V1 should accept a normalized payload and preserve raw 
     { "name": "Client Name", "email": "client@example.com" },
     { "name": "CSM Name", "email": "csm@example.com" }
   ],
-  "write_summary_to_notes": true,
-  "update_last_contact": true,
+  "queue_ai_analysis": true,
   "raw_payload": {}
 }
 ```
+
+## Summary-To-Next-Steps Endpoint
+
+Recommended function name:
+
+```text
+supabase/functions/ingest-client-call-summary
+```
+
+Recommended public URL:
+
+```text
+{SUPABASE_URL}/functions/v1/ingest-client-call-summary
+```
+
+Recommended payload:
+
+```json
+{
+  "company_id": "{{company_id}}",
+  "provider": "fathom",
+  "external_call_id": "{{provider_call_id}}",
+  "client_email": "{{client_email}}",
+  "summary": "{{fathom_summary_or_next_steps}}",
+  "started_at": "{{call_started_at}}",
+  "recording_url": "{{recording_url}}",
+  "raw_payload": {}
+}
+```
+
+V1 should require `client_email`. If it cannot match exactly one client inside the company, it should store a failed intake/review event and must not update a client.
+
+## Ethical Scaling First QA Setup
+
+Before Moves Method uses this, validate with Ethical Scaling because it is already a pilot company and the risk is low.
+
+Recommended setup:
+
+1. Create the RetainOS inbound endpoint first, for example `ingest-call-transcript`.
+2. Create a company-specific integration token row for the company and integration type.
+3. In Zapier, n8n, or Make, create a test automation from Fathom/Otter/Grain:
+   - Trigger: new recording/transcript/AI summary is available.
+   - Action: Webhooks by Zapier or equivalent `POST`.
+   - URL: `{SUPABASE_URL}/functions/v1/ingest-call-transcript`.
+   - Header: `Authorization: Bearer {COMPANY_INTEGRATION_TOKEN}`.
+   - Header: `Content-Type: application/json`.
+   - Body: normalized JSON matching the shape above.
+4. Use Ethical Scaling's company id in the payload.
+5. Use a known Ethical Scaling client email for the first test.
+6. Send one payload to `ingest-client-call-summary` first, because this is the lighter operational flow.
+7. Verify in RetainOS:
+   - The intake is stored.
+   - The call matched the expected client.
+   - The client History shows the summary/update.
+   - The client current next steps changed to the summary.
+   - Date of Last Contact updates only when matching is confident.
+   - If matching fails, the call lands in a review/unmatched state instead of writing to the wrong client.
+
+How this links to RetainOS:
+
+- Zapier or another automation layer only delivers the provider payload.
+- RetainOS owns company validation, client matching, history writing, last-contact updates, and future Call AI queuing.
+- The resource guide should show company-specific IDs and copyable payload examples, but should not claim the endpoint is live until the Edge Function and tables are implemented and QAed.
 
 Provider-specific aliases should be supported in the function for common variations:
 
@@ -93,6 +216,39 @@ Provider-specific aliases should be supported in the function for common variati
 - `transcript_text`, `transcript_url`, `transcript` -> transcript fields
 
 ## Proposed Tables
+
+### `integration_intake_events`
+
+Recommended shared audit/intake table for all inbound integrations.
+
+Suggested fields:
+
+- `id uuid primary key`
+- `company_id uuid not null references companies(id)`
+- `legacy_company_glide_row_id text`
+- `integration_type text not null`
+  - suggested values: `call_ai_transcript`, `call_summary_next_steps`, `client_create`, `client_update`, `course_completion`
+- `provider text`
+- `external_event_id text`
+- `status text not null default 'received'`
+  - suggested values: `received`, `processed`, `needs_review`, `failed`, `ignored`
+- `match_status text not null default 'unmatched'`
+  - suggested values: `matched`, `unmatched`, `ambiguous`, `manual`, `not_required`
+- `matched_client_id uuid null references clients(id)`
+- `matched_legacy_client_glide_row_id text`
+- `matched_by text`
+- `error_message text`
+- `payload jsonb not null default '{}'::jsonb`
+- `metadata jsonb not null default '{}'::jsonb`
+- `created_at timestamptz not null default now()`
+- `updated_at timestamptz not null default now()`
+
+Suggested unique index:
+
+```sql
+unique (company_id, integration_type, provider, external_event_id)
+where external_event_id is not null
+```
 
 ### `client_calls`
 
@@ -150,6 +306,25 @@ Suggested fields:
 - `requested_by text`
   - suggested values: `webhook`, `manual`, `scheduled`
 - `error_message text`
+- `metadata jsonb not null default '{}'::jsonb`
+- `created_at timestamptz not null default now()`
+- `updated_at timestamptz not null default now()`
+
+### `client_course_progress`
+
+This can wait unless an LMS integration becomes immediate. If we want multiple courses per client, use a dedicated table instead of custom fields.
+
+Suggested fields:
+
+- `id uuid primary key`
+- `company_id uuid not null references companies(id)`
+- `client_id uuid null references clients(id)`
+- `legacy_client_glide_row_id text`
+- `provider text`
+- `course_id text`
+- `course_name text`
+- `completion_percentage numeric`
+- `completed_at timestamptz`
 - `metadata jsonb not null default '{}'::jsonb`
 - `created_at timestamptz not null default now()`
 - `updated_at timestamptz not null default now()`
@@ -224,18 +399,19 @@ Recommended matching outcomes:
 - `unmatched`: no likely client.
 - `manual`: user linked the call later.
 
-## Fathom Summary To Notes / History
+## Fathom Summary To Next Steps / History
 
-When a call is matched to a client and `write_summary_to_notes = true`, write a `client_history_events` row.
+When a summary payload is matched to exactly one client, write a `client_history_events` row and update the client current state.
 
 Suggested history event:
 
 - `event_type`: `call_summary_added`
-- `source`: `call_transcript_webhook`
+- `source`: `call_summary_webhook`
 - `title`: `Call summary added for {client_name}`
 - `summary`: provider summary
 - `last_contact_at`: call started time, if available
 - `notes`: provider summary
+- `next_steps`: provider summary
 - `payload`:
   - `call_id`
   - `provider`
@@ -246,13 +422,14 @@ Suggested history event:
 
 Important:
 
-- Do not overwrite `next_steps_value` unless the provider payload explicitly sends next steps and Jay approves that behavior later.
+- The summary endpoint is explicitly allowed to update `clients.next_steps_value` because that is the purpose of the workflow.
+- Store the prior next steps in history/audit metadata so changes are reversible/reviewable.
 - Summary should appear in History as a RetainOS history event.
 - If the UI later has a dedicated call notes area, the same event can link there.
 
 ## Linked Call To Last Contact Date
 
-When a call is matched to a client and `update_last_contact = true`:
+When a summary payload is matched to a client:
 
 - Update `clients.csm_date_of_last_contact` to the call `started_at` date/time.
 - If the current last-contact date is newer than the call date, do not move it backwards unless `force_update_last_contact = true`.
@@ -316,12 +493,21 @@ Add a global Resource with:
 - `is_dynamic`: `true`
 - `dynamic_key`: `call_transcript_webhook`
 
+Also add a separate global Resource with:
+
+- `slug`: `call-summary-webhook`
+- `title`: `Connect call summaries to client next steps`
+- `type`: `guide`
+- `status`: `draft` until endpoint is live
+- `is_dynamic`: `true`
+- `dynamic_key`: `client_call_summary_webhook`
+
 Dynamic guide should show:
 
 1. Copy the Call Transcript Webhook URL.
 2. Copy the selected Company ID.
 3. Configure Headers:
-   - `Authorization: Bearer YOUR_WEBHOOK_SECRET`
+   - `Authorization: Bearer YOUR_COMPANY_INTEGRATION_TOKEN`
    - `Content-Type: application/json`
 4. Choose provider:
    - Fathom
@@ -362,15 +548,45 @@ Resource JSON body example:
   "recording_url": "{{recording_url}}",
   "client_email": "{{client_email}}",
   "attendees": "{{attendees}}",
-  "write_summary_to_notes": true,
-  "update_last_contact": true,
   "queue_ai_analysis": false
+}
+```
+
+Summary-to-next-steps JSON body example:
+
+```json
+{
+  "company_id": "{{company_id}}",
+  "provider": "fathom",
+  "external_call_id": "{{fathom_call_id}}",
+  "client_email": "{{client_email}}",
+  "summary": "{{fathom_summary}}",
+  "started_at": "{{started_at}}",
+  "recording_url": "{{recording_url}}"
 }
 ```
 
 ## QA Checklist
 
-### Ingestion
+### Summary-To-Next-Steps Ingestion
+
+- Send a valid webhook with app-owned company UUID.
+- Send a valid webhook with legacy company id.
+- Send a valid webhook with a token configured for the submitted company.
+- Same token with a different company_id returns 401.
+- Invalid company integration token returns 401.
+- Missing company id returns 400.
+- Missing client email returns 400.
+- Mirror-only company returns 400 unless explicitly enabled later.
+- Duplicate `(company_id, provider, external_call_id)` does not create duplicate history updates.
+- Exact client email matches the correct client.
+- Duplicate client email marks intake ambiguous/needs review and does not update a client.
+- Matched payload updates `clients.next_steps_value`.
+- Matched payload updates `clients.csm_date_of_last_contact`.
+- History tab shows the call summary.
+- CSM Reports / Profile Upkeep count last-contact freshness from the new history event.
+
+### Call AI Transcript Ingestion
 
 - Send a valid webhook with app-owned company UUID.
 - Send a valid webhook with legacy Glide company id.
@@ -390,8 +606,9 @@ Resource JSON body example:
 
 ### Client Updates
 
-- Matched call with summary writes `client_history_events`.
-- Matched call updates last-contact date.
+- Matched summary writes `client_history_events`.
+- Matched summary updates current next steps.
+- Matched summary updates last-contact date.
 - Older call does not overwrite newer last-contact date.
 - History tab shows the call summary.
 - CSM Reports / Profile Upkeep count last-contact freshness from the new history event.
@@ -413,29 +630,60 @@ Resource JSON body example:
 
 ## Recommended Staged Build
 
-### Stage 1: Inbound Foundation
+### Stage 1: Summary-To-Next-Steps Foundation `[implemented pending QA]`
 
-Build only:
+Built on 2026-06-11:
+
+- `integration_intake_events` table.
+- `ingest-client-call-summary` function.
+- Exact client-email matching.
+- Idempotency.
+- Update next steps.
+- Update last-contact date.
+- History and audit events.
+- Resources dynamic guide.
+
+Remaining before calling this shipped:
+
+- QA with Ethical Scaling through Zapier/n8n/Make or a direct POST.
+- Create an active `company_integration_secrets` row for each customer/company using a SHA-256 token hash. Example hash expression: `encode(extensions.digest('raw-token', 'sha256'), 'hex')`.
+- Validate duplicate protection with `external_call_id`.
+- Decide whether unmatched/ambiguous events need a small review UI before Moves Method migration.
+- Legacy `CALL_SUMMARY_WEBHOOK_SECRET` / `CLIENT_CALL_SUMMARY_WEBHOOK_SECRET` remains a local/dev fallback only when a company has no active company token configured.
+
+Do not build full transcript/Call AI yet.
+
+### Stage 2: Call AI Inbound Foundation
+
+Build:
 
 - `client_calls` table.
 - `ingest-call-transcript` function.
-- Conservative client matching.
+- Conservative client matching by explicit email and attendee email.
 - Idempotency.
 - App audit events.
 - Resources dynamic guide skeleton.
 
-Do not update client notes or last-contact date yet. This lets us safely test provider payloads.
+Do not run AI analysis yet. This lets us safely test provider payloads.
 
-### Stage 2: Client History + Last Contact
+### Stage 3: Client Update Webhook
 
 Add:
 
-- `call_summary_added` history event support.
-- Optional last-contact update.
-- Client Detail History display validation.
-- CSM Reports/Profile Upkeep validation.
+- `webhook-update-client` function.
+- Conservative company + email matching.
+- Explicit allowlist of updatable fields.
+- History/audit events for every write.
 
-### Stage 3: Review Queue
+### Stage 4: Course Completion Webhook
+
+Add:
+
+- `webhook-course-completion` function.
+- Optional `client_course_progress` table.
+- Client custom-field update option for simple percentage tracking.
+
+### Stage 5: Review Queue
 
 Add:
 
@@ -444,7 +692,7 @@ Add:
 - Manual link/unlink client action.
 - Re-run matching action.
 
-### Stage 4: Call AI Queue
+### Stage 6: Call AI Queue
 
 Add:
 
@@ -453,7 +701,7 @@ Add:
 - Manual "Run AI analysis" action.
 - No AI processing yet unless explicitly scoped.
 
-### Stage 5: Provider Polish
+### Stage 7: Provider Polish
 
 Add provider-specific setup guides for:
 
@@ -464,12 +712,12 @@ Add provider-specific setup guides for:
 
 ## Recommended First Build Slice
 
-Start with Stage 1 plus the Resource guide skeleton.
+Start with Stage 1: Summary-To-Next-Steps Foundation.
 
 Why:
 
 - It is low risk.
-- It gives Jay and Ben a real endpoint to test against Fathom/n8n/Zapier.
-- It avoids modifying client records until payload matching is trusted.
-- It creates the data foundation for Call AI without committing to full AI processing yet.
-
+- It matches the operational use case needed before full Call AI.
+- It supports Moves Method-style companies that do not have Call AI access.
+- It updates a visible client workflow Jay can QA immediately: next steps, last contact, history.
+- It creates a reusable intake/audit pattern for the later transcript, client update, and LMS webhooks.

@@ -5,9 +5,22 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-webhook-secret",
+    "authorization, x-client-info, apikey, content-type, x-webhook-secret, x-retainos-integration-token",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+type IntegrationSecretValidationResult =
+  | {
+      ok: true;
+      authMode: "company_integration_token" | "global_secret_fallback";
+      tokenId: string | null;
+      tokenPrefix: string | null;
+    }
+  | {
+      ok: false;
+      error: string;
+      status: number;
+    };
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -63,7 +76,197 @@ function daysBetween(startIso: string | null, endIso: string | null) {
 function getWebhookSecret(req: Request) {
   const bearer = (req.headers.get("Authorization") ?? "").match(/^Bearer\s+(.+)$/i)
     ?.[1];
-  return bearer ?? req.headers.get("x-webhook-secret") ?? "";
+  return (
+    bearer ??
+    req.headers.get("x-retainos-integration-token") ??
+    req.headers.get("x-webhook-secret") ??
+    ""
+  );
+}
+
+function getClientIp(req: Request) {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("cf-connecting-ip") ??
+    null
+  );
+}
+
+function mergeRecord(
+  target: Record<string, unknown>,
+  value: unknown,
+) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    target[key] = entry;
+  }
+}
+
+function parsePossiblyNestedPayload(value: unknown) {
+  if (!value) return null;
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    const entries: Record<string, unknown> = {};
+    for (const item of value) {
+      if (!item || typeof item !== "object") continue;
+      const record = item as Record<string, unknown>;
+      const key =
+        typeof record.key === "string"
+          ? record.key
+          : typeof record.name === "string"
+            ? record.name
+            : "";
+      if (!key) continue;
+      entries[key] = record.value ?? record.val ?? record.data ?? "";
+    }
+    return Object.keys(entries).length > 0 ? entries : null;
+  }
+  if (typeof value !== "string") return null;
+
+  const text = value.trim();
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Fall through to URL-encoded parsing below.
+  }
+
+  if (text.includes("=")) {
+    return Object.fromEntries(new URLSearchParams(text).entries());
+  }
+
+  return null;
+}
+
+function flattenZapierKeys(body: Record<string, unknown>) {
+  for (const [key, value] of Object.entries({ ...body })) {
+    const bracketMatch = key.match(/^(?:data|body|payload|request)\[([^\]]+)\]$/);
+    const dotMatch = key.match(/^(?:data|body|payload|request)\.([^.]+)$/);
+    const nestedKey = bracketMatch?.[1] ?? dotMatch?.[1];
+    if (nestedKey && body[nestedKey] === undefined) {
+      body[nestedKey] = value;
+    }
+  }
+}
+
+async function parseWebhookBody(req: Request) {
+  const body: Record<string, unknown> = Object.fromEntries(
+    new URL(req.url).searchParams.entries(),
+  );
+  const contentType = req.headers.get("content-type")?.toLowerCase() ?? "";
+  const rawBody = await req.text();
+
+  if (rawBody.trim()) {
+    let parsed: unknown = null;
+
+    if (contentType.includes("application/json")) {
+      parsed = parsePossiblyNestedPayload(rawBody);
+    } else if (contentType.includes("application/x-www-form-urlencoded")) {
+      parsed = Object.fromEntries(new URLSearchParams(rawBody).entries());
+    } else {
+      parsed = parsePossiblyNestedPayload(rawBody);
+    }
+
+    mergeRecord(body, parsed);
+  }
+
+  for (const key of ["", "data", "body", "payload", "request"]) {
+    const nested = parsePossiblyNestedPayload(body[key]);
+    mergeRecord(body, nested);
+  }
+  flattenZapierKeys(body);
+
+  return body;
+}
+
+function timingSafeEqual(left: string, right: string) {
+  if (left.length !== right.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+async function sha256Hex(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function validateCompanyIntegrationSecret(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  integrationType: string,
+  submittedSecret: string,
+  fallbackSecret: string | undefined,
+  clientIp: string | null,
+): Promise<IntegrationSecretValidationResult> {
+  const { data, error } = await supabase
+    .from("company_integration_secrets")
+    .select("id, token_hash, token_prefix, expires_at")
+    .eq("company_id", companyId)
+    .eq("integration_type", integrationType)
+    .eq("status", "active");
+
+  if (error) throw error;
+
+  const activeSecrets = data ?? [];
+  if (activeSecrets.length > 0) {
+    const submittedHash = submittedSecret ? await sha256Hex(submittedSecret) : "";
+    const matchingSecret = activeSecrets.find((secret) => {
+      if (!secret.token_hash) return false;
+      const expiresAt = secret.expires_at ? new Date(secret.expires_at) : null;
+      if (expiresAt && expiresAt.getTime() <= Date.now()) return false;
+      return timingSafeEqual(String(secret.token_hash), submittedHash);
+    });
+
+    if (!matchingSecret) {
+      return {
+        ok: false,
+        error: "Invalid company integration token.",
+        status: 401,
+      };
+    }
+
+    await supabase
+      .from("company_integration_secrets")
+      .update({
+        last_used_at: new Date().toISOString(),
+        last_used_from: clientIp,
+      })
+      .eq("id", matchingSecret.id);
+
+    return {
+      ok: true,
+      authMode: "company_integration_token",
+      tokenId: matchingSecret.id,
+      tokenPrefix: matchingSecret.token_prefix ?? null,
+    };
+  }
+
+  if (fallbackSecret && submittedSecret === fallbackSecret) {
+    return {
+      ok: true,
+      authMode: "global_secret_fallback",
+      tokenId: null,
+      tokenPrefix: null,
+    };
+  }
+
+  return {
+    ok: false,
+    error: fallbackSecret
+      ? "Invalid webhook secret."
+      : "Company integration token is not configured.",
+    status: fallbackSecret ? 401 : 500,
+  };
 }
 
 async function resolveCompany(
@@ -165,15 +368,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const expectedSecret = Deno.env.get("ZAPIER_CLIENT_WEBHOOK_SECRET");
-    if (!expectedSecret) {
-      return jsonResponse({ error: "Zapier webhook secret is not configured." }, 500);
-    }
-
-    if (getWebhookSecret(req) !== expectedSecret) {
-      return jsonResponse({ error: "Invalid webhook secret." }, 401);
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey =
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
@@ -190,21 +384,45 @@ Deno.serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    const body = await req.json().catch(() => ({}));
+    const body = await parseWebhookBody(req);
     const clientName =
       cleanText(body.client_name) ||
       cleanText(body.clientName) ||
       cleanText(body.name);
 
     if (!clientName) {
-      return jsonResponse({ error: "Client name is required." }, 400);
+      return jsonResponse(
+        {
+          error: "Client name is required.",
+          received_keys: Object.keys(body).filter(Boolean).sort(),
+        },
+        400,
+      );
     }
 
     const companyResult = await resolveCompany(supabase, body);
     if (companyResult.error) {
-      return jsonResponse({ error: companyResult.error }, 400);
+      return jsonResponse(
+        {
+          error: companyResult.error,
+          received_keys: Object.keys(body).filter(Boolean).sort(),
+        },
+        400,
+      );
     }
     const company = companyResult.company;
+
+    const authResult = await validateCompanyIntegrationSecret(
+      supabase,
+      company.id,
+      "client_create",
+      getWebhookSecret(req),
+      Deno.env.get("ZAPIER_CLIENT_WEBHOOK_SECRET") ?? undefined,
+      getClientIp(req),
+    );
+    if (!authResult.ok) {
+      return jsonResponse({ error: authResult.error }, authResult.status);
+    }
 
     const externalId =
       nullableText(body.external_id) ??
@@ -309,6 +527,9 @@ Deno.serve(async (req) => {
       metadata: {
         created_in: "zapier_create_client",
         external_id: externalId,
+        auth_mode: authResult.authMode,
+        integration_token_id: authResult.tokenId,
+        integration_token_prefix: authResult.tokenPrefix,
         client_phone: firstNullableText(body.client_phone, body.clientPhone, body.phone),
         mailing_address: firstNullableText(body.mailing_address, body.mailingAddress),
         custom_fields: customFields,
@@ -339,6 +560,9 @@ Deno.serve(async (req) => {
           metadata: {
             created_in: "zapier_create_client",
             external_id: externalId,
+            auth_mode: authResult.authMode,
+            integration_token_id: authResult.tokenId,
+            integration_token_prefix: authResult.tokenPrefix,
           },
         })
         .select("*")
@@ -360,6 +584,8 @@ Deno.serve(async (req) => {
           client,
           initial_contract: contract,
           external_id: externalId,
+          auth_mode: authResult.authMode,
+          integration_token_prefix: authResult.tokenPrefix,
         },
       })
       .select("*")
@@ -379,6 +605,9 @@ Deno.serve(async (req) => {
       metadata: {
         history_event_id: event.id,
         external_id: externalId,
+        auth_mode: authResult.authMode,
+        integration_token_id: authResult.tokenId,
+        integration_token_prefix: authResult.tokenPrefix,
       },
     });
 

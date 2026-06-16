@@ -37,6 +37,25 @@ gh auth switch -u retainOS
 - The user's other project may use `atlas-thebrain`; do not confuse that identity with this RetainOS repo.
 - Keep the untracked `old glide project test/` reference folder out of commits unless explicitly requested.
 
+## Graphify Workflow
+
+- Graphify is now a local orientation layer for RetainOS architecture. It is useful for session starts, planning, impact checks, and subagent briefs, but it does not replace `rg` or direct source reads for exact implementation details.
+- Local Graphify credentials live in `.env.graphify`, which is ignored by git. Generated graph files live in `graphify-out/`, also ignored by git.
+- The committed human summary is `ARCHITECTURE_MAP.md`.
+- Start non-trivial sessions with one or two anchored checks, usually:
+
+```bash
+set -a
+source .env.graphify
+set +a
+uvx --from 'graphifyy[gemini]' graphify explain "Project Memory" --graph graphify-out/graph.json
+uvx --from 'graphifyy[gemini]' graphify explain "RetainOS Roadmap" --graph graphify-out/graph.json
+```
+
+- Before larger changes, ask what could break with `graphify affected "<exact node or function>"`, then verify with `rg`.
+- For subagents, include the relevant `ARCHITECTURE_MAP.md` communities and any exact nodes from `graphify explain` / `graphify affected` in the brief.
+- Regenerate Graphify after major milestones, not every small edit. Ask Jay before a regeneration if it may use the Gemini key/cost. The first full no-DSN baseline was generated on 2026-06-10 from code, docs, memory, roadmap, and Hi-Fi handoff assets.
+
 ## Supabase Function Deployment Notes
 
 - `prepare-login` must remain deployed with JWT verification disabled because public login calls it before there is a user session. The function enforces access internally using the SuperAdmin allowlist and app-owned/mirrored company membership checks.
@@ -116,10 +135,11 @@ Core decisions captured there:
 - Client assignment/reassignment v1 was added on 2026-06-06. SuperAdmin, Director, and Support can change Primary CSM through Edit Profile; CSMs cannot reassign clients. New Client and Edit Profile use app-owned active team members for pilot/migrated companies, and assignment changes are included in profile history/audit. `manage-client-profile` and `manage-client-create` were deployed; Jay QA remains.
 - Ethical Scaling reconciliation command: `npm run pilot:reconcile:ethical-scaling`. On 2026-06-06 it confirmed 154 mirrored and 154 app-owned clients with no missing/extra rows. The seven clients assigned to an archived member are all offboarded, so active-client assignment integrity is clean.
 - Reconciliation is a mandatory company-by-company migration gate. For future Glide companies run `npm run pilot:reconcile:company -- --company="Company Name"` before moving `mirror_only` to `pilot` and again before moving `pilot` to `migrated`. You can also target exact ids with `--company-id=<uuid>` or `--legacy-company-id=<glide id>`. Review client counts, app-only/missing rows, status distributions, assignments, current-state differences, app-owned activity, and team roles. Never auto-fix data from the reconciliation command.
-- Contract and renewal confidence were added to the reusable reconciliation gate on 2026-06-08. The command now accepts `--renewal-start=YYYY-MM-DD` and `--renewal-end=YYYY-MM-DD` (aliases: `--date-range-start`, `--date-range-end`) and defaults to the next 30 days when omitted. Review `contractConfidence` for mirrored/app contract counts, missing/app-only contract ids, matching field diffs, archived contract counts, and latest app contract vs client summary mismatches. Review `renewalConfidence` for renewal ids from client summaries, app contract history, legacy contract history, retained ids, active up-for-renewal ids, and offboarded-denominator warnings. This is now part of the company-by-company migration trust checklist.
+- Contract and renewal confidence were added to the reusable reconciliation gate on 2026-06-08. The command now accepts `--renewal-start=YYYY-MM-DD` and `--renewal-end=YYYY-MM-DD` (aliases: `--date-range-start`, `--date-range-end`) and defaults to the next 30 days when omitted. Review `contractConfidence` for mirrored/app contract counts, missing/app-only contract ids, matching field diffs, archived contract counts, latest app contract vs client summary mismatches, latest mirrored contract vs client summary mismatches, and active-client contract coverage. The active-client coverage section highlights clients missing app-owned contract history, missing all contract history, or missing a current renewal date so migration teams can decide whether current summaries are enough or a historical backfill is required. Review `renewalConfidence` for renewal ids from client summaries, app contract history, legacy contract history, retained ids, active up-for-renewal ids, and offboarded-denominator warnings. This is now part of the company-by-company migration trust checklist.
 - Historical activity backfill now has a dry-run/apply script: `npm run pilot:backfill:company-activity -- --company="Company Name"`. It backfills missing historical app-owned `client_contracts` and `client_milestones` from the Glide mirror for active/pilot-relevant clients only by default. Always run dry-run first and review `unresolvedClientMilestonesSkipped` before adding `--apply`; use `--include-archived` only when intentionally migrating historical/offboarded records too.
 - Clients roster filters, applied filters, page, view, and sort are persisted in browser local storage. The status multi-select closes on outside click.
 - New Client v1 is enabled for app-owned pilot/migrated companies through `supabase/functions/manage-client-create`. Migration `supabase/migrations/20260531103000_client_create_pilot.sql` allows `client_created` history events. SuperAdmin/Director/Support can create company clients; CSMs can create clients too, but the server assigns the new client to that CSM so it stays inside their assigned-client scope. New clients are written only to `clients`, with `client_history_events` and `app_audit_events`; `backup_company_clients` remains untouched.
+- CSV client safety net was added locally on 2026-06-10. `/clients` can download a template, export the selected company/filter set, and preview CSV imports before any writes. Import is only exposed for app-owned pilot/migrated companies and calls `manage-client-create` row-by-row after explicit confirmation. Mirror-only companies remain export-only. Template columns, current import mapping, and Jay QA checklist live in `CSV_BULK_IMPORT_EXPORT.md`.
 - Zapier client creation v1 exists as `supabase/functions/zapier-create-client` and was deployed to project `zjauqflzxzsbpnivzsct` on 2026-06-07 with JWT verification disabled. It remains locked until Supabase secret `ZAPIER_CLIENT_WEBHOOK_SECRET` is set. Zapier payloads must include `company_id`, either the app-owned company UUID or the legacy Glide company id. Optional fields include client name/email/business, CSM id/email, onboarded date, contract start/end, next steps, and external id for idempotency.
 - Client status lifecycle v1 is enabled from Client Detail through `supabase/functions/manage-client-status`. Migration `supabase/migrations/20260602100000_client_status_lifecycle_pilot.sql` adds app-owned status metadata and `client_status_changed` history events. The flow uses existing program statuses only: `front-end`, `back-end`, `paused`, `suspended`, and `off-boarded`. SuperAdmin/Director/Support can change company client status; CSMs can change assigned clients only. Paused/Suspended/Offboarded require a typed reason; Paused also requires a return date and extends app-owned contract end/current days by the approved pause window. The flow writes app-owned `clients`, optional `client_contracts`, history, and audit only; it never mutates `backup_company_clients`.
 - New Task v1 is enabled on the top-level Tasks page for app-owned pilot/migrated companies through `supabase/functions/manage-client-task`. Migration `supabase/migrations/20260601124500_tasks_write_pilot.sql` creates app-owned `client_tasks` and allows `task_created` history events. SuperAdmin/Director/Support can create company or client-linked tasks; CSMs can create tasks assigned to themselves and only for assigned clients when a client is linked. Top-level Tasks now shows app-owned tasks plus mirrored Glide tasks; Client Detail > Tasks includes app-owned tasks linked to that client. The flow does not mutate `backup_company_clients_tasks`.
@@ -137,6 +157,8 @@ Core decisions captured there:
 
 - App-owned company customization v1 is live for pilot/migrated companies. Migration: `supabase/migrations/20260608100000_company_customization_v1.sql`. Edge Function: `supabase/functions/manage-company-customization`.
 - App-owned outcome definitions and churn reasons are seeded from the Glide mirror/defaults and editable from Admin Hub / SaaS Company Detail > Customization for SuperAdmins and Directors. Mirror-only companies stay read-only from Glide.
+- Company Custom Fields V1 adds app-owned `company_custom_fields` definitions through `supabase/migrations/20260610110000_company_custom_fields_v1.sql`. The migration seeds pilot/migrated company definitions from any `customfield1` through `customfield7` labels found on app-owned or mirrored company rows. Admin Hub / SaaS Company Detail > Customization can list, create, edit, and archive definitions through `manage-company-customization`; mirror-only companies only show read-only CST slot labels when present. Important product clarification from Jay on 2026-06-10: custom fields are recurring client update fields, not just profile metadata. Their operational home is Quick Update and Client Detail > Outcomes, not the Client Details tab.
+- Custom field value editing is now wired for pilot/migrated clients in Quick Update and Client Detail > Outcomes. Values are stored in `client_custom_field_values`, written by `manage-client-quick-update` and `manage-client-outcomes`, and included in RetainOS history metadata. The related migration and Edge Functions were applied/deployed on 2026-06-10. Follow-up migration `supabase/migrations/20260610123000_client_history_events_metadata.sql` adds the missing `client_history_events.metadata` jsonb column needed for custom-field history metadata.
 - Client Outcomes dropdowns prefer app-owned company outcome definitions for pilot/migrated companies and fall back to mirrored `backup_choices` elsewhere.
 - Company Settings v1 saves profile upkeep freshness days, default client view, default calendar mode, secondary assignee flag, Call AI for CSMs flag, embed flag, and Zapier client-create flag. Jay QAed that the page saves on 2026-06-08.
 - Client Workspace defaults are now consumed for pilot/migrated companies:
@@ -144,7 +166,7 @@ Core decisions captured there:
   - Clients calendar starts from the company default calendar mode (`month`, `week`, or `day`) when there is no stronger cached user/company preference.
   - CSM Reports Field Upkeep uses the company profile-upkeep freshness window instead of a fixed/default 14-day assumption. The selected CSM Reports date range still controls client-level update-rate/report rows.
   - 2026-06-08 QA note: stale roster cache initially blocked defaults from showing. Fix tracks explicit view/calendar user overrides separately, so old cached state no longer prevents company defaults from applying. Jay confirmed default Card/Day behavior works.
-- Remaining customization gaps: custom fields, notification settings, dashboard/client-list preferences, client list columns, and deeper company-level configuration.
+- Remaining customization gaps: optional custom field display on client list/import/export, notification settings consumption, dashboard/client-list preferences, client list columns, and deeper company-level configuration.
 
 ## Client Workspace
 
@@ -231,6 +253,11 @@ Important distinction:
   - SuperAdmin, Director, and Support users see the selected company by default and can filter the page by active client-managing CSM.
   - Progress and Buy-in outcome signals are combined into one client card to avoid duplicate RGA/churn rows for the same client.
   - Calculations are local page logic from current client rows plus app-owned history where available. Move to canonical SQL/RPC after UX validation and before broader migration-scale reporting.
+- On 2026-06-10, Notification Preferences V1 polish was added locally:
+  - Admin Hub / Company Settings now exposes company-level in-app visibility toggles for next contacts, renewals, pause returns, churn risk, RGAs, quiet profiles, and client-linked task due reminders.
+  - Preferences are saved through `manage-company-customization`; mirror-only companies remain read-only.
+  - Clients bell reminders and Daily Pulse sections respect enabled/disabled company preferences with fallback defaults that keep existing companies visible.
+  - Email delivery remains disabled; task reminders stay limited to the existing client-linked notification path.
 - `PILOT_ONBOARDING.md` is the recording script/checklist for onboarding Ben and Emily into the Ethical Scaling internal pilot.
 
 Example found during debugging:
@@ -675,3 +702,893 @@ SaaS Client details / Admin Hub Team notes:
   - Dashboard now reads app-owned team only for pilot/migrated companies.
   - Tasks now reads app-owned team only for pilot/migrated companies.
 - Mirror fallback remains for non-pilot/mirror-only companies.
+- 2026-06-10 task source cleanup:
+  - `/tasks`, Client Detail > Tasks, Clients calendar task events, and Dashboard task-status charts now use `client_tasks` for pilot/migrated companies.
+  - `backup_company_clients_tasks` remains the read-only fallback for mirror-only companies such as Moves Method.
+  - Historical contracts, historical milestones, `backup_choices` status/program labels, and legacy history remain intentional mirror dependencies until their app-owned models/backfills are approved.
+
+## Beacon v1 Local Pilot - 2026-06-10
+
+- The `/beacon` page is now a working AI assistant chat (built by Claude Code, validated by Jay locally the same day). It answers roster questions from live data: renewals, contract gaps, health/referral-ready clients, CSM books, and single-client detail.
+- Code (all in this repo, **intentionally uncommitted** — see deploy warning below):
+  - `src/lib/beacon/tools.ts`: three whitelisted query tools (`query_clients`, `get_client_detail`, `list_team_members`) running through the existing supabase client. The model never writes SQL. A `BeaconScope` enforces role scoping in code: super_admin uses the View-As company (may name another pilot/migrated company), director is locked to their company, csm to assigned clients, support/viewer have no access.
+  - `src/lib/beacon/chat.ts`: Anthropic streaming tool loop (`@anthropic-ai/sdk`, `dangerouslyAllowBrowser`), frozen system prompt with `cache_control`, max 6 tool rounds per question.
+  - `src/pages/Beacon.tsx`: brand-matched chat UI; suggested-prompt chips, streaming with tool-activity line, client names link to `/clients/:glide_row_id`, conversation persists in sessionStorage keyed by company.
+- Env (gitignored `.env`): `VITE_BEACON_ANTHROPIC_KEY` (Jay's real key is present locally — never echo or commit it) and `VITE_BEACON_MODEL` (default `claude-sonnet-4-6`).
+- Route gate unchanged: `canAccessTables` (SuperAdmin-only) in `src/App.tsx`.
+- **DO NOT COMMIT OR DEPLOY Beacon as-is.** Vercel deploys from `main`, and v1 makes a browser-direct Anthropic call — committing would ship key-dependent client code. Promotion path before any commit/rollout: move the loop into a `beacon-chat` Edge Function with `ANTHROPIC_API_KEY` as a Supabase secret, enforce scoping server-side, then add a `canAccessBeacon` capability for Director/CSM access.
+- Coverage: app-owned tables only (`clients`, `client_contracts`, `company_members`), so pilot/migrated companies. Mirror-only companies (`backup_*`) are out of scope for v1.
+- Data caveat for QA: historical contract backfill is still pending, so for Ethical Scaling 13 of 14 active clients have no contract end date on file. "No active contract" answers are large and "renewing in 30 days" is 0 (single live contract ends 2026-09-10). This is correct per data, not a Beacon bug.
+- `.claude/launch.json` was added locally (dev-server config for Claude Code's preview on port 5273, leaving 5173/5174 to Jay). Harmless if committed, but it is uncommitted alongside Beacon for now.
+
+## Moves Method Migration Readiness - 2026-06-10
+
+- Moves Method is the next migration candidate after Ethical Scaling, but it remains read-only / CST mirror-backed until Jay and Ben explicitly approve write-mode rollout.
+- New working checklist: `MOVES_METHOD_MIGRATION_READINESS.md`.
+  - Covers baseline reconciliation, read-only protections, Daily Pulse QA, journey visual QA, Resources QA, call workflow resource QA, and Ben handoff.
+- Daily Pulse now has two additional company-configurable signal types:
+  - `diagnostic_due`: 8-week diagnostics from client onboarding.
+  - `strategic_review_due`: strategic review 35 days before current contract/program end.
+  - Company Settings copy and `manage-company-customization` allowlist were updated.
+- Client Detail > Pathways & Milestones now includes a compact journey visual:
+  - Milestone progress from configured offer milestones and client milestone records.
+  - Contract/program timing from current contract start/end or renewal fields.
+  - Missing data shows fallback copy rather than implied progress.
+- Client Detail > Client Details now includes a simple read-only Client Links section.
+  - It detects common diagnostics, Google Drive, and external-link fields from app-owned or mirrored client rows.
+  - A canonical app-owned client links table/editor is still needed before full write-mode migration.
+- Resources now separates:
+  - RetainOS Help: global product/setup/onboarding resources.
+  - Company Resources: company-scoped SOPs, links, Loom/video embeds, and docs.
+  - Migration required before full remote use: `supabase/migrations/20260610143000_resource_scopes_and_moves_readiness.sql`.
+  - Edge Function update required after migration: `supabase/functions/manage-resource`.
+- Call workflow resource guides now explicitly document future behavior for Fathom/Otter/Grain style payloads:
+  - transcript intake setup;
+  - call summary / notes update setup;
+  - future client matching, call date storage, last-contact update, notes/next-steps update, history preservation, and manual correction when matching fails.
+- This work does not enable Moves write mode and does not implement full Call AI ingestion.
+
+## Moves Method Readiness Refinement - 2026-06-11
+
+- Jay QAed the first Moves readiness pass and validated View As, roster expectations, dashboard speed, CSM Reports, Resources, read-only Client Detail, and contract/program timing.
+- Refinements implemented locally:
+  - `src/pages/Clients.tsx`: mirror-backed client list count now requests exact filtered counts instead of planned estimates, because walkthrough trust matters more than the small count-speed optimization.
+  - `src/pages/DailyPulse.tsx`, `src/lib/companySettings.ts`, `src/pages/SaasClientDetail.tsx`: Daily Pulse diagnostic/strategic-review rules now use company-configured timing. Diagnostic copy is generalized to "Peak Diagnostic" with cadence days; Strategic Review uses configurable days before contract/program end. Defaults are 56 and 35 days.
+  - `src/pages/ClientDetail.tsx`: Client Links copy is broadened from diagnostics to audits, Drive folders, and supporting docs; URL detection now finds embedded URLs in text fields and checks audit/Drive/supporting-doc candidate fields.
+  - `src/pages/ClientDetail.tsx`: Pathways & Milestones now includes a read-only Program Timeline visual with 3-month, 6-month, 12-month, and 2-year presets plus kickoff, 30-day review, Peak Diagnostic, Strategic Review, program-end, and current-position markers when contract timing exists.
+  - `MOVES_METHOD_MIGRATION_READINESS.md`, `CALL_TRANSCRIPT_INTEGRATION_PLAN.md`, and `supabase/migrations/20260610143000_resource_scopes_and_moves_readiness.sql` were updated to match the generalized language and Ethical Scaling-first Fathom/Zapier QA flow.
+- Fathom/Call Workflow remains guidance/foundation only. The intended first real test should be Ethical Scaling: create a RetainOS inbound Edge Function, configure Zapier/n8n/Make to POST normalized JSON with a shared secret, use a known Ethical Scaling client email, then verify call storage, client matching, history, notes, and last-contact updates. Do not claim this is live until the endpoint/tables exist and Jay QA passes.
+- Build passed with `npm run build`. Known warnings remain: browser-externalized Node modules from the local Beacon/Anthropic prototype and the large Vite chunk warning.
+- No commit/deploy was performed in this pass.
+
+## Daily Pulse + Client Links Refinement - 2026-06-11
+
+- Company Settings > notification preferences now stores metadata on `notification_preferences`.
+  - Migration: `supabase/migrations/20260611103000_notification_preference_metadata_and_client_links.sql`.
+  - Edge Function deployed: `manage-company-customization`.
+  - Peak Diagnostic can now be configured as either:
+    - one-time checkpoint, e.g. Moves Method 8-week / 56-day diagnostic;
+    - recurring cadence, e.g. monthly check-in every 30 days.
+  - Daily Pulse consumes the mode: one-time appears only on the checkpoint date/window; recurring uses the existing cadence logic.
+- Client Detail > Client Links is no longer read-only for app-owned pilot/migrated clients.
+  - New app-owned table: `client_links`.
+  - New Edge Function deployed: `manage-client-link`.
+  - UI supports adding and archiving audit, Drive-folder, supporting-doc, and other URLs.
+  - Mirror-only companies remain read-only and still show detected links from CST mirror fields.
+- Build passed with `npm run build`. Known warnings remain the Beacon/Anthropic browser externalization warnings and Vite large chunk warning.
+- No git commit was performed in this pass.
+
+## Integration Intake Stage 1 - 2026-06-11
+
+- Jay clarified the integration map:
+  - Full Call AI transcript analysis is a later/heavier workflow.
+  - Fathom/Otter/Grain call summaries that update client Next Steps + Date of Last Contact are a separate lower-cost workflow and should be available without Call AI.
+  - Other required families: new-client webhook, update-client webhook, LMS/course-completion webhook.
+- `CALL_TRANSCRIPT_INTEGRATION_PLAN.md` was reframed as the broader RetainOS integration intake plan.
+  - Stage 1 is Summary-To-Next-Steps.
+  - Later stages: Call AI transcript intake, update-client webhook, course completion webhook, review queue, Call AI queue/provider polish.
+- Implemented Stage 1 locally and deployed its Supabase function:
+  - Migration: `supabase/migrations/20260611123000_integration_intake_events.sql`.
+  - New shared table: `integration_intake_events` for webhook receipt, match status, idempotency, payload storage, and review/failure tracking.
+  - New Edge Function: `supabase/functions/ingest-client-call-summary/index.ts`.
+  - Function requires `CALL_SUMMARY_WEBHOOK_SECRET` or `CLIENT_CALL_SUMMARY_WEBHOOK_SECRET`.
+  - Function accepts app-owned UUID or legacy company id, exact `client_email`, `summary`, optional `started_at`, `external_call_id`, `recording_url`, and `title`.
+  - It updates app-owned `clients.next_steps_value` and `clients.csm_date_of_last_contact`, writes `client_history_events` with `event_type = call_summary_webhook`, writes audit events, and marks integration intake as processed.
+  - It only updates when exactly one active client matches the email. Unmatched or ambiguous active matches are stored as `needs_review` instead of writing to a client.
+  - Duplicate provider call IDs return as duplicate/idempotent when already processed.
+- Resources guide updated so `client_call_summary_webhook` is no longer described as future-only and uses the new JSON body shape.
+- Build passed with `npm run build`.
+- Migration applied and `ingest-client-call-summary` deployed to Supabase.
+- Supabase secret check showed `CALL_SUMMARY_WEBHOOK_SECRET` is not yet configured. Set that before QA with Zapier/n8n/Make.
+- Jay set `CALL_SUMMARY_WEBHOOK_SECRET` on 2026-06-11 and the first Zapier test returned `Invalid JWT`.
+  - Root cause: Supabase Edge Functions verify JWT by default and Zapier was correctly sending the webhook secret in the `Authorization` header.
+  - Fix: `supabase/config.toml` now includes `[functions.ingest-client-call-summary] verify_jwt = false`; redeploy the function before retrying Zapier QA.
+  - Roadmap hardening note added: before sharing this workflow with Moves Method or any customer, replace the global secret with company-specific integration secrets/tokens validated against the submitted `company_id`.
+- No git commit was performed in this pass.
+
+## Call Summary History Source Label - 2026-06-11
+
+- Jay QA confirmed the first Ethical Scaling call-summary webhook updated Matt Shiver correctly:
+  - Next Steps changed to the Fathom/Zapier summary payload.
+  - Date of Last Contact used the call `started_at` value from the webhook payload.
+  - History was written as `call_summary_webhook`.
+- UX clarification added in `src/pages/ClientDetail.tsx`:
+  - webhook-driven history events now show a subtle `Updated via webhook` chip;
+  - the history card explains that the event time is when RetainOS received the webhook, while Last Contact can reflect the actual call date.
+- Build passed with `npm run build`. Known warnings remain the Beacon/Anthropic browser externalization warnings and Vite large chunk warning.
+
+## Moves Method Review Queue + Journey Config Polish - 2026-06-11
+
+- Built local Integration Review Queue support for app-owned companies.
+  - Location: Admin Hub / SaaS Client Detail > Company Settings.
+  - Source table: `integration_intake_events`.
+  - Shows open `needs_review` and `failed` webhook intake events with provider, match status, received time, external ID, error message, client email, summary preview, and recording link when available.
+  - Mirror-only companies keep the read-only protection and do not expose app-owned review controls.
+- Daily Pulse configuration copy is now company-generic.
+  - Diagnostic rules are framed as onboarding checkpoints/check-ins instead of Moves-only language.
+  - The UI explains one-time checkpoints and recurring cadence modes with clearer examples.
+  - Strategic Review copy remains generic for contract/program-end planning.
+- Client Detail > Pathways & Milestones timeline now reads company notification preferences.
+  - Diagnostic/check-in marker timing comes from the company-configured `diagnostic_due` preference.
+  - Strategic Review timing comes from the company-configured `strategic_review_due` preference.
+  - This removes hardcoded Moves-only assumptions from the visual journey map while preserving fallback defaults.
+- Build passed with `npm run build`.
+- No commit/deploy was performed in this pass.
+
+## Integration Queue + Timeline QA Polish - 2026-06-11
+
+- Jay QA confirmed an unmatched webhook event is now visible in the Integration Review Queue.
+  - The queue is useful as a v1 holding pen, but it has no manual match/resolve action yet.
+  - Product direction: Company Settings is acceptable short-term, but the better long-term home is likely Call AI / integration operations or a task-style inbox once there is a real resolution workflow.
+- Client Detail > Pathways & Milestones program timeline was simplified after QA:
+  - removed hardcoded 30-day review markers;
+  - recurring diagnostic/check-in markers now show as configured check-ins;
+  - kickoff/program-end labels are edge-aware so text does not fall outside the card.
+- Build passed with `npm run build`. Known warnings remain the Beacon/Anthropic browser externalization warnings and Vite large chunk warning.
+- No commit/deploy was performed in this pass.
+
+## Company-Specific Integration Secrets - 2026-06-12
+
+- Implemented app-owned per-company integration token storage for inbound webhooks.
+  - New migration: `supabase/migrations/20260612110000_company_integration_secrets.sql`.
+  - New table: `company_integration_secrets`.
+  - Stores SHA-256 token hashes only, plus optional non-secret prefix, status, expiry, last-used metadata, and integration type.
+  - RLS denies anon/authenticated client access; intended management path is service-role SQL or a future admin Edge Function.
+- Hardened `supabase/functions/ingest-client-call-summary/index.ts`.
+  - The function now resolves `company_id` first, then validates the submitted token against active `company_integration_secrets` rows for `integration_type = 'call_summary_next_steps'`.
+  - Accepted headers: `Authorization: Bearer ...`, `x-retainos-integration-token`, and legacy-compatible `x-webhook-secret`.
+  - If a company has active token rows, the old global `CALL_SUMMARY_WEBHOOK_SECRET` / `CLIENT_CALL_SUMMARY_WEBHOOK_SECRET` cannot bypass company token validation.
+  - The old global secret remains a local/dev fallback only for companies with no active company token rows.
+  - Successful company-token requests update `last_used_at` / `last_used_from` and store non-secret auth metadata on `integration_intake_events.metadata`.
+- Updated resource/config docs:
+  - `src/pages/Resources.tsx` call-summary guide now instructs company-specific bearer token setup.
+  - `CALL_TRANSCRIPT_INTEGRATION_PLAN.md` now treats company-specific tokens as the inbound auth pattern and documents token QA.
+  - `ROADMAP.md` call-summary item now records the 2026-06-12 hardening and remaining deploy/QA gate.
+- Verification:
+  - `git diff --check` passed for touched files.
+  - `npm run build` did not complete because existing dirty work in `src/pages/SaasClientDetail.tsx` has `TS6133: 'NOTIFICATION_PREFERENCE_GROUPS' is declared but its value is never read`.
+  - `deno check` could not run because `deno` is not installed locally.
+- Deployment follow-up:
+  - Apply `20260612110000_company_integration_secrets.sql`.
+  - Create one active `company_integration_secrets` row per customer/company/integration before customer QA. Hash example: `encode(extensions.digest('raw-token', 'sha256'), 'hex')`.
+  - Redeploy `ingest-client-call-summary` with JWT verification disabled as already captured in `supabase/config.toml`.
+- No commit/deploy was performed in this pass. DO NOT COMMIT unrelated local dirty work unless its own MEMORY entry says it is ready.
+
+## Company Customization Hardening - 2026-06-12
+
+- Hardened Admin Hub / SaaS Client Detail customization copy for migration readiness.
+  - File: `src/pages/SaasClientDetail.tsx`.
+  - Company Customization now explicitly frames outcome definitions, custom fields, and churn reasons as separate setup areas.
+  - Custom fields copy now says definitions are configured at the company level and consumed by Quick Update plus Client Detail > Outcomes; values are edited in those client workflows, not in Company Settings or Client Details.
+  - Removed the misleading "Still coming soon" placeholder language from Company Settings and replaced it with a routing note that sends custom fields back to Company Customization.
+  - Notification preferences are grouped into Daily Pulse/bell visibility versus company timing rules, preserving the existing `manage-company-customization` save path.
+  - Added clearer empty states for custom fields and churn reasons.
+- Updated `ROADMAP.md` to reflect that notification preferences are now configured/consumed and that remaining work is Jay QA, richer settings, client-list columns, and later dashboard/client-list preference consumption.
+- Verification: `npm run build` passed. Known warnings remain the Anthropic SDK browser-externalization warnings and the large Vite chunk warning.
+- No webhook functions, integration secret plumbing, migrations, or deploys were touched in this pass.
+- No commit was performed. Existing dirty work remains intentionally uncommitted unless its own MEMORY entry says otherwise.
+
+## Client Update Webhook V1 - 2026-06-12
+
+- Implemented the app-owned inbound Client Update Webhook V1 locally.
+  - New Edge Function: `supabase/functions/webhook-update-client/index.ts`.
+  - New migration: `supabase/migrations/20260612100000_client_update_webhook_v1.sql`.
+  - The migration also publishes a lightweight Resources guide row: `client-update-webhook`.
+  - Deployment config: `supabase/config.toml` now sets `[functions.webhook-update-client] verify_jwt = false`.
+  - Setup docs: `CLIENT_UPDATE_WEBHOOK.md`.
+  - Integration plan updated: `CALL_TRANSCRIPT_INTEGRATION_PLAN.md`.
+  - Roadmap updated: `ROADMAP.md`.
+- Function behavior:
+  - Accepts app-owned company UUID or legacy Glide company id.
+  - Matches by exact case-insensitive `client_email`, or by explicit app-owned `client_id` when it belongs to the submitted company and optional email also matches.
+  - Only pilot/migrated companies are writable; mirror-only companies remain read-only.
+  - Supported V1 fields: `next_steps`, `notes` as history context, `last_contact`, `next_contact`, active `offer_id`, active `assigned_to`/CSM, and active company `custom_fields`.
+  - Rejects `status`, `program`, and `program_status` updates in V1 so lifecycle side effects stay in `manage-client-status`.
+  - Stores intake/idempotency rows in `integration_intake_events`; unmatched or ambiguous requests become `needs_review` and do not update clients.
+  - Successful writes update only app-owned tables: `clients`, `client_custom_field_values`, `client_history_events`, `app_audit_events`, and the intake row. It does not mutate `backup_*` tables.
+- Auth:
+  - Uses the existing 2026-06-12 shared `company_integration_secrets` pattern for `integration_type = client_update`.
+  - Accepted headers: `Authorization: Bearer ...`, `x-retainos-integration-token`, and legacy-compatible `x-webhook-secret`.
+  - If active company secret rows exist, the submitted token must match one active, non-expired SHA-256 hash.
+  - `CLIENT_UPDATE_WEBHOOK_SECRET` / `WEBHOOK_UPDATE_CLIENT_SECRET` remain only as a temporary fallback for companies with no active `client_update` secret rows.
+- Verification:
+  - `npm run build` passed. Known warnings remain the Anthropic SDK browser externalization warnings and the large Vite chunk warning.
+  - `git diff --check` passed for the touched webhook/migration/docs/config files.
+  - `deno check supabase/functions/webhook-update-client/index.ts` could not run because `deno` is not installed locally.
+- Deployment follow-up:
+  - Apply `supabase/migrations/20260611123000_integration_intake_events.sql` if the intake table is not already live.
+  - Apply `supabase/migrations/20260612110000_company_integration_secrets.sql` if company integration secrets are not already live.
+  - Apply `supabase/migrations/20260612100000_client_update_webhook_v1.sql` for the `client_update_webhook` history type.
+  - Deploy: `npx supabase functions deploy webhook-update-client --project-ref zjauqflzxzsbpnivzsct --no-verify-jwt`.
+  - Create one active `company_integration_secrets` row per company/integration before QA/customer use.
+  - QA matched, unmatched, duplicate `external_event_id`, wrong-company token, invalid offer, invalid assignee, and custom-field validation paths against Ethical Scaling before using for customers.
+- No commit/deploy was performed in this pass. Existing dirty work remains intentionally uncommitted unless its own MEMORY entry says otherwise.
+
+## Integration Review Inbox V1 - 2026-06-12
+
+- Implemented the first actionable Integration Review Queue locally.
+  - UI: `src/pages/SaasClientDetail.tsx`.
+  - New Edge Function: `supabase/functions/manage-integration-review/index.ts`.
+  - New migration: `supabase/migrations/20260612190000_integration_review_queue_actions.sql`.
+- The Admin Hub / Company Settings queue now behaves like a small review inbox for app-owned companies:
+  - `Match to client`: reviewer chooses one active app-owned client and applies the intake event manually.
+  - `Retry apply`: RetainOS retries the original automatic match/apply path.
+  - `Ignore`: marks the event as `ignored` so it leaves the open queue without pretending it was processed.
+- Supported event types in this v1:
+  - `call_summary_next_steps`: updates client next steps, updates last contact when the payload has a valid call timestamp, writes `call_summary_webhook` history, audit event, and processed intake state.
+  - `client_update`: applies the same narrow V1 fields as the webhook retry path, writes `client_update_webhook` history, audit event, and processed intake state.
+- Mirror-only companies remain read-only; the review actions are only enabled for `pilot` / `migrated` app-owned companies.
+- Verification:
+  - `npm run build` passed.
+  - `git diff --check` passed.
+  - Known warnings remain the Anthropic SDK browser externalization warnings and the large Vite chunk warning.
+- Deployment/QA follow-up:
+  - Apply `supabase/migrations/20260612190000_integration_review_queue_actions.sql`.
+  - Deploy `manage-integration-review`.
+  - QA with Ethical Scaling: create one unmatched call-summary event, manually match it, verify client next steps/history; create another unmatched event, ignore it, verify it leaves the queue; create a now-matchable event and use Retry apply.
+- No commit/deploy was performed in this pass. Existing dirty work remains intentionally uncommitted unless its own MEMORY entry says otherwise.
+
+### Integration Review Match Dropdown Fix - 2026-06-12
+
+- Fixed the local Admin Hub / Company Settings Integration Review Queue client-match dropdown after Jay QA found Ignore worked but Match could not load clients.
+  - File: `src/pages/SaasClientDetail.tsx`.
+  - Removed the brittle Supabase `.in("program_status_value", ...)` filter from the client option query.
+  - Added a small normalized status guard in the UI so the dropdown includes app-owned unarchived clients while excluding offboarded/off-boarded clients.
+  - Added a real empty-state option (`No active clients found`) when a company truly has no matchable clients.
+- Verification: `npm run build` passed. Known warnings remain the Anthropic SDK browser externalization warnings and the large Vite chunk warning.
+- No migration, Edge Function deploy, commit, or Vercel deploy was performed for this UI-only fix.
+
+### Integration Review Manual Match Column Fix - 2026-06-12
+
+- Fixed the follow-up QA issue where the manual match dropdown still showed `No active clients found`.
+  - File: `src/pages/SaasClientDetail.tsx`.
+  - Root cause: the app-owned client option query selected `business_name`, but the app-owned `clients` table column is `client_business`; Supabase rejected the query, leaving the dropdown empty.
+  - Updated the option type, query, and display fallback to use `client_business`.
+- Hardened manual review matching:
+  - File: `supabase/functions/manage-integration-review/index.ts`.
+  - `Match to client` still sends app-owned UUIDs from the UI, but the function can now resolve either an app-owned UUID or a legacy CST `glide_row_id`.
+  - Manual matches are recorded as `manual_match` whether the selected identifier was an app UUID or legacy client id.
+- Verification: `npm run build` passed. Known warnings remain the Anthropic SDK browser externalization warnings and the large Vite chunk warning.
+- Deploy note: the dropdown fix is UI-only; the Edge Function resilience requires redeploying `manage-integration-review` before testing legacy-id manual matches in Supabase production.
+
+## Integration Token Management UI + Queue Deploy - 2026-06-13
+
+- Added SuperAdmin-only integration token management for pilot/migrated companies.
+  - UI: `src/pages/SaasClientDetail.tsx` under Admin Hub / SaaS Client Detail > Company Settings > Integration Tokens.
+  - Edge Function: `supabase/functions/manage-integration-token/index.ts`.
+  - Actions: list, create, revoke one token, and revoke all active tokens for a company or integration type.
+  - Supported integration types: call summary / next steps, Call AI transcript, client create, client update, and course completion.
+  - Tokens are generated as one-time raw values, stored only as SHA-256 hashes in `company_integration_secrets`, and displayed later only by prefix/status/last-used metadata.
+- Offboarding lesson captured: revoking RetainOS integration tokens prevents inbound webhook writes/processing after a SaaS client is offboarded, but the customer-side Zap/N8N workflow must still be disabled to stop automation task charges at the source.
+- Deployed Supabase functions:
+  - `manage-integration-token` deployed on 2026-06-13.
+  - `manage-integration-review` redeployed on 2026-06-13 after the manual match/dropdown fixes.
+- Verification:
+  - `npm run build` passed before deploy. Known warnings remain the Beacon-related Anthropic SDK browser externalization warnings and the large Vite chunk warning.
+- Jay QA needed:
+  - Admin Hub > Ethical Scaling > Company Settings > Integration Tokens.
+  - Create a token for Client Update Webhook and/or Call Summary Next Steps, copy the one-time raw token, and confirm it works in Zapier.
+  - Revoke the token and confirm the same Zapier request fails authorization.
+  - Generate a new token and confirm requests work again.
+  - Revoke all active tokens and confirm all active tokens leave the usable set.
+- Follow-ups:
+  - Wire token revocation into the future SaaS offboarding workflow so offboarding can automatically revoke integration credentials.
+  - Add revoke audit events if needed.
+  - Keep Integration Review Queue placement under review; current location is Company Settings, but longer-term it may belong in Call AI/integration operations or a task-style inbox.
+- No git commit was performed. Existing dirty work remains intentionally uncommitted unless its own MEMORY entry says otherwise.
+
+### Integration Token One-Time Copy UX - 2026-06-13
+
+- Jay QA found token creation succeeded but the one-time raw token was not obvious enough to copy before it disappeared into the token list.
+- Updated `src/pages/SaasClientDetail.tsx` so generated tokens render as a prominent one-time token panel above the creation form with explicit Copy/Copied feedback and Dismiss after storing.
+- Follow-up fix after QA: token creation also triggered a Company Settings reload that briefly unmounted `CompanySettingsSetup`, wiping the one-time token panel immediately after creation. The settings tab now keeps the component mounted during app-owned settings reloads so the raw token survives long enough to copy.
+- Added inline copy clarifying the difference between Company ID and Integration Token: Company ID routes the webhook to the SaaS account; the token authorizes that integration to write for that company.
+- Verification: `npm run build` passed. Known Beacon-related Anthropic SDK browser externalization warnings and the large Vite chunk warning remain.
+- Follow-up product workflow: Resource guides should show company-specific IDs and active tokens when available, or ask the user to contact support/request access when the feature is not enabled or no active token exists.
+
+## Integration Resource Token Wiring - 2026-06-13
+
+- Cleaned the messy Ethical Scaling integration-token test slate in Supabase.
+  - Applied `/private/tmp/retainos_clean_ethical_scaling_integration_tokens.sql`.
+  - It deleted all `company_integration_secrets` rows for Ethical Scaling / legacy company id `chvcRSSPTJaaoK2zbhGplQ`.
+  - Jay should create fresh real QA/customer tokens from Admin Hub > Company Settings > Integration Tokens.
+- Added a RetainOS Help resource guide seed for Course Completion.
+  - New migration: `supabase/migrations/20260613100000_course_completion_resource_guide.sql`.
+  - Applied successfully with `npm run db:apply:sql`.
+- Wired integration token awareness into RetainOS Help resource pages.
+  - File: `src/pages/Resources.tsx`.
+  - Token-aware guide set now covers: Call Summary / Next Steps, Client Update Webhook, New Client Webhook, Call Transcript, and Course Completion.
+  - Resource pages show the selected company id, explain Company ID vs Integration Token, and show whether active tokens exist for the selected company/integration.
+  - Raw tokens are not shown on resource pages; only one-time token creation in Admin Hub shows the full value. Later views show token prefixes only.
+  - Call Summary / Next Steps and Client Update are live webhook flows.
+  - Call Transcript and Course Completion are setup/planning guides for now until their endpoints are built.
+- Hardened the New Client Webhook locally for company-specific integration tokens.
+  - File: `supabase/functions/zapier-create-client/index.ts`.
+  - Added support for `company_integration_secrets` with `integration_type = client_create`.
+  - Accepted token headers: `Authorization: Bearer ...`, `x-retainos-integration-token`, and `x-webhook-secret`.
+  - Active company tokens override the old global `ZAPIER_CLIENT_WEBHOOK_SECRET`; the global secret remains fallback only when no active company token row exists.
+  - Intake/history/audit metadata now records non-secret auth mode/token id/prefix details when relevant.
+- Verification:
+  - `npm run build` passed. Known Beacon-related Anthropic SDK browser externalization warnings and the large Vite chunk warning remain.
+- Deploy caveat:
+  - A Supabase CLI deploy/list retry for `zapier-create-client` hung silently in this local session, so live deployment of `client_create` token support is NOT confirmed.
+  - Before testing New Client Webhook with company-scoped tokens, run a clean deploy retry for `zapier-create-client`.
+  - Client Update and Call Summary token flows are already the better live QA targets until that redeploy is confirmed.
+- No git commit was performed. Existing dirty work remains intentionally uncommitted unless its own MEMORY entry says otherwise.
+
+## Company Settings Polish - 2026-06-13
+
+- Finished a small Company Settings / Customization polish pass to make the Admin Hub settings area feel less temporary.
+  - File: `src/pages/SaasClientDetail.tsx`.
+  - Added clearer copy for Client workspace defaults, including that the settings affect Clients and CSM Reports behavior without rewriting historical client data.
+  - Renamed `Simple flags` to `Feature gates` and clarified the practical meaning of secondary assignee, Call AI for CSMs, embeds, and client creation webhook access.
+  - Renamed the Zapier-specific client-create label to `Client creation webhook` so the setting can cover Zapier, n8n, or other automation tools.
+  - Kept the Integration Review Queue in Company Settings for now but moved it into a quieter operations drawer that opens automatically when unmatched/ambiguous events exist.
+  - Renamed `Not configured in this panel` to `Managed in other tabs` and pointed users toward Customization, Pathways & Milestones, and Resources for related setup.
+- Verification:
+  - `npm run build` passed.
+  - `git diff --check` passed.
+  - Known warnings remain: Beacon/Anthropic SDK browser externalization warnings and the large Vite chunk warning.
+- No migration, Edge Function deploy, commit, or Vercel deploy was performed.
+- Follow-ups:
+  - Jay QA on the organized Company Settings flow.
+  - Longer-term settings work remains dashboard/client-list preference consumption, client list column presets, and call/communication settings.
+
+## New Client Webhook Company Token Deploy - 2026-06-13
+
+- Closed the previous deploy caveat for the New Client Webhook.
+  - Function: `supabase/functions/zapier-create-client/index.ts`.
+  - Deployed with `npx supabase functions deploy zapier-create-client --project-ref zjauqflzxzsbpnivzsct`.
+  - Supabase reported a successful deploy on project `zjauqflzxzsbpnivzsct`.
+- Live behavior now supports company-scoped integration tokens for `integration_type = client_create`.
+  - Accepted headers: `Authorization: Bearer <raw token>`, `x-retainos-integration-token`, or `x-webhook-secret`.
+  - If active company tokens exist for `client_create`, the submitted token must match one of them.
+  - The old `ZAPIER_CLIENT_WEBHOOK_SECRET` remains fallback only for companies with no active `client_create` token rows.
+- Jay QA recipe:
+  - Admin Hub > Company Settings > Integration Tokens: create a `New Client Webhook` token and copy the one-time raw token.
+  - Zapier/N8N custom request:
+    - Method: `POST`.
+    - URL: `https://zjauqflzxzsbpnivzsct.supabase.co/functions/v1/zapier-create-client`.
+    - Headers: `Authorization: Bearer <raw token>` and `Content-Type: application/json`.
+    - Body example:
+
+```json
+{
+  "company_id": "chvcRSSPTJaaoK2zbhGplQ",
+  "external_id": "qa-new-client-001",
+  "client_name": "QA New Client",
+  "client_email": "qa-new-client@example.com",
+  "business_name": "QA Business",
+  "assigned_to": "jay@ethicalscaling.com",
+  "offer_id": "",
+  "contract_start_date": "2026-06-13",
+  "contract_end_date": "2026-09-13",
+  "notes": "Created by new client webhook QA"
+}
+```
+
+  - Expected success: new app-owned client row, optional contract row, `client_created` history, and audit event.
+  - Re-send the same payload with the same `external_id`; expected duplicate response, not another new client.
+  - Test a bad token and a token generated for another company; expected 401.
+  - Delete/archive the QA client after testing.
+- No git commit or Vercel deploy was performed.
+
+## New Client Webhook Zapier Body Compatibility - 2026-06-13
+
+- Fixed Zapier POST compatibility for the New Client Webhook after Zapier kept reaching the function without top-level `company_id` / `client_name` fields.
+  - File: `supabase/functions/zapier-create-client/index.ts`.
+  - Added `parseWebhookBody(req)` so the Edge Function accepts:
+    - plain JSON request bodies,
+    - form-encoded bodies,
+    - query-string fields,
+    - Zapier-style nested payload strings under `data`, `body`, `payload`, `request`, or a blank key.
+  - Missing `client_name` errors now return `received_keys` to make future Zapier QA visible instead of opaque.
+- Deployed with:
+  - `npx supabase functions deploy zapier-create-client --project-ref zjauqflzxzsbpnivzsct`
+  - Supabase reported a successful deploy on project `zjauqflzxzsbpnivzsct`.
+- No git commit or Vercel deploy was performed.
+- QA remaining:
+  - Retest Zapier POST action with key/value Data rows.
+  - Confirm `company_integration_secrets.last_used_at` updates for the `client_create` token.
+  - Confirm new app-owned QA client, client-created history event, optional contract, and audit event.
+
+## New Client Webhook Zapier URL Pattern - 2026-06-13
+
+- Jay validated the New Client Webhook from Zapier after moving `company_id` into the endpoint URL query string.
+  - Working URL shape: `https://zjauqflzxzsbpnivzsct.supabase.co/functions/v1/zapier-create-client?company_id=<company_id>`.
+  - Headers still use the company-scoped integration token: `Authorization: Bearer <raw client_create token>` plus `Content-Type: application/json`.
+  - Client-specific fields stay in the Zapier body (`client_name`, `client_email`, `assigned_to`, contract dates, notes, etc.).
+  - QA result: a new app-owned `QA New Client` appeared in the Ethical Scaling client list with the expected CSM, status, onboarded date, and renewal date.
+- Resource guide update:
+  - File: `src/pages/Resources.tsx`.
+  - The New Client Webhook guide now copies the Zapier-safe URL with `?company_id=<selected company id>` and removes `company_id` from the body template to avoid Zapier nesting/serialization confusion.
+  - The server still accepts body/query/nested payload company IDs for n8n or custom callers, but Zapier documentation should use the URL query pattern as canonical.
+- Security model unchanged:
+  - `company_id` is a routing identifier, not the secret.
+  - The server validates the submitted token against active `company_integration_secrets` for that same company and `integration_type = client_create`.
+- No git commit or Vercel deploy was performed.
+
+## New Client Webhook Closeout QA - 2026-06-13
+
+- Completed server-side closeout QA for the New Client Webhook using the canonical Zapier-safe endpoint pattern:
+  - `POST /functions/v1/zapier-create-client?company_id=<company_id>`.
+  - `Authorization: Bearer <raw client_create integration token>`.
+  - Client fields in the JSON body.
+- The live endpoint passed:
+  - happy-path app-owned client creation;
+  - optional contract creation;
+  - `client_created` history event creation;
+  - audit event creation;
+  - idempotent duplicate response when the same `external_id` is resent;
+  - 400 validation when `client_name` is missing;
+  - 401 rejection for an invalid company token;
+  - `company_integration_secrets.last_used_at` update for the used token.
+- Temporary QA client, contract, history, audit, and token rows were cleaned up after the test.
+- No git commit or Vercel deploy was performed.
+
+## Client Update Webhook Closeout QA - 2026-06-13
+
+- Completed server-side closeout QA for the Client Update Webhook using a disposable app-owned Ethical Scaling client and a disposable company-scoped `client_update` token.
+- The live endpoint passed:
+  - happy-path update for `next_steps`, `last_contact`, and `next_contact`;
+  - `client_update_webhook` history event creation;
+  - app audit event creation;
+  - processed `integration_intake_events` row with `match_status = matched`;
+  - idempotent duplicate response when the same `external_event_id` is resent;
+  - unmatched-email review queue with `status = needs_review` and `match_status = unmatched`;
+  - 401 rejection for an invalid company token;
+  - 400 rejection for direct status/program updates, which must stay inside the RetainOS lifecycle flow;
+  - `company_integration_secrets.last_used_at` update for the used token.
+- Temporary QA client, history, audit, intake, and token rows were cleaned up after the test.
+- No git commit or Vercel deploy was performed.
+
+## Call Summary / Next Steps Webhook Closeout QA - 2026-06-13
+
+- Completed server-side closeout QA for the Call Summary / Next Steps Webhook using a disposable app-owned Ethical Scaling client and a disposable company-scoped `call_summary_next_steps` token.
+- The live endpoint passed:
+  - happy-path matching by exact active client email;
+  - `next_steps_value` update from the submitted summary;
+  - `csm_date_of_last_contact` update from the submitted call timestamp;
+  - `call_summary_webhook` history event creation;
+  - app audit event creation;
+  - processed `integration_intake_events` row with `match_status = matched`;
+  - idempotent duplicate response when the same external call ID is resent;
+  - unmatched-email review queue with `status = needs_review` and `match_status = unmatched`;
+  - 401 rejection for an invalid company token;
+  - 400 rejection when neither `summary` nor `notes` is present;
+  - `company_integration_secrets.last_used_at` update for the used token.
+- Temporary QA client, history, audit, intake, and token rows were cleaned up after the test.
+- No git commit or Vercel deploy was performed.
+
+## Call Transcript Webhook Resource Closeout - 2026-06-13
+
+- Confirmed there is no live `ingest-call-transcript` Edge Function in the repo.
+- Current status is intentionally resource/planning-only:
+  - Resources has a token-aware Call Transcript guide.
+  - The guide shows the selected company ID, active token status/prefix, expected transcript payload fields, and Fathom/Otter/Grain/Zapier/n8n/Make mapping guidance.
+  - The guide includes clear placeholder language that the endpoint is not active yet and that full Call AI transcript intake/matching/analysis remains a later phase.
+- No live endpoint QA was performed because there is no endpoint to call yet.
+- No git commit or Vercel deploy was performed.
+
+## Course Completion Webhook Resource Closeout - 2026-06-13
+
+- Confirmed there is no live `webhook-course-completion` Edge Function in the repo.
+- Current status is intentionally resource/planning-only:
+  - Resources has a token-aware Course Completion guide.
+  - The guide shows the selected company ID, active token status/prefix, expected LMS payload fields, and course/module completion mapping guidance.
+  - The guide includes clear placeholder language that the endpoint is not active yet.
+- No live endpoint QA was performed because there is no endpoint to call yet.
+- No git commit or Vercel deploy was performed.
+
+## Integration Resource Guides Cleanup - 2026-06-13
+
+- Cleaned `src/pages/Resources.tsx` integration guides so live vs planned workflows are explicit.
+- New Client uses the Zapier-safe `?company_id=<company_id>` URL pattern and body-only client fields.
+- Client Update and Call Summary / Next Steps remain live endpoint guides with company token headers and body `company_id`.
+- Call Transcript and Course Completion now use explicit not-live placeholder copy, planned method/headers, company ID, payload templates, and token status/prefix.
+- No endpoint QA was performed for Call Transcript or Course Completion by design because those endpoint implementations do not exist yet.
+- Verified `npm run build` passed; only the known Vite large chunk / Anthropic Beacon local warning remains.
+- No git commit or Vercel deploy was performed.
+
+## Moves Method Migration Readiness Snapshot - 2026-06-14
+
+- Added a read-only migration readiness snapshot command for Moves Method:
+  - `npm run migration:readiness:moves`
+  - generic form: `npm run migration:readiness:company -- --company="Company Name"`
+- Files touched:
+  - `scripts/migration-readiness-snapshot.mjs`
+  - `package.json`
+  - `MOVES_METHOD_MIGRATION_READINESS.md`
+  - `ROADMAP.md`
+- Important migration rule clarified by Jay:
+  - We are building everything needed for migration, not doing the migration yet.
+  - The Glide/CST sync is paid/manual and should only be run by Jay when the team is truly ready to migrate.
+  - Current Supabase mirror data can be around a week old and is good enough for validating structure, workflow, and migration plumbing.
+  - Final confidence requires Jay to trigger the paid Glide/CST sync on cutover day, then rerun readiness and app-owned backfill immediately after.
+- The new readiness script reads the current Supabase CST mirror only. It does not trigger a Glide sync and does not write app-owned migration data.
+- 2026-06-14 Moves Method snapshot:
+  - 4,143 mirrored clients.
+  - 2,338 active clients.
+  - Status mix: 2,004 front-end, 334 back-end, 106 paused, 96 suspended, 1,603 off-boarded.
+  - 89 mirrored team rows; 59 visible client managers.
+  - 16 mirrored offers and 33 mirrored offer milestones.
+  - Active clients missing offer config: 0.
+  - Active clients missing milestone config: 0.
+  - Active clients missing renewal/filtering date: 0.
+  - Active unassigned clients: 6.
+  - Active clients with invalid CSM assignments: 9.
+  - Mirrored contract history rows: 177; most active clients do not have a mirrored historical contract row, so contract-history backfill rules still need to be finalized before write-mode migration.
+- Current gate interpretation:
+  - Read-only walkthrough is close, but the 9 active invalid assignments and 6 active unassigned clients should be reviewed before calling Moves data clean.
+  - Write migration remains intentionally blocked until Jay triggers final sync and approves app-owned backfill/cutover.
+- No git commit or Vercel deploy was performed.
+
+## Moves Method Jay QA Doc Cleanup - 2026-06-14
+
+- Updated `MOVES_METHOD_MIGRATION_READINESS.md` to mark Jay's read-only/product QA as complete.
+- Moved the 9 active invalid assignment / 6 active unassigned snapshot findings out of current product blockers and into final-sync QA, because the mirror is intentionally stale until Jay runs the paid Glide/CST sync on migration day.
+- Updated `ROADMAP.md` with the same checkpoint so future sessions do not keep re-litigating stale mirror data as if it were live.
+- No code changes, build, git commit, or Vercel deploy were performed.
+
+## Beacon: Page -> Floating Bubble Widget - 2026-06-14
+
+- Beacon is no longer a standalone page. Per Jay's request it is now a floating bubble assistant available on every authenticated page (cleaner sidebar, "always-available friend").
+- Changes:
+  - New `src/components/Beacon.tsx` exports `BeaconBubble` (a fixed bottom-right FAB + popover panel) wrapping an internal `BeaconChat` (the same chat/logic ported from the old page). Chat brain (`src/lib/beacon/chat.ts`, `tools.ts`) is unchanged.
+  - `BeaconBubble` is mounted once in `AppShell` (`src/components/Header.tsx`) and gated on `isSuperAdmin`, so it persists across navigation and an in-flight answer survives closing/navigating. Lazy-mounts on first open, then stays mounted (hidden) to preserve the conversation.
+  - Deleted `src/pages/Beacon.tsx`; removed the `/beacon` route + `Beacon` import from `src/App.tsx`; removed the Beacon entry from the `devNav` list in `src/components/Header.tsx`.
+  - Panel z-index is `z-40` — above content/sticky header (`z-30`), below modals (`z-50`), per Jay's decision.
+- Still SuperAdmin-only and still the uncommitted local pilot. The DO NOT COMMIT warning and Edge-Function promotion path in "Beacon v1 Local Pilot - 2026-06-10" still apply unchanged.
+- `npm run build` passes; app boots with no console errors. Logged-in QA is Jay's (email-OTP gate).
+
+## Moves Method Readiness Checklist Cleanup - 2026-06-14
+
+- Updated `MOVES_METHOD_MIGRATION_READINESS.md` based on Jay's clarification:
+  - Moves-specific company resource content is not RetainOS-owned; the Resources structure is complete and Ben/Moves will add their own SOPs/resources when ready.
+  - Daily Pulse config validation is approved by Jay and treated as complete.
+  - Ben handoff is complete through Jay/Ben's real-time updates.
+  - Journey Visual is the only remaining product QA item in the Moves readiness doc; Jay requested a focused QA list before it is marked complete.
+- Moved the official rollout checklist out of the Moves-specific doc and into `ROADMAP.md` as a reusable `Official Company Rollout Checklist` for any RetainOS customer migration.
+- Important process note: pull that rollout checklist only when Jay explicitly calls a company migration and triggers the fresh paid CST/Glide sync. Do not treat stale mirror drift as a blocker while building migration plumbing.
+- No code changes, build, git commit, or Vercel deploy were performed.
+
+## Moves Method Journey Visual QA Completion - 2026-06-14
+
+- Jay QAed the Journey Visual across Moves examples with complete, partial, missing, and offboarded journey data:
+  - Darcy Sturm / Dicken Watson: complete milestone examples looked functionally right, but timeline markers were hard to read.
+  - Nicola Everson: no milestones still rendered acceptable fallback state.
+  - Don Wood: offboarded/missing-data example exposed close-marker collision between Peak Diagnostic and Strategic Review.
+- Updated `src/pages/ClientDetail.tsx` timeline layout:
+  - Kickoff and Program End now share the timeline rail and stay edge-aware.
+  - Planned checkpoints render above the line.
+  - Current renders below the line.
+  - Close planned checkpoint labels are staggered into two lanes to avoid collisions.
+- Marked Journey Visual QA complete in `MOVES_METHOD_MIGRATION_READINESS.md`.
+- Marked the Moves Method migration-readiness pass complete in `ROADMAP.md`.
+- `npm run build` passed. Known warnings remain: Anthropic/Beacon browser externalization warnings and the existing Vite large chunk warning.
+- No git commit or Vercel deploy was performed.
+- Important: this completes Moves Method readiness/plumbing, not final write-mode migration. Final cutover still waits for Jay's fresh paid CST/Glide sync and the reusable Official Company Rollout Checklist.
+
+## Contract / Renewal Confidence V1 Closeout - 2026-06-15
+
+- Worker 2 closed the local Contract tab V1 gaps for app-owned pilot/migrated clients.
+- Files changed:
+  - `src/pages/ClientDetail.tsx`
+  - `supabase/functions/manage-client-contract/index.ts`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- Client Detail > Contract now:
+  - loads archived app-owned `client_contracts` rows so archived history can be filtered/viewed;
+  - has Active, Old, Archived, and All filters;
+  - labels the app-owned/mirrored client current summary as `Current Contract Summary` and linked rows as contract history;
+  - keeps mirror-only companies read-only because write controls still require `canEditClient && isAppOwnedClient`;
+  - supports create, edit, archive, and SuperAdmin-only delete for app-owned contract rows.
+- `manage-client-contract` now accepts `action = delete` for SuperAdmins only.
+  - Delete writes `client_history_events` and `app_audit_events` using existing allowed event type `contract_archived` with `source = contract_delete`, then removes the app-owned contract row and refreshes the client current contract summary from the latest non-archived contract.
+  - Directors/Support/CSMs cannot delete; CSMs remain scoped to assigned clients for contract management.
+- History/audit behavior:
+  - Create/update/archive behavior remains intact.
+  - Delete writes client history before the physical delete so a history failure does not silently remove the row.
+- V2/later items recorded in `ROADMAP.md`:
+  - remind/ensure contract is added when manual or webhook-created clients lack contract info;
+  - richer multi-contract/LTV reporting and high-fidelity renewal/reporting flows remain out of V1.
+- Verification:
+  - `npm run build` passed on rerun. Known Beacon/Anthropic browser externalization warnings and the large Vite chunk warning remain.
+  - `git diff --check -- src/pages/ClientDetail.tsx supabase/functions/manage-client-contract/index.ts ROADMAP.md MEMORY.md` passed.
+  - No migration was added. Edge Function deploy is still needed for live SuperAdmin delete support.
+- No git commit or Vercel deploy was performed.
+- DO NOT COMMIT until Jay/parent reviews this Worker 2 closeout together with the parallel dirty work and decides what should be staged.
+
+Correction - 2026-06-15:
+- Worker 1 fixed the `src/pages/SaasClientDetail.tsx` `canManageCompanyDefinitions` used-before-declaration error during the Company Customization closeout.
+- After that fix, the repo build is blocked by the separate `src/pages/ClientDetail.tsx` syntax errors reported in the Worker 1 verification note below.
+
+## Company Customization Closeout V1 - 2026-06-15
+
+- Worker 1 completed a narrow Company Customization V1 closeout pass.
+- Files changed:
+  - `src/pages/SaasClientDetail.tsx`
+  - `supabase/functions/manage-company-customization/index.ts`
+  - `supabase/migrations/20260608100000_company_customization_v1.sql`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Customization now keeps outcome definitions, recurring custom fields, and churn reasons clearly grouped in one place; Company Settings continues to point definition work back to Customization instead of duplicating it.
+  - Existing outcome type/value fields are locked in the edit modal so the Success / Progress / Buy-in structure stays constrained while labels and ordering remain editable.
+  - Custom field copy now frames fields as recurring Quick Update / Client Profile > Outcomes tracking fields, not client-details-only profile fields.
+  - Visible edit controls now require app-owned company data plus the SuperAdmin/Director capability, matching the `manage-company-customization` server rule that rejects non-Directors/CSMs.
+  - Added `seed_default_churn_reasons` to `manage-company-customization`; it inserts Financial, Overwhelm, Paused, Spousal, Uncertainty, and Other only when the company has zero `company_churn_reasons` rows.
+  - The Customization loader calls that seed action for app-owned companies with no churn reasons, then displays the seeded rows.
+  - The company-customization migration fallback churn defaults were aligned to the Jay-approved V1 list for fresh environments.
+- Deploy/migration notes:
+  - Edge Function update required before live QA: deploy `supabase/functions/manage-company-customization`.
+  - No new migration file was created. The existing `20260608100000_company_customization_v1.sql` was adjusted for fresh/local environments; live databases that already ran it will rely on the Edge Function seed path for truly empty company configs.
+- Verification:
+  - `npm run build` was attempted but blocked by pre-existing syntax errors in `src/pages/ClientDetail.tsx` at lines 2010 and 3735, outside this task's ownership.
+  - Scoped check passed: `node_modules/.bin/tsc --noEmit --jsx react-jsx --module esnext --target es2021 --lib dom,dom.iterable,es2021 --moduleResolution bundler --allowImportingTsExtensions --skipLibCheck --types vite/client src/pages/SaasClientDetail.tsx`.
+  - `git diff --check` passed for the changed customization files.
+- No git commit, Supabase deploy, or Vercel deploy was performed.
+
+Correction - 2026-06-15:
+- Worker 2 fixed the temporary `src/pages/ClientDetail.tsx` syntax errors during the Contract / Renewal Confidence closeout.
+- `npm run build` now passes. Known Beacon/Anthropic browser externalization warnings and the large Vite chunk warning remain.
+
+## Company Rollout / Closeout Planning - 2026-06-15
+
+- Jay clarified the next high-priority closeout push:
+  - Company Customization Closeout should finish custom fields, outcome definitions, and churn reasons as company-level configuration.
+  - Contract / Renewal Confidence should finish client-level contract create/edit/archive/delete/filter flows, with reminders for clients missing contracts deferred to V2.
+  - Integration/Webhook Polish should wait until the higher-priority plumbing is done; resource guides should eventually show company-scoped variables/tokens.
+  - Official Company Rollout Checklist should become the reusable migration checklist Jay can convert into a spreadsheet.
+  - Reduce Glide/CST Mirror Dependency should focus first on making Ethical Scaling app-owned/mirror-free before repeating the pattern for other companies.
+- Worker 1 completed the Company Customization V1 local slice:
+  - `src/pages/SaasClientDetail.tsx`
+  - `supabase/functions/manage-company-customization/index.ts`
+  - `supabase/migrations/20260608100000_company_customization_v1.sql`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+  - Edge Function deploy still needed before live QA: `manage-company-customization`.
+- Worker 2 completed the Contract / Renewal Confidence V1 local slice:
+  - `src/pages/ClientDetail.tsx`
+  - `supabase/functions/manage-client-contract/index.ts`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+  - Edge Function deploy still needed before live QA: `manage-client-contract`.
+- Worker 3 completed an Ethical Scaling mirror-dependency audit without runtime edits:
+  - Ethical Scaling is pilot/app-owned and ready for a staged mirror-removal plan.
+  - Highest-impact remaining runtime dependencies are company/team shell fallback, mirrored choices/status definitions, historical contracts, historical milestones, some task/calendar paths, and dashboard/history confidence paths.
+  - Recommended next step is a staged implementation plan before assigning a build agent, because this can affect many shared surfaces.
+- Added `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md`.
+  - It captures the reusable migration flow: candidate scope, pre-migration prep, final CST/Glide sync and freeze, migration execution, QA matrix, handoff, hold/rollback criteria, and close condition.
+  - It explicitly says the paid CST/Glide sync only happens when Jay calls final migration day, and CST/Glide activity must be paused/locked before the final sync.
+- Updated `ROADMAP.md` to mark the Official Company Rollout Checklist as `[~] [qa] [priority: high]`, pending Jay review of the checklist format.
+- No git commit, Supabase deploy, or Vercel deploy was performed.
+- Open follow-ups:
+  - Jay QA/review Company Customization V1.
+  - Jay QA/review Contract / Renewal Confidence V1.
+  - Jay review `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md` before turning it into the reusable spreadsheet.
+  - Decide the first staged implementation for Ethical Scaling mirror dependency removal.
+
+## Company Customization / Contract QA Polish - 2026-06-15
+
+- Tightened the QA polish pass after Jay's Company Customization and Contract/Renewal review.
+- Files changed:
+  - `src/pages/SaasClientDetail.tsx`
+  - `src/pages/ClientDetail.tsx`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Removed internal company ID and last-sync metadata from the Admin Hub header; it now presents a cleaner company workspace header.
+  - Made Company Customization actions render as a clean three-button row on tablet/desktop, with mobile stacking.
+  - Contract tab now avoids showing both Current Contract Summary and Latest Contract History for the same app-owned contract; linked app-owned rows become the contract source of truth.
+  - Renamed Contract Days to Expected Duration Days and clarified that start/end dates drive renewal timing when present.
+  - Added a low-priority roadmap follow-up for drag/drop ordering of customization definitions.
+- No Supabase deploy, git commit, or Vercel deploy was performed.
+- QA needed from Jay:
+  - Confirm Admin Hub header and Customization buttons look clean.
+  - Confirm contract display no longer feels duplicated/confusing.
+
+## Ethical Scaling Mirror Dependency Reduction - 2026-06-15
+
+- Started the first runtime mirror-reduction slice for Ethical Scaling.
+- Files changed:
+  - `src/pages/ClientDetail.tsx`
+  - `scripts/backfill-company-activity.mjs`
+  - `ETHICAL_SCALING_APP_OWNED_AUDIT.md`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Client Detail now skips mirrored CST contract and milestone history for `pilot` / `migrated` companies and keeps backup fallback for mirror-only companies.
+  - Applied contract backfill for Ethical Scaling: 7 current-summary contracts inserted; follow-up dry-run reports 0 remaining.
+  - Applied activity/milestone backfill for Ethical Scaling: 32 historical milestone rows inserted; follow-up dry-run reports 0 remaining.
+  - `backfill-company-activity` now skips/reports existing active client/milestone conflicts; 2 rows were skipped for Ethical Scaling because active app-owned rows already existed.
+  - Fixed audit insert metadata for `historical_activity_backfill` so it satisfies `app_audit_events.entity_table`.
+- Verification:
+  - `npm run build` passes.
+  - Known warnings: Beacon/Anthropic browser externalization and the Vite large chunk warning.
+- No git commit, Supabase Edge deploy, or Vercel deploy was performed.
+- QA needed:
+  - Jay to verify Ethical Scaling contracts/milestones are app-owned-only on Client Detail.
+  - Jay to spot-check Moves Method still has mirror read-only fallback.
+
+## Ethical Scaling Mirror Dependency QA + Rollout Checklist Review - 2026-06-15
+
+- Jay QA passed spot checks for Siwash Zahmat, Stephen, and Devon Canup after the Ethical Scaling mirror-reduction slice; Dashboard and CSM Reports also loaded correctly.
+- Reviewed Jay's `RetainOS_Company_Rollout_Checklist.xlsx`. Spreadsheet structure maps well to the official rollout checklist: candidate scope, prep, final sync/freeze, execution, QA matrix, and handoff.
+- Migration process update: contract/current-renewal coverage is mandatory for every company cutover, including Moves Method. `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md` now treats contract backfill/dry-run/coverage spot checks as gates.
+- Added low-priority roadmap follow-up for app-owned client image upload/display for RetainOS-created clients. Mirrored/migrated clients can still display CST image URLs when present.
+- Files changed: `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md`, `ROADMAP.md`, `MEMORY.md`.
+- No Supabase deploy, git commit, Vercel deploy, or build was performed; this was documentation/process follow-through after Jay QA.
+
+## Roadmap Closure Pass - 2026-06-15
+
+- Closed validated V1 roadmap loops after Jay QA instead of leaving them in `[~]`: Company Customization V1, Company Settings V1, Client Contracts/Renewals V1, Official Company Rollout Checklist template, Ethical Scaling mirror dependency reduction/app-owned backfill slice, and company custom fields on Client Detail > Outcomes.
+- Split future enhancements into explicit V2/later buckets instead of keeping V1 open: optional custom-field list/import/export display, advanced field-type UX, client-list presets, drag/drop ordering, missing-contract reminders, LTV/multi-contract reporting, client image upload, and per-company residual mirror audits.
+- Rule going forward: when these areas come up again, label it as either a regression or new V2 scope. Do not reopen the V1 items unless Jay finds a real regression.
+- This was a docs-only hygiene pass: no app code changes, Supabase deploy, Vercel deploy, build, or git commit.
+
+## Roadmap QA Queue Cleanup - 2026-06-16
+
+- Per Jay's handoff, completed a docs-only `ROADMAP.md` cleanup so the roadmap no longer presents stale `[~] [qa]` items as a giant active QA pile.
+- Files changed:
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Added a `Jay QA Queue` section near the top of `ROADMAP.md`.
+  - The queue is now the only canonical place to answer "what should Jay QA next?"
+  - Recorded that there are no active Jay QA items queued as of 2026-06-16.
+  - Reserved `[qa]` for items copied into the Jay QA Queue.
+  - Retagged stale `[qa]` roadmap items as `[polish]` or `[mixed]`.
+  - Added reason tags to previously untagged active `[~]` bullets.
+  - Corrected stale contract duplicate entries so the closed Client Contracts/Renewals V1 work stays `[x]`.
+- Verification:
+  - Scanned `ROADMAP.md` for active `[~]` bullets without `[qa]`, `[polish]`, `[downstream]`, or `[mixed]`; only explanatory legend/queue text remains.
+  - Scanned `ROADMAP.md` for `[qa]`; it now appears only in the status-key reservation and Jay QA Queue language.
+- No app code changes, Supabase deploy, Vercel deploy, build, git stage, or git commit was performed.
+
+## Ethical Scaling Role QA Closure - 2026-06-16
+
+- Jay confirmed the Ethical Scaling pilot has been used with Ben and Emily and is working as expected.
+- Files changed:
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Marked the Ethical Scaling pilot blocker "Role-based end-to-end QA passes using Jay, Ben, and Emily's real accounts" as `[x]`.
+  - Added roadmap notes that Dashboard canonical formula validation and CSM Reports formula confidence should wait for Moves Method or another larger migrated-company dataset, because Ethical Scaling has too few active clients to be a strong formula/performance stress test.
+- No app code changes, Supabase deploy, Vercel deploy, build, git stage, or git commit was performed.
+
+## Daily Pulse / Notifications Product Polish - 2026-06-16
+
+- Subagent A completed a narrow product-polish pass for Daily Pulse and in-app notification clarity.
+- Files changed:
+  - `src/pages/DailyPulse.tsx`
+  - `src/pages/Clients.tsx`
+  - `src/pages/SaasClientDetail.tsx`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Daily Pulse copy now explicitly separates the persistent operating page from the compact reminder bell.
+  - Daily Pulse section empty states now say no clients match the selected signal/window instead of using a generic "nothing needs attention" message.
+  - Daily Pulse now shows a clear page-level empty state when no Daily Pulse sections are enabled in Company Settings.
+  - Daily Pulse now shows a green zero-signal summary when enabled sections have no open items in the selected window.
+  - Clients header dropdown is labeled "Reminder bell" and explains it is for short-term reminders, not the full operating view.
+  - Company Settings notification copy now distinguishes bell reminders, Daily Pulse sections, and company timing rules more clearly.
+- Deliberately not built:
+  - Email delivery.
+  - Push notifications.
+  - Full inbox/read/dismiss/count behavior.
+  - Scheduled delivery infrastructure.
+  - Canonical formula rewrites.
+- No Supabase deploy, Vercel deploy, git stage, or git commit was performed.
+- Jay QA checklist:
+  - Open `/daily-pulse` for Ethical Scaling and confirm the header distinction between Daily Pulse and the reminder bell reads naturally.
+  - Switch Today / This Week / This Month and confirm zero-signal and section-level empty states are clear.
+  - Open Clients and confirm the bell dropdown feels correctly scoped as short-term reminders.
+  - Open Admin Hub / Company Settings and confirm notification labels describe what is bell-only, Daily Pulse, or timing-rule behavior.
+
+## Daily Pulse / Resources / UX Triage Kickoff - 2026-06-16
+
+- Jay approved two subagent workstreams for today's lighter product/UX push:
+  - Daily Pulse + Notifications product polish.
+  - Read-only high-fidelity UX triage for Clients, Client Detail, and Admin Hub / Company Settings.
+- Created `GLIDE_RESOURCES_EXPORT_TEMPLATE.md` so Jay can paste existing Glide resources in a consistent format before the Resources / Help Center content polish work begins.
+- Added a planned medium-priority roadmap item for a shorter client-facing migration QA checklist, separate from the internal official rollout checklist. It should cover simple end-user cutover validation such as login, roster spot checks, CSM assignment visibility, client profiles, updates, contracts, Daily Pulse, and support handoff.
+- No Supabase deploy, Vercel deploy, build, git stage, or git commit was performed.
+
+## Daily Pulse QA Approval + HiFi Polish Decisions - 2026-06-16
+
+- Jay QA approved the Daily Pulse + Notifications product-polish pass.
+  - Daily Pulse page looked solid.
+  - Company Settings notification controls looked clean.
+  - Marked `ROADMAP.md` Daily Pulse operating page as `[x]`.
+  - Kept broader email delivery, push, and full inbox/read-dismiss behavior as later notification scope.
+- Jay HiFi triage decisions:
+  - Remove visible "pilot data" / "RetainOS data" source-badge language instead of renaming it.
+  - Use `Expected Duration Days` for contract duration display.
+  - Hide disabled `Edit SaaS details` in Admin Hub.
+  - Add confirmations before integration token revoke / revoke-all actions.
+  - Unsaved filter cue and improved empty-state recovery need a quick plain-language review before implementation.
+- Files changed in this follow-up:
+  - `src/pages/Clients.tsx`
+  - `src/pages/ClientDetail.tsx`
+  - `src/pages/SaasClientDetail.tsx`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- Verification:
+  - `git diff --check -- src/pages/Clients.tsx src/pages/ClientDetail.tsx src/pages/SaasClientDetail.tsx ROADMAP.md MEMORY.md RETAINOS_RESOURCES_MIGRATION.md` passed.
+- No Supabase deploy, Vercel deploy, build, git stage, or git commit was performed.
+
+## Clients Filter Polish - 2026-06-16
+
+- Subagent D completed the approved Clients-page filter polish after Jay approved the plain-language UX.
+- Files changed:
+  - `src/pages/Clients.tsx`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Added a subtle "Apply filters to update results." cue when draft filters differ from the applied results, using the same normalization as the existing Apply filters action for company, assigned CSM, and secondary assignee scope.
+  - Replaced the bare no-results state with recovery copy and a `Clear filters` action that reuses the existing `clearFilters` behavior.
+  - Added a roadmap note under the existing `[~] [polish]` Clients / Client Detail HiFi pass; status remains pending Jay QA.
+- Jay QA:
+  - The unsaved filter cue appears and feels right.
+  - A no-match search showed the improved recovery copy.
+  - `Clear filters` worked as expected.
+- No Supabase deploy, Vercel deploy, git stage, or git commit was performed.
+
+## Resources Category Polish / Arendt Takeover - 2026-06-16
+
+- Arendt, the Resources subagent, stalled after making partial Resources edits and was shut down. Parent took over the bounded Resources slice directly.
+- Files changed:
+  - `src/pages/Resources.tsx`
+  - `RETAINOS_RESOURCES_MIGRATION.md`
+  - `supabase/migrations/20260616110000_retainos_resources_migration_seed.sql`
+  - `ROADMAP.md`
+  - `MEMORY.md`
+- What changed:
+  - Renamed the filled Glide export from `GLIDE_RESOURCES_EXPORT_TEMPLATE.md` to `RETAINOS_RESOURCES_MIGRATION.md`.
+  - Added a RetainOS implementation review to `RETAINOS_RESOURCES_MIGRATION.md`, summarizing covered/live resources, resources that need rewrite/re-record, future/not-live guides, and the recommended next resource pass.
+  - Added a seed migration for all 25 resource entries from Jay's Glide export.
+  - Rewrite/re-record resources seed as `draft` so SuperAdmins can review them without publishing old Glide-era Looms to customer users.
+  - Live dynamic integration guides seed as `published`.
+  - Kept the two top-level Resources libraries: RetainOS Help and Company Resources.
+  - Added RetainOS Help subcategory pills: All, Setup & Onboarding, Working with Clients, Using the Dashboard, and Automations.
+  - RetainOS Help subcategory filtering uses explicit slug overrides for the seeded migration resources, with client-side inference as fallback; no resource category schema migration was added.
+  - Added category-aware empty-state copy for RetainOS Help.
+- Verification:
+  - `node_modules/.bin/tsc --noEmit --jsx react-jsx --module esnext --target es2021 --lib dom,dom.iterable,es2021 --moduleResolution bundler --allowImportingTsExtensions --skipLibCheck --types vite/client src/pages/Resources.tsx` passed.
+  - Resource seed sanity check found 25 resource slugs and balanced SQL dollar quotes.
+  - `git diff --check -- src/pages/Resources.tsx supabase/migrations/20260616110000_retainos_resources_migration_seed.sql RETAINOS_RESOURCES_MIGRATION.md ROADMAP.md MEMORY.md` passed.
+- Follow-up:
+  - If Resources categorization needs exact editorial control, add a first-class database `category` or `tags` field to `resources`.
+  - Replace seeded guide copy with rewritten RetainOS versions from `RETAINOS_RESOURCES_MIGRATION.md` in small batches.
+- No Supabase deploy, Vercel deploy, build, git stage, or git commit was performed.
+
+Apply note - 2026-06-16:
+- Jay requested the Resources seed migration be applied instead of left local.
+- Ran `npm run db:apply:sql -- supabase/migrations/20260616110000_retainos_resources_migration_seed.sql`.
+- Apply succeeded through the repo `exec_sql` path.
+- Live Supabase verification found all 25 expected resource slugs:
+  - 5 published dynamic integration guides: `zapier-client-webhook`, `course-completion-webhook`, `call-ai-transcript-webhook`, `client-call-summary-webhook`, `client-update-webhook`.
+  - 20 draft rewrite/re-record resources for SuperAdmin review.
+  - 0 missing seeded slugs.
+- No Vercel deploy, build, git stage, or git commit was performed.

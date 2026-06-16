@@ -11,14 +11,85 @@ const CORS_HEADERS = {
 
 const ACTIONS = new Set([
   "update_settings",
+  "update_notification_preferences",
+  "seed_default_churn_reasons",
+  "upsert_custom_field",
+  "archive_custom_field",
   "upsert_outcome",
   "archive_outcome",
   "upsert_churn_reason",
   "archive_churn_reason",
 ]);
 const OUTCOME_TYPES = new Set(["success", "progress", "buy_in", "suitable"]);
+const CUSTOM_FIELD_TYPES = new Set([
+  "text",
+  "textarea",
+  "number",
+  "date",
+  "boolean",
+  "single_select",
+  "multi_select",
+  "url",
+  "email",
+]);
+const CUSTOM_FIELD_ENTITY_TYPES = new Set(["client", "company_member", "contract"]);
 const CLIENT_VIEWS = new Set(["list", "card", "calendar"]);
 const CALENDAR_MODES = new Set(["month", "week", "day"]);
+const NOTIFICATION_TYPES = new Set([
+  "next_contact_due",
+  "renewal_due",
+  "paused_return_due",
+  "churn_risk",
+  "rga_candidate",
+  "quiet_profile",
+  "task_due",
+  "diagnostic_due",
+  "strategic_review_due",
+]);
+const DEFAULT_CHURN_REASONS = [
+  {
+    value: "financial",
+    label: "Financial",
+    category: "commercial",
+    position: 10,
+    requires_notes: false,
+  },
+  {
+    value: "overwhelm",
+    label: "Overwhelm",
+    category: "capacity",
+    position: 20,
+    requires_notes: false,
+  },
+  {
+    value: "paused",
+    label: "Paused",
+    category: "paused",
+    position: 30,
+    requires_notes: false,
+  },
+  {
+    value: "spousal",
+    label: "Spousal",
+    category: "family",
+    position: 40,
+    requires_notes: false,
+  },
+  {
+    value: "uncertainty",
+    label: "Uncertainty",
+    category: "uncertainty",
+    position: 50,
+    requires_notes: false,
+  },
+  {
+    value: "other",
+    label: "Other",
+    category: "other",
+    position: 60,
+    requires_notes: true,
+  },
+];
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -34,6 +105,20 @@ function cleanText(value: unknown) {
 function nullableText(value: unknown) {
   const text = cleanText(value);
   return text || null;
+}
+
+function normalizeNotificationMetadata(
+  notificationType: string,
+  metadata: unknown,
+) {
+  if (notificationType !== "diagnostic_due") return {};
+  const raw =
+    metadata && typeof metadata === "object"
+      ? (metadata as Record<string, unknown>)
+      : {};
+  return {
+    recurrence: raw.recurrence === "recurring" ? "recurring" : "once",
+  };
 }
 
 function normalizeEmail(value: unknown) {
@@ -75,6 +160,30 @@ function cleanValue(value: unknown) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function parseOptions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const options = value
+    .map((option) => {
+      if (typeof option === "string") {
+        const label = option.trim();
+        return label ? { value: cleanValue(label), label } : null;
+      }
+      if (!option || typeof option !== "object") return null;
+      const raw = option as Record<string, unknown>;
+      const label = cleanText(raw.label);
+      const optionValue = cleanValue(raw.value ?? label);
+      if (!label || !optionValue) return null;
+      return { value: optionValue, label };
+    })
+    .filter(Boolean) as { value: string; label: string }[];
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    if (seen.has(option.value)) return false;
+    seen.add(option.value);
+    return true;
+  });
 }
 
 async function assertCanManageCompany(
@@ -232,6 +341,277 @@ Deno.serve(async (req) => {
         title: "update settings",
         summary: "Company settings were updated.",
         before_data: existing,
+        after_data: saved,
+      });
+
+      return jsonResponse({ ok: true, item: saved });
+    }
+
+    if (action === "update_notification_preferences") {
+      const rawPreferences = Array.isArray(body.preferences)
+        ? body.preferences
+        : [];
+      const preferences = rawPreferences
+        .map((preference: Record<string, unknown>) => {
+          const notificationType = cleanText(preference.notification_type);
+          if (!NOTIFICATION_TYPES.has(notificationType)) return null;
+          return {
+            notification_type: notificationType,
+            in_app_enabled: preference.in_app_enabled === false ? false : true,
+            email_enabled: false,
+            lead_days: requiredBoundedInteger(
+              preference.lead_days,
+              notificationType === "renewal_due" ? 7 : 0,
+              0,
+              365,
+            ),
+            metadata: normalizeNotificationMetadata(
+              notificationType,
+              preference.metadata,
+            ),
+          };
+        })
+        .filter(Boolean) as {
+        notification_type: string;
+        in_app_enabled: boolean;
+        email_enabled: boolean;
+        lead_days: number;
+        metadata: Record<string, unknown>;
+      }[];
+
+      if (preferences.length === 0) {
+        return jsonResponse({ error: "Choose at least one notification preference." }, 400);
+      }
+
+      const { data: beforeRows, error: beforeError } = await supabase
+        .from("notification_preferences")
+        .select("*")
+        .eq("company_id", company.id)
+        .is("member_id", null)
+        .is("role", null);
+      if (beforeError) throw beforeError;
+
+      const savedRows: Record<string, unknown>[] = [];
+      for (const preference of preferences) {
+        const { data: existing, error: existingError } = await supabase
+          .from("notification_preferences")
+          .select("id")
+          .eq("company_id", company.id)
+          .eq("notification_type", preference.notification_type)
+          .is("member_id", null)
+          .is("role", null)
+          .maybeSingle();
+        if (existingError) throw existingError;
+
+        const payload = {
+          company_id: company.id,
+          member_id: null,
+          role: null,
+          notification_type: preference.notification_type,
+          in_app_enabled: preference.in_app_enabled,
+          email_enabled: false,
+          lead_days: preference.lead_days,
+          metadata: preference.metadata,
+        };
+
+        const { data: saved, error: saveError } = existing?.id
+          ? await supabase
+              .from("notification_preferences")
+              .update(payload)
+              .eq("id", existing.id)
+              .eq("company_id", company.id)
+              .select("*")
+              .single()
+          : await supabase
+              .from("notification_preferences")
+              .insert(payload)
+              .select("*")
+              .single();
+        if (saveError) throw saveError;
+        savedRows.push(saved);
+      }
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "company_customization_update_notification_preferences",
+        source: "company_settings_admin",
+        entity_table: "notification_preferences",
+        entity_id: null,
+        legacy_glide_row_id: company.legacy_glide_row_id,
+        title: "update notification preferences",
+        summary: "Company notification preferences were updated.",
+        before_data: beforeRows ?? [],
+        after_data: savedRows,
+      });
+
+      return jsonResponse({ ok: true, items: savedRows });
+    }
+
+    if (action === "seed_default_churn_reasons") {
+      const { count, error: countError } = await supabase
+        .from("company_churn_reasons")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", company.id);
+      if (countError) throw countError;
+
+      if ((count ?? 0) > 0) {
+        return jsonResponse({ ok: true, seeded: false, items: [] });
+      }
+
+      const { data: savedRows, error: saveError } = await supabase
+        .from("company_churn_reasons")
+        .insert(
+          DEFAULT_CHURN_REASONS.map((reason) => ({
+            company_id: company.id,
+            ...reason,
+            counts_as_churn: true,
+            status: "active",
+            metadata: { seeded_from: "company_customization_v1_defaults" },
+          })),
+        )
+        .select("*")
+        .order("position", { ascending: true });
+      if (saveError) throw saveError;
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "company_customization_seed_default_churn_reasons",
+        source: "company_customization_admin",
+        entity_table: "company_churn_reasons",
+        entity_id: null,
+        legacy_glide_row_id: company.legacy_glide_row_id,
+        title: "seed default churn reasons",
+        summary: "Default company churn reasons were seeded because none existed.",
+        before_data: [],
+        after_data: savedRows ?? [],
+      });
+
+      return jsonResponse({ ok: true, seeded: true, items: savedRows ?? [] });
+    }
+
+    if (action === "upsert_custom_field" || action === "archive_custom_field") {
+      const table = "company_custom_fields";
+      const entityId = cleanText(body.entityId);
+      let beforeData: Record<string, unknown> | null = null;
+      let saved: Record<string, unknown> | null = null;
+
+      if (action === "archive_custom_field") {
+        if (!entityId) return jsonResponse({ error: "Missing custom field id." }, 400);
+        const { data: existing, error: existingError } = await supabase
+          .from(table)
+          .select("*")
+          .eq("id", entityId)
+          .eq("company_id", company.id)
+          .maybeSingle();
+        if (existingError) throw existingError;
+        if (!existing) return jsonResponse({ error: "Custom field not found." }, 404);
+        beforeData = existing;
+
+        const { data, error } = await supabase
+          .from(table)
+          .update({ status: "archived", archived_at: new Date().toISOString() })
+          .eq("id", entityId)
+          .eq("company_id", company.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+        saved = data;
+      } else {
+        const key = cleanValue(body.key);
+        const label = cleanText(body.label);
+        const fieldType = cleanText(body.fieldType) || "text";
+        const entityType = cleanText(body.entityType) || "client";
+        const options = parseOptions(body.options);
+
+        if (!key || !label) {
+          return jsonResponse({ error: "Custom field key and label are required." }, 400);
+        }
+        if (!CUSTOM_FIELD_TYPES.has(fieldType)) {
+          return jsonResponse({ error: "Choose a valid custom field type." }, 400);
+        }
+        if (!CUSTOM_FIELD_ENTITY_TYPES.has(entityType)) {
+          return jsonResponse({ error: "Choose a valid custom field entity type." }, 400);
+        }
+        if (
+          (fieldType === "single_select" || fieldType === "multi_select") &&
+          options.length === 0
+        ) {
+          return jsonResponse(
+            { error: "Select custom fields require at least one option." },
+            400,
+          );
+        }
+
+        const payload = {
+          company_id: company.id,
+          key,
+          label,
+          description: nullableText(body.description),
+          entity_type: entityType,
+          field_type: fieldType,
+          options,
+          is_required: Boolean(body.isRequired),
+          is_visible_on_client_detail:
+            body.isVisibleOnClientDetail === false ? false : true,
+          is_visible_on_client_list: Boolean(body.isVisibleOnClientList),
+          is_editable_by_csm: Boolean(body.isEditableByCsm),
+          position: optionalInteger(body.position) ?? 0,
+          source_table: nullableText(body.sourceTable),
+          source_key: nullableText(body.sourceKey),
+          status: "active",
+          archived_at: null,
+        };
+
+        if (entityId) {
+          const { data: existing, error: existingError } = await supabase
+            .from(table)
+            .select("*")
+            .eq("id", entityId)
+            .eq("company_id", company.id)
+            .maybeSingle();
+          if (existingError) throw existingError;
+          if (!existing) return jsonResponse({ error: "Custom field not found." }, 404);
+          beforeData = existing;
+
+          const { data, error } = await supabase
+            .from(table)
+            .update(payload)
+            .eq("id", entityId)
+            .eq("company_id", company.id)
+            .select("*")
+            .single();
+          if (error) throw error;
+          saved = data;
+        } else {
+          const { data, error } = await supabase
+            .from(table)
+            .insert({
+              ...payload,
+              metadata: { created_from: "manage-company-customization" },
+            })
+            .select("*")
+            .single();
+          if (error) throw error;
+          saved = data;
+        }
+      }
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: `company_customization_${action}`,
+        source: "company_customization_admin",
+        entity_table: table,
+        entity_id: saved?.id ?? null,
+        legacy_glide_row_id: company.legacy_glide_row_id,
+        title: action.replaceAll("_", " "),
+        summary: `${saved?.label ?? saved?.key ?? "Custom field"} was ${action.replaceAll("_", " ")}.`,
+        before_data: beforeData,
         after_data: saved,
       });
 

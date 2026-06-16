@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  mergeNotificationPreferences,
+  type NotificationPreference,
+  type NotificationPreferenceType,
+} from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 
 type DetailTab = "team" | "customization" | "pathways" | "settings";
@@ -105,6 +111,34 @@ interface CompanyChurnReasonRow {
   metadata?: Record<string, unknown> | null;
 }
 
+interface CompanyCustomFieldRow {
+  id?: string;
+  key: string;
+  label: string;
+  description?: string | null;
+  entity_type?: "client" | "company_member" | "contract" | null;
+  field_type:
+    | "text"
+    | "textarea"
+    | "number"
+    | "date"
+    | "boolean"
+    | "single_select"
+    | "multi_select"
+    | "url"
+    | "email";
+  options?: { value: string; label: string }[] | null;
+  is_required?: boolean | null;
+  is_visible_on_client_detail?: boolean | null;
+  is_visible_on_client_list?: boolean | null;
+  is_editable_by_csm?: boolean | null;
+  position?: number | null;
+  source_table?: string | null;
+  source_key?: string | null;
+  status?: "active" | "archived" | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 interface CompanySettingsRow {
   id?: string;
   profile_upkeep_freshness_days: number;
@@ -116,6 +150,45 @@ interface CompanySettingsRow {
   enable_zapier_client_create: boolean;
   metadata?: Record<string, unknown> | null;
   updated_at?: string | null;
+}
+
+type SettingsNotificationPreference = NotificationPreference;
+
+interface IntegrationIntakeEventRow {
+  id: string;
+  integration_type: string;
+  provider: string | null;
+  external_event_id: string | null;
+  status: "received" | "processed" | "needs_review" | "failed" | "ignored";
+  match_status: "unmatched" | "matched" | "ambiguous";
+  error_message: string | null;
+  payload: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface IntegrationReviewClientOption {
+  id: string;
+  glide_row_id: string | null;
+  client_name: string | null;
+  client_business: string | null;
+  client_email: string | null;
+  program_status_value: string | null;
+}
+
+interface IntegrationTokenRow {
+  id: string;
+  integration_type: string;
+  label: string | null;
+  token_prefix: string | null;
+  status: "active" | "revoked";
+  expires_at: string | null;
+  last_used_at: string | null;
+  last_used_from: string | null;
+  created_at: string;
+  updated_at: string | null;
+  revoked_at: string | null;
 }
 
 interface PathwayUsageCounts {
@@ -153,6 +226,44 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function integrationValue(
+  event: IntegrationIntakeEventRow,
+  keys: string[],
+): string | null {
+  for (const source of [event.metadata, event.payload]) {
+    for (const key of keys) {
+      const value = source?.[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return null;
+}
+
+function normalizeIntegrationClientStatus(value: string | null | undefined) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+}
+
+function isMatchableIntegrationClient(client: IntegrationReviewClientOption) {
+  const status = normalizeIntegrationClientStatus(client.program_status_value);
+  return status !== "off-boarded" && status !== "offboarded";
+}
+
 function roleLabel(member: TeamRow) {
   if (member.role_read_only_user) return "Viewer";
   if (member.role_id === 1 || member.role_is_saa_s_admin) return "Director";
@@ -177,6 +288,24 @@ const roleOptions: { label: string; value: TeamRole }[] = [
   { label: "Support", value: "support" },
   { label: "Viewer", value: "viewer" },
 ];
+
+const integrationTokenTypeOptions = [
+  {
+    value: "call_summary_next_steps",
+    label: "Call summary / next steps",
+  },
+  { value: "client_update", label: "Client update webhook" },
+  { value: "client_create", label: "New client webhook" },
+  { value: "call_ai_transcript", label: "Call AI transcript" },
+  { value: "course_completion", label: "Course completion" },
+];
+
+function integrationTokenLabel(value: string) {
+  return (
+    integrationTokenTypeOptions.find((option) => option.value === value)?.label ??
+    value.replaceAll("_", " ")
+  );
+}
 
 function mapAppTeamMember(member: AppTeamRow, legacyCompanyId: string): TeamRow {
   const roleId =
@@ -865,15 +994,6 @@ function PathwaysSetup({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-              source === "app_owned"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-slate-200 bg-slate-50 text-slate-600"
-            }`}
-          >
-            {source === "app_owned" ? "RetainOS pilot data" : "CST preview data"}
-          </span>
           <button
             type="button"
             disabled={!canManage}
@@ -1213,20 +1333,23 @@ function CustomizationTextInput({
   value,
   onChange,
   required,
+  readOnly,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
+  readOnly?: boolean;
 }) {
   return (
     <label className="block text-sm font-medium text-[#344054]">
       {label}
       <input
         required={required}
+        readOnly={readOnly}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 block w-full rounded-md border border-[#d0d5dd] px-3 py-2 text-sm shadow-sm focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#59abf0]/20"
+        className="mt-1 block w-full rounded-md border border-[#d0d5dd] px-3 py-2 text-sm shadow-sm focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#59abf0]/20 read-only:bg-[#f7f9fc] read-only:text-[#667085]"
       />
     </label>
   );
@@ -1296,7 +1419,9 @@ function OutcomeDefinitionModal({
               {item ? "Edit outcome" : "New outcome"}
             </h2>
             <p className="mt-1 text-sm text-[#667085]">
-              Values are stored in lowercase for validation and reporting.
+              Success, Progress, and Buy-in stay as the constrained outcome
+              structure. Rename labels carefully; values power validation and
+              reporting.
             </p>
           </div>
           <button type="button" onClick={onClose} className="text-[#98a2b3]">
@@ -1308,6 +1433,7 @@ function OutcomeDefinitionModal({
             Outcome type
             <select
               value={outcomeType}
+              disabled={Boolean(item)}
               onChange={(event) =>
                 setOutcomeType(
                   event.target.value as CompanyOutcomeDefinitionRow["outcome_type"],
@@ -1327,6 +1453,7 @@ function OutcomeDefinitionModal({
             value={value}
             onChange={setValue}
             required
+            readOnly={Boolean(item)}
           />
           <CustomizationTextInput
             label="Label"
@@ -1497,6 +1624,232 @@ function ChurnReasonModal({
   );
 }
 
+const customFieldTypeLabels: Record<CompanyCustomFieldRow["field_type"], string> = {
+  text: "Text",
+  textarea: "Long text",
+  number: "Number",
+  date: "Date",
+  boolean: "Yes/No",
+  single_select: "Single select",
+  multi_select: "Multi select",
+  url: "URL",
+  email: "Email",
+};
+
+function CustomFieldModal({
+  companyLegacyId,
+  item,
+  onClose,
+  onSaved,
+}: {
+  companyLegacyId: string;
+  item: CompanyCustomFieldRow | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [key, setKey] = useState(item?.key ?? "");
+  const [label, setLabel] = useState(item?.label ?? "");
+  const [description, setDescription] = useState(item?.description ?? "");
+  const [fieldType, setFieldType] = useState<CompanyCustomFieldRow["field_type"]>(
+    item?.field_type ?? "text",
+  );
+  const [position, setPosition] = useState(String(item?.position ?? 0));
+  const [isRequired, setIsRequired] = useState(item?.is_required ?? false);
+  const [showOnClientDetail, setShowOnClientDetail] = useState(
+    item?.is_visible_on_client_detail ?? true,
+  );
+  const [showOnClientList, setShowOnClientList] = useState(
+    item?.is_visible_on_client_list ?? false,
+  );
+  const [editableByCsm, setEditableByCsm] = useState(
+    item?.is_editable_by_csm ?? false,
+  );
+  const [optionsText, setOptionsText] = useState(
+    (item?.options ?? []).map((option) => option.label).join("\n"),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requiresOptions =
+    fieldType === "single_select" || fieldType === "multi_select";
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    const options = optionsText
+      .split("\n")
+      .map((option) => option.trim())
+      .filter(Boolean);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "upsert_custom_field",
+          companyLegacyId,
+          entityId: item?.id,
+          key,
+          label,
+          description,
+          fieldType,
+          entityType: item?.entity_type ?? "client",
+          position: Number(position) || 0,
+          isRequired,
+          isVisibleOnClientDetail: showOnClientDetail,
+          isVisibleOnClientList: showOnClientList,
+          isEditableByCsm: editableByCsm,
+          options,
+          sourceTable: item?.source_table,
+          sourceKey: item?.source_key,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError) {
+      setError(invokeError.message);
+      return;
+    }
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+    onSaved();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-[#101828]">
+              {item ? "Edit custom field" : "New custom field"}
+            </h2>
+            <p className="mt-1 text-sm text-[#667085]">
+              Definitions control recurring fields shown in Quick Update and
+              Client Profile &gt; Outcomes.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-[#98a2b3]">
+            Close
+          </button>
+        </div>
+        <div className="mt-5 space-y-4">
+          <CustomizationTextInput
+            label="Key"
+            value={key}
+            onChange={setKey}
+            required
+          />
+          <CustomizationTextInput
+            label="Label"
+            value={label}
+            onChange={setLabel}
+            required
+          />
+          <CustomizationTextInput
+            label="Description"
+            value={description}
+            onChange={setDescription}
+          />
+          <label className="block text-sm font-medium text-[#344054]">
+            Type
+            <select
+              value={fieldType}
+              onChange={(event) =>
+                setFieldType(event.target.value as CompanyCustomFieldRow["field_type"])
+              }
+              className="mt-1 block w-full rounded-md border border-[#d0d5dd] px-3 py-2 text-sm shadow-sm focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#59abf0]/20"
+            >
+              {Object.entries(customFieldTypeLabels).map(([type, display]) => (
+                <option key={type} value={type}>
+                  {display}
+                </option>
+              ))}
+            </select>
+          </label>
+          <CustomizationTextInput
+            label="Position"
+            value={position}
+            onChange={setPosition}
+          />
+          {requiresOptions ? (
+            <label className="block text-sm font-medium text-[#344054]">
+              Options
+              <textarea
+                value={optionsText}
+                onChange={(event) => setOptionsText(event.target.value)}
+                rows={4}
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] px-3 py-2 text-sm shadow-sm focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#59abf0]/20"
+              />
+            </label>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-[#344054]">
+              <input
+                type="checkbox"
+                checked={isRequired}
+                onChange={(event) => setIsRequired(event.target.checked)}
+                className="h-4 w-4 rounded border-[#d0d5dd] text-[#59abf0]"
+              />
+              Required
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-[#344054]">
+              <input
+                type="checkbox"
+                checked={showOnClientDetail}
+                onChange={(event) => setShowOnClientDetail(event.target.checked)}
+                className="h-4 w-4 rounded border-[#d0d5dd] text-[#59abf0]"
+              />
+              Outcomes view
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-[#344054]">
+              <input
+                type="checkbox"
+                checked={showOnClientList}
+                onChange={(event) => setShowOnClientList(event.target.checked)}
+                className="h-4 w-4 rounded border-[#d0d5dd] text-[#59abf0]"
+              />
+              Client list
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-[#344054]">
+              <input
+                type="checkbox"
+                checked={editableByCsm}
+                onChange={(event) => setEditableByCsm(event.target.checked)}
+                className="h-4 w-4 rounded border-[#d0d5dd] text-[#59abf0]"
+              />
+              CSM editable
+            </label>
+          </div>
+          {error ? (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-[#d0d5dd] px-4 py-2 text-sm font-medium text-[#344054]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-medium text-white hover:bg-[#3b95df] disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function CustomizationRow({
   primary,
   secondary,
@@ -1554,7 +1907,13 @@ function customizationOriginLabel(item: {
     typeof item.metadata?.created_from === "string"
       ? item.metadata.created_from
       : "";
-  if (seededFrom === "safe_defaults" || item.is_default) return "Default";
+  if (
+    seededFrom === "safe_defaults" ||
+    seededFrom === "company_customization_v1_defaults" ||
+    item.is_default
+  ) {
+    return "Default";
+  }
   if (seededFrom) return "Imported";
   if (createdFrom) return "Custom";
   return null;
@@ -1581,6 +1940,7 @@ function CustomizationSetup({
   source,
   outcomes,
   churnReasons,
+  customFields,
   canManage,
   onReload,
 }: {
@@ -1588,6 +1948,7 @@ function CustomizationSetup({
   source: CustomizationSource;
   outcomes: CompanyOutcomeDefinitionRow[];
   churnReasons: CompanyChurnReasonRow[];
+  customFields: CompanyCustomFieldRow[];
   canManage: boolean;
   onReload: () => void;
 }) {
@@ -1595,6 +1956,8 @@ function CustomizationSetup({
     useState<CompanyOutcomeDefinitionRow | null>();
   const [editingChurnReason, setEditingChurnReason] =
     useState<CompanyChurnReasonRow | null>();
+  const [editingCustomField, setEditingCustomField] =
+    useState<CompanyCustomFieldRow | null>();
   const [actionError, setActionError] = useState<string | null>(null);
   const sortedOutcomes = [...outcomes].sort(customizationSort);
   const activeOutcomes = sortedOutcomes.filter(
@@ -1610,6 +1973,13 @@ function CustomizationSetup({
   const archivedChurnReasons = sortedChurnReasons.filter(
     (item) => item.status === "archived",
   );
+  const sortedCustomFields = [...customFields].sort(customizationSort);
+  const activeCustomFields = sortedCustomFields.filter(
+    (item) => item.status !== "archived",
+  );
+  const archivedCustomFields = sortedCustomFields.filter(
+    (item) => item.status === "archived",
+  );
   const outcomesByType = activeOutcomes.reduce(
     (grouped, item) => {
       grouped[item.outcome_type] = grouped[item.outcome_type] ?? [];
@@ -1623,7 +1993,7 @@ function CustomizationSetup({
   ).filter((type) => type !== "suitable" || (outcomesByType.suitable?.length ?? 0) > 0);
 
   async function archiveItem(
-    action: "archive_outcome" | "archive_churn_reason",
+    action: "archive_outcome" | "archive_churn_reason" | "archive_custom_field",
     entityId?: string,
   ) {
     if (!entityId) return;
@@ -1657,7 +2027,9 @@ function CustomizationSetup({
           </h2>
           <p className="mt-1 text-sm text-[#667085]">
             Outcome choices are still loaded from CST until this
-            company is moved to pilot or migrated status.
+            company is moved to pilot or migrated status. Custom field labels
+            below are previewed from CST slots and become editable company-level
+            update fields after migration.
           </p>
         </div>
         {outcomes.length > 0 ? (
@@ -1698,37 +2070,72 @@ function CustomizationSetup({
             </div>
           </section>
         ) : null}
+        {customFields.length > 0 ? (
+          <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="text-sm font-semibold text-[#101828]">
+              Mirrored custom fields
+            </h3>
+            <div className="mt-3 space-y-2">
+              {activeCustomFields.map((item) => (
+                <CustomizationRow
+                  key={item.key}
+                  primary={item.label}
+                  secondary={`${item.key} · ${customFieldTypeLabels[item.field_type]}`}
+                  badge={item.source_key ?? "CST slot"}
+                  status={item.status}
+                  canManage={false}
+                  onEdit={() => undefined}
+                  onArchive={() => undefined}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
       </div>
     );
   }
 
   return (
     <div className="mt-6 space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0 flex-1">
           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
             RetainOS customization
           </span>
           <h2 className="mt-3 text-lg font-semibold text-[#101828]">
             Company Customization
           </h2>
+          <p className="mt-1 max-w-2xl text-sm text-[#667085]">
+            Configure the definitions that client-facing workflows consume:
+            constrained outcome dropdowns, recurring outcome tracking fields,
+            and churn/offboarding reasons.
+          </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setEditingOutcome(null)}
-            className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-medium text-white hover:bg-[#3b95df]"
-          >
-            + Outcome
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditingChurnReason(null)}
-            className="rounded-md border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-medium text-[#344054] hover:bg-[#f7f9fc]"
-          >
-            + Churn Reason
-          </button>
-        </div>
+        {canManage ? (
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3 lg:w-auto lg:shrink-0">
+            <button
+              type="button"
+              onClick={() => setEditingOutcome(null)}
+              className="whitespace-nowrap rounded-md bg-[#59abf0] px-4 py-2 text-sm font-medium text-white hover:bg-[#3b95df]"
+            >
+              + Outcome
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingCustomField(null)}
+              className="whitespace-nowrap rounded-md border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-medium text-[#344054] hover:bg-[#f7f9fc]"
+            >
+              + Custom Field
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingChurnReason(null)}
+              className="whitespace-nowrap rounded-md border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-medium text-[#344054] hover:bg-[#f7f9fc]"
+            >
+              + Churn Reason
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {actionError ? (
@@ -1743,7 +2150,8 @@ function CustomizationSetup({
             Outcome definitions
           </h3>
           <p className="mt-1 text-xs text-[#667085]">
-            Each outcome type has its own active definition list.
+            These values appear in Quick Update and Client Detail &gt; Outcomes.
+            Keep labels short enough for dropdowns and reports.
           </p>
         </div>
         <div className="grid gap-4 p-4 xl:grid-cols-2">
@@ -1814,11 +2222,78 @@ function CustomizationSetup({
       <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
         <div className="border-b border-[#e4e9f0] px-5 py-4">
           <h3 className="text-sm font-semibold text-[#101828]">
+            Custom fields
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Define recurring company-level update fields here. Enabled fields
+            appear in Quick Update and Client Profile &gt; Outcomes; client values
+            are edited in those workflows.
+          </p>
+        </div>
+        <div className="space-y-2 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+              Active fields
+            </p>
+            <span className="rounded-full border border-[#e4e9f0] bg-white px-2.5 py-1 text-xs font-medium text-[#667085]">
+              {activeCustomFields.length} active
+            </span>
+          </div>
+          {activeCustomFields.length === 0 ? (
+            <div className="rounded-md border border-dashed border-[#d0d5dd] bg-white px-4 py-3 text-sm text-[#667085]">
+              No active custom fields. Add fields here when this company needs
+              recurring client update prompts beyond the standard outcomes.
+            </div>
+          ) : (
+            activeCustomFields.map((item) => (
+              <CustomizationRow
+                key={item.id ?? item.key}
+                primary={item.label}
+                secondary={`${item.key} · ${
+                  customFieldTypeLabels[item.field_type]
+                } · position ${item.position ?? 0}`}
+                badge={item.source_key ? `Mapped from ${item.source_key}` : customizationOriginLabel(item)}
+                status={item.status}
+                canManage={canManage}
+                onEdit={() => setEditingCustomField(item)}
+                onArchive={() => archiveItem("archive_custom_field", item.id)}
+              />
+            ))
+          )}
+          {archivedCustomFields.length > 0 ? (
+            <details className="pt-2">
+              <summary className="cursor-pointer text-sm font-semibold text-[#586273]">
+                Archived custom fields ({archivedCustomFields.length})
+              </summary>
+              <div className="mt-3 space-y-2">
+                {archivedCustomFields.map((item) => (
+                  <CustomizationRow
+                    key={item.id ?? item.key}
+                    primary={item.label}
+                    secondary={`${item.key} · ${customFieldTypeLabels[item.field_type]}`}
+                    badge={item.source_key ? `Mapped from ${item.source_key}` : customizationOriginLabel(item)}
+                    status="archived"
+                    canManage={false}
+                    onEdit={() => undefined}
+                    onArchive={() => undefined}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
             Churn reasons
           </h3>
           <p className="mt-1 text-xs text-[#667085]">
-            Active reasons are sorted by position, then label. Imported Glide
-            values are tagged separately from safe defaults and custom additions.
+            These company-level values support offboarding/churn classification
+            and dashboard churn reason charts. Companies with no configured
+            reasons start with Financial, Overwhelm, Paused, Spousal,
+            Uncertainty, and Other.
           </p>
         </div>
         <div className="space-y-2 p-4">
@@ -1832,7 +2307,8 @@ function CustomizationSetup({
           </div>
           {activeChurnReasons.length === 0 ? (
             <div className="rounded-md border border-dashed border-[#d0d5dd] bg-white px-4 py-3 text-sm text-[#667085]">
-              No active churn reasons.
+              No active churn reasons. Add the reasons Directors and Support
+              should choose from during offboarding.
             </div>
           ) : (
             activeChurnReasons.map((item) => (
@@ -1896,6 +2372,17 @@ function CustomizationSetup({
           }}
         />
       ) : null}
+      {editingCustomField !== undefined ? (
+        <CustomFieldModal
+          companyLegacyId={companyLegacyId}
+          item={editingCustomField}
+          onClose={() => setEditingCustomField(undefined)}
+          onSaved={() => {
+            setEditingCustomField(undefined);
+            onReload();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1915,6 +2402,84 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_zapier_client_create: false,
   };
 }
+
+const NOTIFICATION_PREFERENCE_COPY: Record<
+  NotificationPreferenceType,
+  { label: string; description: string }
+> = {
+  next_contact_due: {
+    label: "Next contact reminders",
+    description:
+      "Show next-contact reminders in the bell and today's contact list in Daily Pulse.",
+  },
+  renewal_due: {
+    label: "Contract renewals",
+    description:
+      "Show renewal reminders in the bell and selected Daily Pulse date window.",
+  },
+  paused_return_due: {
+    label: "Pause returns",
+    description:
+      "Show paused-client return reminders in the bell and selected Daily Pulse date window.",
+  },
+  churn_risk: {
+    label: "Churn risk",
+    description:
+      "Show Daily Pulse cards for active clients with stale red Progress or Buy-in signals.",
+  },
+  rga_candidate: {
+    label: "RGA candidates",
+    description:
+      "Show Daily Pulse cards for active clients with stale green Progress or Buy-in signals.",
+  },
+  quiet_profile: {
+    label: "Quiet profiles",
+    description:
+      "Show Daily Pulse cards for active clients without a recent RetainOS profile/history signal.",
+  },
+  task_due: {
+    label: "Task due reminders",
+    description:
+      "Show generated task due reminders in the bell when task notifications are available.",
+  },
+  diagnostic_due: {
+    label: "Onboarding checkpoint",
+    description:
+      "Show Daily Pulse cards for onboarding-based diagnostics, audits, or recurring check-ins.",
+  },
+  strategic_review_due: {
+    label: "Strategic reviews",
+    description:
+      "Show Daily Pulse cards before contract/program end for strategic review or renewal planning.",
+  },
+};
+
+const NOTIFICATION_PREFERENCE_GROUPS: {
+  title: string;
+  description: string;
+  types: NotificationPreferenceType[];
+}[] = [
+  {
+    title: "Daily Pulse and reminder visibility",
+    description:
+      "Choose which operating signals this company sees. Bell reminders stay compact; Daily Pulse stays persistent.",
+    types: [
+      "next_contact_due",
+      "renewal_due",
+      "paused_return_due",
+      "churn_risk",
+      "rga_candidate",
+      "quiet_profile",
+      "task_due",
+    ],
+  },
+  {
+    title: "Company timing rules",
+    description:
+      "Set the company rhythm for onboarding checkpoints/check-ins and strategic review planning.",
+    types: ["diagnostic_due", "strategic_review_due"],
+  },
+];
 
 function SettingsSelect<T extends string>({
   label,
@@ -1978,29 +2543,143 @@ function SettingsFlag({
   );
 }
 
+function ReminderTimingInput({
+  preference,
+  disabled,
+  onChange,
+}: {
+  preference: SettingsNotificationPreference;
+  disabled: boolean;
+  onChange: (changes: Partial<SettingsNotificationPreference>) => void;
+}) {
+  if (preference.notification_type === "diagnostic_due") {
+    const recurrence =
+      preference.metadata?.recurrence === "recurring" ? "recurring" : "once";
+    return (
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+          Signal behavior
+          <select
+            disabled={disabled}
+            value={recurrence}
+            onChange={(event) =>
+              onChange({ metadata: { recurrence: event.target.value } })
+            }
+            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+          >
+            <option value="once">One-time checkpoint after onboarding</option>
+            <option value="recurring">Recurring check-in cadence</option>
+          </select>
+        </label>
+        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+          {recurrence === "recurring" ? "Repeat every X days" : "Days after onboarding"}
+          <input
+            type="number"
+            min="1"
+            max="365"
+            disabled={disabled}
+            value={preference.lead_days || 56}
+            onChange={(event) =>
+              onChange({ lead_days: Number(event.target.value) || 56 })
+            }
+            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+          />
+          <span className="mt-1 block text-[11px] normal-case tracking-normal text-[#667085]">
+            {recurrence === "recurring"
+              ? "Example: 30 creates a monthly check-in signal."
+              : "Example: 56 creates an eight-week checkpoint."}
+          </span>
+        </label>
+      </div>
+    );
+  }
+
+  if (preference.notification_type === "strategic_review_due") {
+    return (
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+        Days before contract/program end
+        <input
+          type="number"
+          min="0"
+          max="365"
+          disabled={disabled}
+          value={preference.lead_days}
+          onChange={(event) =>
+            onChange({ lead_days: Number(event.target.value) || 0 })
+          }
+          className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+        />
+        <span className="mt-1 block text-[11px] normal-case tracking-normal text-[#667085]">
+          Example: 35 creates a five-week pre-renewal review signal.
+        </span>
+      </label>
+    );
+  }
+
+  return null;
+}
+
 function CompanySettingsSetup({
   companyLegacyId,
   source,
   settings,
+  notificationPreferences,
+  integrationEvents,
+  integrationEventsLoading,
+  integrationClients,
+  integrationTokens,
+  integrationTokensLoading,
+  canManageTokens,
   canManage,
   onReload,
 }: {
   companyLegacyId: string;
   source: SettingsSource;
   settings: CompanySettingsRow;
+  notificationPreferences: SettingsNotificationPreference[];
+  integrationEvents: IntegrationIntakeEventRow[];
+  integrationEventsLoading: boolean;
+  integrationClients: IntegrationReviewClientOption[];
+  integrationTokens: IntegrationTokenRow[];
+  integrationTokensLoading: boolean;
+  canManageTokens: boolean;
   canManage: boolean;
   onReload: () => void;
 }) {
   const [draft, setDraft] = useState<CompanySettingsRow>(settings);
+  const [preferenceDraft, setPreferenceDraft] = useState<
+    SettingsNotificationPreference[]
+  >(mergeNotificationPreferences(notificationPreferences));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [eventClientSelections, setEventClientSelections] = useState<
+    Record<string, string>
+  >({});
+  const [reviewAction, setReviewAction] = useState<string | null>(null);
+  const [tokenAction, setTokenAction] = useState<string | null>(null);
+  const [tokenDraft, setTokenDraft] = useState({
+    integrationType: "call_summary_next_steps",
+    label: "Default token",
+  });
+  const [generatedToken, setGeneratedToken] = useState<{
+    rawToken: string;
+    label: string;
+    integrationType: string;
+  } | null>(null);
+  const [generatedTokenCopied, setGeneratedTokenCopied] = useState(false);
 
   useEffect(() => {
     setDraft(settings);
     setError(null);
     setSaved(false);
   }, [settings]);
+
+  useEffect(() => {
+    setPreferenceDraft(mergeNotificationPreferences(notificationPreferences));
+    setError(null);
+    setSaved(false);
+  }, [notificationPreferences]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -2033,11 +2712,132 @@ function CompanySettingsSetup({
       setError(data.error);
       return;
     }
+    const { data: preferenceData, error: preferenceInvokeError } =
+      await supabase.functions.invoke("manage-company-customization", {
+        body: {
+          action: "update_notification_preferences",
+          companyLegacyId,
+          preferences: preferenceDraft,
+        },
+      });
+    if (preferenceInvokeError) {
+      setError(preferenceInvokeError.message);
+      return;
+    }
+    if (preferenceData?.error) {
+      setError(preferenceData.error);
+      return;
+    }
     setSaved(true);
     onReload();
   }
 
   const disabled = !canManage || saving;
+
+  async function handleIntegrationReviewAction(
+    eventId: string,
+    action: "match" | "retry" | "ignore",
+  ) {
+    if (!canManage || reviewAction) return;
+    const selectedClientId = eventClientSelections[eventId] ?? "";
+    if (action === "match" && !selectedClientId) {
+      setError("Choose a client before matching this event.");
+      setSaved(false);
+      return;
+    }
+    setReviewAction(`${eventId}:${action}`);
+    setError(null);
+    setSaved(false);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-integration-review",
+      {
+        body: {
+          action,
+          companyLegacyId,
+          eventId,
+          clientId: selectedClientId || undefined,
+        },
+      },
+    );
+    setReviewAction(null);
+    if (invokeError) {
+      setError(invokeError.message);
+      return;
+    }
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+    setSaved(true);
+    setEventClientSelections((current) => {
+      const next = { ...current };
+      delete next[eventId];
+      return next;
+    });
+    onReload();
+  }
+
+  async function handleIntegrationTokenAction(
+    action: "create" | "revoke" | "revoke_all",
+    tokenId?: string,
+    integrationType?: string,
+  ) {
+    if (!canManageTokens || tokenAction) return;
+    if (action === "revoke_all") {
+      const confirmed = window.confirm(
+        "Revoke all active integration tokens for this company? Incoming webhooks will stop processing until new tokens are created.",
+      );
+      if (!confirmed) return;
+    }
+    if (action === "revoke") {
+      const confirmed = window.confirm(
+        "Revoke this integration token? Any Zap or workflow using it will stop writing to RetainOS.",
+      );
+      if (!confirmed) return;
+    }
+    setTokenAction(`${action}:${tokenId ?? integrationType ?? "all"}`);
+    setError(null);
+    setSaved(false);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-integration-token",
+      {
+        body: {
+          action,
+          companyId: companyLegacyId,
+          tokenId,
+          integrationType: integrationType ?? tokenDraft.integrationType,
+          label: tokenDraft.label,
+        },
+      },
+    );
+    setTokenAction(null);
+    if (invokeError) {
+      setError(invokeError.message);
+      return;
+    }
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+    if (action === "create") {
+      setGeneratedToken({
+        rawToken: data.rawToken,
+        label: data.token?.label ?? tokenDraft.label,
+        integrationType: data.token?.integration_type ?? tokenDraft.integrationType,
+      });
+      setGeneratedTokenCopied(false);
+    } else {
+      setGeneratedToken(null);
+      setGeneratedTokenCopied(false);
+    }
+    setSaved(true);
+    onReload();
+  }
+
+  const activeIntegrationTokens = integrationTokens.filter(
+    (token) => token.status === "active",
+  );
+  const hasOpenIntegrationEvents = integrationEvents.length > 0;
 
   return (
     <form onSubmit={handleSubmit} className="mt-6 space-y-6">
@@ -2055,6 +2855,10 @@ function CompanySettingsSetup({
           <h2 className="mt-3 text-lg font-semibold text-[#101828]">
             Company Settings
           </h2>
+          <p className="mt-1 max-w-3xl text-sm text-[#667085]">
+            Set workspace defaults, feature gates, and Daily Pulse/reminder
+            behavior for this company.
+          </p>
         </div>
         <button
           type="submit"
@@ -2087,6 +2891,10 @@ function CompanySettingsSetup({
           <h3 className="text-sm font-semibold text-[#101828]">
             Client workspace defaults
           </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            These defaults are consumed by Clients and CSM Reports. They change
+            the starting workspace behavior, not historical client data.
+          </p>
         </div>
         <div className="grid gap-4 p-4 md:grid-cols-3">
           <label className="block text-sm font-medium text-[#344054]">
@@ -2137,12 +2945,18 @@ function CompanySettingsSetup({
 
       <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
         <div className="border-b border-[#e4e9f0] px-5 py-4">
-          <h3 className="text-sm font-semibold text-[#101828]">Simple flags</h3>
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Feature gates
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Turn company-level capabilities on or off. Deeper setup still lives
+            in the feature area that uses the capability.
+          </p>
         </div>
         <div className="grid gap-3 p-4 lg:grid-cols-2">
           <SettingsFlag
             label="Secondary assignee"
-            description="Allow clients to carry a secondary CSM assignment."
+            description="Allow clients to carry a secondary CSM or support assignment where workflows support it."
             checked={draft.enable_secondary_assignee}
             disabled={disabled}
             onChange={(checked) =>
@@ -2154,7 +2968,7 @@ function CompanySettingsSetup({
           />
           <SettingsFlag
             label="Call AI for CSMs"
-            description="Show the company-level Call AI capability flag."
+            description="Allow CSM access to company Call AI surfaces when Call AI is enabled."
             checked={draft.enable_call_ai_for_csms}
             disabled={disabled}
             onChange={(checked) =>
@@ -2166,7 +2980,7 @@ function CompanySettingsSetup({
           />
           <SettingsFlag
             label="Embeds"
-            description="Reserve embedded surfaces for this company."
+            description="Allow embedded resources or content where supported."
             checked={draft.enable_embeds}
             disabled={disabled}
             onChange={(checked) =>
@@ -2174,8 +2988,8 @@ function CompanySettingsSetup({
             }
           />
           <SettingsFlag
-            label="Zapier client create"
-            description="Allow the existing Zapier client creation pathway when configured."
+            label="Client creation webhook"
+            description="Allow external automations such as Zapier or n8n to create clients when a valid company token is configured."
             checked={draft.enable_zapier_client_create}
             disabled={disabled}
             onChange={(checked) =>
@@ -2188,11 +3002,545 @@ function CompanySettingsSetup({
         </div>
       </section>
 
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Notification and reminder preferences
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            These power Daily Pulse and the notification bell. Timing rules are
+            company-specific operating signals. Email delivery remains off until
+            the inbox and delivery flow are QAed.
+          </p>
+        </div>
+        <div className="space-y-5 p-4">
+          {NOTIFICATION_PREFERENCE_GROUPS.map((group) => (
+            <div key={group.title}>
+              <div className="mb-3">
+                <h4 className="text-sm font-semibold text-[#101828]">
+                  {group.title}
+                </h4>
+                <p className="mt-1 text-xs text-[#667085]">{group.description}</p>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
+                {group.types.map((notificationType) => {
+                  const preference =
+                    DEFAULT_NOTIFICATION_PREFERENCES.find(
+                      (item) => item.notification_type === notificationType,
+                    ) ?? DEFAULT_NOTIFICATION_PREFERENCES[0];
+                  const current =
+                    preferenceDraft.find(
+                      (item) => item.notification_type === notificationType,
+                    ) ?? preference;
+                  const copy = NOTIFICATION_PREFERENCE_COPY[notificationType];
+                  return (
+                    <div
+                      key={notificationType}
+                      className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3"
+                    >
+                      <SettingsFlag
+                        label={copy.label}
+                        description={copy.description}
+                        checked={current.in_app_enabled}
+                        disabled={disabled}
+                        onChange={(checked) =>
+                          setPreferenceDraft((preferences) =>
+                            mergeNotificationPreferences(preferences).map((item) =>
+                              item.notification_type === notificationType
+                                ? {
+                                    ...item,
+                                    in_app_enabled: checked,
+                                    email_enabled: false,
+                                  }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                      <ReminderTimingInput
+                        preference={current}
+                        disabled={disabled}
+                        onChange={(leadDays) =>
+                          setPreferenceDraft((preferences) =>
+                            mergeNotificationPreferences(preferences).map((item) =>
+                              item.notification_type === notificationType
+                                ? {
+                                    ...item,
+                                    ...leadDays,
+                                    metadata: {
+                                      ...(item.metadata ?? {}),
+                                      ...(leadDays.metadata ?? {}),
+                                    },
+                                  }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <details
+        open={hasOpenIntegrationEvents}
+        className="overflow-hidden rounded-lg border border-[#e4e9f0] bg-white"
+      >
+        <summary className="cursor-pointer list-none border-b border-[#e4e9f0] px-5 py-4 [&::-webkit-details-marker]:hidden">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-[#101828]">
+                Integration review queue
+              </h3>
+              <p className="mt-1 text-xs text-[#667085]">
+                Operations inbox for webhook events that need human review. This
+                sits here temporarily until integrations get their own operating
+                area.
+              </p>
+            </div>
+            <span className="w-fit rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+              {integrationEvents.length} open
+            </span>
+          </div>
+        </summary>
+        {source === "mirror" ? (
+          <div className="px-5 py-4 text-sm text-[#667085]">
+            Integration review is available once this company is running on
+            RetainOS app-owned data.
+          </div>
+        ) : integrationEventsLoading ? (
+          <div className="px-5 py-4 text-sm text-[#667085]">
+            Loading integration events...
+          </div>
+        ) : integrationEvents.length === 0 ? (
+          <div className="px-5 py-4 text-sm text-[#667085]">
+            No unmatched or ambiguous webhook events need review.
+          </div>
+        ) : (
+          <div className="divide-y divide-[#e4e9f0]">
+            {integrationEvents.map((event) => {
+              const clientEmail = integrationValue(event, [
+                "client_email",
+                "clientEmail",
+                "email",
+              ]);
+              const title = integrationValue(event, ["title", "meeting_title"]);
+              const summary = integrationValue(event, [
+                "summary",
+                "notes",
+                "next_steps",
+                "nextSteps",
+              ]);
+              const recordingUrl = integrationValue(event, [
+                "recording_url",
+                "recordingUrl",
+                "url",
+              ]);
+              const selectedClientId = eventClientSelections[event.id] ?? "";
+              const actionBusy = reviewAction?.startsWith(`${event.id}:`) ?? false;
+              const clientOptions = integrationClients.map((client) => {
+                const label =
+                  client.client_name ||
+                  client.client_business ||
+                  client.client_email ||
+                  client.id;
+                const detail = [
+                  client.client_email,
+                  client.program_status_value
+                    ? client.program_status_value
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                return {
+                  value: client.id,
+                  label: detail ? `${label} — ${detail}` : label,
+                };
+              });
+              return (
+                <article key={event.id} className="px-5 py-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-[#101828]">
+                          {title || clientEmail || "Webhook event"}
+                        </span>
+                        <span className="rounded-full border border-[#d0d5dd] bg-[#f8fafc] px-2 py-0.5 text-[11px] font-semibold uppercase text-[#586273]">
+                          {event.provider || "unknown"}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${
+                            event.match_status === "ambiguous"
+                              ? "border-orange-200 bg-orange-50 text-orange-700"
+                              : "border-amber-200 bg-amber-50 text-amber-800"
+                          }`}
+                        >
+                          {event.match_status}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-[#667085]">
+                        Received {formatDateTime(event.created_at)}
+                        {event.external_event_id
+                          ? ` · External ID ${event.external_event_id}`
+                          : ""}
+                      </p>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+                        {event.integration_type.replaceAll("_", " ")}
+                      </p>
+                      <p className="mt-2 text-sm text-[#344054]">
+                        {event.error_message || "Needs manual review before writing."}
+                      </p>
+                    </div>
+                    {recordingUrl ? (
+                      <a
+                        href={recordingUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="retainos-button-secondary w-fit px-3 py-2 text-sm"
+                      >
+                        Open recording
+                      </a>
+                    ) : null}
+                  </div>
+                  <dl className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-md bg-[#f7f9fc] px-3 py-2">
+                      <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#667085]">
+                        Client email
+                      </dt>
+                      <dd className="mt-1 break-words text-sm text-[#101828]">
+                        {clientEmail || "--"}
+                      </dd>
+                    </div>
+                    <div className="rounded-md bg-[#f7f9fc] px-3 py-2 md:col-span-2">
+                      <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#667085]">
+                        Summary preview
+                      </dt>
+                      <dd className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-[#101828]">
+                        {summary || "--"}
+                      </dd>
+                    </div>
+                  </dl>
+                  {canManage ? (
+                    <div className="mt-4 rounded-lg border border-[#e4e9f0] bg-[#fbfcfe] p-3">
+                      <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-end">
+                        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                          Match to client
+                          <select
+                            value={selectedClientId}
+                            disabled={actionBusy}
+                            onChange={(selectEvent) =>
+                              setEventClientSelections((current) => ({
+                                ...current,
+                                [event.id]: selectEvent.target.value,
+                              }))
+                            }
+                            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                          >
+                            <option value="">
+                              {clientOptions.length > 0
+                                ? "Choose an active client..."
+                                : "No active clients found"}
+                            </option>
+                            {clientOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={actionBusy || !selectedClientId}
+                            onClick={() =>
+                              handleIntegrationReviewAction(event.id, "match")
+                            }
+                            className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Match to client
+                          </button>
+                          <button
+                            type="button"
+                            disabled={actionBusy}
+                            onClick={() =>
+                              handleIntegrationReviewAction(event.id, "retry")
+                            }
+                            className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Retry apply
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={actionBusy}
+                          onClick={() =>
+                            handleIntegrationReviewAction(event.id, "ignore")
+                          }
+                          className="w-fit rounded-full border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-semibold text-[#586273] shadow-sm transition hover:border-[#98a2b3] hover:text-[#101828] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Ignore
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </details>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-white">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-[#101828]">
+                Integration tokens
+              </h3>
+              <p className="mt-1 text-xs text-[#667085]">
+                Generate company-specific webhook tokens for Zapier, n8n, Fathom,
+                Otter, Grain, and future integrations. Raw tokens are shown once.
+              </p>
+            </div>
+            <span className="w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+              {activeIntegrationTokens.length} active
+            </span>
+          </div>
+        </div>
+        {source === "mirror" ? (
+          <div className="px-5 py-4 text-sm text-[#667085]">
+            Tokens are available once this company is running on RetainOS
+            app-owned data.
+          </div>
+        ) : !canManageTokens ? (
+          <div className="px-5 py-4 text-sm text-[#667085]">
+            Integration tokens are Super Admin-only because they allow external
+            systems to write into RetainOS.
+          </div>
+        ) : (
+          <div className="space-y-4 p-5">
+            {generatedToken ? (
+              <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 shadow-sm">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-amber-700">
+                      One-time token
+                    </p>
+                    <h4 className="mt-1 text-base font-semibold text-amber-950">
+                      Copy this token now
+                    </h4>
+                    <p className="mt-1 text-sm text-amber-900">
+                      This {integrationTokenLabel(generatedToken.integrationType)}
+                      token authorizes external systems to write to this company.
+                      It is only shown once. The listed token prefix below cannot
+                      be used to configure Zapier or n8n.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await navigator.clipboard?.writeText(
+                          generatedToken.rawToken,
+                        );
+                        setGeneratedTokenCopied(true);
+                      }}
+                      className="retainos-button-primary w-fit px-4 py-2 text-sm"
+                    >
+                      {generatedTokenCopied ? "Copied" : "Copy token"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGeneratedToken(null);
+                        setGeneratedTokenCopied(false);
+                      }}
+                      className="retainos-button-secondary w-fit px-4 py-2 text-sm"
+                    >
+                      Dismiss after storing
+                    </button>
+                  </div>
+                </div>
+                <code className="mt-3 block break-all rounded-md border border-amber-200 bg-white px-3 py-2 text-xs text-[#101828]">
+                  {generatedToken.rawToken}
+                </code>
+              </div>
+            ) : null}
+
+            <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+              <span className="font-semibold">Company ID</span> routes a webhook
+              to the right SaaS account.{" "}
+              <span className="font-semibold">Integration token</span> proves
+              the webhook is allowed to write for that company and integration.
+            </div>
+
+            <div className="grid gap-3 rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+              <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                Integration type
+                <select
+                  value={tokenDraft.integrationType}
+                  disabled={Boolean(tokenAction)}
+                  onChange={(event) =>
+                    setTokenDraft((current) => ({
+                      ...current,
+                      integrationType: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                >
+                  {integrationTokenTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                Label
+                <input
+                  type="text"
+                  value={tokenDraft.label}
+                  disabled={Boolean(tokenAction)}
+                  onChange={(event) =>
+                    setTokenDraft((current) => ({
+                      ...current,
+                      label: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={Boolean(tokenAction)}
+                onClick={() => handleIntegrationTokenAction("create")}
+                className="retainos-button-primary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Generate token
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-amber-900">
+                    Offboarding safety
+                  </h4>
+                  <p className="mt-1 text-xs text-amber-800">
+                    If a SaaS client is paused, archived, or offboarded, revoke
+                    active tokens here. RetainOS will reject future webhook
+                    writes even if an external Zap or workflow keeps firing.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={Boolean(tokenAction) || activeIntegrationTokens.length === 0}
+                  onClick={() => handleIntegrationTokenAction("revoke_all")}
+                  className="w-fit rounded-full border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-900 shadow-sm transition hover:border-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Revoke all active tokens
+                </button>
+              </div>
+            </div>
+
+            {integrationTokensLoading ? (
+              <div className="text-sm text-[#667085]">Loading tokens...</div>
+            ) : integrationTokens.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-[#d0d5dd] px-4 py-5 text-sm text-[#667085]">
+                No integration tokens have been created yet.
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-[#e4e9f0]">
+                <table className="min-w-full divide-y divide-[#e4e9f0] text-sm">
+                  <thead className="bg-[#f7f9fc] text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+                    <tr>
+                      <th className="px-4 py-3">Integration</th>
+                      <th className="px-4 py-3">Token</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Last used</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#e4e9f0] bg-white">
+                    {integrationTokens.map((token) => {
+                      const isActive = token.status === "active";
+                      return (
+                        <tr key={token.id}>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-[#101828]">
+                              {integrationTokenLabel(token.integration_type)}
+                            </div>
+                            <div className="text-xs text-[#667085]">
+                              {token.label || "Default token"}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <code className="rounded bg-[#f7f9fc] px-2 py-1 text-xs text-[#344054]">
+                              {token.token_prefix || "--"}...
+                            </code>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                                isActive
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-slate-50 text-slate-600"
+                              }`}
+                            >
+                              {token.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-[#667085]">
+                            {token.last_used_at
+                              ? formatDateTime(token.last_used_at)
+                              : "Never"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {isActive ? (
+                              <button
+                                type="button"
+                                disabled={Boolean(tokenAction)}
+                                onClick={() =>
+                                  handleIntegrationTokenAction(
+                                    "revoke",
+                                    token.id,
+                                    token.integration_type,
+                                  )
+                                }
+                                className="rounded-full border border-[#d0d5dd] px-3 py-1.5 text-xs font-semibold text-[#586273] hover:border-red-300 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Revoke
+                              </button>
+                            ) : (
+                              <span className="text-xs text-[#98a2b3]">
+                                Revoked {formatDate(token.revoked_at)}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
       <section className="rounded-lg border border-dashed border-[#d0d5dd] bg-white px-5 py-4">
-        <h3 className="text-sm font-semibold text-[#101828]">Still coming soon</h3>
+        <h3 className="text-sm font-semibold text-[#101828]">
+          Managed in other tabs
+        </h3>
         <p className="mt-1 text-sm text-[#667085]">
-          Custom fields, notification rules, dashboard preferences, and client-list
-          column presets are intentionally left out of this settings slice.
+          Outcome definitions, custom fields, and churn reasons live in
+          Customization. Offers and milestones live in Pathways &amp; Milestones.
+          Resource setup guides live in Resources. Dashboard preferences and
+          client-list column presets remain later migration-hardening work.
         </p>
       </section>
     </form>
@@ -2209,7 +3557,8 @@ export function SaasClientDetail({
   const navigate = useNavigate();
   const params = useParams();
   const companyId = companyIdOverride ?? params.companyId;
-  const { setViewAsCompanyId, viewAsCompanyId } = useAccountContext();
+  const { capabilities, isSuperAdmin, setViewAsCompanyId, viewAsCompanyId } =
+    useAccountContext();
   const [company, setCompany] = useState<CompanyRow | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamRow[]>([]);
   const [activeTab, setActiveTab] = useState<DetailTab>("team");
@@ -2239,14 +3588,30 @@ export function SaasClientDetail({
     CompanyOutcomeDefinitionRow[]
   >([]);
   const [churnReasons, setChurnReasons] = useState<CompanyChurnReasonRow[]>([]);
+  const [customFields, setCustomFields] = useState<CompanyCustomFieldRow[]>([]);
   const [customizationLoading, setCustomizationLoading] = useState(false);
   const [customizationReloadKey, setCustomizationReloadKey] = useState(0);
   const [settingsSource, setSettingsSource] = useState<SettingsSource>("mirror");
   const [companySettings, setCompanySettings] = useState<CompanySettingsRow>(
     defaultCompanySettings(null),
   );
+  const [notificationPreferences, setNotificationPreferences] = useState<
+    SettingsNotificationPreference[]
+  >(mergeNotificationPreferences(null));
+  const [integrationReviewEvents, setIntegrationReviewEvents] = useState<
+    IntegrationIntakeEventRow[]
+  >([]);
+  const [integrationReviewClients, setIntegrationReviewClients] = useState<
+    IntegrationReviewClientOption[]
+  >([]);
+  const [integrationTokens, setIntegrationTokens] = useState<IntegrationTokenRow[]>(
+    [],
+  );
+  const [integrationReviewLoading, setIntegrationReviewLoading] = useState(false);
+  const [integrationTokensLoading, setIntegrationTokensLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsReloadKey, setSettingsReloadKey] = useState(0);
+  const canManageCompanyDefinitions = capabilities.canManageTeam;
 
   useEffect(() => {
     if (!companyId) return;
@@ -2453,7 +3818,7 @@ export function SaasClientDetail({
         .maybeSingle();
 
       if (appCompany?.id) {
-        const [outcomesResult, churnResult] = await Promise.all([
+        const [outcomesResult, churnResult, customFieldsResult] = await Promise.all([
           supabase
             .from("company_outcome_definitions")
             .select(
@@ -2469,13 +3834,52 @@ export function SaasClientDetail({
             )
             .eq("company_id", appCompany.id)
             .order("position", { ascending: true }),
+          supabase
+            .from("company_custom_fields")
+            .select(
+              "id, key, label, description, entity_type, field_type, options, is_required, is_visible_on_client_detail, is_visible_on_client_list, is_editable_by_csm, position, source_table, source_key, status, metadata",
+            )
+            .eq("company_id", appCompany.id)
+            .order("position", { ascending: true }),
         ]);
         if (cancelled) return;
         if (!outcomesResult.error && !churnResult.error) {
+          let loadedChurnReasons =
+            (churnResult.data ?? []) as CompanyChurnReasonRow[];
+          if (loadedChurnReasons.length === 0 && canManageCompanyDefinitions) {
+            const { data: seededData, error: seedError } =
+              await supabase.functions.invoke("manage-company-customization", {
+                body: {
+                  action: "seed_default_churn_reasons",
+                  companyLegacyId: legacyCompanyId,
+                },
+              });
+            if (cancelled) return;
+            if (seedError || seededData?.error) {
+              console.error(
+                "Failed to seed default churn reasons:",
+                seedError ?? seededData?.error,
+              );
+            } else if (Array.isArray(seededData?.items)) {
+              loadedChurnReasons =
+                seededData.items as CompanyChurnReasonRow[];
+            }
+          }
           setOutcomeDefinitions(
             (outcomesResult.data ?? []) as CompanyOutcomeDefinitionRow[],
           );
-          setChurnReasons((churnResult.data ?? []) as CompanyChurnReasonRow[]);
+          setChurnReasons(loadedChurnReasons);
+          if (customFieldsResult.error) {
+            console.error(
+              "Failed to load app-owned custom fields:",
+              customFieldsResult.error,
+            );
+            setCustomFields([]);
+          } else {
+            setCustomFields(
+              (customFieldsResult.data ?? []) as CompanyCustomFieldRow[],
+            );
+          }
           setCustomizationSource("app_owned");
           setCustomizationLoading(false);
           return;
@@ -2486,23 +3890,37 @@ export function SaasClientDetail({
         );
         setOutcomeDefinitions([]);
         setChurnReasons([]);
+        setCustomFields([]);
         setCustomizationSource("app_owned");
         setCustomizationLoading(false);
         return;
       }
 
-      const { data, error } = await supabase
-        .from("backup_choices")
-        .select(
-          "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display, index",
-        )
-        .order("index", { ascending: true });
+      const [choicesResult, mirrorCompanyResult] = await Promise.all([
+        supabase
+          .from("backup_choices")
+          .select(
+            "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display, index",
+          )
+          .order("index", { ascending: true }),
+        supabase
+          .from("backup_companies")
+          .select(
+            "customfield1, customfield2, customfield3, customfield4, customfield5, customfield6, customfield7",
+          )
+          .eq("glide_row_id", legacyCompanyId)
+          .maybeSingle(),
+      ]);
       if (cancelled) return;
-      if (error) console.error("Failed to load mirrored customization:", error);
+      if (choicesResult.error)
+        console.error("Failed to load mirrored customization:", choicesResult.error);
+      if (mirrorCompanyResult.error) {
+        console.error("Failed to load mirrored custom fields:", mirrorCompanyResult.error);
+      }
 
       const seen = new Set<string>();
       const mirroredOutcomes: CompanyOutcomeDefinitionRow[] = [];
-      for (const row of (data ?? []) as Record<string, unknown>[]) {
+      for (const row of (choicesResult.data ?? []) as Record<string, unknown>[]) {
         (
           [
             ["success", row.success_value, row.success_display],
@@ -2529,8 +3947,30 @@ export function SaasClientDetail({
           });
         });
       }
+      const mirroredCustomFields: CompanyCustomFieldRow[] = [];
+      const mirrorCompany = (mirrorCompanyResult.data ?? {}) as Record<
+        string,
+        unknown
+      >;
+      for (let index = 1; index <= 7; index += 1) {
+        const sourceKey = `customfield${index}`;
+        const rawLabel = mirrorCompany[sourceKey];
+        const label = typeof rawLabel === "string" ? rawLabel.trim() : "";
+        if (!label) continue;
+        mirroredCustomFields.push({
+          key: sourceKey,
+          label,
+          field_type: "text",
+          position: index * 10,
+          source_table: "backup_companies",
+          source_key: sourceKey,
+          status: "active",
+          metadata: { seeded_from: "backup_companies" },
+        });
+      }
       setOutcomeDefinitions(mirroredOutcomes);
       setChurnReasons([]);
+      setCustomFields(mirroredCustomFields);
       setCustomizationSource("mirror");
       setCustomizationLoading(false);
     }
@@ -2539,7 +3979,7 @@ export function SaasClientDetail({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, companyId, customizationReloadKey]);
+  }, [activeTab, canManageCompanyDefinitions, companyId, customizationReloadKey]);
 
   useEffect(() => {
     if (!companyId || activeTab !== "settings") return;
@@ -2548,6 +3988,8 @@ export function SaasClientDetail({
 
     async function loadSettings() {
       setSettingsLoading(true);
+      setIntegrationReviewLoading(true);
+      setIntegrationTokensLoading(true);
       const { data: appCompany } = await supabase
         .from("companies")
         .select("id, migration_status")
@@ -2556,22 +3998,116 @@ export function SaasClientDetail({
         .maybeSingle();
 
       if (appCompany?.id) {
-        const { data, error: settingsError } = await supabase
-          .from("company_settings")
-          .select(
-            "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, metadata, updated_at",
-          )
-          .eq("company_id", appCompany.id)
-          .maybeSingle();
+        const [
+          settingsResult,
+          preferencesResult,
+          integrationResult,
+          integrationClientsResult,
+          integrationTokensResult,
+        ] = await Promise.all([
+          supabase
+            .from("company_settings")
+            .select(
+              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, metadata, updated_at",
+            )
+            .eq("company_id", appCompany.id)
+            .maybeSingle(),
+          supabase
+            .from("notification_preferences")
+            .select("notification_type, in_app_enabled, email_enabled, lead_days, metadata")
+            .eq("company_id", appCompany.id)
+            .is("member_id", null)
+            .is("role", null),
+          supabase
+            .from("integration_intake_events")
+            .select(
+              "id, integration_type, provider, external_event_id, status, match_status, error_message, payload, metadata, created_at, updated_at",
+            )
+            .eq("company_id", appCompany.id)
+            .in("status", ["needs_review", "failed"])
+            .order("created_at", { ascending: false })
+            .limit(12),
+          supabase
+            .from("clients")
+            .select(
+              "id, glide_row_id, client_name, client_business, client_email, program_status_value",
+            )
+            .eq("company_id", appCompany.id)
+            .is("archived_at", null)
+            .order("client_name", { ascending: true }),
+          isSuperAdmin
+            ? supabase.functions.invoke("manage-integration-token", {
+                body: {
+                  action: "list",
+                  companyId: legacyCompanyId,
+                },
+              })
+            : Promise.resolve({ data: { tokens: [] }, error: null }),
+        ]);
         if (cancelled) return;
-        if (!settingsError && data) {
-          setCompanySettings(data as CompanySettingsRow);
+        if (!preferencesResult.error) {
+          setNotificationPreferences(
+            mergeNotificationPreferences(
+              (preferencesResult.data ?? []) as Partial<NotificationPreference>[],
+            ),
+          );
+        } else {
+          console.error(
+            "Failed to load notification preferences:",
+            preferencesResult.error,
+          );
+          setNotificationPreferences(mergeNotificationPreferences(null));
+        }
+        if (!integrationResult.error) {
+          setIntegrationReviewEvents(
+            (integrationResult.data ?? []) as IntegrationIntakeEventRow[],
+          );
+        } else {
+          console.error(
+            "Failed to load integration review events:",
+            integrationResult.error,
+          );
+          setIntegrationReviewEvents([]);
+        }
+        if (!integrationClientsResult.error) {
+          setIntegrationReviewClients(
+            (
+              (integrationClientsResult.data ?? []) as IntegrationReviewClientOption[]
+            ).filter(isMatchableIntegrationClient),
+          );
+        } else {
+          console.error(
+            "Failed to load integration review clients:",
+            integrationClientsResult.error,
+          );
+          setIntegrationReviewClients([]);
+        }
+        if (!integrationTokensResult.error && integrationTokensResult.data?.tokens) {
+          setIntegrationTokens(
+            integrationTokensResult.data.tokens as IntegrationTokenRow[],
+          );
+        } else {
+          if (integrationTokensResult.error) {
+            console.error(
+              "Failed to load integration tokens:",
+              integrationTokensResult.error,
+            );
+          }
+          setIntegrationTokens([]);
+        }
+        setIntegrationReviewLoading(false);
+        setIntegrationTokensLoading(false);
+        if (!settingsResult.error && settingsResult.data) {
+          setCompanySettings(settingsResult.data as CompanySettingsRow);
           setSettingsSource("app_owned");
           setSettingsLoading(false);
           return;
         }
-        if (settingsError) {
-          console.error("Failed to load app-owned company settings:", settingsError);
+        if (settingsResult.error) {
+          console.error(
+            "Failed to load app-owned company settings:",
+            settingsResult.error,
+          );
         }
         setCompanySettings(defaultCompanySettings(company));
         setSettingsSource("app_owned");
@@ -2580,6 +4116,12 @@ export function SaasClientDetail({
       }
 
       setCompanySettings(defaultCompanySettings(company));
+      setNotificationPreferences(mergeNotificationPreferences(null));
+      setIntegrationReviewEvents([]);
+      setIntegrationReviewClients([]);
+      setIntegrationTokens([]);
+      setIntegrationReviewLoading(false);
+      setIntegrationTokensLoading(false);
       setSettingsSource("mirror");
       setSettingsLoading(false);
     }
@@ -2588,7 +4130,7 @@ export function SaasClientDetail({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, company, companyId, settingsReloadKey]);
+  }, [activeTab, company, companyId, isSuperAdmin, settingsReloadKey]);
 
   const groupedTeam = useMemo(() => {
     const activeMembers = teamMembers.filter((member) => member.is_archived !== true);
@@ -2701,23 +4243,15 @@ export function SaasClientDetail({
               {getInitials(company.name)}
             </div>
             <div className="min-w-0">
-              <p className="text-xs text-gray-500">{company.glide_row_id}</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Company workspace
+              </p>
               <h1 className="truncate text-2xl font-semibold text-gray-900">
                 {companyName}
               </h1>
-              <p className="mt-1 text-sm text-gray-500">
-                Last synced {formatDate(company.synced_at)}
-              </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled
-              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-400"
-            >
-              Edit SaaS details
-            </button>
             <button
               type="button"
               onClick={handleViewAs}
@@ -2773,15 +4307,6 @@ export function SaasClientDetail({
               </TeamStatusButton>
             </div>
             <div className="flex flex-wrap items-center gap-3 md:justify-end">
-              {teamSource === "app_owned" ? (
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                  RetainOS pilot data
-                </span>
-              ) : (
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
-                  CST preview data
-                </span>
-              )}
               {canManagePilotTeam ? (
                 <button
                   type="button"
@@ -2869,7 +4394,10 @@ export function SaasClientDetail({
             source={customizationSource}
             outcomes={outcomeDefinitions}
             churnReasons={churnReasons}
-            canManage={customizationSource === "app_owned"}
+            customFields={customFields}
+            canManage={
+              customizationSource === "app_owned" && canManageCompanyDefinitions
+            }
             onReload={() => setCustomizationReloadKey((key) => key + 1)}
           />
         )
@@ -2905,7 +4433,7 @@ export function SaasClientDetail({
           />
         )
       ) : (
-        settingsLoading ? (
+        settingsLoading && settingsSource === "mirror" && !companySettings.id ? (
           <div className="flex items-center justify-center py-20">
             <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
           </div>
@@ -2914,7 +4442,14 @@ export function SaasClientDetail({
             companyLegacyId={companyId ?? ""}
             source={settingsSource}
             settings={companySettings}
-            canManage={settingsSource === "app_owned"}
+            notificationPreferences={notificationPreferences}
+            integrationEvents={integrationReviewEvents}
+            integrationEventsLoading={integrationReviewLoading}
+            integrationClients={integrationReviewClients}
+            integrationTokens={integrationTokens}
+            integrationTokensLoading={integrationTokensLoading}
+            canManageTokens={isSuperAdmin && settingsSource === "app_owned"}
+            canManage={settingsSource === "app_owned" && canManageCompanyDefinitions}
             onReload={() => setSettingsReloadKey((key) => key + 1)}
           />
         )
