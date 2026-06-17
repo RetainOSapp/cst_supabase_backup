@@ -351,7 +351,7 @@ const outcomeFields: [string, string[]][] = [
 ];
 const pathwayFields: [string, string[]][] = [
   [
-    "Offer",
+    "Pathway",
     [
       "offer_milestones_current_offer_id",
       "offer_milestones_2nd_current_offer_id",
@@ -2699,6 +2699,19 @@ function MilestoneActionModal({
     currentMilestoneIndex >= 0
       ? orderedMilestones[currentMilestoneIndex + 1] ?? null
       : null;
+  const startableMilestones = orderedMilestones.filter(
+    (milestone) =>
+      String(milestone.glide_row_id ?? "") !== String(currentMilestoneId ?? ""),
+  );
+  const defaultNextStartMilestoneId =
+    nextConfiguredMilestone?.glide_row_id ??
+    startableMilestones[0]?.glide_row_id ??
+    "";
+  const [startAnotherMilestone, setStartAnotherMilestone] = useState(false);
+  const [nextStartMilestoneId, setNextStartMilestoneId] = useState(
+    defaultNextStartMilestoneId,
+  );
+  const [nextStartDate, setNextStartDate] = useState(completionDate);
   const completesFinalMilestone =
     isComplete &&
     (Boolean(currentConfiguredMilestone?.final_milestone) || !nextConfiguredMilestone);
@@ -2708,6 +2721,10 @@ function MilestoneActionModal({
   const previewTimeToHit = isComplete
     ? daysBetweenValues(valueFrom(client, ["client_age_date_onboarded"]), completionDate)
     : null;
+
+  useEffect(() => {
+    setNextStartMilestoneId((current) => current || defaultNextStartMilestoneId);
+  }, [defaultNextStartMilestoneId]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -2734,13 +2751,13 @@ function MilestoneActionModal({
       },
     );
 
-    setSaving(false);
-
     if (error) {
+      setSaving(false);
       setSaveError(error.message);
       return;
     }
     if (data?.error) {
+      setSaving(false);
       setSaveError(data.error);
       return;
     }
@@ -2750,8 +2767,45 @@ function MilestoneActionModal({
         data.clientMilestone as ClientMilestoneRow,
         (data.event as ClientHistoryEventRow | undefined) ?? null,
       );
+      if (isComplete && startAnotherMilestone && nextStartMilestoneId) {
+        const { data: startData, error: startError } =
+          await supabase.functions.invoke("manage-client-milestone", {
+            body: {
+              action: "start_milestone",
+              clientLegacyId: client.glide_row_id,
+              offerId: currentOfferId,
+              milestoneId: nextStartMilestoneId,
+              startDate: nextStartDate || completionDate,
+              notes,
+            },
+          });
+        if (startError) {
+          setSaving(false);
+          setSaveError(
+            `Milestone completed, but RetainOS could not start the next milestone: ${startError.message}`,
+          );
+          return;
+        }
+        if (startData?.error) {
+          setSaving(false);
+          setSaveError(
+            `Milestone completed, but RetainOS could not start the next milestone: ${startData.error}`,
+          );
+          return;
+        }
+        if (startData?.client && startData?.clientMilestone) {
+          onSaved(
+            mapAppClientRow(startData.client as Record<string, unknown>),
+            startData.clientMilestone as ClientMilestoneRow,
+            (startData.event as ClientHistoryEventRow | undefined) ?? null,
+          );
+        }
+      }
+      setSaving(false);
       onClose();
+      return;
     }
+    setSaving(false);
   }
 
   return (
@@ -2813,6 +2867,63 @@ function MilestoneActionModal({
                   Time to hit:{" "}
                   {previewTimeToHit === null ? "--" : `${previewTimeToHit} days`}
                 </div>
+              </div>
+            ) : null}
+            {isComplete && startableMilestones.length > 0 ? (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <label className="flex items-start gap-3 text-sm font-medium text-gray-800">
+                  <input
+                    type="checkbox"
+                    checked={startAnotherMilestone}
+                    onChange={(event) => setStartAnotherMilestone(event.target.checked)}
+                    disabled={saving}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                  />
+                  <span>
+                    Start another milestone after completing this one
+                    <span className="mt-1 block text-xs font-normal text-gray-500">
+                      Use the next milestone in line, or choose another active milestone.
+                    </span>
+                  </span>
+                </label>
+                {startAnotherMilestone ? (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Milestone To Start
+                      </span>
+                      <select
+                        value={nextStartMilestoneId}
+                        onChange={(event) => setNextStartMilestoneId(event.target.value)}
+                        required
+                        disabled={saving}
+                        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                      >
+                        {startableMilestones.map((milestone) => (
+                          <option
+                            key={milestone.glide_row_id ?? milestone.name ?? "milestone"}
+                            value={milestone.glide_row_id ?? ""}
+                          >
+                            {displayValue(milestone.name, relationLookup)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Start Date
+                      </span>
+                      <input
+                        type="date"
+                        value={nextStartDate}
+                        onChange={(event) => setNextStartDate(event.target.value)}
+                        required
+                        disabled={saving}
+                        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                      />
+                    </label>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <label className="block">
@@ -2988,7 +3099,7 @@ function PathwayChangeModal({
               Change Pathway
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Directors and Super Admins can change the active offer and
+              Directors and Super Admins can change the active pathway and
               milestone.
             </p>
           </div>
@@ -3005,7 +3116,7 @@ function PathwayChangeModal({
           <div className="space-y-4 px-5 py-5">
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Offer / Pathway
+                Pathway
               </span>
               <select
                 value={offerId}
@@ -4209,7 +4320,11 @@ function PathwaysSection({
         )}
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div
+        className={`grid gap-3 ${
+          contractProgressPercent === null ? "lg:grid-cols-1" : "lg:grid-cols-2"
+        }`}
+      >
         <div className="rounded-lg border border-[#d6eafb] bg-[#f7fbff] p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -4234,29 +4349,29 @@ function PathwaysSection({
           </div>
         </div>
 
-        <div className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
-                Contract / Program Timing
+        {contractProgressPercent !== null ? (
+          <div className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                  Contract / Program Timing
+                </div>
+                <div className="mt-1 text-sm font-semibold text-[#162b3e]">
+                  {formatDate(contractStart)} to {formatDate(contractEnd)}
+                </div>
               </div>
-              <div className="mt-1 text-sm font-semibold text-[#162b3e]">
-                {contractProgressPercent === null
-                  ? "Contract timing unavailable"
-                  : `${formatDate(contractStart)} to ${formatDate(contractEnd)}`}
-              </div>
+              <span className="text-2xl font-semibold text-[#162b3e]">
+                {contractProgressPercent}%
+              </span>
             </div>
-            <span className="text-2xl font-semibold text-[#162b3e]">
-              {contractProgressPercent === null ? "--" : `${contractProgressPercent}%`}
-            </span>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e2e8f0]">
+              <div
+                className="h-full rounded-full bg-[#162b3e]"
+                style={{ width: `${contractProgressPercent}%` }}
+              />
+            </div>
           </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e2e8f0]">
-            <div
-              className="h-full rounded-full bg-[#162b3e]"
-              style={{ width: `${contractProgressPercent ?? 0}%` }}
-            />
-          </div>
-        </div>
+        ) : null}
       </div>
 
       <div className="rounded-lg border border-[#e4e9f0] bg-white p-4">

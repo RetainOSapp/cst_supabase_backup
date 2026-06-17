@@ -199,6 +199,7 @@ interface PathwayUsageCounts {
 interface ArchiveAffectedClient {
   glide_row_id?: string | null;
   client_name?: string | null;
+  client_business?: string | null;
   business_name?: string | null;
 }
 
@@ -776,7 +777,7 @@ function PathwaySetupModal({
           <div className="flex items-center justify-between border-b border-[#e4e9f0] px-6 py-4">
             <div>
               <h2 className="text-lg font-semibold text-[#162b3e]">
-                {isEditing ? "Edit" : "New"} {isMilestone ? "milestone" : "offer"}
+                {isEditing ? "Edit" : "New"} {isMilestone ? "milestone" : "pathway"}
               </h2>
               <p className="mt-1 text-sm text-[#6c7684]">
                 This configuration will be available to RetainOS pilot clients.
@@ -824,7 +825,7 @@ function PathwaySetupModal({
                     checked={isFinalMilestone}
                     onChange={(event) => setIsFinalMilestone(event.target.checked)}
                   />
-                  Final milestone in this offer
+                  Final milestone in this pathway
                 </label>
               </>
             ) : null}
@@ -891,10 +892,26 @@ function PathwaysSetup({
       : [];
     if (!count || clients.length === 0) return fallback;
     const sample = clients
-      .map((client) => client.client_name ?? client.business_name ?? client.glide_row_id)
+      .map(
+        (client) =>
+          client.client_name ??
+          client.client_business ??
+          client.business_name ??
+          client.glide_row_id,
+      )
       .filter(Boolean)
       .join(", ");
     return `${fallback} Active clients: ${sample}${count > clients.length ? `, and ${count - clients.length} more` : ""}.`;
+  }
+
+  async function functionErrorPayload(error: unknown) {
+    const context = (error as { context?: unknown } | null)?.context;
+    if (context instanceof Response) {
+      return (await context.clone().json().catch(() => null)) as
+        | Record<string, unknown>
+        | null;
+    }
+    return null;
   }
 
   async function archiveItem(
@@ -908,10 +925,13 @@ function PathwaysSetup({
       body: { action, companyLegacyId, entityId },
     });
     if (error || data?.error) {
+      const errorData = data ?? (await functionErrorPayload(error));
       setActionError(
         archiveErrorMessage(
-          data?.error ?? error?.message ?? "Unable to archive.",
-          data as Record<string, unknown> | null | undefined,
+          typeof errorData?.error === "string"
+            ? errorData.error
+            : error?.message ?? "Unable to archive.",
+          errorData as Record<string, unknown> | null | undefined,
         ),
       );
       return;
@@ -988,9 +1008,9 @@ function PathwaysSetup({
     <div className="mt-6 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-[#162b3e]">Offers & Milestones</h2>
+          <h2 className="text-xl font-semibold text-[#162b3e]">Pathways & Milestones</h2>
           <p className="mt-1 text-sm text-[#6c7684]">
-            Configure the primary client journeys and their ordered milestones.
+            Configure the primary client pathways and their ordered milestones.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -1000,14 +1020,14 @@ function PathwaysSetup({
             onClick={() => setEditingOffer(null)}
             className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-semibold text-[#162b3e] disabled:opacity-40"
           >
-            + New Offer
+            + New Pathway
           </button>
         </div>
       </div>
 
       {source === "mirror" ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          This company still reads journey configuration from Glide. Editing unlocks when
+          This company still reads pathway configuration from Glide. Editing unlocks when
           the company enters the RetainOS pilot.
         </div>
       ) : null}
@@ -1019,7 +1039,7 @@ function PathwaysSetup({
 
       {activeOffers.length === 0 ? (
         <div className="rounded-lg border border-dashed border-[#cbd2dc] bg-white p-10 text-center text-sm text-[#6c7684]">
-          No active offers configured yet.
+          No active pathways configured yet.
         </div>
       ) : (
         activeOffers.map((offer) => {
@@ -1055,7 +1075,7 @@ function PathwaysSetup({
                     {offerMilestones.length} active milestone
                     {offerMilestones.length === 1 ? "" : "s"}
                     {" · "}
-                    {usageCounts.offers[offer.glide_row_id] ?? 0} active client
+                    {usageCounts.offers[offer.glide_row_id] ?? 0} current active client
                     {(usageCounts.offers[offer.glide_row_id] ?? 0) === 1 ? "" : "s"}
                   </p>
                 </div>
@@ -1086,7 +1106,7 @@ function PathwaysSetup({
                       void archiveItem(
                         "archive_offer",
                         offer.glide_row_id,
-                        offer.name ?? "offer",
+                        offer.name ?? "pathway",
                       )
                     }
                     className="rounded-md px-3 py-1.5 text-sm font-semibold text-red-600 disabled:opacity-40"
@@ -1098,7 +1118,7 @@ function PathwaysSetup({
               <div className="divide-y divide-[#e4e9f0]">
                 {offerMilestones.length === 0 ? (
                   <p className="px-5 py-6 text-sm text-[#6c7684]">
-                    No milestones configured for this offer.
+                    No milestones configured for this pathway.
                   </p>
                 ) : (
                   offerMilestones.map((milestone, index) => (
@@ -1127,8 +1147,8 @@ function PathwaysSetup({
                               ? " · Final"
                               : ""}
                             {" · "}
-                            {usageCounts.milestones[milestone.glide_row_id] ?? 0} active
-                            client
+                            {usageCounts.milestones[milestone.glide_row_id] ?? 0} current
+                            active client
                             {(usageCounts.milestones[milestone.glide_row_id] ?? 0) === 1
                               ? ""
                               : "s"}
@@ -1248,7 +1268,7 @@ function PathwaysSetup({
       {archivedOffers.length > 0 ? (
         <details className="rounded-lg border border-[#e4e9f0] bg-white px-5 py-4">
           <summary className="cursor-pointer text-sm font-semibold text-[#586273]">
-            Archived offers ({archivedOffers.length})
+            Archived pathways ({archivedOffers.length})
           </summary>
           <div className="mt-4 space-y-2">
             {archivedOffers.map((offer) => (
@@ -1259,7 +1279,7 @@ function PathwaysSetup({
                 <div>
                   <p className="font-semibold text-[#162b3e]">{offer.name}</p>
                   <p className="mt-1 text-xs text-[#6c7684]">
-                    Milestones remain archived until restored individually.
+                    Restoring this pathway also restores its associated milestones.
                   </p>
                 </div>
                 <button
@@ -1269,7 +1289,7 @@ function PathwaysSetup({
                     void unarchiveItem(
                       "unarchive_offer",
                       offer.glide_row_id,
-                      offer.name ?? "offer",
+                      offer.name ?? "pathway",
                     )
                   }
                   className="rounded-md border border-emerald-200 px-3 py-1.5 text-sm font-semibold text-emerald-700 disabled:opacity-40"
@@ -3538,7 +3558,7 @@ function CompanySettingsSetup({
         </h3>
         <p className="mt-1 text-sm text-[#667085]">
           Outcome definitions, custom fields, and churn reasons live in
-          Customization. Offers and milestones live in Pathways &amp; Milestones.
+          Customization. Pathways and milestones live in Pathways &amp; Milestones.
           Resource setup guides live in Resources. Dashboard preferences and
           client-list column presets remain later migration-hardening work.
         </p>

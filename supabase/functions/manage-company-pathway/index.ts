@@ -152,11 +152,12 @@ Deno.serve(async (req) => {
 
     let beforeData: Record<string, unknown> | null = null;
     let saved: Record<string, unknown> | null = null;
+    let associatedRestoredMilestones: Record<string, unknown>[] | null = null;
 
     if (action === "reorder_milestones") {
       const offerId = cleanText(body.offerId);
       const milestoneIds = stringArray(body.milestoneIds);
-      if (!offerId) return jsonResponse({ error: "Choose an offer first." }, 400);
+      if (!offerId) return jsonResponse({ error: "Choose a pathway first." }, 400);
       if (milestoneIds.length === 0) {
         return jsonResponse({ error: "Provide the ordered milestone ids." }, 400);
       }
@@ -172,7 +173,7 @@ Deno.serve(async (req) => {
         .eq("status", "active")
         .maybeSingle();
       if (offerError) throw offerError;
-      if (!offer) return jsonResponse({ error: "Active offer not found." }, 404);
+      if (!offer) return jsonResponse({ error: "Active pathway not found." }, 404);
 
       const { data: activeMilestones, error: milestoneError } = await supabase
         .from("company_offer_milestones")
@@ -191,7 +192,7 @@ Deno.serve(async (req) => {
         return jsonResponse(
           {
             error:
-              "Reorder must include every active milestone for this offer and no milestones from another offer.",
+              "Reorder must include every active milestone for this pathway and no milestones from another pathway.",
             details: { missingIds, unknownIds },
           },
           400,
@@ -249,7 +250,7 @@ Deno.serve(async (req) => {
         entity_id: offer.id,
         legacy_glide_row_id: offerId,
         title: "reorder milestones",
-        summary: `${offer.name ?? "Offer"} milestones were reordered.`,
+        summary: `${offer.name ?? "Pathway"} milestones were reordered.`,
         before_data: { offer, order: beforeOrder },
         after_data: { offer, order: reordered ?? [] },
       });
@@ -297,7 +298,7 @@ Deno.serve(async (req) => {
             metadata: { created_from: "manage-company-pathway" },
           };
       if (!isOfferAction && !payload.offer_id) {
-        return jsonResponse({ error: "Choose an offer first." }, 400);
+        return jsonResponse({ error: "Choose a pathway first." }, 400);
       }
       const { data, error } = await supabase.from(table).insert(payload).select("*").single();
       if (error) throw error;
@@ -329,7 +330,7 @@ Deno.serve(async (req) => {
         if ((count ?? 0) > 0) {
           const { data: affectedClients, error: sampleError } = await supabase
             .from("clients")
-            .select("glide_row_id, client_name, business_name")
+            .select("glide_row_id, client_name, client_business")
             .eq("company_id", company.id)
             .eq(field, entityId)
             .is("archived_at", null)
@@ -339,10 +340,10 @@ Deno.serve(async (req) => {
           return jsonResponse(
             {
               error: `Move ${count} active client${count === 1 ? "" : "s"} off this ${
-                action === "archive_offer" ? "offer" : "milestone"
+                action === "archive_offer" ? "pathway" : "milestone"
               } before archiving it.`,
               affectedCount: count ?? 0,
-              affectedEntity: action === "archive_offer" ? "offer" : "milestone",
+              affectedEntity: action === "archive_offer" ? "pathway" : "milestone",
               affectedClients: affectedClients ?? [],
             },
             400,
@@ -353,7 +354,7 @@ Deno.serve(async (req) => {
       if (action === "unarchive_milestone") {
         const offerId = cleanText(existing.offer_id);
         if (!offerId) {
-          return jsonResponse({ error: "Milestone is missing an offer." }, 400);
+          return jsonResponse({ error: "Milestone is missing a pathway." }, 400);
         }
         const { data: parentOffer, error: parentOfferError } = await supabase
           .from("company_offers")
@@ -364,7 +365,7 @@ Deno.serve(async (req) => {
         if (parentOfferError) throw parentOfferError;
         if (!parentOffer || parentOffer.status !== "active") {
           return jsonResponse(
-            { error: "Restore the parent offer before restoring this milestone." },
+            { error: "Restore the parent pathway before restoring this milestone." },
             400,
           );
         }
@@ -425,6 +426,18 @@ Deno.serve(async (req) => {
           .eq("offer_id", entityId)
           .eq("status", "active");
       }
+      if (action === "unarchive_offer") {
+        const { data: restoredMilestones, error: restoreMilestonesError } =
+          await supabase
+            .from("company_offer_milestones")
+            .update({ status: "active", archived_at: null })
+            .eq("company_id", company.id)
+            .eq("offer_id", entityId)
+            .eq("status", "archived")
+            .select("*");
+        if (restoreMilestonesError) throw restoreMilestonesError;
+        associatedRestoredMilestones = restoredMilestones ?? [];
+      }
     }
 
     await supabase.from("app_audit_events").insert({
@@ -439,14 +452,26 @@ Deno.serve(async (req) => {
       title: action.replaceAll("_", " "),
       summary: `${saved?.name ?? beforeData?.name ?? "Journey configuration"} was ${action.replaceAll("_", " ")}.`,
       before_data: beforeData,
-      after_data: saved,
+      after_data: associatedRestoredMilestones
+        ? { ...saved, restored_milestones: associatedRestoredMilestones }
+        : saved,
     });
 
-    return jsonResponse({ ok: true, item: saved });
+    return jsonResponse({
+      ok: true,
+      item: saved,
+      restoredMilestones: associatedRestoredMilestones,
+    });
   } catch (error) {
     console.error(error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof (error as { message?: unknown } | null)?.message === "string"
+          ? String((error as { message: unknown }).message)
+          : "Unexpected error.";
     return jsonResponse(
-      { error: error instanceof Error ? error.message : "Unexpected error." },
+      { error: message },
       500,
     );
   }

@@ -116,14 +116,22 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - Optional custom field display on client list/import/export.
   - Richer client/account management settings and client list column presets.
   - Advanced field-type UX polish after migration-critical workflows settle.
-- `[~]` `[polish]` `[priority: high]` Company Pathways & Milestones setup:
+- `[x]` Company Pathways & Milestones setup.
   - App-owned `company_offers` and `company_offer_milestones` tables seed pilot/migrated companies from Glide once.
   - Admin Hub / SaaS Company Detail lists offers and their ordered milestones.
   - Directors and SuperAdmins can create, edit, and archive offers/milestones for pilot companies.
   - Offers/milestones assigned to active clients cannot be archived until those clients move elsewhere.
   - Reorder controls, active-client usage counts, archive blockers, and restore/unarchive are live for pilot companies.
   - Mirror-only companies retain a read-only Glide fallback.
-  - Remaining: drag/drop reorder as later UI/UX polish, secondary offers after primary pathway validation, and hard-delete cleanup only with explicit approval.
+  - 2026-06-16 refreshed `PATHWAYS_MILESTONES_POLISH_PLAN.md`; the recommended next lightweight slice is Client Detail completion clarity plus real-migration QA before secondary offers.
+  - 2026-06-16 implementation follow-up: user-facing copy now uses Pathway, restoring an archived pathway restores its milestones, Client Detail completion can optionally start the next/another milestone immediately, and milestone action responses include selected/next/final/duration metadata.
+  - 2026-06-16 Jay QA follow-up: Admin archive failures now surface affected-client details instead of the generic Edge Function non-2xx wrapper; Quick Update pathway completion now mirrors the Client Detail flow with next/another milestone start controls; empty Contract / Program Timing cards are hidden when timing is unavailable.
+  - 2026-06-16 final QA follow-up: archive affected-client sampling now uses app-owned `client_business`, non-Error Supabase throws surface their message, and Quick Update defaults `Milestone To Start` to the next milestone in line.
+  - Complete for V1/polish. Drag/drop reorder, secondary offers, hard-delete cleanup, and contract-page cleanup are separate later scopes.
+- `[x]` Deploy final Pathways & Milestones closure fixes.
+  - 2026-06-17 build passed and `manage-company-pathway` / `manage-client-milestone` were deployed to Supabase project `zjauqflzxzsbpnivzsct`.
+  - Safe Pathways/docs work was prepared for commit/push; Beacon local pilot files stayed out of scope.
+  - Keep Beacon local pilot out of this commit/deploy.
 - `[x]` Company settings V1.
   - Client workspace defaults now save and apply profile upkeep freshness days, default client view, and default calendar mode for pilot/migrated companies.
   - Clients roster uses the default list/card/calendar view when there is no stronger cached user preference.
@@ -177,6 +185,8 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-10: reconciliation now reports active-client contract coverage, renewal date source/confidence, latest mirrored-contract summary mismatches, active clients missing app-owned contract history, active clients missing all contract history, and active clients missing current renewal dates.
   - 2026-06-15 Jay QA passed create/edit/archive/delete, contract filters, and duration/date calculation polish.
 - `[ ]` `[priority: medium]` Contract/Renewal V2.
+  - 2026-06-17 next sanity pass: deep dive Ali's Contract tab display after QA found it visually/data-wise confusing while Pathways itself looked clean.
+  - Decide whether this is noisy QA data from repeated test actions, display duplication, or a contract source-of-truth/backfill issue.
   - When a manually created or webhook-created client is missing contract info, remind/ensure the contract is added.
   - Richer multi-contract/LTV reporting.
   - High-fidelity renewal UX.
@@ -322,9 +332,10 @@ Next session lock:
   - Covers company kickoff, final paid CST/Glide sync, CST/Glide freeze, app-owned backfill/cutover, QA matrix, rollout handoff, and hold/rollback criteria.
   - 2026-06-15 Jay spreadsheet draft reviewed: structure maps well to the official checklist. Contract backfill/coverage is now a mandatory rollout gate for every company, including Moves Method.
   - 2026-06-15 Jay is converting the playbook into the reusable migration spreadsheet; the source playbook is approved as the canonical checklist template.
-- `[ ]` `[priority: medium]` Client-facing migration QA checklist.
-  - Create a shorter customer-facing QA list for migration/cutover signoff.
+- `[x]` Client-facing migration QA checklist.
+  - Created `CLIENT_FACING_MIGRATION_QA_CHECKLIST.md` as the shorter customer-facing QA list for migration/cutover signoff.
   - Keep internal migration checks in `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md`; the client-facing version should focus on simple end-user validation such as login, roster spot checks, CSM assignment visibility, client profile details, core updates, contracts, Daily Pulse, and support handoff.
+  - 2026-06-17 Jay converted it into a spreadsheet template and approved it as v1 for Moves Method testing.
 - `[x]` Ethical Scaling mirror dependency reduction / app-owned backfill slice.
   - Keep mirror fallback for non-pilot companies.
   - For Ethical Scaling pilot users, prefer app-owned tables wherever the app-owned equivalent exists.

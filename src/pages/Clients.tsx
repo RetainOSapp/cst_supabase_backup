@@ -116,6 +116,7 @@ interface OfferMilestone {
   glide_row_id: string;
   offer_id: string | null;
   name: string | null;
+  position?: number | null;
   order?: number | null;
 }
 interface PilotReminder {
@@ -865,6 +866,15 @@ function toDateInputValue(value: unknown) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
 }
+function todayInputValue() {
+  return new Date().toISOString().slice(0, 10);
+}
+function milestoneSortValue(milestone: OfferMilestone) {
+  const position = Number(milestone.position);
+  if (Number.isFinite(position) && position > 0) return position;
+  const order = Number(milestone.order);
+  return Number.isFinite(order) ? order : 9999;
+}
 function normalizeOutcome(value: unknown) {
   const raw = formatValue(value).trim();
   if (!raw || raw === "--" || raw.toLowerCase() === "x") return "";
@@ -1119,7 +1129,14 @@ function QuickUpdateModal({
   const [notes, setNotes] = useState("");
   const [currentOfferName, setCurrentOfferName] = useState("");
   const [currentMilestoneName, setCurrentMilestoneName] = useState("");
+  const [currentOfferMilestones, setCurrentOfferMilestones] = useState<
+    OfferMilestone[]
+  >([]);
   const [completingMilestone, setCompletingMilestone] = useState(false);
+  const [completionDate, setCompletionDate] = useState(todayInputValue());
+  const [startAnotherMilestone, setStartAnotherMilestone] = useState(false);
+  const [nextStartMilestoneId, setNextStartMilestoneId] = useState("");
+  const [nextStartDate, setNextStartDate] = useState(todayInputValue());
   const companyLegacyId = client.company_id ?? "";
   const [currentOfferId] = useState(
     typeof client.offer_milestones_current_offer_id === "string"
@@ -1237,6 +1254,7 @@ function QuickUpdateModal({
       if (!currentOfferId || !currentMilestoneId) {
         setCurrentOfferName("");
         setCurrentMilestoneName("");
+        setCurrentOfferMilestones([]);
         return;
       }
       const [appOfferResult, appMilestoneResult] = await Promise.all([
@@ -1251,6 +1269,12 @@ function QuickUpdateModal({
           .eq("glide_row_id", currentMilestoneId)
           .maybeSingle(),
       ]);
+      const appMilestonesResult = await supabase
+        .from("company_offer_milestones")
+        .select("glide_row_id, offer_id, name, position")
+        .eq("offer_id", currentOfferId)
+        .eq("status", "active")
+        .order("position", { ascending: true, nullsFirst: false });
       const [offerResult, milestoneResult] = await Promise.all([
         appOfferResult.data
           ? Promise.resolve(appOfferResult)
@@ -1267,9 +1291,24 @@ function QuickUpdateModal({
               .eq("glide_row_id", currentMilestoneId)
               .maybeSingle(),
       ]);
+      const mirrorMilestonesResult =
+        appMilestonesResult.error || (appMilestonesResult.data ?? []).length === 0
+          ? await supabase
+              .from("backup_company_offer_milestones")
+              .select("glide_row_id, offer_id, name, order")
+              .eq("offer_id", currentOfferId)
+              .order("order", { ascending: true, nullsFirst: false })
+          : null;
       if (cancelled) return;
       setCurrentOfferName(offerResult.data?.name ?? currentOfferId);
       setCurrentMilestoneName(milestoneResult.data?.name ?? currentMilestoneId);
+      setCurrentOfferMilestones(
+        (((appMilestonesResult.data ?? []).length > 0
+          ? appMilestonesResult.data
+          : mirrorMilestonesResult?.data ?? []) as OfferMilestone[]).sort(
+          (a, b) => milestoneSortValue(a) - milestoneSortValue(b),
+        ),
+      );
     }
     void loadCurrentMilestone();
     return () => {
@@ -1468,6 +1507,26 @@ function QuickUpdateModal({
     onClose();
   }
 
+  const currentMilestoneIndex = currentOfferMilestones.findIndex(
+    (milestone) => milestone.glide_row_id === currentMilestoneId,
+  );
+  const nextConfiguredMilestone =
+    currentMilestoneIndex >= 0
+      ? currentOfferMilestones[currentMilestoneIndex + 1] ?? null
+      : null;
+  const startableMilestones = currentOfferMilestones.filter(
+    (milestone) => milestone.glide_row_id !== currentMilestoneId,
+  );
+  const firstStartableMilestoneId = startableMilestones[0]?.glide_row_id ?? "";
+
+  useEffect(() => {
+    const defaultNextId =
+      nextConfiguredMilestone?.glide_row_id ??
+      firstStartableMilestoneId ??
+      "";
+    setNextStartMilestoneId(defaultNextId);
+  }, [firstStartableMilestoneId, nextConfiguredMilestone?.glide_row_id]);
+
   async function completeCurrentMilestone() {
     if (
       !isPilotCompany ||
@@ -1488,19 +1547,28 @@ function QuickUpdateModal({
           clientLegacyId: client.glide_row_id,
           offerId: currentOfferId,
           milestoneId: currentMilestoneId,
-          completionDate: new Date().toISOString(),
+          completionDate,
           notes,
         },
       },
     );
-    setCompletingMilestone(false);
     if (error) {
+      setCompletingMilestone(false);
       setSaveError(error.message);
       return;
     }
     if (data?.error) {
+      setCompletingMilestone(false);
       setSaveError(data.error);
       return;
+    }
+    if (data?.event) {
+      setHistoryEvents((current) =>
+        [data.event as ClientHistoryEvent, ...current].slice(0, 5),
+      );
+    }
+    if (data?.client) {
+      onClientUpdated(mapAppClientRow(data.client as Record<string, unknown>));
     }
     const nextName =
       typeof data?.nextMilestone?.name === "string"
@@ -1512,9 +1580,52 @@ function QuickUpdateModal({
         : "";
     if (nextId) setCurrentMilestoneId(nextId);
     setCurrentMilestoneName(nextName || currentMilestoneName);
+    if (startAnotherMilestone && nextStartMilestoneId) {
+      const selectedStartMilestone = startableMilestones.find(
+        (milestone) => milestone.glide_row_id === nextStartMilestoneId,
+      );
+      const { data: startData, error: startError } =
+        await supabase.functions.invoke("manage-client-milestone", {
+          body: {
+            action: "start_milestone",
+            clientLegacyId: client.glide_row_id,
+            offerId: currentOfferId,
+            milestoneId: nextStartMilestoneId,
+            startDate: nextStartDate || completionDate,
+            notes,
+          },
+        });
+      if (startError) {
+        setCompletingMilestone(false);
+        setSaveError(
+          `Milestone completed, but RetainOS could not start the next milestone: ${startError.message}`,
+        );
+        return;
+      }
+      if (startData?.error) {
+        setCompletingMilestone(false);
+        setSaveError(
+          `Milestone completed, but RetainOS could not start the next milestone: ${startData.error}`,
+        );
+        return;
+      }
+      if (startData?.event) {
+        setHistoryEvents((current) =>
+          [startData.event as ClientHistoryEvent, ...current].slice(0, 5),
+        );
+      }
+      if (startData?.client) {
+        onClientUpdated(mapAppClientRow(startData.client as Record<string, unknown>));
+      }
+      setCurrentMilestoneId(nextStartMilestoneId);
+      setCurrentMilestoneName(selectedStartMilestone?.name ?? nextStartMilestoneId);
+    }
+    setCompletingMilestone(false);
     setSaveMessage(
-      nextName
-        ? `Milestone completed. ${nextName} is now current.`
+      startAnotherMilestone && nextStartMilestoneId
+        ? "Milestone completed and the selected next milestone was started."
+        : nextName
+          ? `Milestone completed. ${nextName} is now current.`
         : "Milestone completed.",
     );
   }
@@ -1538,7 +1649,7 @@ function QuickUpdateModal({
             </h2>
             <p className="mt-1 text-sm text-[#586273]">
               {isPilotCompany
-                ? "Record the latest client context, outcomes, and journey progress."
+                ? "Record the latest client context, outcomes, and pathway progress."
                 : "Read-only preview while this company remains on CST data."}
             </p>
           </div>
@@ -1654,23 +1765,104 @@ function QuickUpdateModal({
           />
           <section className="retainos-section overflow-hidden">
             <div className="border-b border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
-              <h3 className="retainos-section-title">Journey progress</h3>
+              <h3 className="retainos-section-title">Pathway progress</h3>
               <p className="retainos-section-copy mt-1">
                 Complete the current milestone when the client is ready to advance.
               </p>
             </div>
-            <div className="px-4 py-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-[11px] font-semibold uppercase text-[#586273]">
-                  Current offer / milestone
+            <div className="space-y-4 px-4 py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase text-[#586273]">
+                    Current pathway / milestone
+                  </div>
+                  <p className="mt-1.5 text-sm font-semibold text-[#162b3e]">
+                    {currentMilestoneName
+                      ? `${currentOfferName || "Current pathway"} / ${currentMilestoneName}`
+                      : "No current milestone is configured for this client."}
+                  </p>
+                  {currentMilestoneName ? (
+                    <p className="mt-1 text-xs text-[#6c7684]">
+                      Next state:{" "}
+                      {nextConfiguredMilestone?.name ??
+                        "Final milestone completed"}
+                    </p>
+                  ) : null}
                 </div>
-                <p className="mt-1.5 text-sm font-semibold text-[#162b3e]">
-                  {currentMilestoneName
-                    ? `${currentOfferName || "Current offer"} / ${currentMilestoneName}`
-                    : "No current milestone is configured for this client."}
-                </p>
+                {currentMilestoneName ? (
+                  <label className="block min-w-[180px]">
+                    <span className="retainos-field-label">Completion Date</span>
+                    <input
+                      type="date"
+                      value={completionDate}
+                      onChange={(event) => {
+                        setCompletionDate(event.target.value);
+                        setNextStartDate((current) => current || event.target.value);
+                      }}
+                      disabled={!isPilotCompany || saving || completingMilestone}
+                      className="retainos-input"
+                    />
+                  </label>
+                ) : null}
               </div>
+              {currentMilestoneName && startableMilestones.length > 0 ? (
+                <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
+                  <label className="flex items-start gap-3 text-sm font-semibold text-[#364152]">
+                    <input
+                      type="checkbox"
+                      checked={startAnotherMilestone}
+                      onChange={(event) =>
+                        setStartAnotherMilestone(event.target.checked)
+                      }
+                      disabled={!isPilotCompany || saving || completingMilestone}
+                      className="mt-0.5 h-4 w-4 rounded border-[#cbd2dc]"
+                    />
+                    <span>
+                      Start another milestone after completing this one
+                      <span className="mt-1 block text-xs font-normal text-[#6c7684]">
+                        Use the next milestone in line, or choose another active
+                        milestone.
+                      </span>
+                    </span>
+                  </label>
+                  {startAnotherMilestone ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="retainos-field-label">
+                          Milestone To Start
+                        </span>
+                        <select
+                          value={nextStartMilestoneId}
+                          onChange={(event) =>
+                            setNextStartMilestoneId(event.target.value)
+                          }
+                          disabled={!isPilotCompany || saving || completingMilestone}
+                          className="retainos-input"
+                        >
+                          {startableMilestones.map((milestone) => (
+                            <option
+                              key={milestone.glide_row_id}
+                              value={milestone.glide_row_id}
+                            >
+                              {milestone.name ?? milestone.glide_row_id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="retainos-field-label">Start Date</span>
+                        <input
+                          type="date"
+                          value={nextStartDate}
+                          onChange={(event) => setNextStartDate(event.target.value)}
+                          disabled={!isPilotCompany || saving || completingMilestone}
+                          className="retainos-input"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {currentMilestoneName ? (
                 <button
                   type="button"
@@ -1684,7 +1876,6 @@ function QuickUpdateModal({
                 </button>
               ) : null}
             </div>
-            </div>
           </section>
           <div
             className={`rounded-md border px-4 py-3 text-sm ${
@@ -1696,7 +1887,7 @@ function QuickUpdateModal({
             {loadingPilotState
               ? "Checking write status..."
               : isPilotCompany
-                ? "Quick Updates save to client history. CST preview fields remain unchanged."
+                ? "Quick Updates save to client history."
                 : "Editing is locked for now while this reads from CST into RetainOS."}
           </div>
           {saveError ? (

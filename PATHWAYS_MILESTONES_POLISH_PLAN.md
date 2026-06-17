@@ -1,8 +1,42 @@
 # Company Pathways & Milestones Polish Plan
 
-Last inspected: 2026-06-08
+Last inspected: 2026-06-16
 
-Scope for this pass: planning only. Do not modify app source, migrations, Supabase functions, `ROADMAP.md`, or `MEMORY.md` until the implementation slice is explicitly selected.
+Scope for this pass: planning only. No app source, migrations, Supabase functions, or deploy work is included in this document refresh.
+
+## 2026-06-16 Product Summary
+
+Company Pathways & Milestones V1 is usable for primary pathways and should stay focused on the primary company journey until the next larger migration gives us more real client data. Secondary offers remain a later feature.
+
+The best next lightweight product slice is:
+
+- Add simple move up/down polish only if ordering feels clunky after real admin usage.
+- Keep usage counts and archive blockers visible so admins understand when live clients are attached to an offer or milestone.
+- Improve Client Detail completion clarity: show whether completing the current milestone advances to a next milestone or finishes the pathway.
+- Keep deeper reporting/formula validation for Moves Method or another larger migrated company.
+
+Suggested QA lens for Jay:
+
+| Area | What to check | Decision needed |
+| --- | --- | --- |
+| Admin setup | Offers and milestones are understandable for a migrated company. | Does the current setup UI feel safe enough for high-touch migrations? |
+| Reordering | Existing controls are usable without accidental journey changes. | Do we need more polish now, or can drag/drop wait? |
+| Client completion | Completing a milestone makes the next state obvious. | Is the next/final milestone language clear? |
+| Migration gates | Current offer and milestone ids resolve for migrated clients. | Keep as migration QA, not day-to-day customer QA. |
+
+## 2026-06-16 Implementation Follow-Up
+
+Implemented after Jay answered the open product decisions:
+
+- User-facing language now prefers `Pathway` over `Offer` / `Journey` in the Admin pathway setup and Client Detail pathway flows. Internal table/action names still use `offer` for compatibility.
+- Restoring an archived pathway now restores its associated archived milestones in the same `unarchive_offer` action.
+- Client Detail milestone completion now prompts the user to optionally start another milestone immediately after completion. The selector defaults to the next milestone in line when one exists, but the user can choose another active milestone.
+- `manage-client-milestone` responses now include `selectedMilestone`, `nextMilestone`, `isFinalMilestone`, `durationDays`, and `timeToHitDays`.
+
+Decision on milestone renames:
+
+- Do not rewrite historical `client_milestones.metadata.mirrored_milestone_name` snapshots in this slice. Active clients resolve current labels by milestone id, so renamed milestones show correctly in current product surfaces while historical snapshots remain audit-safe.
+- If filtering/reporting later needs snapshot rewrites, handle that as a separate explicit migration/tooling action with a preview.
 
 ## Current Implemented State
 
@@ -342,8 +376,8 @@ Out of scope for this first slice:
 
 ## Open Product Decisions
 
-- Should Directors be allowed to reorder milestones when active clients are already in the offer, or should SuperAdmin approval be required?
-- Should milestone renames update only future labels, or should existing `client_milestones.metadata.mirrored_milestone_name` snapshots be rewritten for consistency?
-- When a final milestone is completed, should the client remain on that milestone, move to a special completed state, or clear the current milestone?
-- Should archived offers be restorable with all milestones in one action, or should restore be item-by-item only?
-- What is the user-facing canonical term: `Pathway`, `Offer`, or `Journey`?
+- Should Directors be allowed to reorder milestones when active clients are already in the offer, or should SuperAdmin approval be required? Directos should be able to reorder milestones indepdently of clients being already in an offer.
+- Should milestone renames update only future labels, or should existing `client_milestones.metadata.mirrored_milestone_name` snapshots be rewritten for consistency? When we change a milestone to be renamed we can prompt the client to ask if they want to rename existing clients in that milestone or keep them as they are and only use it moving forward. This can mess up milestone filtering, so I am inclined to say this should always be applicable for every active client and maybe just leave "out" offboarded clients. I will let you chime in on this one.
+- When a final milestone is completed, should the client remain on that milestone, move to a special completed state, or clear the current milestone? when a milestone is completed the user should be prompted to start the next milestone in line (or any other the user wants)
+- Should archived offers be restorable with all milestones in one action, or should restore be item-by-item only? when an offer is restored all associated milestones should automatically be restored.
+- What is the user-facing canonical term: `Pathway`, `Offer`, or `Journey`? It should be labeled Pathway, is a bettee term as offer can be confused with Front end Offer or backend offer (and we call those Programs in retainOS), so Pathway should be the right term moving forward.

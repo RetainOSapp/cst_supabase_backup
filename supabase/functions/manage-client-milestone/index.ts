@@ -224,7 +224,7 @@ Deno.serve(async (req) => {
           cleanText(client.offer_milestones_current_milestone_id);
 
     if (!requestedOfferId) {
-      return jsonResponse({ error: "Choose an offer/pathway first." }, 400);
+      return jsonResponse({ error: "Choose a pathway first." }, 400);
     }
     if (!requestedMilestoneId) {
       return jsonResponse({ error: "Choose a milestone first." }, 400);
@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
     if (offerError) throw offerError;
     if (!offer) {
       return jsonResponse(
-        { error: "That offer does not belong to this company." },
+        { error: "That pathway does not belong to this company." },
         400,
       );
     }
@@ -263,7 +263,7 @@ Deno.serve(async (req) => {
 
     if (selectedIndex < 0) {
       return jsonResponse(
-        { error: "That milestone does not belong to the selected offer." },
+        { error: "That milestone does not belong to the selected pathway." },
         400,
       );
     }
@@ -469,7 +469,13 @@ Deno.serve(async (req) => {
       client: updatedClient,
       clientMilestone: progressRow,
       event,
+      selectedMilestone,
       nextMilestone,
+      isFinalMilestone:
+        action === "complete_milestone" &&
+        (Boolean(selectedMilestone.is_final_milestone) || !nextMilestone),
+      durationDays,
+      timeToHitDays,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
