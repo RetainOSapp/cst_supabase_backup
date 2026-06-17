@@ -88,6 +88,14 @@ function calculateDays(startDate: string | null, endDate: string | null) {
   );
 }
 
+function calculateEndDate(startDate: string | null, contractDays: number | null) {
+  if (!startDate || contractDays === null) return null;
+  const start = new Date(startDate);
+  if (Number.isNaN(start.getTime())) return null;
+  start.setUTCDate(start.getUTCDate() + contractDays);
+  return start.toISOString();
+}
+
 async function syncClientContractSummary(
   supabase: ReturnType<typeof createClient>,
   clientId: string,
@@ -106,12 +114,18 @@ async function syncClientContractSummary(
 
   if (latestError) throw latestError;
 
+  const latestContractEndDate =
+    latestContract?.end_date ??
+    calculateEndDate(
+      latestContract?.start_date ?? null,
+      latestContract?.contract_days ?? null,
+    );
   const updatePayload: Record<string, unknown> = latestContract
     ? {
         current_contract_start_date: latestContract.start_date,
         current_contract_of_days: latestContract.contract_days,
-        current_contract_end_date: latestContract.end_date,
-        current_contract_end_date_for_filtering: latestContract.end_date,
+        current_contract_end_date: latestContractEndDate,
+        current_contract_end_date_for_filtering: latestContractEndDate,
         current_contract_monthly_value: latestContract.monthly_value,
         current_contract_reference_link: latestContract.reference_link,
         current_contract_notes: latestContract.notes,
@@ -298,6 +312,7 @@ Deno.serve(async (req) => {
           : currentProgramStatus;
     const contractDays =
       nullableNumber(body.contractDays) ?? calculateDays(startDate, endDate);
+    const effectiveEndDate = endDate ?? calculateEndDate(startDate, contractDays);
     const monthlyValue = nullableNumber(body.monthlyValue);
     const totalContractValue =
       nullableNumber(body.totalContractValue) ??
@@ -562,8 +577,8 @@ Deno.serve(async (req) => {
           event_type: "contract_updated",
           source: "contract_update",
           title: `Contract updated for ${updatedClient.client_name ?? "client"}`,
-          summary: endDate
-            ? `Updated contract ending ${endDate.slice(0, 10)}.`
+          summary: effectiveEndDate
+            ? `Updated contract ending ${effectiveEndDate.slice(0, 10)}.`
             : "Updated contract.",
           notes: nullableText(body.notes),
           payload: {
@@ -639,8 +654,8 @@ Deno.serve(async (req) => {
     const clientUpdatePayload: Record<string, unknown> = {
       current_contract_start_date: startDate,
       current_contract_of_days: contractDays,
-      current_contract_end_date: endDate,
-      current_contract_end_date_for_filtering: endDate,
+      current_contract_end_date: effectiveEndDate,
+      current_contract_end_date_for_filtering: effectiveEndDate,
       current_contract_monthly_value: monthlyValue,
       current_contract_reference_link: nullableText(body.referenceLink),
       current_contract_notes: nullableText(body.notes),
@@ -681,8 +696,8 @@ Deno.serve(async (req) => {
         event_type: "contract_created",
         source: "contract_create",
         title: `Contract created for ${updatedClient.client_name ?? "client"}`,
-        summary: endDate
-          ? `Created contract ending ${endDate.slice(0, 10)}.`
+        summary: effectiveEndDate
+          ? `Created contract ending ${effectiveEndDate.slice(0, 10)}.`
           : "Created contract.",
         payload: {
           actor_role: actor.role,
@@ -705,7 +720,9 @@ Deno.serve(async (req) => {
         retentionType === "upsell"
           ? `Recorded Front End to Back End renewal/upsell.`
           : `Recorded ${currentProgramStatus ?? "active"} renewal.`,
-        endDate ? `New renewal date: ${endDate.slice(0, 10)}.` : null,
+        effectiveEndDate
+          ? `New renewal date: ${effectiveEndDate.slice(0, 10)}.`
+          : null,
       ].filter(Boolean);
 
       const { data: insertedRetentionEvent, error: retentionHistoryError } =

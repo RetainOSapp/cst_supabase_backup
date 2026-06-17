@@ -184,9 +184,10 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-08: reusable reconciliation now includes `contractConfidence` and `renewalConfidence` sections for company-by-company migration trust.
   - 2026-06-10: reconciliation now reports active-client contract coverage, renewal date source/confidence, latest mirrored-contract summary mismatches, active clients missing app-owned contract history, active clients missing all contract history, and active clients missing current renewal dates.
   - 2026-06-15 Jay QA passed create/edit/archive/delete, contract filters, and duration/date calculation polish.
+  - 2026-06-17 Ali sanity pass found no Glide contract leakage. `manage-client-contract` now writes calculated end/filtering dates into the client summary when a contract uses start date + expected duration days; four Ethical Scaling pilot summaries were repaired, including Ali Back End.
 - `[ ]` `[priority: medium]` Contract/Renewal V2.
-  - 2026-06-17 next sanity pass: deep dive Ali's Contract tab display after QA found it visually/data-wise confusing while Pathways itself looked clean.
-  - Decide whether this is noisy QA data from repeated test actions, display duplication, or a contract source-of-truth/backfill issue.
+  - 2026-06-17 Ali's remaining confusing Contract tab state is duplicate app-owned QA-created contract rows, not a source-of-truth/backfill failure.
+  - Optional cleanup: use the SuperAdmin delete action for duplicate QA/test contracts when Jay wants demo data tidied.
   - When a manually created or webhook-created client is missing contract info, remind/ensure the contract is added.
   - Richer multi-contract/LTV reporting.
   - High-fidelity renewal UX.
