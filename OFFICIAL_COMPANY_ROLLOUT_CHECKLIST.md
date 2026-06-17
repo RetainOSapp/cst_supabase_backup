@@ -9,9 +9,36 @@ Reusable checklist for migrating one RetainOS customer from CST/Glide mirror mod
 - Before final migration, the company remains read-only or mirror-backed unless Jay says otherwise.
 - On final migration day, pause or lock CST/Glide activity for that company before the last sync so no edits are lost.
 - After cutover, RetainOS app-owned tables become the source of truth.
+- Do not plan a long customer parallel run. Jay owns a high-touch final sync, validation, and go-live decision; after go-live, operators stop using CST/Glide for day-to-day work.
 - Keep CST/Glide mirror data only for reconciliation, fallback review, and historical archive unless a rollback is explicitly chosen.
 - Non-migrated companies must keep working from mirror fallback.
 - Contract history/current-contract coverage is mandatory for every write-mode migration. Do not cut over active clients without reconciled app-owned contract/renewal coverage or a documented Jay-approved caveat.
+
+## How To Use This Packet
+
+This file is the internal migration command packet. Use it with the shorter
+`CLIENT_FACING_MIGRATION_QA_CHECKLIST.md` or Jay's spreadsheet version.
+
+1. Use this file before and during migration day for RetainOS/Jay/Ben checks.
+2. Use the client-facing checklist after RetainOS is live so the customer can
+   spot-check access, roster, client profiles, contracts, updates, Daily Pulse,
+   resources, dashboard, and CSM Reports.
+3. Record any customer-facing issues in the client-facing checklist; record
+   internal blockers, data caveats, and support decisions here.
+
+## Migration Day Command Center
+
+| Moment | Owner | Action | Evidence |
+| --- | --- | --- | --- |
+| Before freeze | Jay / Ben | Confirm the company is ready for final migration and customer operators know CST/Glide edits are stopping. | Written confirmation |
+| Freeze | Jay / Ben | Pause/lock CST/Glide usage for the selected company. | Operator confirmation |
+| Final sync | Jay | Trigger the paid CST/Glide sync. | Sync completion note |
+| Snapshot | Codex | Rerun company readiness/reconciliation against the fresh mirror. | Saved command output |
+| Backfill | Codex | Backfill app-owned company, users, clients, contracts, offers, milestones, settings, resources, and tokens. | Counts and samples |
+| Internal QA | Jay / Codex | Run this checklist's QA matrix. | Pass/fail notes |
+| Customer signoff | Jay / Customer | Run the client-facing signoff checklist. | Spreadsheet/doc approval |
+| Go-live | Jay | Confirm RetainOS is source of truth and CST/Glide is no longer used for daily operations. | Final go-live note |
+| Support watch | Jay / Ben / Codex | Monitor issues for the agreed support window. | Issue log |
 
 ## Phase 0 - Candidate Scope
 
@@ -52,6 +79,7 @@ Run this phase only when Jay calls final migration day.
 | Contract, milestone, and history anomalies reviewed from fresh data | Codex / Jay | Pass/fail notes | Not started |
 | Contract backfill dry-run reviewed from fresh data | Codex / Jay | Pending count, missing active-client coverage, caveats | Not started |
 | No new CST/Glide edits made after freeze | Jay / Ben | Operator confirmation | Not started |
+| Customer operators reminded that RetainOS becomes source of truth after go-live | Jay / Ben | Message / meeting note | Not started |
 
 ## Phase 3 - Migration Execution
 
@@ -70,6 +98,7 @@ Run this phase only when Jay calls final migration day.
 | Daily Pulse and notification preferences backfilled app-owned | Codex | Company settings/preferences | Not started |
 | Resources and integration tokens configured | Jay / Codex | Resource pages and token list | Not started |
 | Company migration status moved to write-mode only after QA gate | Jay / Codex | Status change record | Not started |
+| Mirror fallback preserved for reference only | Codex | No mirror deletion; app-owned reads verified | Not started |
 
 ## Phase 4 - QA Matrix
 
@@ -102,8 +131,22 @@ Run this phase only when Jay calls final migration day.
 | Ben receives what changed and what remains limited | Jay / Codex | Handoff note | Not started |
 | Company receives operating instructions | Jay / Ben | Loom/doc/training | Not started |
 | Known caveats documented | Codex | Roadmap or handoff note | Not started |
-| Rollback stance confirmed | Jay / Ben / Codex | Written decision | Not started |
+| Emergency support stance confirmed | Jay / Ben / Codex | Written decision | Not started |
 | RetainOS marked as source of truth for the company | Jay | Final go-live confirmation | Not started |
+| Client-facing signoff checklist completed or scheduled | Jay / Customer | Approved checklist or open issue list | Not started |
+
+## Emergency Support Plan
+
+Use this only when a migrated company cannot operate correctly in RetainOS after
+go-live. This is an internal support path, not a planned customer parallel run.
+
+| Scenario | Action | Owner |
+| --- | --- | --- |
+| Data display mismatch | Pause affected workflow, compare app-owned row to fresh mirror/archive, document expected source of truth, then patch data or UI. | Codex / Jay |
+| Role/access failure | Pause affected user group, verify company membership/role, fix access path before asking the customer to continue. | Codex / Jay |
+| Write workflow failure | Stop that workflow, keep RetainOS as source of truth for unaffected areas, fix Edge Function/UI, then replay or manually repair the failed write if needed. | Codex |
+| Reporting materially wrong | Keep operations in RetainOS, mark reports as under review, validate formulas against samples before using numbers for decisions. | Jay / Codex |
+| Critical blocker across core operations | Jay decides whether to temporarily use CST/Glide archive/fallback for reference while RetainOS is repaired. Record the exact affected scope and exit condition. | Jay |
 
 ## Hold Or Rollback Criteria
 

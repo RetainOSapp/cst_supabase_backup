@@ -336,6 +336,7 @@ Next session lock:
   - Covers company kickoff, final paid CST/Glide sync, CST/Glide freeze, app-owned backfill/cutover, QA matrix, rollout handoff, and hold/rollback criteria.
   - 2026-06-15 Jay spreadsheet draft reviewed: structure maps well to the official checklist. Contract backfill/coverage is now a mandatory rollout gate for every company, including Moves Method.
   - 2026-06-15 Jay is converting the playbook into the reusable migration spreadsheet; the source playbook is approved as the canonical checklist template.
+  - 2026-06-17 packet pass added Migration Day Command Center, no-parallel-run operating rule, client-facing signoff handoff, and internal emergency support plan.
 - `[x]` Client-facing migration QA checklist.
   - Created `CLIENT_FACING_MIGRATION_QA_CHECKLIST.md` as the shorter customer-facing QA list for migration/cutover signoff.
   - Keep internal migration checks in `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md`; the client-facing version should focus on simple end-user validation such as login, roster spot checks, CSM assignment visibility, client profile details, core updates, contracts, Daily Pulse, and support handoff.
@@ -476,10 +477,11 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
   - Semi-monthly churn-risk / renewals / RGAs PDF.
   - Weekly CSM Metrics PDF.
 - `[ ]` `[priority: high]` Final migration validation with pilot company.
-- `[ ]` `[priority: high]` Jay-led final sync and no-turning-back cutover plan.
+- `[x]` Jay-led final sync and no-turning-back cutover plan.
   - 2026-06-17 product decision: do not plan for a long DIY parallel run. Jay owns the high-touch customer cutover; once the final migration is approved, customers stop using Glide and RetainOS becomes source of truth.
-- `[ ]` `[priority: high]` Post-cutover rollback/emergency support plan.
+- `[x]` Post-cutover rollback/emergency support plan.
   - Keep this as an internal safety plan, not customer-facing parallel usage.
+  - 2026-06-17 documented in `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md`: use CST/Glide mirror/archive only for reconciliation or emergency reference, not as a planned parallel customer workspace.
 
 ### Phase 5: AI, Advanced Automations, Billing, And Later Enhancements
 
@@ -1724,8 +1726,8 @@ Use this section as the “what good looks like” checklist before migrating re
 - `[x]` Ethical Scaling internal pilot is completed before external company migration.
 - `[ ]` Low-volume external SaaS Client pilot is completed after Ethical Scaling.
 - `[ ]` Role access is validated for SuperAdmin, Director, Support, CSM, and Viewer on the full workflow.
-- `[ ]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
-- `[ ]` Final cutover plan exists for:
+- `[x]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
+- `[x]` Final cutover plan exists for:
   - Data backfill.
   - User access.
   - Notification/email setup.

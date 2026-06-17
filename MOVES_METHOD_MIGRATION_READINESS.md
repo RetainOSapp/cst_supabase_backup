@@ -1,12 +1,12 @@
 # Moves Method Migration Readiness
 
-Last updated: 2026-06-14
+Last updated: 2026-06-17
 
 ## Goal
 
 Make Moves Method the next migration-ready company after Ethical Scaling without enabling write mode until validation is clean.
 
-Default stance: Moves Method remains read-only and CST mirror-backed. RetainOS can be used for walkthroughs, feedback, and validation, but official rollout starts only when Jay calls the final migration and the reusable company rollout checklist in `ROADMAP.md` is run against a fresh CST sync.
+Default stance: Moves Method remains read-only and CST mirror-backed. RetainOS can be used for walkthroughs, feedback, and validation, but official rollout starts only when Jay calls the final migration and the reusable company rollout checklist in `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md` is run against a fresh CST sync.
 
 ## Baseline Checks
 
@@ -46,6 +46,16 @@ Current snapshot from 2026-06-14:
 - Renewal date confidence: all 2,338 active clients have a renewal/filtering date in the mirror.
 - Mirrored contract history rows: 177. Most active clients do not have a mirrored historical contract row, so renewal confidence currently relies on client-level renewal/filtering fields until migration backfill rules are finalized.
 
+Dry snapshot rerun on 2026-06-17:
+
+- Current CST mirror data only; no Glide sync was triggered.
+- Counts are unchanged from the 2026-06-14 snapshot: 4,143 mirrored clients and 2,338 active clients.
+- Active unassigned clients remain 6.
+- Active clients with invalid CSM assignments remain 9.
+- All 2,338 active clients still have renewal/filtering date coverage from mirror client-level fields.
+- App-owned company row remains intentionally absent before final migration day.
+- Script gate remains conservative: write migration is blocked until Jay triggers final paid sync, assignment anomalies are reviewed from fresh data, and app-owned backfill/cutover is explicitly approved.
+
 Gate interpretation:
 
 - Read-only walkthrough: Jay QA is complete enough for product walkthrough/readiness purposes.
@@ -63,8 +73,9 @@ This is the execution path for Moves Method. It exists so we build the migration
 5. App-owned backfill phase: create/enable the app-owned company and backfill team, clients, contracts, offers, milestones, resources, customization, notification preferences, and integration tokens from the fresh snapshot.
 6. Cutover QA: verify roster counts, active-client counts, CSM assignments, offers/milestones, contracts/renewals, dashboard, CSM Reports, Daily Pulse, resources, client links, and write protections.
 7. Source-of-truth flip: only after Jay/Ben approve, switch Moves from mirror/read-only to RetainOS app-owned write mode.
+8. Customer signoff: run `CLIENT_FACING_MIGRATION_QA_CHECKLIST.md` or Jay's spreadsheet version after RetainOS is live.
 
-Rollback stance: keep CST/Glide data available until Moves is fully validated in RetainOS. Do not delete mirrored data during migration.
+Emergency support stance: keep CST/Glide mirror/archive data available for reconciliation and emergency reference until Moves is fully validated in RetainOS. Do not delete mirrored data during migration. Do not plan a long customer parallel run; after Jay calls go-live, Moves operators should work in RetainOS and route issues back to Jay.
 
 ## Remaining Moves-Specific Items
 
@@ -72,7 +83,7 @@ Rollback stance: keep CST/Glide data available until Moves is fully validated in
 - [x] Daily Pulse config validation: Jay has tested this multiple times and shown it in the Moves context; approved as complete.
 - [x] Resources structure: RetainOS Help and Company Resources are built. Moves-specific SOPs/resources are customer-owned content that Ben/Moves can add during or after migration, not a RetainOS readiness blocker.
 - [x] Ben handoff: complete through real-time Jay/Ben updates. Ben already understands that Moves remains read-only until final migration and that RetainOS plumbing is being built ahead of cutover.
-- [~] Contract history confidence: final migration-day item. The generic company rollout checklist in `ROADMAP.md` decides whether client-level renewal fields are sufficient or whether historical contract rows need app-owned backfill before cutover.
+- [~] Contract history confidence: final migration-day item. The official company rollout checklist decides whether client-level renewal fields are sufficient or whether historical contract rows need app-owned backfill before cutover.
 - [~] Final sync gate: final migration-day item. Do not run the paid Glide/CST sync until Jay explicitly calls migration day.
 
 ## Read-Only Protections
@@ -199,4 +210,4 @@ Handoff for Ben is complete through Jay/Ben's real-time updates. Ben knows:
 - What workflows were added from walkthrough feedback.
 - Known caveats, especially dashboard and CSM Reports limitations from CST mirror data.
 
-The reusable official rollout checklist now lives in `ROADMAP.md` under "Official Company Rollout Checklist". Pull that checklist for Moves only when Jay calls the final migration and triggers a fresh CST sync.
+The reusable official rollout checklist now lives in `OFFICIAL_COMPANY_ROLLOUT_CHECKLIST.md`. Pull that checklist for Moves only when Jay calls the final migration and triggers a fresh CST sync. Use `CLIENT_FACING_MIGRATION_QA_CHECKLIST.md` or Jay's spreadsheet version for customer signoff after go-live.

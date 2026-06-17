@@ -14,6 +14,14 @@ checklist, not the internal migration runbook.
 | Customer reviewer(s) |  |
 | Review window |  |
 | Signoff status | Not started / In review / Approved / Needs fixes |
+| Source of truth | RetainOS |
+
+## Customer Operating Note
+
+Use this checklist after Jay confirms RetainOS is live for your company. At that
+point, RetainOS is the operating workspace for the migrated workflows. If
+something looks wrong, report it to Jay in the notes below instead of updating
+the old CST/Glide workspace.
 
 ## Access And Login
 
