@@ -210,7 +210,7 @@ async function validateCompanyIntegrationSecret(
     error: fallbackSecret
       ? "Invalid webhook secret."
       : "Company integration token is not configured.",
-    status: fallbackSecret ? 401 : 500,
+    status: 401,
   };
 }
 

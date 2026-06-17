@@ -122,6 +122,7 @@ Run this phase only when Jay calls final migration day.
 | Daily Pulse | Today, This Week, This Month are scoped correctly | Jay / Ben | Browser QA | Not started |
 | Resources | RetainOS Help and Company Resources behave correctly | Jay / Ben | Browser QA | Not started |
 | Integrations | Enabled webhooks accept valid tokens and reject revoked tokens | Jay / Codex | Zapier/Supabase QA | Not started |
+| Integrations | A token from another migrated company is rejected for this company | Codex | Same-token/different-company 401 test | Not started |
 | Isolation | Another company still uses mirror fallback correctly | Jay / Codex | Regression sample | Not started |
 
 ## Phase 5 - Rollout Handoff

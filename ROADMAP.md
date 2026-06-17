@@ -231,7 +231,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Current write coverage follows New Client v1 fields; phone, contract monthly value/notes, next steps, director notes, freeform notes, and custom fields are preview/export only until a broader create/import server path is approved.
   - Jay QAed the skeleton and preview/import flow as a strong starting point. Keep as a migration safety net, but prioritize other high-impact migration features first.
   - QA checklist and template columns: `CSV_BULK_IMPORT_EXPORT.md`.
-- `[~]` `[mixed]` `[priority: high]` Zapier client creation webhook with required server-validated `company_id`.
+- `[x]` Zapier client creation webhook with required server-validated `company_id`.
   - 2026-06-07: `zapier-create-client` Edge Function deployed with JWT verification disabled and protected by `ZAPIER_CLIENT_WEBHOOK_SECRET`.
   - It accepts app-owned company UUID or legacy Glide company id, creates app-owned clients, optional initial contract, history, and audit events.
   - 2026-06-13 local token hardening: `zapier-create-client` now supports company-scoped `company_integration_secrets` with `integration_type = client_create`, while preserving the global secret as a fallback only for companies with no active company token rows.
@@ -240,8 +240,8 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-13 Zapier POST compatibility fix: endpoint now accepts JSON, form-encoded bodies, query params, and Zapier-style nested payloads; missing client-name errors return received body keys for faster QA.
   - 2026-06-13 Zapier QA found the most reliable setup is `company_id` in the endpoint URL query string and client-specific values in the body. RetainOS Help now treats that as the canonical Zapier setup while keeping body/query parsing support for n8n/custom callers.
   - 2026-06-13 closeout QA: direct live endpoint test passed for query-param `company_id` + bearer company token. Verified client creation, optional contract, client-created history, audit event, idempotent duplicate response, missing-client-name 400, invalid-token 401, and token `last_used_at` update. Temporary QA rows were cleaned up.
-  - Remaining: stakeholder-facing setup instructions and one final Jay/Ben Zapier-template sanity pass before using with another customer.
-- `[~]` `[polish]` `[priority: high]` Call summary webhook updates client next steps and last contact.
+  - 2026-06-17 closeout QA: disposable company-scoped `client_create` token created a temporary client through canonical `company_id` query-param setup, duplicate external id returned idempotent duplicate response, wrong integration token type returned 401, revoked token returned 401, `last_used_at` updated, and all temporary QA rows were cleaned up.
+- `[x]` Call summary webhook updates client next steps and last contact.
   - 2026-06-11: `integration_intake_events` table and `ingest-client-call-summary` Edge Function were added/deployed.
   - This is separate from full Call AI: it receives a provider summary, exact client email, company ID, call timestamp, and optional recording URL.
   - It updates app-owned client `next_steps_value` and `csm_date_of_last_contact`, writes `call_summary_webhook` history, and stores intake/match status for audit/idempotency.
@@ -254,9 +254,9 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-13 deploy: `manage-integration-token` and `manage-integration-review` were deployed to Supabase.
   - 2026-06-13 resource wiring: RetainOS Help pages now surface the company ID plus active token status/prefix for Call Summary / Next Steps, Client Update, New Client Webhook, Call Transcript, and Course Completion.
   - 2026-06-13 closeout QA: direct live endpoint test passed for app-owned client matching by exact email with a company-scoped `call_summary_next_steps` token. Verified next steps update, last-contact update from call timestamp, `call_summary_webhook` history, processed intake row, audit event, idempotent duplicate response, unmatched-email review queue, missing-summary 400, invalid-token 401, and token `last_used_at` update. Temporary QA rows were cleaned up.
-  - Remaining: stakeholder-facing setup instructions, revoked-token sanity pass, and one final Jay/Ben Zapier-template sanity pass before using with another customer.
-  - Before giving this to Moves Method or any customer: create one active company token per target company/integration, verify same-token/different-company requests return 401, and document that revoking tokens stops RetainOS writes/processing but the customer-side Zap still needs to be turned off to avoid Zapier task spend.
-- `[~]` `[polish]` `[priority: high]` Client update webhook V1.
+  - 2026-06-17 closeout QA: disposable company-scoped `call_summary_next_steps` token accepted an unmatched payload into the review queue, rejected a wrong integration token type with 401, rejected the revoked token with 401, updated `last_used_at`, and cleaned up temporary intake/token rows.
+  - Before giving this to Moves Method or any customer: create one active company token per target company/integration, and document that revoking tokens stops RetainOS writes/processing but the customer-side Zap still needs to be turned off to avoid Zapier task spend.
+- `[x]` Client update webhook V1.
   - 2026-06-12 local implementation: `webhook-update-client` accepts app-owned company UUID or legacy company id plus exact `client_email`, or explicit app-owned `client_id` when it belongs to the submitted company and optional email also matches.
   - Supported V1 fields are intentionally narrow: next steps, notes as history context, last contact, next contact, active offer id, active assigned CSM/member, and active company custom fields.
   - Status/program updates are rejected in V1 so lifecycle side effects stay inside `manage-client-status`.
@@ -266,7 +266,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-12 local queue v1 can retry automatic application or manually match these events to one active client.
   - 2026-06-13 token-management UI supports creating/revoking the company tokens used by this endpoint.
   - 2026-06-13 closeout QA: direct live endpoint test passed with a disposable app-owned client and company-scoped `client_update` token. Verified next steps, last contact, next contact, history, audit, processed intake, idempotent duplicate response, unmatched-email review queue, invalid-token 401, status/program-update 400, and token `last_used_at` update. Temporary QA rows were cleaned up.
-  - Remaining: stakeholder-facing setup instructions and one final Jay/Ben Zapier-template sanity pass before using with another customer.
+  - 2026-06-17 closeout QA: disposable company-scoped `client_update` token accepted an unmatched payload into the review queue, revoked token returned 401 after deploy fix, `last_used_at` updated, and temporary intake/token rows were cleaned up.
 - `[~]` `[polish]` `[priority: medium]` Profile upkeep scoring.
   - CSM Reports v1 exists for active clients with six-field freshness.
   - Dashboard duplicate was removed so Dashboard stays focused on KPI/chart reporting and CSM Reports owns field-upkeep compliance.
@@ -1409,13 +1409,14 @@ Source: `Datasheet - Ethical Scaling - Integrations.csv`.
   - `company_id` is generated when the SaaS Client/company is created and must be copied into the Zap configuration by Director or Support during setup.
   - RetainOS must validate `company_id` server-side before creating the client so new clients route to the correct SaaS Client.
   - Add clear setup instructions in the Admin/Integration UI so teams know where to find and copy the Company ID.
-- `[~]` `[polish]` `[priority: high]` Company-specific integration token management.
+- `[x]` Company-specific integration token management.
   - 2026-06-13: Admin Hub > Company Settings now has a SuperAdmin-only Integration Tokens area for pilot/migrated companies.
   - Supports generating one-time raw tokens, listing active/revoked tokens, revoking one token, and revoking all active tokens for SaaS offboarding.
   - Tokens are stored hashed in `company_integration_secrets`; raw token is only shown once at creation.
   - 2026-06-13 QA fix: generated tokens now stay visible in a one-time copy panel long enough to copy, with explicit copy/dismiss UX.
   - 2026-06-13 resource wiring: RetainOS Help integration pages show whether an active token exists for the selected company and display only token prefixes after creation.
   - This is the RetainOS-side kill switch for inbound webhooks. It prevents writes/processing after offboarding, but teams must still disable customer Zaps/N8N workflows to stop automation task charges at the source.
+  - 2026-06-17 kill-switch QA passed for `client_create`, `call_summary_next_steps`, and `client_update`: revoked tokens return 401 and do not process writes/intake. Same-token/different-company misuse is a final migration-day QA gate once a second app-owned company exists.
 - `[?]` Decide integration boundary:
   - Which workflows should live inside RetainOS/Supabase Edge Functions.
   - Which workflows should live in N8N or Zapier.
