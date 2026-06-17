@@ -32,8 +32,9 @@ items may still be open for polish, downstream wiring, migration validation, or
 mixed reasons, but they are not active Jay QA asks unless copied here.
 
 - `[x]` 2026-06-15 V1 closure QA is complete for Company Customization, Company Settings, Client Contracts/Renewals, Official Company Rollout Checklist, and the Ethical Scaling mirror-dependency/backfill slice.
-- `[ ]` No active Jay QA item is queued as of 2026-06-16.
+- `[ ]` No active Jay QA item is queued as of 2026-06-17.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
+- `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
 ## Current Foundation
 
@@ -85,12 +86,13 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - Working plan: `SUPABASE_WRITE_PLAN.md`.
 - `[~]` `[mixed]` Define RLS/server-side authorization for all write paths.
 - `[~]` `[mixed]` Start write mode through controlled Edge Functions for first flows, then add direct RLS-backed writes only after policies are proven.
-- `[~]` `[polish]` Use Ethical Scaling as the first internal controlled pilot company.
+- `[x]` Use Ethical Scaling as the first internal controlled pilot company.
   - Pilot schema/backfill/QA artifacts:
     - `supabase/migrations/20260529120000_write_mode_pilot_foundation.sql`
     - `scripts/seed-ethical-scaling-pilot.mjs`
     - `scripts/qa-ethical-scaling-pilot.mjs`
     - `QA_WRITE_MODE_PILOT.md`
+  - 2026-06-17 closed: Jay confirmed the role-based end-to-end pilot has been used with Ben and Emily and works as expected.
 - `[~]` `[downstream]` `[priority: high]` Remove Ethical Scaling-only assumptions before broader rollout.
   - Move successful pilot companies from `migration_status = 'pilot'` to `migration_status = 'migrated'`.
   - Keep non-migrated companies at `migration_status = 'mirror_only'`.
@@ -153,11 +155,12 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
 
 Goal: one company can manage real clients in RetainOS without relying on Glide for day-to-day fulfillment tracking.
 
-- `[~]` `[polish]` Run first client lifecycle write tests against the Ethical Scaling pilot company.
+- `[x]` Run first client lifecycle write tests against the Ethical Scaling pilot company.
   - First pilot write is Quick Update history via `client_history_events`.
-- `[~]` `[polish]` App-owned clients current-state table and Ethical Scaling backfill.
+- `[x]` App-owned clients current-state table and Ethical Scaling backfill.
   - `clients` now holds 154 Ethical Scaling pilot rows backfilled from `backup_company_clients`.
   - Clients list/detail prefer app-owned `clients` for pilot/migrated companies and fall back to the Glide mirror elsewhere.
+  - 2026-06-17 closed for Ethical Scaling. Company-by-company backfill/reconciliation remains tracked under rollout and migration-readiness items.
 - `[~]` `[polish]` `[priority: medium]` CRUD Clients.
   - New Client v1 is enabled for app-owned pilot/migrated companies through `manage-client-create`.
   - SuperAdmin/Director/Support can create company clients.
@@ -298,7 +301,7 @@ Next session lock:
   - Non-blocking notes: invalid assignments exist only on offboarded clients; archived pilot/test offer and milestone rows exist app-side; historical mirrored contracts and client milestones are not fully app-backfilled yet.
   - 2026-06-07: historical activity backfill dry-run script added. Ethical Scaling dry-run found 1 contract and 34 client milestone rows ready to backfill for active/pilot-relevant clients, with 0 unresolved milestone offer mappings. Applying remains an explicit review gate.
   - 2026-06-08: `scripts/reconcile-company-pilot.mjs` now supports `--renewal-start` / `--renewal-end` and reports contract/renewal confidence. Live Ethical Scaling run for 2026-06-08 to 2026-07-08 returned `rolloutGate.readyForPilot = true`; it identified missing historical mirrored contract/client milestone backfill as non-blocking notes, not pilot blockers.
-  - Remaining product/process decision: pilot-week source-of-truth rules so RetainOS and Glide do not receive conflicting edits.
+  - 2026-06-17 product decision: no long parallel-write window. Jay owns a high-touch final sync/cutover, then the customer stops using Glide.
 - `[x]` Moves Method migration-readiness pass.
   - Dedicated checklist: `MOVES_METHOD_MIGRATION_READINESS.md`.
   - Default stance: Moves Method remains CST mirror-backed/read-only until Jay and Ben explicitly approve write-mode migration.
@@ -473,8 +476,10 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
   - Semi-monthly churn-risk / renewals / RGAs PDF.
   - Weekly CSM Metrics PDF.
 - `[ ]` `[priority: high]` Final migration validation with pilot company.
-- `[ ]` `[priority: high]` Parallel run with Glide before cutover.
-- `[ ]` `[priority: high]` Cutover and rollback plan.
+- `[ ]` `[priority: high]` Jay-led final sync and no-turning-back cutover plan.
+  - 2026-06-17 product decision: do not plan for a long DIY parallel run. Jay owns the high-touch customer cutover; once the final migration is approved, customers stop using Glide and RetainOS becomes source of truth.
+- `[ ]` `[priority: high]` Post-cutover rollback/emergency support plan.
+  - Keep this as an internal safety plan, not customer-facing parallel usage.
 
 ### Phase 5: AI, Advanced Automations, Billing, And Later Enhancements
 
@@ -1715,11 +1720,11 @@ Use this section as the “what good looks like” checklist before migrating re
   - Complete tasks.
   - Analyze a call.
   - See updates reflected in dashboard, CSM Reports, and alerts.
-- `[ ]` Existing Glide data can be reconciled against RetainOS for a pilot company.
-- `[ ]` Ethical Scaling internal pilot is completed before external company migration.
+- `[x]` Existing Glide data can be reconciled against RetainOS for a pilot company.
+- `[x]` Ethical Scaling internal pilot is completed before external company migration.
 - `[ ]` Low-volume external SaaS Client pilot is completed after Ethical Scaling.
 - `[ ]` Role access is validated for SuperAdmin, Director, Support, CSM, and Viewer on the full workflow.
-- `[ ]` RetainOS can run in parallel with Glide for a pilot period before cutover.
+- `[ ]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
 - `[ ]` Final cutover plan exists for:
   - Data backfill.
   - User access.

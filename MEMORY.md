@@ -119,3 +119,4 @@ For historical context:
 - Pathways closure: `npm run build` passed; deployed `manage-company-pathway` and `manage-client-milestone` to Supabase project `zjauqflzxzsbpnivzsct`.
 - Commit scope for Pathways closure excludes Beacon local pilot files, `package.json`, `package-lock.json`, `src/components/Header.tsx`, and `old glide project test/`.
 - Contract sanity: deployed `manage-client-contract` fix so start date + expected duration days sync a calculated end/filtering date to `clients`; repaired four Ethical Scaling pilot summaries. Ali Back End still has duplicate QA-created contract history rows, which can be tidied later via SuperAdmin delete.
+- Roadmap hygiene: Jay QA queue remains empty; Ethical Scaling pilot/backfill loops are closed; migration plan now reflects Jay-led final sync/cutover instead of long Glide parallel usage.
