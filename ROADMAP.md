@@ -34,6 +34,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` 2026-06-15 V1 closure QA is complete for Company Customization, Company Settings, Client Contracts/Renewals, Official Company Rollout Checklist, and the Ethical Scaling mirror-dependency/backfill slice.
 - `[x]` 2026-06-17 Client lifecycle/program closeout QA passed with Josh Garvey assigned to Ben; lifecycle controlled-write and offboarding items can be closed.
 - `[x]` Lifecycle closeout promoted the client lifecycle controlled-write and offboarding items to `[x]`; dashboard/CSM/notification proof remains Moves Method migration-day validation.
+- `[~]` `[qa]` Tasks V1.5 final retest: drag a task into `In Progress`, hard refresh, and confirm it stays there. Jay already passed company-level creation, client-linked creation, client link navigation, edit, and the other drag/drop statuses.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -371,8 +372,8 @@ Next session lock:
 - `[~]` `[polish]` Task manager board/list exists and now includes New Task v1 for app-owned pilot/migrated companies.
 - `[~]` `[polish]` `[priority: low]` CRUD Tasks.
   - New Task v1 creates app-owned `client_tasks` through `manage-client-task`.
-  - 2026-06-18 local Tasks V1.5 pass adds app-owned task edit, status updates, complete/reopen, dismiss/archive, task detail modal, and native drag/drop board columns. SQL migration for `task_updated` history events was applied.
-  - Needs `manage-client-task` Edge Function deploy and Jay QA before closure. Remaining later gaps: templates/automation, comments, attachments, recurring rules, realtime, richer notifications.
+  - 2026-06-18 Tasks V1.5 pass adds app-owned task edit, status updates, complete/reopen, dismiss/archive, task detail modal, and native drag/drop board columns. SQL migration for `task_updated` history events was applied and Jay deployed `manage-client-task`.
+  - Jay QA passed company-level creation, client-linked creation, client link navigation, edit, and every drag/drop status except `In Progress`; follow-up fix normalizes `in-progress`/`in_progress` for grouping. Remaining later gaps: templates/automation, comments, attachments, recurring rules, realtime, richer notifications.
 - `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
 - `[ ]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
 - `[~]` `[polish]` CSM Reports list view and filters.

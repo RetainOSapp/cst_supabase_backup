@@ -110,7 +110,8 @@ function isClosedTask(task: TaskRow) {
 
 function taskStatusKey(value: unknown): TaskStatus {
   const key = displayValue(value).toLowerCase();
-  if (key === "in progress") return "in-progress";
+  if (key === "in progress" || key === "in-progress" || key === "in_progress")
+    return "in-progress";
   if (key === "complete" || key === "completed") return "done";
   if (key === "waiting") return "waiting";
   if (key === "done") return "done";
