@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ProgramStatusPill } from "../lib/clientDisplay.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
@@ -57,6 +57,9 @@ const TASK_STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
   { value: "dismissed", label: "Dismissed" },
   { value: "archived", label: "Archived" },
 ];
+const ALLOWED_TASK_STATUS_VALUES = new Set<TaskStatus>(
+  TASK_STATUS_OPTIONS.map((option) => option.value),
+);
 
 function isPresent(value: unknown) {
   return value !== null && value !== undefined && String(value).trim() !== "";
@@ -167,6 +170,7 @@ function TaskCard({
   isMoving,
   onClick,
   onDragStart,
+  onDragEnd,
 }: {
   task: TaskRow;
   client: ClientRow | undefined;
@@ -175,6 +179,7 @@ function TaskCard({
   isMoving: boolean;
   onClick: () => void;
   onDragStart: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd: (event: DragEvent<HTMLElement>) => void;
 }) {
   const assignedTo = task.assigned_to_id
     ? (teamMemberNameById.get(task.assigned_to_id) ?? task.assigned_to_id)
@@ -184,6 +189,7 @@ function TaskCard({
     <article
       draggable={canManage}
       onDragStart={canManage ? onDragStart : undefined}
+      onDragEnd={canManage ? onDragEnd : undefined}
       onClick={onClick}
       className={`relative rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:border-indigo-200 hover:shadow-md ${canManage ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
     >
@@ -660,6 +666,8 @@ export function Tasks() {
   const [selectedTask, setSelectedTask] = useState<TaskRow | null>(null);
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const dragHandledRef = useRef(false);
 
   const assignedTeamMemberId = capabilities.canViewOnlyAssignedClients
     ? teamMemberId
@@ -934,19 +942,17 @@ export function Tasks() {
     const dismissed = tasks.filter((task) =>
       ["dismissed", "archived"].includes(taskStatusKey(task.status_value)),
     );
-    return [
+    const allColumns = [
       { key: "todo", label: "To Do", tasks: todo },
       { key: "in-progress", label: "In Progress", tasks: inProgress },
       { key: "waiting", label: "Waiting", tasks: waiting },
       { key: "done", label: "Done", tasks: done },
       { key: "dismissed", label: "Dismissed", tasks: dismissed },
-    ].filter(
-      (column) =>
-        statusMode !== "open" ||
-        !["done", "dismissed"].includes(column.key) ||
-        column.tasks.length > 0,
-    );
-  }, [tasks]);
+    ];
+    return statusMode === "closed"
+      ? allColumns.filter((column) => ["done", "dismissed"].includes(column.key))
+      : allColumns;
+  }, [statusMode, tasks]);
 
   async function saveTaskUpdate(taskId: string, updates: Record<string, unknown>) {
     setMovingTaskId(taskId);
@@ -978,14 +984,13 @@ export function Tasks() {
   }
 
   function handleDragStart(event: DragEvent<HTMLElement>, task: TaskRow) {
+    dragHandledRef.current = false;
+    setDraggingTaskId(task.glide_row_id);
     event.dataTransfer.setData("text/plain", task.glide_row_id);
     event.dataTransfer.effectAllowed = "move";
   }
 
-  async function handleDrop(event: DragEvent<HTMLElement>, status: TaskStatus) {
-    event.preventDefault();
-    setDragOverStatus(null);
-    const taskId = event.dataTransfer.getData("text/plain");
+  async function moveTaskToStatus(taskId: string, status: TaskStatus) {
     if (!taskId || !canManageTasks) return;
     const task = tasks.find((row) => row.glide_row_id === taskId);
     if (!task || taskStatusKey(task.status_value) === status) return;
@@ -997,6 +1002,32 @@ export function Tasks() {
     );
     const updated = await saveTaskUpdate(taskId, { statusValue: status });
     if (!updated) setTasks(previousTasks);
+  }
+
+  async function handleDrop(event: DragEvent<HTMLElement>, status: TaskStatus) {
+    event.preventDefault();
+    const taskId = event.dataTransfer.getData("text/plain") || draggingTaskId;
+    dragHandledRef.current = true;
+    setDragOverStatus(null);
+    setDraggingTaskId(null);
+    if (!taskId) return;
+    await moveTaskToStatus(taskId, status);
+  }
+
+  async function handleDragEnd(event: DragEvent<HTMLElement>) {
+    if (dragHandledRef.current) {
+      dragHandledRef.current = false;
+      return;
+    }
+    const taskId = draggingTaskId;
+    setDragOverStatus(null);
+    setDraggingTaskId(null);
+    if (!taskId || !canManageTasks) return;
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const target = element?.closest<HTMLElement>("[data-task-status]");
+    const status = target?.dataset.taskStatus as TaskStatus | undefined;
+    if (!status || !ALLOWED_TASK_STATUS_VALUES.has(status)) return;
+    await moveTaskToStatus(taskId, status);
   }
 
   const overdueCount = tasks.filter(isOverdue).length;
@@ -1171,6 +1202,7 @@ export function Tasks() {
           {columns.map((column) => (
             <section
               key={column.key}
+              data-task-status={column.key}
               onDragOver={(event) => {
                 if (!canManageTasks) return;
                 event.preventDefault();
@@ -1203,6 +1235,7 @@ export function Tasks() {
                       if (canManageTasks) setSelectedTask(task);
                     }}
                     onDragStart={(event) => handleDragStart(event, task)}
+                    onDragEnd={(event) => void handleDragEnd(event)}
                   />
                 ))}
               </div>
