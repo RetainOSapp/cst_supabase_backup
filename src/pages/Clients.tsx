@@ -3140,7 +3140,7 @@ export function Clients() {
         const { data, error } = await fallbackQuery;
         if (cancelled) return;
         if (error) {
-          console.error("Failed to load pilot reminders:", error);
+          console.error("Failed to load RetainOS reminders:", error);
           setPilotReminders([]);
           return;
         }
@@ -3161,7 +3161,7 @@ export function Clients() {
         { p_company_id: appCompany.id },
       );
       if (generationError) {
-        console.error("Failed to generate pilot notifications:", generationError);
+        console.error("Failed to generate RetainOS notifications:", generationError);
         await fallbackToClientFields();
         return;
       }
@@ -3192,7 +3192,7 @@ export function Clients() {
         .range(0, 199);
       if (cancelled) return;
       if (notificationsError) {
-        console.error("Failed to load pilot notifications:", notificationsError);
+        console.error("Failed to load RetainOS notifications:", notificationsError);
         await fallbackToClientFields();
         return;
       }

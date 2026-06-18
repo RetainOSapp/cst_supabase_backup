@@ -1279,7 +1279,7 @@ function ResourceEditModal({
 }
 
 export function Resources() {
-  const { effectiveCompanyId, isSuperAdmin } = useAccountContext();
+  const { effectiveCompanyId, isSuperAdmin, role } = useAccountContext();
   const [activeLibrary, setActiveLibrary] = useState<ResourceScope>("retainos_help");
   const [activeRetainOsCategory, setActiveRetainOsCategory] =
     useState<ResourceCategory>("all");
@@ -1469,10 +1469,15 @@ export function Resources() {
     }
 
     const visibleRows = resourceRows.filter((resource) => {
-      if (!isSuperAdmin && resource.status !== "published") return false;
       const scope = resourceScope(resource);
-      if (scope === "retainos_help") return true;
-      return resource.company_legacy_id === effectiveCompanyId;
+      const isCompanyResource =
+        scope === "company" && resource.company_legacy_id === effectiveCompanyId;
+
+      if (isSuperAdmin) return true;
+      if (resource.status === "published") {
+        return scope === "retainos_help" || isCompanyResource;
+      }
+      return role === "director" && isCompanyResource;
     });
     setResources(visibleRows);
     setResourceError(null);
@@ -1480,7 +1485,7 @@ export function Resources() {
 
   useEffect(() => {
     void loadResources();
-  }, [effectiveCompanyId, isSuperAdmin]);
+  }, [effectiveCompanyId, isSuperAdmin, role]);
 
   useEffect(() => {
     let cancelled = false;

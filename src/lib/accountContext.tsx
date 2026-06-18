@@ -167,7 +167,7 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
 
   return {
     canAccessSaasClients: isSuperAdmin,
-    canAccessDashboard: isSuperAdmin || isDirector || isCsm || isSupport,
+    canAccessDashboard: isSuperAdmin || isDirector || isCsm || isSupport || isViewer,
     canAccessCsmReports: isSuperAdmin || isDirector || isSupport,
     canAccessClients: canSeeCompany,
     canAccessResources: canSeeCompany,
@@ -184,7 +184,7 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
     canManageTeam: isSuperAdmin || isDirector,
     canViewAllClients: isSuperAdmin || isDirector || isSupport || isViewer,
     canViewOnlyAssignedClients: isCsm,
-    canViewCompanyDashboard: isSuperAdmin || isDirector || isSupport,
+    canViewCompanyDashboard: isSuperAdmin || isDirector || isSupport || isViewer,
   };
 }
 

@@ -1161,6 +1161,7 @@ export function Dashboard() {
   const {
     capabilities,
     effectiveCompanyId,
+    role,
     teamMemberId,
   } = useAccountContext();
   const [pendingFilters, setPendingFilters] = useState(() =>
@@ -1227,6 +1228,7 @@ export function Dashboard() {
     title: string;
     rows: ChartClientRow[];
   } | null>(null);
+  const canUseDashboardDrilldowns = role !== "viewer";
   const [chartsLoading, setChartsLoading] = useState(false);
 
   const updateSearchParams = (updates: Record<string, string | null>) => {
@@ -1457,6 +1459,7 @@ export function Dashboard() {
   const detailEnd = Math.min(detailPage * DETAIL_PAGE_SIZE, detailTotalCount);
 
   const openDetailDrawer = (key: KpiDetailKey) => {
+    if (!canUseDashboardDrilldowns) return;
     setActiveDetailKey(key);
     setDetailSearch("");
     setDetailPage(1);
@@ -1483,6 +1486,7 @@ export function Dashboard() {
     item: ChartDatum,
     getKey: (client: ChartClientRow) => string | null | undefined,
   ) => {
+    if (!canUseDashboardDrilldowns) return;
     setChartDetail({
       title: `${title}: ${item.label}`,
       rows: chartClients.filter((client) => chartKey(getKey(client)) === item.key),
@@ -3213,28 +3217,44 @@ export function Dashboard() {
               loading={primaryKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("active")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("active")
+                  : undefined
+              }
             />
             <FrontEndClientsKpi
               value={frontEndClients}
               loading={primaryKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("front-end")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("front-end")
+                  : undefined
+              }
             />
             <BackEndClientsKpi
               value={backEndClients}
               loading={primaryKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("back-end")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("back-end")
+                  : undefined
+              }
             />
             <OffBoardedClientsKpi
               value={offBoardedClients}
               loading={primaryKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("off-boarded")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("off-boarded")
+                  : undefined
+              }
             />
           </div>
 
@@ -3249,7 +3269,11 @@ export function Dashboard() {
               loading={retentionKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("retained")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("retained")
+                  : undefined
+              }
             />
             <RetentionPercentageKpi
               percentage={retentionPercentage}
@@ -3257,14 +3281,22 @@ export function Dashboard() {
               loading={retentionKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("renewing")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("renewing")
+                  : undefined
+              }
             />
             <UpForRenewalKpi
               value={activeRenewingClients}
               loading={retentionKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("active-renewing")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("active-renewing")
+                  : undefined
+              }
             />
             <ChurnPercentageKpi
               percentage={churnPercentage}
@@ -3272,7 +3304,11 @@ export function Dashboard() {
               loading={primaryKpiLoading}
               sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
-              onOpenList={() => openDetailDrawer("churned")}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("churned")
+                  : undefined
+              }
             />
           </div>
 
@@ -3325,12 +3361,15 @@ export function Dashboard() {
               >
                 <DonutChart
                   data={chartData.programDistribution}
-                  onItemClick={(item) =>
-                    openChartDetail(
-                      "Program Distribution",
-                      item,
-                      (client) => client.program_status_value,
-                    )
+                  onItemClick={
+                    canUseDashboardDrilldowns
+                      ? (item) =>
+                          openChartDetail(
+                            "Program Distribution",
+                            item,
+                            (client) => client.program_status_value,
+                          )
+                      : undefined
                   }
                 />
               </ChartCard>
@@ -3340,12 +3379,15 @@ export function Dashboard() {
               >
                 <DonutChart
                   data={chartData.buyInDistribution}
-                  onItemClick={(item) =>
-                    openChartDetail(
-                      "Buy-in",
-                      item,
-                      (client) => client.outcomes_buy_in_for_filtering,
-                    )
+                  onItemClick={
+                    canUseDashboardDrilldowns
+                      ? (item) =>
+                          openChartDetail(
+                            "Buy-in",
+                            item,
+                            (client) => client.outcomes_buy_in_for_filtering,
+                          )
+                      : undefined
                   }
                 />
               </ChartCard>
@@ -3355,12 +3397,15 @@ export function Dashboard() {
               >
                 <DonutChart
                   data={chartData.progressDistribution}
-                  onItemClick={(item) =>
-                    openChartDetail(
-                      "Progress",
-                      item,
-                      (client) => client.outcomes_progress_for_filtering,
-                    )
+                  onItemClick={
+                    canUseDashboardDrilldowns
+                      ? (item) =>
+                          openChartDetail(
+                            "Progress",
+                            item,
+                            (client) => client.outcomes_progress_for_filtering,
+                          )
+                      : undefined
                   }
                 />
               </ChartCard>
@@ -3370,12 +3415,15 @@ export function Dashboard() {
               >
                 <BarChart
                   data={chartData.clientsByOffer}
-                  onItemClick={(item) =>
-                    openChartDetail(
-                      "Clients By Offer",
-                      item,
-                      (client) => client.offer_milestones_current_offer_id,
-                    )
+                  onItemClick={
+                    canUseDashboardDrilldowns
+                      ? (item) =>
+                          openChartDetail(
+                            "Clients By Offer",
+                            item,
+                            (client) => client.offer_milestones_current_offer_id,
+                          )
+                      : undefined
                   }
                 />
               </ChartCard>

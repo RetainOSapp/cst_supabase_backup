@@ -1060,7 +1060,7 @@ export function CsmReports() {
               >
                 {profileUpkeep
                   ? `${profileUpkeep.completeClientCount}/${profileUpkeep.clientCount} complete profiles`
-                  : "RetainOS pilot metric"}
+                  : "RetainOS metric"}
               </button>
             </div>
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1143,7 +1143,7 @@ export function CsmReports() {
                 </p>
               </div>
               <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">
-                {usesAppClients ? "RetainOS pilot data" : "CST roster preview"}
+                {usesAppClients ? "RetainOS data" : "CST roster preview"}
               </span>
             </div>
 

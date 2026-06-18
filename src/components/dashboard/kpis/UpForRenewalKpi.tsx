@@ -9,7 +9,7 @@ interface UpForRenewalKpiProps {
   loading: boolean;
   sqlParams: DashboardKpiSqlParams;
   onOpenInfo: (title: string, description: string, sql: string) => void;
-  onOpenList: () => void;
+  onOpenList?: () => void;
 }
 
 export function UpForRenewalKpi({

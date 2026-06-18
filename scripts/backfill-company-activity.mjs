@@ -16,7 +16,7 @@ function readArg(name) {
     ?.slice(name.length + 3);
 }
 
-const companyArgument = readArg("company") ?? "Ethical Scaling";
+const companyArgument = readArg("company");
 const companyIdArgument = readArg("company-id");
 const legacyCompanyIdArgument = readArg("legacy-company-id");
 
@@ -64,6 +64,14 @@ function fail(message, details = undefined) {
 }
 
 async function resolveCompany() {
+  if (!companyArgument && !companyIdArgument && !legacyCompanyIdArgument) {
+    fail("Company selector is required for this generic backfill script.", {
+      usage:
+        "npm run pilot:backfill:company-activity -- --company=\"Company Name\" [--apply]",
+      selectors: ["--company", "--company-id", "--legacy-company-id"],
+    });
+  }
+
   let query = supabase
     .from("companies")
     .select("id, legacy_glide_row_id, name, migration_status");
@@ -291,7 +299,7 @@ async function main() {
     mode: apply ? "apply" : "dry-run",
     generatedAt: new Date().toISOString(),
     company,
-    scope: includeArchived ? "all app-owned clients" : "active/pilot-relevant clients only",
+    scope: includeArchived ? "all app-owned clients" : "active migration-relevant clients only",
     candidates: {
       contractsToBackfill: contractPayloads.length,
       clientMilestonesToBackfill: milestonePayloads.length,

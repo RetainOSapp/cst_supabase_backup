@@ -274,7 +274,7 @@ export function Login() {
       {googleComingSoon ? (
         <ComingSoonModal
           title="Google Login"
-          description="Google Workspace sign-in will be added after the pilot authentication flow is fully validated."
+          description="Google Workspace sign-in will be added after the current authentication flow is fully validated."
           onClose={() => setGoogleComingSoon(false)}
         />
       ) : null}

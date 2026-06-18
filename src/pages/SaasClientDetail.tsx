@@ -624,7 +624,7 @@ function NewTeamMemberModal({
               }`}
             >
               {canManage
-                ? "Writes are enabled for this RetainOS pilot company."
+                ? "Writes are enabled for this RetainOS workspace."
                 : "Editing is locked while this reads from CST into RetainOS."}
             </div>
             {error ? (
@@ -780,7 +780,7 @@ function PathwaySetupModal({
                 {isEditing ? "Edit" : "New"} {isMilestone ? "milestone" : "pathway"}
               </h2>
               <p className="mt-1 text-sm text-[#6c7684]">
-                This configuration will be available to RetainOS pilot clients.
+                This configuration will be available to RetainOS clients.
               </p>
             </div>
             <button type="button" onClick={onClose} className="text-2xl text-[#6c7684]">
@@ -1028,7 +1028,7 @@ function PathwaysSetup({
       {source === "mirror" ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           This company still reads pathway configuration from Glide. Editing unlocks when
-          the company enters the RetainOS pilot.
+          the company moves to RetainOS write mode.
         </div>
       ) : null}
       {actionError ? (
@@ -2047,7 +2047,7 @@ function CustomizationSetup({
           </h2>
           <p className="mt-1 text-sm text-[#667085]">
             Outcome choices are still loaded from CST until this
-            company is moved to pilot or migrated status. Custom field labels
+            company is moved to RetainOS write mode. Custom field labels
             below are previewed from CST slots and become editable company-level
             update fields after migration.
           </p>
@@ -2891,8 +2891,7 @@ function CompanySettingsSetup({
 
       {source === "mirror" ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Settings are read-only until this company is moved to RetainOS pilot or
-          migrated status.
+          Settings are read-only until this company is moved to RetainOS write mode.
         </div>
       ) : null}
       {error ? (

@@ -32,7 +32,8 @@ items may still be open for polish, downstream wiring, migration validation, or
 mixed reasons, but they are not active Jay QA asks unless copied here.
 
 - `[x]` 2026-06-15 V1 closure QA is complete for Company Customization, Company Settings, Client Contracts/Renewals, Official Company Rollout Checklist, and the Ethical Scaling mirror-dependency/backfill slice.
-- `[ ]` No active Jay QA item is queued as of 2026-06-17.
+- `[x]` 2026-06-17 Client lifecycle/program closeout QA passed with Josh Garvey assigned to Ben; lifecycle controlled-write and offboarding items can be closed.
+- `[x]` Lifecycle closeout promoted the client lifecycle controlled-write and offboarding items to `[x]`; dashboard/CSM/notification proof remains Moves Method migration-day validation.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -98,6 +99,8 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - Keep non-migrated companies at `migration_status = 'mirror_only'`.
   - Generalize pilot scripts to accept a company identifier.
   - 2026-06-07: generic reconciliation command supports company name, app company id, and legacy Glide company id.
+  - 2026-06-17 audit pass: app UI copy no longer presents migrated/write-mode surfaces as Ethical Scaling/pilot-only; generic reconcile/backfill scripts now require an explicit company selector instead of defaulting to Ethical Scaling. Remaining Ethical Scaling references are intentional historical docs, package aliases, and ES-specific seed/QA scripts.
+  - Remaining downstream closure: decide when to promote the completed Ethical Scaling pilot company from `migration_status = 'pilot'` to `migration_status = 'migrated'`; run the explicit-selector migration/reconcile commands during Moves Method cutover prep.
 - `[ ]` `[priority: medium]` Convert SaaS Client/company management from disabled UI to controlled writes.
 - `[ ]` `[priority: medium]` CRUD SaaS Clients.
 - `[ ]` `[priority: medium]` SaaS Clients list filters: active, paused, archived.
@@ -387,6 +390,7 @@ Next session lock:
   - Retention now includes `client_retention_recorded` events for same-program renewals.
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
+  - 2026-06-17 readiness packet prepared in `DASHBOARD_FORMULA_VALIDATION.md` with current formulas, sources, weak spots, and migration-day checks. Full confidence still waits for Moves Method or another larger migrated company.
 - `[ ]` `[priority: medium]` Dashboard advanced filtering and sorting.
   - Capture Ben pilot feedback: dashboard views should eventually support more operational filtering/sorting directly inside the dashboard.
   - First named use case: show only upcoming renewals from dashboard metrics/drilldowns.
@@ -401,6 +405,7 @@ Next session lock:
   - Draft SQL starting point: `DASHBOARD_CANONICAL_RPC_DRAFT.sql`.
   - Canonical KPI UI integration v1 is wired for Dashboard KPI cards; remaining work is broader validation against Moves Method or another larger migrated-company dataset before marking shipped. Ethical Scaling has too few active clients to give strong formula/performance confidence.
   - Remaining gaps: charts/client drill-throughs still use client-row calculations; decide later whether those should move to canonical reporting views too.
+  - 2026-06-17 validation packet is ready. Next action on migration day: compare Dashboard KPI cards, chart/drilldown totals, Clients list filters, contract/renewal spot checks, and CSM Reports denominators against the packet after final sync/backfill.
 - `[x]` Client contact calendar.
   - V1 exists as a Calendar view on `/clients`, beside List and Cards.
   - Day, Week, and Month modes exist.
@@ -417,6 +422,7 @@ Next session lock:
   - Dashboard v1 includes clickable field drilldowns and a clickable complete/incomplete profile drilldown.
   - CSM Reports now includes a Field Upkeep section as the operational/compliance home, using the company freshness window and separating client-level update rate from field-level upkeep score.
   - Remaining gaps: CSM Reports validation after configurable-window wiring and eventual canonical SQL/RPC calculation. Treat this as a Moves Method / larger-company migration validation item because Ethical Scaling's small roster is not a strong stress test.
+  - 2026-06-17 `DASHBOARD_FORMULA_VALIDATION.md` now defines the exact CSM Reports update-rate, field-upkeep, complete-profile, and CSM Summary formulas plus migration-day validation steps.
 - `[x]` Daily Pulse operating page for CSMs.
   - Purpose: a persistent daily operating view, distinct from dismissible notifications.
   - Suggested buckets: Today, This Week, and This Month, with expandable sections to avoid clutter.
@@ -532,8 +538,9 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[~]` `[polish]` Profile upkeep scoring based on last update timestamps across key fields.
   - Dashboard Overview v1 uses recent RetainOS history events and current client date fields for Ethical Scaling pilot data.
 - `[x]` Client calendar view.
-- `[~]` `[polish]` Client lifecycle actions: active, paused, suspended, offboarded.
-  - Pilot supports status writes through `manage-client-status`; needs QA and later notification/report integration.
+- `[x]` Client lifecycle actions: active, paused, suspended, offboarded.
+  - 2026-06-17 audit: V1 status writes are centralized in `manage-client-status`, include role/assignment guardrails, write history/audit, and keep lifecycle side effects out of webhooks/Quick Update. See `CLIENT_LIFECYCLE_PROGRAM_CLOSEOUT.md`.
+  - 2026-06-17 Jay QA passed with Josh Garvey assigned to Ben; downstream formula/notification confidence is tracked separately for migration-day validation.
 
 #### Dashboard And Analytics
 
@@ -728,11 +735,14 @@ Use this section to connect feature work into operational flows. A feature is no
 - `[ ]` `[priority: medium]` Contract expiration detection identifies clients up for renewal within configured windows.
 - `[ ]` `[priority: medium]` Renewal opportunities can be surfaced to CSMs and Directors.
 - `[ ]` `[priority: medium]` Client at churn risk can be flagged from progress/buy-in/milestone delays and related signals.
-- `[~]` `[polish]` Client can be paused, suspended, offboarded, or archived through controlled write flows.
-  - Pause/Suspended/Offboarded status changes are live for app-owned pilot clients.
-  - Archive remains separate/future.
-- `[~]` `[polish]` Offboarding updates roster, dashboard, client history, notifications, and reporting.
-  - Roster/current profile/history are covered in pilot; notifications/reporting need later validation.
+- `[x]` Client can be paused, suspended, or offboarded through controlled write flows.
+  - 2026-06-17 lifecycle audit confirms Pause/Suspended/Offboarded status changes are live for app-owned pilot/migrated clients through `manage-client-status`; Jay QA passed with Josh Garvey assigned to Ben.
+- `[ ]` `[priority: low]` Client archive flow.
+  - Archive remains separate/future and is not part of the status lifecycle closeout.
+- `[~]` `[downstream]` Offboarding updates roster, dashboard, client history, notifications, and reporting.
+  - Roster/current profile/history are wired through the app-owned status flow.
+  - Dashboard/CSM formula expectations are documented in `DASHBOARD_FORMULA_VALIDATION.md`.
+  - Notification/reporting confidence needs Moves Method migration-day validation with real company scale.
 
 ### Automated Flagging Flow
 
@@ -754,7 +764,7 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[x]` SaaS Client detail view.
 - `[~]` `[polish]` New SaaS Client modal exists with disabled submit.
 - `[x]` View As / company support flow.
-- `[ ]` `[priority: medium]` Resources list view.
+- `[x]` Resources list view.
 - `[ ]` `[priority: medium]` New resource flow.
 - `[ ]` `[priority: later]` AI Prompts management for fixed prompts.
   - SuperAdmin has the ability to edit fixed AI prompts.
@@ -816,7 +826,7 @@ Use this section to validate route structure, navigation visibility, and role ac
   - Company settings.
   - Customization.
   - Offers & Milestones.
-- `[ ]` `[priority: medium]` Resources list view.
+- `[x]` Resources list view.
 - `[ ]` `[priority: high]` Director customization excludes dynamic AI prompts.
   - Director can manage custom fields, outcome definitions, and churn reasons.
   - Director cannot customize dynamic AI prompts.
@@ -832,7 +842,7 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[~]` `[polish]` `[priority: low]` New Task flow.
 - `[ ]` `[priority: low]` Update Task flow.
 - `[ ]` `[priority: later]` Call AI list view for accessible calls.
-- `[ ]` `[priority: medium]` Resources list view.
+- `[x]` Resources list view.
 - `[x]` CSM does not access Admin Hub.
 - `[x]` CSM does not access SaaS Clients.
 
@@ -854,17 +864,17 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[ ]` `[priority: later]` Call AI list view.
 - `[ ]` `[priority: later]` New meeting transcript flow.
 - `[ ]` `[priority: later]` Share call analysis with team.
-- `[ ]` `[priority: medium]` Resources list view.
+- `[x]` Resources list view.
 - `[x]` Support does not access SaaS Clients.
-- `[?]` Confirm whether Support should access Admin Hub/team/settings or only operational areas.
+- `[x]` Support stays operational-only and does not access Admin Hub/team/settings.
 
 ### Viewer Sitemap
 
 - `[late]` `[priority: later]` Groups list and detail views.
 - `[x]` Clients list and card views.
 - `[x]` Client calendar view.
-- `[x]` Dashboard / KPI dashboard.
-- `[ ]` `[priority: medium]` Resources list view.
+- `[x]` Dashboard / KPI dashboard in read-only mode; Viewer cannot click KPI/cards or search client names from Dashboard drilldowns.
+- `[x]` Resources list view.
 - `[x]` Viewer is read-only.
 - `[x]` Viewer does not see Quick Update.
 - `[x]` Viewer does not access Tasks, Call AI, CSM Reports, Admin Hub, or SaaS Clients.
@@ -941,7 +951,7 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[x]` SuperAdmin and Director can see AI Insights tab.
 - `[x]` Support and CSM cannot access AI Insights.
 - `[ ]` Real AI Insights generation.
-- `[?]` Confirm whether Support should remain company-wide on KPI dashboard, since matrix only explicitly grants company-wide KPIs to SuperAdmin and Director but separately grants Support dashboard filtering.
+- `[x]` Support remains company-wide on KPI Dashboard and stays excluded from Admin Hub/settings.
 
 ### Tasks
 
@@ -1190,8 +1200,9 @@ The current Glide model starts with Companies. Companies own team members, group
 - `[ ]` Edit Client Details.
 - `[~]` `[polish]` Quick Update write flow.
   - Pilot saves app-owned quick update events without changing mirrored client fields.
-- `[~]` `[polish]` Client Offboarding flow.
-  - Pilot marks app-owned clients as `off-boarded`, saves offboarded date/churn context, and writes history/audit events.
+- `[x]` Client Offboarding flow.
+  - 2026-06-17 audit: current Client Detail UI uses `manage-client-status` to mark app-owned clients as `off-boarded`, save offboarded date/churn context, and write history/audit events; Jay QA passed with Josh Garvey assigned to Ben.
+  - `manage-client-offboard` is legacy unless intentionally revived.
 - `[~]` `[polish]` Client update history view.
   - Pilot view reads `client_history_events`; full Glide-style audit/change log is still future work.
 - `[ ]` Track call attendance.
@@ -1726,7 +1737,11 @@ Use this section as the “what good looks like” checklist before migrating re
 - `[x]` Existing Glide data can be reconciled against RetainOS for a pilot company.
 - `[x]` Ethical Scaling internal pilot is completed before external company migration.
 - `[ ]` Low-volume external SaaS Client pilot is completed after Ethical Scaling.
-- `[ ]` Role access is validated for SuperAdmin, Director, Support, CSM, and Viewer on the full workflow.
+- `[x]` Role access is validated for SuperAdmin, Director, Support, CSM, and Viewer on the full workflow.
+  - 2026-06-17 packet created: `ROLE_ACCESS_VALIDATION_PACKET.md`.
+  - Code audit source: `src/lib/accountContext.tsx`, route/nav gating, major pages, and `supabase/functions/manage-*` authorization paths.
+  - 2026-06-17 Jay decisions applied: Viewer Dashboard is read-only with client drilldowns/search disabled; Support stays operational-only; integration review/tokens exclude Support; RetainOS Help drafts are SuperAdmin-only; Company Resource drafts are visible to Directors.
+  - 2026-06-17 implementation passed `npm run build`; `manage-integration-review` was deployed after narrowing server-side access to SuperAdmin/Director.
 - `[x]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
 - `[x]` Final cutover plan exists for:
   - Data backfill.

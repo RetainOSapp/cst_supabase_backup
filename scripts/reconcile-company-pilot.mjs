@@ -13,7 +13,7 @@ function readArg(name) {
     ?.slice(name.length + 3);
 }
 
-const companyArgument = readArg("company") ?? "Ethical Scaling";
+const companyArgument = readArg("company");
 const companyIdArgument = readArg("company-id");
 const legacyCompanyIdArgument = readArg("legacy-company-id");
 const renewalStartArgument = readArg("renewal-start") ?? readArg("date-range-start");
@@ -267,6 +267,14 @@ async function runQuery(label, queryFactory, attempts = 4) {
 }
 
 async function resolveCompany() {
+  if (!companyArgument && !companyIdArgument && !legacyCompanyIdArgument) {
+    fail("Company selector is required for this generic reconciliation script.", {
+      usage:
+        "npm run pilot:reconcile:company -- --company=\"Company Name\"",
+      selectors: ["--company", "--company-id", "--legacy-company-id"],
+    });
+  }
+
   let query = supabase
     .from("companies")
     .select("id, legacy_glide_row_id, name, migration_status");
@@ -918,7 +926,7 @@ async function main() {
     notes.push(`${clientComparison.appOnlyRows.length} app-owned clients do not exist in the mirror.`);
   }
   if (invalidActiveAssignments.length > 0) {
-    blockers.push(`${invalidActiveAssignments.length} active/pilot clients point to inactive/non-client-managing CSM assignments.`);
+    blockers.push(`${invalidActiveAssignments.length} active clients point to inactive/non-client-managing CSM assignments.`);
   } else if (invalidAssignments.length > 0) {
     notes.push(`${invalidAssignments.length} invalid CSM assignments exist only on non-active clients.`);
   }
@@ -941,7 +949,7 @@ async function main() {
     blockers.push(`${activeClientsWithMissingMilestone.length} active clients reference a milestone missing from active app-owned config.`);
   }
   if (sourceContracts.length > appContracts.length) {
-    notes.push("Mirrored historical contracts are not fully backfilled app-side yet; pilot writes are app-owned from this point forward.");
+    notes.push("Mirrored historical contracts are not fully backfilled app-side yet; RetainOS writes are app-owned from this point forward.");
   }
   if (activeClientsMissingAppContracts.length > 0) {
     notes.push(`${activeClientsMissingAppContracts.length} active clients do not yet have app-owned contract history; current client summaries and/or mirrored contract history still support renewal confidence until historical backfill is applied.`);
@@ -950,7 +958,7 @@ async function main() {
     notes.push(`${activeClientsMissingCurrentRenewalDate.length} active clients do not have a current contract renewal date in the app-owned client summary.`);
   }
   if (sourceClientMilestones.length > appClientMilestones.length) {
-    notes.push("Mirrored historical client milestone records are not fully backfilled app-side yet; pilot progress writes are app-owned from this point forward.");
+    notes.push("Mirrored historical client milestone records are not fully backfilled app-side yet; RetainOS progress writes are app-owned from this point forward.");
   }
 
   console.log(

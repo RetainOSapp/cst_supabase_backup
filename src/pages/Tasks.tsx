@@ -391,7 +391,7 @@ function NewTaskModal({
           <div>
             <h2 className="text-lg font-semibold text-gray-900">New Task</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Creates a RetainOS pilot task. CST preview tasks stay unchanged.
+              Creates a RetainOS task. CST preview tasks stay unchanged.
             </p>
           </div>
           <button
@@ -878,7 +878,7 @@ export function Tasks() {
           <h1 className="text-xl font-semibold text-gray-900">Tasks</h1>
           <p className="mt-1 text-sm text-gray-500">
             {isUsingAppTasks
-              ? "RetainOS pilot task data for this company."
+              ? "RetainOS task data for this company."
               : "Read-only task view mirrored from CST into RetainOS."}
           </p>
         </div>
@@ -1065,7 +1065,7 @@ export function Tasks() {
         <ComingSoonPanel
           compact
           title="Expanded Tasks"
-          description="Task editing, richer assignment workflows, notifications, recurring tasks, and deeper task automation will be added after the pilot."
+          description="Task editing, richer assignment workflows, notifications, recurring tasks, and deeper task automation will be added as the workflow matures."
         />
       </div>
       {newTaskOpen ? (
