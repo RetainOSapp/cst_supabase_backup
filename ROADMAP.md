@@ -483,6 +483,8 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
   - Semi-monthly churn-risk / renewals / RGAs PDF.
   - Weekly CSM Metrics PDF.
 - `[ ]` `[priority: high]` Final migration validation with pilot company.
+  - 2026-06-18 Moves preflight: current mirror snapshot still has 4,143 clients, 2,338 active clients, 6 active unassigned clients, and 9 active invalid CSM assignments; offer/milestone config remains complete and all active clients have renewal/filtering dates.
+  - 2026-06-18 migration tooling: added a generic dry-runnable company write-mode seed script for company, team, clients, offers, milestones, settings defaults, custom fields, outcome/churn defaults, and notification preferences. It is not applied; use only after final paid sync and Jay approval.
 - `[x]` Jay-led final sync and no-turning-back cutover plan.
   - 2026-06-17 product decision: do not plan for a long DIY parallel run. Jay owns the high-touch customer cutover; once the final migration is approved, customers stop using Glide and RetainOS becomes source of truth.
 - `[x]` Post-cutover rollback/emergency support plan.
