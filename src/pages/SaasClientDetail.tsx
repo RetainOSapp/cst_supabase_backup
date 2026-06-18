@@ -139,6 +139,23 @@ interface CompanyCustomFieldRow {
   metadata?: Record<string, unknown> | null;
 }
 
+interface CompanyTaskTemplateRow {
+  id?: string;
+  name: string;
+  description?: string | null;
+  trigger_type: "manual" | "client_created";
+  applies_to_offer_id?: string | null;
+  assign_to_type: "assigned_csm" | "director" | "support" | "specific_member" | "unassigned";
+  assigned_member_legacy_id?: string | null;
+  due_offset_days: number;
+  priority?: string | null;
+  status_value: "todo" | "in-progress" | "waiting" | "done" | "dismissed" | "archived";
+  is_enabled: boolean;
+  position?: number | null;
+  metadata?: Record<string, unknown> | null;
+  archived_at?: string | null;
+}
+
 interface CompanySettingsRow {
   id?: string;
   profile_upkeep_freshness_days: number;
@@ -467,8 +484,8 @@ function NewTeamMemberModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function handleSubmit(event?: FormEvent) {
+    event?.preventDefault();
     if (!canManage) return;
     setSaving(true);
     setError(null);
@@ -736,8 +753,8 @@ function PathwaySetupModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function handleSubmit(event?: FormEvent) {
+    event?.preventDefault();
     setSaving(true);
     setError(null);
     const action = isMilestone
@@ -2639,11 +2656,418 @@ function ReminderTimingInput({
   return null;
 }
 
+function TaskTemplatesModal({
+  companyLegacyId,
+  templates,
+  offers,
+  teamMembers,
+  disabled,
+  onClose,
+  onReload,
+}: {
+  companyLegacyId: string;
+  templates: CompanyTaskTemplateRow[];
+  offers: CompanyOfferRow[];
+  teamMembers: TeamRow[];
+  disabled: boolean;
+  onClose: () => void;
+  onReload: () => void;
+}) {
+  const activeTeamMembers = teamMembers
+    .filter((member) => member.is_archived !== true && member.role_read_only_user !== true)
+    .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+  const [editing, setEditing] = useState<CompanyTaskTemplateRow | null>(null);
+  const [draft, setDraft] = useState<CompanyTaskTemplateRow>(() => ({
+    name: "",
+    description: "",
+    trigger_type: "client_created",
+    applies_to_offer_id: "",
+    assign_to_type: "assigned_csm",
+    assigned_member_legacy_id: "",
+    due_offset_days: 0,
+    priority: "",
+    status_value: "todo",
+    is_enabled: true,
+    position: templates.length * 10,
+  }));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function resetDraft() {
+    setEditing(null);
+    setDraft({
+      name: "",
+      description: "",
+      trigger_type: "client_created",
+      applies_to_offer_id: "",
+      assign_to_type: "assigned_csm",
+      assigned_member_legacy_id: "",
+      due_offset_days: 0,
+      priority: "",
+      status_value: "todo",
+      is_enabled: true,
+      position: templates.length * 10,
+    });
+  }
+
+  function editTemplate(template: CompanyTaskTemplateRow) {
+    setEditing(template);
+    setDraft({
+      ...template,
+      description: template.description ?? "",
+      applies_to_offer_id: template.applies_to_offer_id ?? "",
+      assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
+      priority: template.priority ?? "",
+      position: template.position ?? 0,
+    });
+    setError(null);
+  }
+
+  async function saveTemplate(event: FormEvent) {
+    event.preventDefault();
+    if (disabled || saving) return;
+    setSaving(true);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "upsert_task_template",
+          companyLegacyId,
+          entityId: editing?.id,
+          name: draft.name,
+          description: draft.description,
+          triggerType: draft.trigger_type,
+          appliesToOfferId: draft.applies_to_offer_id || null,
+          assignToType: draft.assign_to_type,
+          assignedMemberLegacyId: draft.assigned_member_legacy_id || null,
+          dueOffsetDays: draft.due_offset_days,
+          priority: draft.priority || null,
+          statusValue: draft.status_value,
+          isEnabled: draft.is_enabled,
+          position: draft.position ?? 0,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError || data?.error) {
+      setError(invokeError?.message ?? data.error);
+      return;
+    }
+    resetDraft();
+    onReload();
+  }
+
+  async function archiveTemplate(template: CompanyTaskTemplateRow) {
+    if (disabled || saving || !template.id) return;
+    const confirmed = window.confirm(`Archive task template "${template.name}"?`);
+    if (!confirmed) return;
+    setSaving(true);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "archive_task_template",
+          companyLegacyId,
+          entityId: template.id,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError || data?.error) {
+      setError(invokeError?.message ?? data.error);
+      return;
+    }
+    if (editing?.id === template.id) resetDraft();
+    onReload();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+      <div className="retainos-modal max-h-[92vh] w-full max-w-5xl overflow-y-auto">
+        <div className="retainos-modal-header sticky top-0 z-10 flex items-start justify-between gap-4 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold text-[#101828]">
+              Task Templates
+            </h2>
+            <p className="mt-1 text-sm text-[#667085]">
+              Configure reusable tasks and new-client auto-create rules.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-[#d0d5dd] px-3 py-1.5 text-sm font-medium text-[#344054] hover:bg-[#f8fafc]"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="grid gap-5 px-6 py-5 lg:grid-cols-[1fr_1.15fr]">
+          <section>
+            <h3 className="text-sm font-semibold text-[#101828]">
+              Active templates
+            </h3>
+            <div className="mt-3 space-y-3">
+              {templates.length === 0 ? (
+                <div className="rounded-md border border-dashed border-[#d9e2ec] bg-[#f8fafc] px-4 py-6 text-sm text-[#667085]">
+                  No task templates yet.
+                </div>
+              ) : (
+                templates.map((template) => (
+                  <div
+                    key={template.id ?? template.name}
+                    className="rounded-md border border-[#e4e9f0] bg-white p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-[#101828]">
+                          {template.name}
+                        </h4>
+                        <p className="mt-1 text-xs text-[#667085]">
+                          {template.trigger_type === "client_created"
+                            ? "Auto-create when a client is added"
+                            : "Manual task template"}{" "}
+                          · due in {template.due_offset_days} day
+                          {template.due_offset_days === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          template.is_enabled
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-50 text-slate-600"
+                        }`}
+                      >
+                        {template.is_enabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editTemplate(template)}
+                        className="rounded-md border border-[#d0d5dd] px-3 py-1.5 text-xs font-semibold text-[#344054] hover:bg-[#f8fafc]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void archiveTemplate(template)}
+                        className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                      >
+                        Archive
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <form onSubmit={saveTemplate} className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-[#101828]">
+                {editing ? "Edit template" : "New template"}
+              </h3>
+              {editing ? (
+                <button
+                  type="button"
+                  onClick={resetDraft}
+                  className="text-xs font-semibold text-[#2f73b8] hover:text-[#1d4f8f]"
+                >
+                  New template
+                </button>
+              ) : null}
+            </div>
+            {error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
+            <label className="block text-sm font-medium text-[#344054]">
+              Template name
+              <input
+                value={draft.name}
+                disabled={disabled || saving}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, name: event.target.value }))
+                }
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+              />
+            </label>
+            <label className="block text-sm font-medium text-[#344054]">
+              Description
+              <textarea
+                value={draft.description ?? ""}
+                disabled={disabled || saving}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    description: event.target.value,
+                  }))
+                }
+                rows={3}
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+              />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <SettingsSelect
+                label="Trigger"
+                value={draft.trigger_type}
+                disabled={disabled || saving}
+                options={[
+                  { value: "client_created", label: "When client is created" },
+                  { value: "manual", label: "Manual template" },
+                ]}
+                onChange={(value) =>
+                  setDraft((current) => ({ ...current, trigger_type: value }))
+                }
+              />
+              <label className="block text-sm font-medium text-[#344054]">
+                Applies to offer
+                <select
+                  disabled={disabled || saving}
+                  value={draft.applies_to_offer_id ?? ""}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      applies_to_offer_id: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                >
+                  <option value="">All offers</option>
+                  {offers.map((offer) => (
+                    <option key={offer.glide_row_id} value={offer.glide_row_id}>
+                      {offer.name ?? "Unnamed offer"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <SettingsSelect
+                label="Assign to"
+                value={draft.assign_to_type}
+                disabled={disabled || saving}
+                options={[
+                  { value: "assigned_csm", label: "Assigned CSM" },
+                  { value: "director", label: "Director" },
+                  { value: "support", label: "Support" },
+                  { value: "specific_member", label: "Specific team member" },
+                  { value: "unassigned", label: "Unassigned" },
+                ]}
+                onChange={(value) =>
+                  setDraft((current) => ({
+                    ...current,
+                    assign_to_type: value,
+                    assigned_member_legacy_id:
+                      value === "specific_member"
+                        ? current.assigned_member_legacy_id
+                        : "",
+                  }))
+                }
+              />
+              <label className="block text-sm font-medium text-[#344054]">
+                Team member
+                <select
+                  disabled={
+                    disabled || saving || draft.assign_to_type !== "specific_member"
+                  }
+                  value={draft.assigned_member_legacy_id ?? ""}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      assigned_member_legacy_id: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                >
+                  <option value="">Choose member</option>
+                  {activeTeamMembers.map((member) => (
+                    <option key={member.glide_row_id} value={member.glide_row_id}>
+                      {member.name ?? member.email ?? "Unnamed member"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-[#344054]">
+                Due after X days
+                <input
+                  type="number"
+                  min="0"
+                  max="365"
+                  disabled={disabled || saving}
+                  value={draft.due_offset_days}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      due_offset_days: Number(event.target.value) || 0,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                />
+              </label>
+              <label className="block text-sm font-medium text-[#344054]">
+                Priority
+                <select
+                  disabled={disabled || saving}
+                  value={draft.priority ?? ""}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      priority: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                >
+                  <option value="">None</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
+            </div>
+            <SettingsFlag
+              label="Template enabled"
+              description="Disabled templates stay saved but do not create tasks."
+              checked={draft.is_enabled}
+              disabled={disabled || saving}
+              onChange={(checked) =>
+                setDraft((current) => ({ ...current, is_enabled: checked }))
+              }
+            />
+            <div className="retainos-modal-footer sticky bottom-0 flex justify-end gap-3 px-0 py-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-[#d0d5dd] px-4 py-2 text-sm font-medium text-[#344054] hover:bg-[#f8fafc]"
+              >
+                Done
+              </button>
+              <button
+                type="submit"
+                disabled={disabled || saving}
+                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {saving ? "Saving..." : editing ? "Save template" : "Create template"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CompanySettingsSetup({
   companyLegacyId,
   source,
   settings,
   notificationPreferences,
+  taskTemplates,
+  taskTemplateOffers,
+  teamMembers,
   integrationEvents,
   integrationEventsLoading,
   integrationClients,
@@ -2657,6 +3081,9 @@ function CompanySettingsSetup({
   source: SettingsSource;
   settings: CompanySettingsRow;
   notificationPreferences: SettingsNotificationPreference[];
+  taskTemplates: CompanyTaskTemplateRow[];
+  taskTemplateOffers: CompanyOfferRow[];
+  teamMembers: TeamRow[];
   integrationEvents: IntegrationIntakeEventRow[];
   integrationEventsLoading: boolean;
   integrationClients: IntegrationReviewClientOption[];
@@ -2673,6 +3100,7 @@ function CompanySettingsSetup({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [taskTemplateModalOpen, setTaskTemplateModalOpen] = useState(false);
   const [eventClientSelections, setEventClientSelections] = useState<
     Record<string, string>
   >({});
@@ -2701,8 +3129,8 @@ function CompanySettingsSetup({
     setSaved(false);
   }, [notificationPreferences]);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function handleSubmit(event?: FormEvent) {
+    event?.preventDefault();
     if (!canManage) return;
     setSaving(true);
     setError(null);
@@ -2860,7 +3288,7 @@ function CompanySettingsSetup({
   const hasOpenIntegrationEvents = integrationEvents.length > 0;
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+    <div className="mt-6 space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <span
@@ -2881,7 +3309,8 @@ function CompanySettingsSetup({
           </p>
         </div>
         <button
-          type="submit"
+          type="button"
+          onClick={() => void handleSubmit()}
           disabled={disabled}
           className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
@@ -3022,6 +3451,64 @@ function CompanySettingsSetup({
       </section>
 
       <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="flex flex-col gap-3 border-b border-[#e4e9f0] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-[#101828]">
+              Task templates and auto-create
+            </h3>
+            <p className="mt-1 text-xs text-[#667085]">
+              Reusable task rules for onboarding and company operating workflows.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setTaskTemplateModalOpen(true)}
+            className="rounded-md border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-semibold text-[#344054] hover:bg-[#f8fafc] disabled:opacity-50"
+          >
+            Manage task templates
+          </button>
+        </div>
+        <div className="grid gap-3 p-4 md:grid-cols-3">
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Templates
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {taskTemplates.length}
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Auto-create
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {
+                taskTemplates.filter(
+                  (template) =>
+                    template.is_enabled &&
+                    template.trigger_type === "client_created",
+                ).length
+              }
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Manual
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {
+                taskTemplates.filter(
+                  (template) =>
+                    template.is_enabled && template.trigger_type === "manual",
+                ).length
+              }
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
         <div className="border-b border-[#e4e9f0] px-5 py-4">
           <h3 className="text-sm font-semibold text-[#101828]">
             Notification and reminder preferences
@@ -3104,6 +3591,18 @@ function CompanySettingsSetup({
           ))}
         </div>
       </section>
+
+      {taskTemplateModalOpen ? (
+        <TaskTemplatesModal
+          companyLegacyId={companyLegacyId}
+          templates={taskTemplates}
+          offers={taskTemplateOffers}
+          teamMembers={teamMembers}
+          disabled={disabled}
+          onClose={() => setTaskTemplateModalOpen(false)}
+          onReload={onReload}
+        />
+      ) : null}
 
       <details
         open={hasOpenIntegrationEvents}
@@ -3562,7 +4061,7 @@ function CompanySettingsSetup({
           client-list column presets remain later migration-hardening work.
         </p>
       </section>
-    </form>
+    </div>
   );
 }
 
@@ -3626,6 +4125,8 @@ export function SaasClientDetail({
   const [integrationTokens, setIntegrationTokens] = useState<IntegrationTokenRow[]>(
     [],
   );
+  const [taskTemplates, setTaskTemplates] = useState<CompanyTaskTemplateRow[]>([]);
+  const [taskTemplateOffers, setTaskTemplateOffers] = useState<CompanyOfferRow[]>([]);
   const [integrationReviewLoading, setIntegrationReviewLoading] = useState(false);
   const [integrationTokensLoading, setIntegrationTokensLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
@@ -4023,6 +4524,8 @@ export function SaasClientDetail({
           integrationResult,
           integrationClientsResult,
           integrationTokensResult,
+          taskTemplatesResult,
+          taskTemplateOffersResult,
         ] = await Promise.all([
           supabase
             .from("company_settings")
@@ -4062,6 +4565,21 @@ export function SaasClientDetail({
                 },
               })
             : Promise.resolve({ data: { tokens: [] }, error: null }),
+          supabase
+            .from("company_task_templates")
+            .select(
+              "id, name, description, trigger_type, applies_to_offer_id, assign_to_type, assigned_member_legacy_id, due_offset_days, priority, status_value, is_enabled, position, metadata, archived_at",
+            )
+            .eq("company_id", appCompany.id)
+            .is("archived_at", null)
+            .order("position", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("company_offers")
+            .select("glide_row_id, name, status")
+            .eq("company_id", appCompany.id)
+            .eq("status", "active")
+            .order("name", { ascending: true }),
         ]);
         if (cancelled) return;
         if (!preferencesResult.error) {
@@ -4114,6 +4632,25 @@ export function SaasClientDetail({
           }
           setIntegrationTokens([]);
         }
+        if (!taskTemplatesResult.error) {
+          setTaskTemplates(
+            (taskTemplatesResult.data ?? []) as CompanyTaskTemplateRow[],
+          );
+        } else {
+          console.error("Failed to load task templates:", taskTemplatesResult.error);
+          setTaskTemplates([]);
+        }
+        if (!taskTemplateOffersResult.error) {
+          setTaskTemplateOffers(
+            (taskTemplateOffersResult.data ?? []) as CompanyOfferRow[],
+          );
+        } else {
+          console.error(
+            "Failed to load task template offers:",
+            taskTemplateOffersResult.error,
+          );
+          setTaskTemplateOffers([]);
+        }
         setIntegrationReviewLoading(false);
         setIntegrationTokensLoading(false);
         if (!settingsResult.error && settingsResult.data) {
@@ -4139,6 +4676,8 @@ export function SaasClientDetail({
       setIntegrationReviewEvents([]);
       setIntegrationReviewClients([]);
       setIntegrationTokens([]);
+      setTaskTemplates([]);
+      setTaskTemplateOffers([]);
       setIntegrationReviewLoading(false);
       setIntegrationTokensLoading(false);
       setSettingsSource("mirror");
@@ -4462,6 +5001,9 @@ export function SaasClientDetail({
             source={settingsSource}
             settings={companySettings}
             notificationPreferences={notificationPreferences}
+            taskTemplates={taskTemplates}
+            taskTemplateOffers={taskTemplateOffers}
+            teamMembers={teamMembers}
             integrationEvents={integrationReviewEvents}
             integrationEventsLoading={integrationReviewLoading}
             integrationClients={integrationReviewClients}

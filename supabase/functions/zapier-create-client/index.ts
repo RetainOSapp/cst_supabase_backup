@@ -73,6 +73,123 @@ function daysBetween(startIso: string | null, endIso: string | null) {
   );
 }
 
+function addDaysIso(value: string | null, days: number) {
+  const base = value ? new Date(value) : new Date();
+  if (Number.isNaN(base.getTime())) return new Date().toISOString();
+  base.setDate(base.getDate() + days);
+  return base.toISOString();
+}
+
+async function resolveTemplateAssignee(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  template: Record<string, unknown>,
+  client: Record<string, unknown>,
+) {
+  const assignToType = String(template.assign_to_type ?? "assigned_csm");
+  if (assignToType === "assigned_csm") {
+    return (client.csm_team_member_id as string | null | undefined) ?? null;
+  }
+  if (assignToType === "specific_member") {
+    return (template.assigned_member_legacy_id as string | null | undefined) ?? null;
+  }
+  if (assignToType === "unassigned") return null;
+  if (assignToType === "director" || assignToType === "support") {
+    const { data, error } = await supabase
+      .from("company_members")
+      .select("legacy_glide_row_id")
+      .eq("company_id", companyId)
+      .eq("role", assignToType)
+      .eq("status", "active")
+      .order("name", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return (data?.legacy_glide_row_id as string | null | undefined) ?? null;
+  }
+  return null;
+}
+
+async function createTasksFromClientTemplates({
+  supabase,
+  company,
+  client,
+  source,
+}: {
+  supabase: ReturnType<typeof createClient>;
+  company: { id: string; legacy_glide_row_id: string | null };
+  client: Record<string, unknown>;
+  source: string;
+}) {
+  const { data: templates, error } = await supabase
+    .from("company_task_templates")
+    .select("*")
+    .eq("company_id", company.id)
+    .eq("trigger_type", "client_created")
+    .eq("is_enabled", true)
+    .is("archived_at", null)
+    .order("position", { ascending: true });
+  if (error) throw error;
+
+  const matchingTemplates = ((templates ?? []) as Record<string, unknown>[]).filter(
+    (template) =>
+      !template.applies_to_offer_id ||
+      template.applies_to_offer_id === client.offer_milestones_current_offer_id,
+  );
+  const createdTasks: Record<string, unknown>[] = [];
+  const taskErrors: string[] = [];
+
+  for (const template of matchingTemplates) {
+    try {
+      const assignedToId = await resolveTemplateAssignee(
+        supabase,
+        company.id,
+        template,
+        client,
+      );
+      const taskName = String(template.name ?? "").trim();
+      if (!taskName) continue;
+      const dueOffsetDays = Number(template.due_offset_days ?? 0);
+      const taskDueDate = addDaysIso(
+        (client.client_age_date_onboarded as string | null | undefined) ?? null,
+        Number.isFinite(dueOffsetDays) ? dueOffsetDays : 0,
+      );
+      const { data: task, error: taskError } = await supabase
+        .from("client_tasks")
+        .insert({
+          company_id: company.id,
+          company_glide_row_id: company.legacy_glide_row_id,
+          glide_row_id: `task_${crypto.randomUUID()}`,
+          client_id: client.glide_row_id,
+          task_name: taskName,
+          task_description: template.description ?? null,
+          task_due_date: taskDueDate,
+          task_last_updated_date: new Date().toISOString(),
+          start_date: new Date().toISOString(),
+          created_by_id: null,
+          assigned_to_id: assignedToId,
+          priority: template.priority ?? null,
+          status_value: template.status_value ?? "todo",
+          metadata: {
+            created_in: source,
+            task_template_id: template.id,
+            task_template_name: template.name,
+          },
+        })
+        .select("*")
+        .single();
+      if (taskError) throw taskError;
+      createdTasks.push(task);
+    } catch (templateError) {
+      taskErrors.push(
+        templateError instanceof Error ? templateError.message : "Task template failed.",
+      );
+    }
+  }
+
+  return { createdTasks, taskErrors };
+}
+
 function getWebhookSecret(req: Request) {
   const bearer = (req.headers.get("Authorization") ?? "").match(/^Bearer\s+(.+)$/i)
     ?.[1];
@@ -571,6 +688,13 @@ Deno.serve(async (req) => {
       contract = data;
     }
 
+    const templateTaskResult = await createTasksFromClientTemplates({
+      supabase,
+      company,
+      client,
+      source: "zapier_create_client_template",
+    });
+
     const { data: event, error: historyError } = await supabase
       .from("client_history_events")
       .insert({
@@ -586,6 +710,8 @@ Deno.serve(async (req) => {
           external_id: externalId,
           auth_mode: authResult.authMode,
           integration_token_prefix: authResult.tokenPrefix,
+          created_template_tasks: templateTaskResult.createdTasks,
+          task_template_errors: templateTaskResult.taskErrors,
         },
       })
       .select("*")
@@ -608,10 +734,19 @@ Deno.serve(async (req) => {
         auth_mode: authResult.authMode,
         integration_token_id: authResult.tokenId,
         integration_token_prefix: authResult.tokenPrefix,
+        created_template_task_count: templateTaskResult.createdTasks.length,
+        task_template_errors: templateTaskResult.taskErrors,
       },
     });
 
-    return jsonResponse({ ok: true, client, event, contract });
+    return jsonResponse({
+      ok: true,
+      client,
+      event,
+      contract,
+      createdTemplateTasks: templateTaskResult.createdTasks,
+      taskTemplateErrors: templateTaskResult.taskErrors,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return jsonResponse({ error: message }, 500);

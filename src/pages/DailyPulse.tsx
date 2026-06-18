@@ -49,13 +49,25 @@ interface HistoryRow {
   created_at: string;
 }
 
+interface PulseTask {
+  glide_row_id: string;
+  client_id: string | null;
+  task_name: string | null;
+  task_due_date: string | null;
+  assigned_to_id: string | null;
+  status_value: string | null;
+  is_manually_archived: boolean | null;
+  archived_at: string | null;
+}
+
 interface PulseItem {
   id: string;
-  client: PulseClient;
+  client?: PulseClient;
   label: string;
   detail: string;
   date?: string | null;
   tone: "blue" | "amber" | "red" | "green" | "slate";
+  href?: string;
 }
 
 interface PulseSection {
@@ -236,6 +248,10 @@ function clientUrl(client: PulseClient) {
   return `/clients/${encodeURIComponent(client.glide_row_id)}`;
 }
 
+function taskUrl() {
+  return "/tasks";
+}
+
 function mostRecentDate(values: Array<string | null | undefined>) {
   return values
     .map(parseDate)
@@ -245,19 +261,21 @@ function mostRecentDate(values: Array<string | null | undefined>) {
 
 function makeItem(
   sectionId: string,
-  client: PulseClient,
+  client: PulseClient | undefined,
   label: string,
   detail: string,
   tone: PulseItem["tone"],
   date?: string | null,
+  href?: string,
 ): PulseItem {
   return {
-    id: `${sectionId}:${client.glide_row_id}:${label}:${date ?? ""}`,
+    id: `${sectionId}:${client?.glide_row_id ?? href ?? "company"}:${label}:${date ?? ""}`,
     client,
     label,
     detail,
     date,
     tone,
+    href,
   };
 }
 
@@ -326,6 +344,7 @@ function outcomeSignalItems({
 
 function buildPulseSections(
   clients: PulseClient[],
+  tasks: PulseTask[],
   latestHistoryByClient: Map<string, string>,
   window: PulseWindow,
   enabledTypes = enabledNotificationTypes([]),
@@ -339,6 +358,7 @@ function buildPulseSections(
   };
   const range = ranges[window];
   const activeClients = clients.filter(isActiveClient);
+  const clientById = new Map(clients.map((client) => [client.glide_row_id, client]));
   const pausedClients = clients.filter(
     (client) => client.program_status_value === "paused",
   );
@@ -362,6 +382,40 @@ function buildPulseSections(
   );
 
   const sections: PulseSection[] = [];
+
+  if (enabledTypes.has("task_due")) {
+    sections.push({
+      id: `tasks-${window}`,
+      title:
+        window === "today"
+          ? "Tasks Due Today"
+          : window === "week"
+            ? "Tasks Due This Week"
+            : "Tasks Due This Month",
+      description: "Open tasks due in the selected operating window.",
+      items: tasks
+        .filter((task) => {
+          const status = String(task.status_value ?? "");
+          if (["done", "completed", "closed", "dismissed", "archived"].includes(status)) {
+            return false;
+          }
+          if (task.is_manually_archived === true || task.archived_at) return false;
+          return isWithin(task.task_due_date, range.start, range.end);
+        })
+        .map((task) => {
+          const client = task.client_id ? clientById.get(task.client_id) : undefined;
+          return makeItem(
+            `tasks-${window}`,
+            client,
+            "Task due",
+            `${task.task_name ?? "Task"} is due ${formatDate(task.task_due_date)}`,
+            isWithin(task.task_due_date, today, addDays(today, 1)) ? "amber" : "blue",
+            task.task_due_date,
+            client ? clientUrl(client) : taskUrl(),
+          );
+        }),
+    });
+  }
 
   if (window === "today" && enabledTypes.has("next_contact_due")) {
     sections.push({
@@ -603,7 +657,7 @@ function buildPulseSections(
       (a, b) =>
         (parseDate(a.date)?.getTime() ?? Number.MAX_SAFE_INTEGER) -
           (parseDate(b.date)?.getTime() ?? Number.MAX_SAFE_INTEGER) ||
-        (a.client.client_name ?? "").localeCompare(b.client.client_name ?? ""),
+        (a.client?.client_name ?? "").localeCompare(b.client?.client_name ?? ""),
     ),
   }));
 }
@@ -677,13 +731,13 @@ function PulseSectionCard({ section }: { section: PulseSection }) {
               {section.items.map((item) => (
                 <Link
                   key={item.id}
-                  to={clientUrl(item.client)}
+                  to={item.href ?? (item.client ? clientUrl(item.client) : taskUrl())}
                   className="retainos-focus rounded-lg border border-[#e2e8f0] bg-[#fbfcfe] p-4 transition hover:-translate-y-0.5 hover:border-[#59abf0] hover:bg-white hover:shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-semibold text-[#162b3e]">
-                        {item.client.client_name ?? "Unnamed client"}
+                        {item.client?.client_name ?? "Company task"}
                       </h3>
                       <p className="mt-1 text-sm text-[#697586]">{item.detail}</p>
                     </div>
@@ -696,9 +750,15 @@ function PulseSectionCard({ section }: { section: PulseSection }) {
                     </span>
                   </div>
                   <div className="mt-4 flex items-center justify-between gap-3">
-                    <ProgramStatusPill value={item.client.program_status_value} />
+                    {item.client ? (
+                      <ProgramStatusPill value={item.client.program_status_value} />
+                    ) : (
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                        Company-level
+                      </span>
+                    )}
                     <span className="text-xs font-semibold text-[#697586]">
-                      Open client
+                      {item.client ? "Open client" : "Open tasks"}
                     </span>
                   </div>
                 </Link>
@@ -719,6 +779,7 @@ export function DailyPulse() {
   const [csmOptions, setCsmOptions] = useState<CsmOption[]>([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [clients, setClients] = useState<PulseClient[]>([]);
+  const [tasks, setTasks] = useState<PulseTask[]>([]);
   const [latestHistoryByClient, setLatestHistoryByClient] = useState(
     new Map<string, string>(),
   );
@@ -817,6 +878,7 @@ export function DailyPulse() {
     async function loadPulseData() {
       if (!effectiveCompanyId) {
         setClients([]);
+        setTasks([]);
         setLatestHistoryByClient(new Map());
         return;
       }
@@ -855,6 +917,29 @@ export function DailyPulse() {
           .filter((client) => client.glide_row_id);
 
         const historyByClient = new Map<string, string>();
+        let taskRows: PulseTask[] = [];
+
+        if (usesAppClients) {
+          let tasksQuery = supabase
+            .from("client_tasks")
+            .select(
+              "glide_row_id, client_id, task_name, task_due_date, assigned_to_id, status_value, is_manually_archived, archived_at",
+            )
+            .eq("company_glide_row_id", effectiveCompanyId)
+            .not("task_due_date", "is", null)
+            .limit(1000);
+
+          if (scopedCsmId) {
+            tasksQuery = tasksQuery.eq("assigned_to_id", scopedCsmId);
+          }
+
+          const { data: tasksData, error: tasksError } = await tasksQuery;
+          if (tasksError) {
+            console.warn("Daily Pulse task data unavailable:", tasksError);
+          } else {
+            taskRows = (tasksData ?? []) as PulseTask[];
+          }
+        }
 
         const clientIds = usesAppClients
           ? mappedClients.map((client) => client.glide_row_id)
@@ -882,12 +967,14 @@ export function DailyPulse() {
 
         if (!cancelled) {
           setClients(mappedClients);
+          setTasks(taskRows);
           setLatestHistoryByClient(historyByClient);
         }
       } catch (loadError) {
         console.error("Failed to load Daily Pulse:", loadError);
         if (!cancelled) {
           setClients([]);
+          setTasks([]);
           setLatestHistoryByClient(new Map());
           setError(
             loadError instanceof Error
@@ -916,12 +1003,13 @@ export function DailyPulse() {
     () =>
       buildPulseSections(
         clients,
+        tasks,
         latestHistoryByClient,
         windowMode,
         enabledTypes,
         notificationPreferences,
       ),
-    [clients, enabledTypes, latestHistoryByClient, notificationPreferences, windowMode],
+    [clients, enabledTypes, latestHistoryByClient, notificationPreferences, tasks, windowMode],
   );
 
   const totalItems = sections.reduce((sum, section) => sum + section.items.length, 0);

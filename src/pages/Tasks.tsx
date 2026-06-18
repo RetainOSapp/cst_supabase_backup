@@ -45,6 +45,21 @@ interface ClientRow {
   client_name: string | null;
   client_image: string | null;
   program_status_value: string | null;
+  csm_team_member_id?: string | null;
+}
+
+interface TaskTemplateRow {
+  id: string;
+  name: string;
+  description: string | null;
+  trigger_type: "manual" | "client_created";
+  applies_to_offer_id: string | null;
+  assign_to_type: "assigned_csm" | "director" | "support" | "specific_member" | "unassigned";
+  assigned_member_legacy_id: string | null;
+  due_offset_days: number;
+  priority: string | null;
+  status_value: TaskStatus;
+  is_enabled: boolean;
 }
 
 const TASKS_CACHE_KEY = "cst.tasksPageState.v1";
@@ -129,7 +144,50 @@ function isOverdue(task: TaskRow) {
   if (isClosedTask(task) || !task.task_due_date) return false;
   const due = new Date(task.task_due_date);
   if (Number.isNaN(due.getTime())) return false;
-  return due.getTime() < Date.now();
+  return startOfLocalDay(due).getTime() < startOfLocalDay().getTime();
+}
+
+function startOfLocalDay(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function daysUntilDue(task: TaskRow) {
+  if (isClosedTask(task) || !task.task_due_date) return null;
+  const due = new Date(task.task_due_date);
+  if (Number.isNaN(due.getTime())) return null;
+  return Math.round(
+    (startOfLocalDay(due).getTime() - startOfLocalDay().getTime()) /
+      86_400_000,
+  );
+}
+
+function isDueSoon(task: TaskRow) {
+  const days = daysUntilDue(task);
+  return days !== null && days >= 0 && days <= 3;
+}
+
+function dueBadge(task: TaskRow) {
+  const days = daysUntilDue(task);
+  if (days === null) return null;
+  if (days < 0) {
+    return {
+      label: "Overdue",
+      className: "border-red-200 bg-red-50 text-red-700",
+    };
+  }
+  if (days === 0) {
+    return {
+      label: "Due today",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+  if (days <= 3) {
+    return {
+      label: `Due in ${days}d`,
+      className: "border-blue-200 bg-blue-50 text-blue-700",
+    };
+  }
+  return null;
 }
 
 function statusClasses(status: unknown) {
@@ -185,6 +243,7 @@ function TaskCard({
   const assignedTo = task.assigned_to_id
     ? (teamMemberNameById.get(task.assigned_to_id) ?? task.assigned_to_id)
     : "Unassigned";
+  const dueSignal = dueBadge(task);
 
   return (
     <article
@@ -215,11 +274,13 @@ function TaskCard({
                 {displayValue(task.priority)}
               </span>
             )}
-            {isOverdue(task) && (
-              <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                Overdue
+            {dueSignal ? (
+              <span
+                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${dueSignal.className}`}
+              >
+                {dueSignal.label}
               </span>
-            )}
+            ) : null}
           </div>
         </div>
         {task.external_link && (
@@ -376,6 +437,7 @@ function NewTaskModal({
   task,
   clients,
   teamMembers,
+  taskTemplates,
   assignedTeamMemberId,
   onClose,
   onSaved,
@@ -384,6 +446,7 @@ function NewTaskModal({
   task?: TaskRow | null;
   clients: ClientRow[];
   teamMembers: TeamMember[];
+  taskTemplates: TaskTemplateRow[];
   assignedTeamMemberId: string;
   onClose: () => void;
   onSaved: (task: TaskRow) => void;
@@ -409,6 +472,30 @@ function NewTaskModal({
     (member) =>
       member.is_archived !== true && member.role_hide_from_csm_list !== true,
   );
+
+  function dateAfterToday(days: number) {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date.toISOString().slice(0, 10);
+  }
+
+  function applyTemplate(templateId: string) {
+    const template = taskTemplates.find((item) => item.id === templateId);
+    if (!template) return;
+    setTaskName(template.name);
+    setTaskDescription(template.description ?? "");
+    setPriority(template.priority ?? "");
+    setStatusValue(taskStatusKey(template.status_value));
+    setTaskDueDate(dateAfterToday(template.due_offset_days));
+    if (template.assign_to_type === "specific_member") {
+      setAssignedToId(template.assigned_member_legacy_id ?? "");
+    } else if (template.assign_to_type === "assigned_csm") {
+      const client = clients.find((row) => row.glide_row_id === clientId);
+      setAssignedToId(client?.csm_team_member_id ?? assignedTeamMemberId ?? "");
+    } else if (template.assign_to_type === "unassigned") {
+      setAssignedToId("");
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -482,6 +569,26 @@ function NewTaskModal({
         </div>
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2">
+            {!isEditing && taskTemplates.length > 0 ? (
+              <label className="block md:col-span-2">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Start From Template
+                </span>
+                <select
+                  defaultValue=""
+                  onChange={(event) => applyTemplate(event.target.value)}
+                  disabled={saving}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                >
+                  <option value="">Choose a task template</option>
+                  {taskTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="block md:col-span-2">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Task Name
@@ -660,6 +767,7 @@ export function Tasks() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [clientById, setClientById] = useState(new Map<string, ClientRow>());
   const [companyClients, setCompanyClients] = useState<ClientRow[]>([]);
+  const [taskTemplates, setTaskTemplates] = useState<TaskTemplateRow[]>([]);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -828,7 +936,7 @@ export function Tasks() {
         : "backup_company_clients";
       const { data, error } = await supabase
         .from(sourceTable)
-        .select("glide_row_id, client_name, client_image, program_status_value")
+        .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
         .eq(
           sourceTable === "clients" ? "company_glide_row_id" : "company_id",
           companyId,
@@ -844,6 +952,49 @@ export function Tasks() {
       }
     }
     void loadCompanyClients();
+    return () => {
+      cancelled = true;
+    };
+  }, [appTaskCompanyIds, companyId]);
+
+  useEffect(() => {
+    if (!companyId || !appTaskCompanyIds.has(companyId)) {
+      setTaskTemplates([]);
+      return;
+    }
+    let cancelled = false;
+    async function loadTaskTemplates() {
+      const { data: appCompany, error: companyError } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("legacy_glide_row_id", companyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+      if (companyError) console.error("Failed to load app company:", companyError);
+      if (!appCompany?.id) {
+        if (!cancelled) setTaskTemplates([]);
+        return;
+      }
+      const { data, error } = await supabase
+        .from("company_task_templates")
+        .select(
+          "id, name, description, trigger_type, applies_to_offer_id, assign_to_type, assigned_member_legacy_id, due_offset_days, priority, status_value, is_enabled",
+        )
+        .eq("company_id", appCompany.id)
+        .eq("trigger_type", "manual")
+        .eq("is_enabled", true)
+        .is("archived_at", null)
+        .order("position", { ascending: true })
+        .order("name", { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load task templates:", error);
+        setTaskTemplates([]);
+      } else {
+        setTaskTemplates((data ?? []) as TaskTemplateRow[]);
+      }
+    }
+    void loadTaskTemplates();
     return () => {
       cancelled = true;
     };
@@ -904,7 +1055,7 @@ export function Tasks() {
       if (clientIds.length > 0) {
         const clientsResult = await supabase
           .from(usesAppTasks ? "clients" : "backup_company_clients")
-          .select("glide_row_id, client_name, client_image, program_status_value")
+          .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
           .in("glide_row_id", clientIds);
         if (!cancelled) {
           if (clientsResult.error)
@@ -1032,6 +1183,7 @@ export function Tasks() {
   }
 
   const overdueCount = tasks.filter(isOverdue).length;
+  const dueSoonCount = tasks.filter(isDueSoon).length;
   const selectedCompanyName =
     companies.find((company) => company.glide_row_id === companyId)?.name ??
     "No company selected";
@@ -1146,7 +1298,7 @@ export function Tasks() {
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
         <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
           <div className="text-xs uppercase tracking-wider text-gray-500">
             Company
@@ -1169,6 +1321,14 @@ export function Tasks() {
           </div>
           <div className="mt-1 text-sm font-semibold text-gray-900">
             {overdueCount.toLocaleString()}
+          </div>
+        </div>
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+          <div className="text-xs uppercase tracking-wider text-gray-500">
+            Due Soon
+          </div>
+          <div className="mt-1 text-sm font-semibold text-gray-900">
+            {dueSoonCount.toLocaleString()}
           </div>
         </div>
       </div>
@@ -1258,6 +1418,7 @@ export function Tasks() {
           companyId={companyId}
           clients={companyClients}
           teamMembers={teamMembers}
+          taskTemplates={taskTemplates}
           assignedTeamMemberId={assignedTeamMemberId}
           onClose={() => setNewTaskOpen(false)}
           onSaved={(task) => {
@@ -1283,6 +1444,7 @@ export function Tasks() {
           task={selectedTask}
           clients={companyClients}
           teamMembers={teamMembers}
+          taskTemplates={taskTemplates}
           assignedTeamMemberId={assignedTeamMemberId}
           onClose={() => setSelectedTask(null)}
           onSaved={(task) => {

@@ -19,6 +19,8 @@ const ACTIONS = new Set([
   "archive_outcome",
   "upsert_churn_reason",
   "archive_churn_reason",
+  "upsert_task_template",
+  "archive_task_template",
 ]);
 const OUTCOME_TYPES = new Set(["success", "progress", "buy_in", "suitable"]);
 const CUSTOM_FIELD_TYPES = new Set([
@@ -35,6 +37,22 @@ const CUSTOM_FIELD_TYPES = new Set([
 const CUSTOM_FIELD_ENTITY_TYPES = new Set(["client", "company_member", "contract"]);
 const CLIENT_VIEWS = new Set(["list", "card", "calendar"]);
 const CALENDAR_MODES = new Set(["month", "week", "day"]);
+const TASK_TEMPLATE_TRIGGERS = new Set(["manual", "client_created"]);
+const TASK_TEMPLATE_ASSIGNEES = new Set([
+  "assigned_csm",
+  "director",
+  "support",
+  "specific_member",
+  "unassigned",
+]);
+const TASK_STATUSES = new Set([
+  "todo",
+  "in-progress",
+  "waiting",
+  "done",
+  "dismissed",
+  "archived",
+]);
 const NOTIFICATION_TYPES = new Set([
   "next_contact_due",
   "renewal_due",
@@ -611,6 +629,159 @@ Deno.serve(async (req) => {
         legacy_glide_row_id: company.legacy_glide_row_id,
         title: action.replaceAll("_", " "),
         summary: `${saved?.label ?? saved?.key ?? "Custom field"} was ${action.replaceAll("_", " ")}.`,
+        before_data: beforeData,
+        after_data: saved,
+      });
+
+      return jsonResponse({ ok: true, item: saved });
+    }
+
+    if (action === "upsert_task_template" || action === "archive_task_template") {
+      const table = "company_task_templates";
+      const entityId = cleanText(body.entityId);
+      let beforeData: Record<string, unknown> | null = null;
+      let saved: Record<string, unknown> | null = null;
+
+      if (action === "archive_task_template") {
+        if (!entityId) return jsonResponse({ error: "Missing task template id." }, 400);
+        const { data: existing, error: existingError } = await supabase
+          .from(table)
+          .select("*")
+          .eq("id", entityId)
+          .eq("company_id", company.id)
+          .maybeSingle();
+        if (existingError) throw existingError;
+        if (!existing) return jsonResponse({ error: "Task template not found." }, 404);
+        beforeData = existing;
+
+        const { data, error } = await supabase
+          .from(table)
+          .update({
+            is_enabled: false,
+            archived_at: new Date().toISOString(),
+          })
+          .eq("id", entityId)
+          .eq("company_id", company.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+        saved = data;
+      } else {
+        const name = cleanText(body.name);
+        if (!name) return jsonResponse({ error: "Template name is required." }, 400);
+
+        const triggerType = cleanText(body.triggerType) || "manual";
+        if (!TASK_TEMPLATE_TRIGGERS.has(triggerType)) {
+          return jsonResponse({ error: "Choose a valid task template trigger." }, 400);
+        }
+
+        const assignToType = cleanText(body.assignToType) || "assigned_csm";
+        if (!TASK_TEMPLATE_ASSIGNEES.has(assignToType)) {
+          return jsonResponse({ error: "Choose a valid task template assignee." }, 400);
+        }
+
+        const statusValue = cleanText(body.statusValue) || "todo";
+        const normalizedStatus =
+          statusValue === "in progress" || statusValue === "in_progress"
+            ? "in-progress"
+            : statusValue;
+        if (!TASK_STATUSES.has(normalizedStatus)) {
+          return jsonResponse({ error: "Choose a valid task template status." }, 400);
+        }
+
+        const assignedMemberLegacyId =
+          assignToType === "specific_member" ? nullableText(body.assignedMemberLegacyId) : null;
+        if (assignToType === "specific_member" && !assignedMemberLegacyId) {
+          return jsonResponse({ error: "Choose a team member for this template." }, 400);
+        }
+        if (assignedMemberLegacyId) {
+          const { data: member, error: memberError } = await supabase
+            .from("company_members")
+            .select("legacy_glide_row_id, status")
+            .eq("company_id", company.id)
+            .eq("legacy_glide_row_id", assignedMemberLegacyId)
+            .maybeSingle();
+          if (memberError) throw memberError;
+          if (!member || member.status !== "active") {
+            return jsonResponse({ error: "Template assignee is not an active team member." }, 400);
+          }
+        }
+
+        const appliesToOfferId = nullableText(body.appliesToOfferId);
+        if (appliesToOfferId) {
+          const { data: offer, error: offerError } = await supabase
+            .from("company_offers")
+            .select("glide_row_id, status")
+            .eq("company_id", company.id)
+            .eq("glide_row_id", appliesToOfferId)
+            .maybeSingle();
+          if (offerError) throw offerError;
+          if (!offer || offer.status !== "active") {
+            return jsonResponse({ error: "Template offer is not active for this company." }, 400);
+          }
+        }
+
+        const payload = {
+          company_id: company.id,
+          name,
+          description: nullableText(body.description),
+          trigger_type: triggerType,
+          applies_to_offer_id: appliesToOfferId,
+          assign_to_type: assignToType,
+          assigned_member_legacy_id: assignedMemberLegacyId,
+          due_offset_days: requiredBoundedInteger(body.dueOffsetDays, 0, 0, 365),
+          priority: nullableText(body.priority),
+          status_value: normalizedStatus,
+          is_enabled: body.isEnabled === false ? false : true,
+          position: optionalInteger(body.position) ?? 0,
+          archived_at: null,
+          metadata: { updated_from: "manage-company-customization" },
+        };
+
+        if (entityId) {
+          const { data: existing, error: existingError } = await supabase
+            .from(table)
+            .select("*")
+            .eq("id", entityId)
+            .eq("company_id", company.id)
+            .maybeSingle();
+          if (existingError) throw existingError;
+          if (!existing) return jsonResponse({ error: "Task template not found." }, 404);
+          beforeData = existing;
+          const { data, error } = await supabase
+            .from(table)
+            .update(payload)
+            .eq("id", entityId)
+            .eq("company_id", company.id)
+            .select("*")
+            .single();
+          if (error) throw error;
+          saved = data;
+        } else {
+          const { data, error } = await supabase
+            .from(table)
+            .insert({
+              ...payload,
+              metadata: { created_from: "manage-company-customization" },
+            })
+            .select("*")
+            .single();
+          if (error) throw error;
+          saved = data;
+        }
+      }
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: `company_customization_${action}`,
+        source: "company_customization_admin",
+        entity_table: table,
+        entity_id: saved?.id ?? null,
+        legacy_glide_row_id: company.legacy_glide_row_id,
+        title: action.replaceAll("_", " "),
+        summary: `${saved?.name ?? "Task template"} was ${action.replaceAll("_", " ")}.`,
         before_data: beforeData,
         after_data: saved,
       });

@@ -35,6 +35,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` 2026-06-17 Client lifecycle/program closeout QA passed with Josh Garvey assigned to Ben; lifecycle controlled-write and offboarding items can be closed.
 - `[x]` Lifecycle closeout promoted the client lifecycle controlled-write and offboarding items to `[x]`; dashboard/CSM/notification proof remains Moves Method migration-day validation.
 - `[x]` Tasks V1.5 QA passed: company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` all work after hard refresh.
+- `[~]` `[qa]` Task Templates + Urgency V1: create a Company Settings task template, create a manual task from that template, create a new client and confirm enabled `client_created` templates auto-create tasks, confirm due/overdue badges on Tasks, and confirm `task_due` appears in Daily Pulse when enabled.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -373,9 +374,12 @@ Next session lock:
 - `[~]` `[polish]` `[priority: low]` CRUD Tasks.
   - New Task v1 creates app-owned `client_tasks` through `manage-client-task`.
   - 2026-06-18 Tasks V1.5 pass adds app-owned task edit, status updates, complete/reopen, dismiss/archive, task detail modal, and native drag/drop board columns. SQL migration for `task_updated` history events was applied and Jay deployed `manage-client-task`.
-  - Jay QA passed company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` after the follow-up `in-progress`/`in_progress` normalization fix. Remaining later gaps: templates/automation, comments, attachments, recurring rules, realtime, richer notifications.
+  - Jay QA passed company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` after the follow-up `in-progress`/`in_progress` normalization fix.
+  - 2026-06-18 Task Templates + Urgency V1 added `company_task_templates`, Company Settings template modal, manual New Task template picker, new-client auto-create hooks in `manage-client-create` and `zapier-create-client`, due today/due soon/overdue board signals, and Daily Pulse `task_due` section. SQL migration applied; `manage-company-customization`, `manage-client-create`, and `zapier-create-client` deployed. Awaiting Jay QA.
+  - Remaining later gaps after this QA: comments, attachments, recurring rules, realtime, richer notifications.
 - `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
-- `[ ]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
+- `[~]` `[qa]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
+  - Due-state board badges and Daily Pulse task_due visibility are implemented and awaiting Jay QA. Email/push/inbox delivery remains future.
 - `[~]` `[polish]` CSM Reports list view and filters.
   - Standalone `/csm-reports` page exists for SuperAdmin, Director, and Support.
   - V1 filters: company, CSM, Today, last 7/14/30 days, and custom date range.
