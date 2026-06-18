@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ProgramStatusPill } from "../lib/clientDisplay.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
@@ -7,6 +7,7 @@ import { ComingSoonPanel } from "../components/ComingSoon.tsx";
 
 type ViewMode = "board" | "list";
 type StatusMode = "open" | "all" | "closed";
+type TaskStatus = "todo" | "in-progress" | "waiting" | "done" | "dismissed" | "archived";
 
 interface Company {
   glide_row_id: string;
@@ -48,6 +49,15 @@ interface ClientRow {
 
 const TASKS_CACHE_KEY = "cst.tasksPageState.v1";
 
+const TASK_STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
+  { value: "todo", label: "To Do" },
+  { value: "in-progress", label: "In Progress" },
+  { value: "waiting", label: "Waiting" },
+  { value: "done", label: "Done" },
+  { value: "dismissed", label: "Dismissed" },
+  { value: "archived", label: "Archived" },
+];
+
 function isPresent(value: unknown) {
   return value !== null && value !== undefined && String(value).trim() !== "";
 }
@@ -85,14 +95,30 @@ function getInitials(name: string | null | undefined) {
 }
 
 function isClosedTask(task: TaskRow) {
-  const status = displayValue(task.status_value).toLowerCase();
+  const status = taskStatusKey(task.status_value);
   return (
     status === "done" ||
-    status === "complete" ||
-    status === "completed" ||
+    status === "dismissed" ||
+    status === "archived" ||
     isPresent(task.completion_date) ||
     task.is_manually_archived === true
   );
+}
+
+function taskStatusKey(value: unknown): TaskStatus {
+  const key = displayValue(value).toLowerCase();
+  if (key === "in progress") return "in-progress";
+  if (key === "complete" || key === "completed") return "done";
+  if (key === "waiting") return "waiting";
+  if (key === "done") return "done";
+  if (key === "dismissed") return "dismissed";
+  if (key === "archived") return "archived";
+  return "todo";
+}
+
+function taskStatusLabel(value: unknown) {
+  const key = taskStatusKey(value);
+  return TASK_STATUS_OPTIONS.find((option) => option.value === key)?.label ?? "To Do";
 }
 
 function isOverdue(task: TaskRow) {
@@ -103,12 +129,16 @@ function isOverdue(task: TaskRow) {
 }
 
 function statusClasses(status: unknown) {
-  const key = displayValue(status).toLowerCase();
-  if (key === "done" || key === "complete" || key === "completed")
+  const key = taskStatusKey(status);
+  if (key === "done")
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (key === "in-progress" || key === "in progress")
+  if (key === "in-progress")
     return "border-blue-200 bg-blue-50 text-blue-700";
-  if (key === "todo" || key === "to do")
+  if (key === "waiting")
+    return "border-purple-200 bg-purple-50 text-purple-700";
+  if (key === "dismissed" || key === "archived")
+    return "border-gray-200 bg-gray-100 text-gray-600";
+  if (key === "todo")
     return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-gray-200 bg-gray-50 text-gray-600";
 }
@@ -133,17 +163,35 @@ function TaskCard({
   task,
   client,
   teamMemberNameById,
+  canManage,
+  isMoving,
+  onClick,
+  onDragStart,
 }: {
   task: TaskRow;
   client: ClientRow | undefined;
   teamMemberNameById: Map<string, string>;
+  canManage: boolean;
+  isMoving: boolean;
+  onClick: () => void;
+  onDragStart: (event: DragEvent<HTMLElement>) => void;
 }) {
   const assignedTo = task.assigned_to_id
     ? (teamMemberNameById.get(task.assigned_to_id) ?? task.assigned_to_id)
     : "Unassigned";
 
   return (
-    <article className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <article
+      draggable={canManage}
+      onDragStart={canManage ? onDragStart : undefined}
+      onClick={onClick}
+      className={`relative rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:border-indigo-200 hover:shadow-md ${canManage ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+    >
+      {isMoving ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/75">
+          <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-indigo-600" />
+        </div>
+      ) : null}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-gray-900">
@@ -153,7 +201,7 @@ function TaskCard({
             <span
               className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClasses(task.status_value)}`}
             >
-              {displayValue(task.status_value)}
+              {taskStatusLabel(task.status_value)}
             </span>
             {isPresent(task.priority) && (
               <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700">
@@ -203,6 +251,7 @@ function TaskCard({
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
         <Link
           to={client ? `/clients/${encodeURIComponent(client.glide_row_id)}` : "#"}
+          onClick={(event) => event.stopPropagation()}
           className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 hover:text-indigo-700"
         >
           {client?.client_image ? (
@@ -230,10 +279,12 @@ function TaskListTable({
   tasks,
   clientById,
   teamMemberNameById,
+  onOpenTask,
 }: {
   tasks: TaskRow[];
   clientById: Map<string, ClientRow>;
   teamMemberNameById: Map<string, string>;
+  onOpenTask: (task: TaskRow) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -258,7 +309,11 @@ function TaskListTable({
               ? clientById.get(task.client_id)
               : undefined;
             return (
-              <tr key={task.glide_row_id}>
+              <tr
+                key={task.glide_row_id}
+                onClick={() => onOpenTask(task)}
+                className="cursor-pointer hover:bg-gray-50"
+              >
                 <td className="max-w-sm px-4 py-3">
                   <div className="text-sm font-medium text-gray-900">
                     {displayValue(task.task_name)}
@@ -285,7 +340,7 @@ function TaskListTable({
                   <span
                     className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClasses(task.status_value)}`}
                   >
-                    {displayValue(task.status_value)}
+                    {taskStatusLabel(task.status_value)}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
@@ -311,27 +366,36 @@ function TaskListTable({
 
 function NewTaskModal({
   companyId,
+  task,
   clients,
   teamMembers,
   assignedTeamMemberId,
   onClose,
-  onCreated,
+  onSaved,
 }: {
   companyId: string;
+  task?: TaskRow | null;
   clients: ClientRow[];
   teamMembers: TeamMember[];
   assignedTeamMemberId: string;
   onClose: () => void;
-  onCreated: (task: TaskRow) => void;
+  onSaved: (task: TaskRow) => void;
 }) {
-  const [taskName, setTaskName] = useState("");
-  const [taskDescription, setTaskDescription] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [assignedToId, setAssignedToId] = useState(assignedTeamMemberId);
-  const [taskDueDate, setTaskDueDate] = useState("");
-  const [priority, setPriority] = useState("");
-  const [statusValue, setStatusValue] = useState("todo");
-  const [externalLink, setExternalLink] = useState("");
+  const isEditing = Boolean(task);
+  const [taskName, setTaskName] = useState(task?.task_name ?? "");
+  const [taskDescription, setTaskDescription] = useState(task?.task_description ?? "");
+  const [clientId, setClientId] = useState(task?.client_id ?? "");
+  const [assignedToId, setAssignedToId] = useState(
+    task?.assigned_to_id ?? assignedTeamMemberId,
+  );
+  const [taskDueDate, setTaskDueDate] = useState(
+    task?.task_due_date ? task.task_due_date.slice(0, 10) : "",
+  );
+  const [priority, setPriority] = useState(task?.priority ?? "");
+  const [statusValue, setStatusValue] = useState<TaskStatus>(
+    taskStatusKey(task?.status_value ?? "todo"),
+  );
+  const [externalLink, setExternalLink] = useState(task?.external_link ?? "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const availableTeamMembers = teamMembers.filter(
@@ -350,6 +414,8 @@ function NewTaskModal({
       {
         body: {
           companyGlideId: companyId,
+          action: isEditing ? "update" : "create",
+          taskId: task?.glide_row_id,
           taskName,
           taskDescription,
           clientId,
@@ -373,7 +439,7 @@ function NewTaskModal({
       return;
     }
     if (data?.task) {
-      onCreated(data.task as TaskRow);
+      onSaved(data.task as TaskRow);
       onClose();
     }
   }
@@ -389,9 +455,13 @@ function NewTaskModal({
       <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">New Task</h2>
+            <h2 className="text-lg font-semibold text-gray-900">
+              {isEditing ? "Task Details" : "New Task"}
+            </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Creates a RetainOS task. CST preview tasks stay unchanged.
+              {isEditing
+                ? "Update task details, assignment, due date, or status."
+                : "Creates a RetainOS task. CST preview tasks stay unchanged."}
             </p>
           </div>
           <button
@@ -499,13 +569,17 @@ function NewTaskModal({
               </span>
               <select
                 value={statusValue}
-                onChange={(event) => setStatusValue(event.target.value)}
+                onChange={(event) =>
+                  setStatusValue(event.target.value as TaskStatus)
+                }
                 disabled={saving}
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
               >
-                <option value="todo">To Do</option>
-                <option value="in-progress">In Progress</option>
-                <option value="done">Done</option>
+                {TASK_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="block">
@@ -539,7 +613,7 @@ function NewTaskModal({
               disabled={saving || !taskName.trim()}
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
-              {saving ? "Creating..." : "Create Task"}
+              {saving ? "Saving..." : isEditing ? "Save Task" : "Create Task"}
             </button>
           </div>
         </form>
@@ -583,13 +657,17 @@ export function Tasks() {
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<TaskRow | null>(null);
+  const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
 
   const assignedTeamMemberId = capabilities.canViewOnlyAssignedClients
     ? teamMemberId
     : "";
   const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
   const isUsingAppTasks = appTaskCompanyIds.has(companyId);
-  const canCreateTask = capabilities.canAccessTasks && Boolean(companyId);
+  const canManageTasks =
+    capabilities.canAccessTasks && Boolean(companyId) && isUsingAppTasks;
 
   const availableTeamMembers = useMemo(
     () =>
@@ -845,26 +923,81 @@ export function Tasks() {
   }, [appTaskCompanyIds, assignedTeamMemberId, companyId, csmId, search, statusMode]);
 
   const columns = useMemo(() => {
-    const todo = tasks.filter(
-      (task) => displayValue(task.status_value).toLowerCase() === "todo",
+    const todo = tasks.filter((task) => taskStatusKey(task.status_value) === "todo");
+    const inProgress = tasks.filter(
+      (task) => taskStatusKey(task.status_value) === "in-progress",
     );
-    const inProgress = tasks.filter((task) =>
-      ["in-progress", "in progress"].includes(
-        displayValue(task.status_value).toLowerCase(),
-      ),
+    const waiting = tasks.filter(
+      (task) => taskStatusKey(task.status_value) === "waiting",
     );
-    const done = tasks.filter(isClosedTask);
-    const other = tasks.filter(
-      (task) =>
-        !todo.includes(task) && !inProgress.includes(task) && !done.includes(task),
+    const done = tasks.filter((task) => taskStatusKey(task.status_value) === "done");
+    const dismissed = tasks.filter((task) =>
+      ["dismissed", "archived"].includes(taskStatusKey(task.status_value)),
     );
     return [
       { key: "todo", label: "To Do", tasks: todo },
       { key: "in-progress", label: "In Progress", tasks: inProgress },
+      { key: "waiting", label: "Waiting", tasks: waiting },
       { key: "done", label: "Done", tasks: done },
-      { key: "other", label: "Other", tasks: other },
-    ].filter((column) => column.tasks.length > 0 || column.key !== "other");
+      { key: "dismissed", label: "Dismissed", tasks: dismissed },
+    ].filter(
+      (column) =>
+        statusMode !== "open" ||
+        !["done", "dismissed"].includes(column.key) ||
+        column.tasks.length > 0,
+    );
   }, [tasks]);
+
+  async function saveTaskUpdate(taskId: string, updates: Record<string, unknown>) {
+    setMovingTaskId(taskId);
+    setTasksError(null);
+    const { data, error } = await supabase.functions.invoke("manage-client-task", {
+      body: {
+        companyGlideId: companyId,
+        action: "update",
+        taskId,
+        ...updates,
+      },
+    });
+    setMovingTaskId(null);
+    if (error || data?.error) {
+      setTasksError(error?.message ?? data?.error ?? "Failed to update task");
+      return null;
+    }
+    if (!data?.task) return null;
+    const updatedTask = data.task as TaskRow;
+    setTasks((current) =>
+      current.map((task) =>
+        task.glide_row_id === updatedTask.glide_row_id ? updatedTask : task,
+      ),
+    );
+    setSelectedTask((current) =>
+      current?.glide_row_id === updatedTask.glide_row_id ? updatedTask : current,
+    );
+    return updatedTask;
+  }
+
+  function handleDragStart(event: DragEvent<HTMLElement>, task: TaskRow) {
+    event.dataTransfer.setData("text/plain", task.glide_row_id);
+    event.dataTransfer.effectAllowed = "move";
+  }
+
+  async function handleDrop(event: DragEvent<HTMLElement>, status: TaskStatus) {
+    event.preventDefault();
+    setDragOverStatus(null);
+    const taskId = event.dataTransfer.getData("text/plain");
+    if (!taskId || !canManageTasks) return;
+    const task = tasks.find((row) => row.glide_row_id === taskId);
+    if (!task || taskStatusKey(task.status_value) === status) return;
+    const previousTasks = tasks;
+    setTasks((current) =>
+      current.map((row) =>
+        row.glide_row_id === taskId ? { ...row, status_value: status } : row,
+      ),
+    );
+    const updated = await saveTaskUpdate(taskId, { statusValue: status });
+    if (!updated) setTasks(previousTasks);
+  }
 
   const overdueCount = tasks.filter(isOverdue).length;
   const selectedCompanyName =
@@ -885,7 +1018,7 @@ export function Tasks() {
         <button
           type="button"
           onClick={() => setNewTaskOpen(true)}
-          disabled={!canCreateTask}
+          disabled={!canManageTasks}
           className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
         >
           New Task
@@ -1029,13 +1162,23 @@ export function Tasks() {
           tasks={tasks}
           clientById={clientById}
           teamMemberNameById={teamMemberNameById}
+          onOpenTask={(task) => {
+            if (canManageTasks) setSelectedTask(task);
+          }}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
           {columns.map((column) => (
             <section
               key={column.key}
-              className="min-h-80 rounded-lg border border-gray-200 bg-gray-50"
+              onDragOver={(event) => {
+                if (!canManageTasks) return;
+                event.preventDefault();
+                setDragOverStatus(column.key as TaskStatus);
+              }}
+              onDragLeave={() => setDragOverStatus(null)}
+              onDrop={(event) => void handleDrop(event, column.key as TaskStatus)}
+              className={`min-h-80 rounded-lg border bg-gray-50 transition ${dragOverStatus === column.key ? "border-indigo-300 bg-indigo-50" : "border-gray-200"}`}
             >
               <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
                 <h2 className="text-sm font-semibold text-gray-800">
@@ -1054,6 +1197,12 @@ export function Tasks() {
                       task.client_id ? clientById.get(task.client_id) : undefined
                     }
                     teamMemberNameById={teamMemberNameById}
+                    canManage={canManageTasks}
+                    isMoving={movingTaskId === task.glide_row_id}
+                    onClick={() => {
+                      if (canManageTasks) setSelectedTask(task);
+                    }}
+                    onDragStart={(event) => handleDragStart(event, task)}
                   />
                 ))}
               </div>
@@ -1061,13 +1210,15 @@ export function Tasks() {
           ))}
         </div>
       )}
-      <div className="mt-6">
-        <ComingSoonPanel
-          compact
-          title="Expanded Tasks"
-          description="Task editing, richer assignment workflows, notifications, recurring tasks, and deeper task automation will be added as the workflow matures."
-        />
-      </div>
+      {!isUsingAppTasks ? (
+        <div className="mt-6">
+          <ComingSoonPanel
+            compact
+            title="Read-only mirrored tasks"
+            description="Task updates are available after this company is migrated into RetainOS app-owned task data."
+          />
+        </div>
+      ) : null}
       {newTaskOpen ? (
         <NewTaskModal
           companyId={companyId}
@@ -1075,7 +1226,7 @@ export function Tasks() {
           teamMembers={teamMembers}
           assignedTeamMemberId={assignedTeamMemberId}
           onClose={() => setNewTaskOpen(false)}
-          onCreated={(task) => {
+          onSaved={(task) => {
             setTasks((current) => [task, ...current]);
             if (task.client_id && !clientById.has(task.client_id)) {
               const client = companyClients.find(
@@ -1089,6 +1240,23 @@ export function Tasks() {
                 });
               }
             }
+          }}
+        />
+      ) : null}
+      {selectedTask ? (
+        <NewTaskModal
+          companyId={companyId}
+          task={selectedTask}
+          clients={companyClients}
+          teamMembers={teamMembers}
+          assignedTeamMemberId={assignedTeamMemberId}
+          onClose={() => setSelectedTask(null)}
+          onSaved={(task) => {
+            setTasks((current) =>
+              current.map((row) =>
+                row.glide_row_id === task.glide_row_id ? task : row,
+              ),
+            );
           }}
         />
       ) : null}

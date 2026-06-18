@@ -371,8 +371,8 @@ Next session lock:
 - `[~]` `[polish]` Task manager board/list exists and now includes New Task v1 for app-owned pilot/migrated companies.
 - `[~]` `[polish]` `[priority: low]` CRUD Tasks.
   - New Task v1 creates app-owned `client_tasks` through `manage-client-task`.
-  - Task update/complete/dismiss is intentionally deferred. It will be needed later, but it is not core to the Ethical Scaling pilot because Ethical Scaling barely uses tasks today.
-  - Remaining later gaps: edit/update status, complete, dismiss/archive, recurring rules, notifications.
+  - 2026-06-18 local Tasks V1.5 pass adds app-owned task edit, status updates, complete/reopen, dismiss/archive, task detail modal, and native drag/drop board columns. SQL migration for `task_updated` history events was applied.
+  - Needs `manage-client-task` Edge Function deploy and Jay QA before closure. Remaining later gaps: templates/automation, comments, attachments, recurring rules, realtime, richer notifications.
 - `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
 - `[ ]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
 - `[~]` `[polish]` CSM Reports list view and filters.
@@ -1209,8 +1209,8 @@ The current Glide model starts with Companies. Companies own team members, group
   - Pilot view reads `client_history_events`; full Glide-style audit/change log is still future work.
 - `[ ]` Track call attendance.
 - `[~]` `[polish]` Task create/edit/complete/dismiss flows.
-  - Partially done. Pilot supports task creation only.
-  - Edit/complete/dismiss should be revisited later, but is not blocking the Ethical Scaling pilot.
+  - 2026-06-18 local Tasks V1.5 pass adds edit/complete/reopen/dismiss/archive/status-drag behavior for app-owned companies.
+  - Needs `manage-client-task` deploy and Jay QA before closure.
 - `[x]` Contract create/edit flow.
   - Create/edit/archive are live locally through `manage-client-contract`.
   - 2026-06-15 Jay QA passed create/edit/archive/delete, Contract tab filters, current-summary display cleanup, and expected duration/date calculation polish after successful Supabase deploys.

@@ -69,11 +69,12 @@ This is the execution path for Moves Method. It exists so we build the migration
 1. Mirror walkthrough phase: keep Moves read-only and mirror-backed. Use RetainOS to gather power-user feedback on workflows, dashboard, CSM Reports, Daily Pulse, resources, client detail, journey, and webhook setup.
 2. Readiness build phase: close workflow gaps in RetainOS while validating against the current CST mirror snapshot. The mirror can be stale here because we are validating structure and behavior, not performing final reconciliation.
 3. Dry readiness phase: run `npm run migration:readiness:moves` and review blockers. Fix config/workflow issues that do not require a fresh Glide sync.
-4. Final sync day: Jay triggers the paid Glide/CST sync only when the team is ready to migrate. Immediately rerun the readiness snapshot against the fresh mirror.
-5. App-owned backfill phase: create/enable the app-owned company and backfill team, clients, contracts, offers, milestones, resources, customization, notification preferences, and integration tokens from the fresh snapshot.
-6. Cutover QA: verify roster counts, active-client counts, CSM assignments, offers/milestones, contracts/renewals, dashboard, CSM Reports, Daily Pulse, resources, client links, and write protections.
-7. Source-of-truth flip: only after Jay/Ben approve, switch Moves from mirror/read-only to RetainOS app-owned write mode.
-8. Customer signoff: run `CLIENT_FACING_MIGRATION_QA_CHECKLIST.md` or Jay's spreadsheet version after RetainOS is live.
+4. Optional temporary Zapier validation phase: 3-5 days before cutover, Jay may enable Moves Zaps to write into RetainOS as validation-only app-owned data while Glide remains the source of truth. Jay can compare Glide and RetainOS side by side during this window. This data is not preserved for final migration.
+5. Final sync day: before the clean migration backfill, wipe any temporary Moves app-owned validation data, then Jay triggers the paid Glide/CST sync only when the team is ready to migrate. Immediately rerun the readiness snapshot against the fresh mirror.
+6. App-owned backfill phase: create/enable the app-owned company and backfill team, clients, contracts, offers, milestones, resources, customization, notification preferences, and integration tokens from the fresh snapshot.
+7. Cutover QA: verify roster counts, active-client counts, CSM assignments, offers/milestones, contracts/renewals, dashboard, CSM Reports, Daily Pulse, resources, client links, and write protections.
+8. Source-of-truth flip: only after Jay/Ben approve, switch Moves from mirror/read-only to RetainOS app-owned write mode.
+9. Customer signoff: run `CLIENT_FACING_MIGRATION_QA_CHECKLIST.md` or Jay's spreadsheet version after RetainOS is live.
 
 Emergency support stance: keep CST/Glide mirror/archive data available for reconciliation and emergency reference until Moves is fully validated in RetainOS. Do not delete mirrored data during migration. Do not plan a long customer parallel run; after Jay calls go-live, Moves operators should work in RetainOS and route issues back to Jay.
 
@@ -84,6 +85,7 @@ Emergency support stance: keep CST/Glide mirror/archive data available for recon
 - [x] Resources structure: RetainOS Help and Company Resources are built. Moves-specific SOPs/resources are customer-owned content that Ben/Moves can add during or after migration, not a RetainOS readiness blocker.
 - [x] Ben handoff: complete through real-time Jay/Ben updates. Ben already understands that Moves remains read-only until final migration and that RetainOS plumbing is being built ahead of cutover.
 - [~] Contract history confidence: final migration-day item. The official company rollout checklist decides whether client-level renewal fields are sufficient or whether historical contract rows need app-owned backfill before cutover.
+- [~] Temporary Zapier validation: optional pre-cutover operating window. If used, RetainOS app-owned data is validation-only and must be wiped before final paid sync/backfill.
 - [~] Final sync gate: final migration-day item. Do not run the paid Glide/CST sync until Jay explicitly calls migration day.
 
 ## Read-Only Protections

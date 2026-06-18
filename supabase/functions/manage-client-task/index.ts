@@ -10,6 +10,14 @@ const CORS_HEADERS = {
 };
 
 const WRITER_ROLES = new Set(["director", "support", "csm"]);
+const ALLOWED_STATUS_VALUES = new Set([
+  "todo",
+  "in-progress",
+  "waiting",
+  "done",
+  "dismissed",
+  "archived",
+]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -52,6 +60,15 @@ function normalizeDate(value: unknown) {
   const date = new Date(text);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString();
+}
+
+function normalizeStatus(value: unknown) {
+  const text = cleanText(value).toLowerCase();
+  if (!text) return null;
+  if (text === "in progress") return "in-progress";
+  if (text === "complete" || text === "completed") return "done";
+  if (!ALLOWED_STATUS_VALUES.has(text)) return null;
+  return text;
 }
 
 async function resolveActor(
@@ -126,11 +143,10 @@ Deno.serve(async (req) => {
 
     const userEmail = normalizeEmail(userData.user.email);
     const body = await req.json().catch(() => ({}));
+    const action = cleanText(body.action) || "create";
     const companyGlideId = cleanText(body.companyGlideId);
-    const taskName = cleanText(body.taskName);
 
     if (!companyGlideId) return jsonResponse({ error: "Missing company." }, 400);
-    if (!taskName) return jsonResponse({ error: "Task name is required." }, 400);
 
     const { data: company, error: companyError } = await supabase
       .from("companies")
@@ -148,6 +164,184 @@ Deno.serve(async (req) => {
     }
 
     const actor = await resolveActor(supabase, userEmail, company.id);
+
+    if (action !== "create") {
+      const taskLegacyId = cleanText(body.taskId);
+      if (!taskLegacyId) return jsonResponse({ error: "Missing task." }, 400);
+
+      const { data: existingTask, error: existingTaskError } = await supabase
+        .from("client_tasks")
+        .select("*")
+        .eq("company_id", company.id)
+        .eq("glide_row_id", taskLegacyId)
+        .maybeSingle();
+      if (existingTaskError) throw existingTaskError;
+      if (!existingTask) return jsonResponse({ error: "Task not found." }, 404);
+
+      if (actor.role === "csm") {
+        const actorOwnsTask =
+          actor.legacyMemberId &&
+          (existingTask.assigned_to_id === actor.legacyMemberId ||
+            existingTask.created_by_id === actor.legacyMemberId);
+        if (!actorOwnsTask) {
+          return jsonResponse(
+            { error: "CSMs can update assigned or created tasks only." },
+            403,
+          );
+        }
+      }
+
+      const nextClientId =
+        body.clientId === undefined
+          ? existingTask.client_id
+          : nullableText(body.clientId);
+      if (nextClientId) {
+        const { data: client, error: clientError } = await supabase
+          .from("clients")
+          .select("glide_row_id, company_id, csm_team_member_id, csm_secondary_assignee_id")
+          .eq("glide_row_id", nextClientId)
+          .eq("company_id", company.id)
+          .maybeSingle();
+        if (clientError) throw clientError;
+        if (!client) return jsonResponse({ error: "Linked client not found." }, 400);
+        if (actor.role === "csm") {
+          const isAssigned =
+            actor.legacyMemberId &&
+            (client.csm_team_member_id === actor.legacyMemberId ||
+              client.csm_secondary_assignee_id === actor.legacyMemberId);
+          if (!isAssigned) {
+            return jsonResponse(
+              { error: "CSMs can link tasks to assigned clients only." },
+              403,
+            );
+          }
+        }
+      }
+
+      const requestedAssigneeId =
+        body.assignedToId === undefined
+          ? existingTask.assigned_to_id
+          : nullableText(body.assignedToId);
+      const assignedToId =
+        actor.role === "csm" ? actor.legacyMemberId : requestedAssigneeId;
+
+      if (assignedToId) {
+        const { data: member, error: memberError } = await supabase
+          .from("company_members")
+          .select("legacy_glide_row_id, status")
+          .eq("company_id", company.id)
+          .eq("legacy_glide_row_id", assignedToId)
+          .maybeSingle();
+        if (memberError) throw memberError;
+        if (!member || member.status !== "active") {
+          return jsonResponse({ error: "Assigned team member is not active." }, 400);
+        }
+      }
+
+      const requestedStatus =
+        body.statusValue === undefined
+          ? existingTask.status_value
+          : normalizeStatus(body.statusValue);
+      if (body.statusValue !== undefined && !requestedStatus) {
+        return jsonResponse({ error: "Invalid task status." }, 400);
+      }
+
+      const now = new Date().toISOString();
+      const updatePayload: Record<string, unknown> = {
+        task_last_updated_date: now,
+      };
+
+      if (body.taskName !== undefined) {
+        const taskName = cleanText(body.taskName);
+        if (!taskName) return jsonResponse({ error: "Task name is required." }, 400);
+        updatePayload.task_name = taskName;
+      }
+      if (body.taskDescription !== undefined) {
+        updatePayload.task_description = nullableText(body.taskDescription);
+      }
+      if (body.clientId !== undefined) updatePayload.client_id = nextClientId;
+      if (body.assignedToId !== undefined || actor.role === "csm") {
+        updatePayload.assigned_to_id = assignedToId;
+      }
+      if (body.taskDueDate !== undefined) {
+        updatePayload.task_due_date = normalizeDate(body.taskDueDate);
+      }
+      if (body.priority !== undefined) {
+        updatePayload.priority = nullableText(body.priority);
+      }
+      if (body.externalLink !== undefined) {
+        updatePayload.external_link = nullableText(body.externalLink);
+      }
+      if (body.statusValue !== undefined) {
+        updatePayload.status_value = requestedStatus;
+        if (requestedStatus === "done") {
+          updatePayload.completion_date = existingTask.completion_date ?? now;
+          updatePayload.is_manually_archived = false;
+          updatePayload.archived_at = null;
+        } else if (requestedStatus === "archived" || requestedStatus === "dismissed") {
+          updatePayload.is_manually_archived = true;
+          updatePayload.archived_at = existingTask.archived_at ?? now;
+          if (!existingTask.completion_date) updatePayload.completion_date = now;
+        } else {
+          updatePayload.completion_date = null;
+          updatePayload.is_manually_archived = false;
+          updatePayload.archived_at = null;
+        }
+      }
+
+      const { data: task, error: taskError } = await supabase
+        .from("client_tasks")
+        .update(updatePayload)
+        .eq("id", existingTask.id)
+        .select("*")
+        .single();
+      if (taskError) throw taskError;
+
+      const { data: event, error: historyError } = await supabase
+        .from("client_history_events")
+        .insert({
+          company_id: company.id,
+          legacy_client_glide_row_id: task.client_id ?? task.glide_row_id,
+          actor_auth_user_id: userData.user.id,
+          actor_member_id: actor.memberId,
+          event_type: "task_updated",
+          source: "task_update",
+          title: `Task updated: ${task.task_name}`,
+          summary: `Updated task ${task.task_name}.`,
+          payload: {
+            actor_role: actor.role,
+            before: existingTask,
+            after: task,
+          },
+        })
+        .select("*")
+        .single();
+      if (historyError) throw historyError;
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "task_updated",
+        source: "task_update",
+        entity_table: "client_tasks",
+        entity_id: task.id,
+        legacy_glide_row_id: task.glide_row_id,
+        title: "Task updated",
+        summary: `Updated task ${task.task_name}.`,
+        before_data: existingTask,
+        after_data: task,
+        metadata: {
+          history_event_id: event.id,
+          actor_role: actor.role,
+        },
+      });
+
+      return jsonResponse({ ok: true, task, event });
+    }
+
+    const taskName = cleanText(body.taskName);
+    if (!taskName) return jsonResponse({ error: "Task name is required." }, 400);
     const clientId = nullableText(body.clientId);
     const requestedAssigneeId = nullableText(body.assignedToId);
     const assignedToId =
@@ -211,7 +405,7 @@ Deno.serve(async (req) => {
       created_by_id: actor.legacyMemberId,
       assigned_to_id: assignedToId,
       priority: nullableText(body.priority),
-      status_value: nullableText(body.statusValue) ?? "todo",
+      status_value: normalizeStatus(body.statusValue) ?? "todo",
       external_link: nullableText(body.externalLink),
       metadata: {
         created_in: "retainos_task_write_pilot",

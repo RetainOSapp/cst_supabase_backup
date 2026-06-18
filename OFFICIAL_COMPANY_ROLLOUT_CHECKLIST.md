@@ -7,6 +7,8 @@ Reusable checklist for migrating one RetainOS customer from CST/Glide mirror mod
 - Migrate one company at a time.
 - Do not trigger the paid CST/Glide sync until Jay explicitly calls final migration day.
 - Before final migration, the company remains read-only or mirror-backed unless Jay says otherwise.
+- Optional pre-cutover webhook validation can run 3-5 days before cutover if Jay approves. During that window, Glide remains the source of truth; RetainOS app-owned data is temporary validation data only.
+- Any temporary app-owned data created before cutover must be wiped before final migration execution. The clean migration must start from the fresh paid CST/Glide sync and backfill from backup tables.
 - On final migration day, pause or lock CST/Glide activity for that company before the last sync so no edits are lost.
 - After cutover, RetainOS app-owned tables become the source of truth.
 - Do not plan a long customer parallel run. Jay owns a high-touch final sync, validation, and go-live decision; after go-live, operators stop using CST/Glide for day-to-day work.
@@ -64,6 +66,7 @@ This file is the internal migration command packet. Use it with the shorter
 | Company customization reviewed | Jay | Outcomes, custom fields, churn reasons, Daily Pulse rules | Not started |
 | Resources structure reviewed | Jay / Ben | RetainOS Help and Company Resources | Not started |
 | Integration needs reviewed | Jay / Codex | New client, client update, call summary, transcript, course completion | Not started |
+| Optional temporary Zapier validation window decided | Jay / Codex | If enabled, RetainOS writes are validation-only for 3-5 days and will be wiped before final migration | Not started |
 | Write-mode blockers listed | Codex | Anything preventing source-of-truth flip | Not started |
 
 ## Phase 2 - Final Sync And Freeze
@@ -78,6 +81,7 @@ Run this phase only when Jay calls final migration day.
 | Roster and assignment anomalies reviewed from fresh data | Codex / Jay | Pass/fail notes | Not started |
 | Contract, milestone, and history anomalies reviewed from fresh data | Codex / Jay | Pass/fail notes | Not started |
 | Contract backfill dry-run reviewed from fresh data | Codex / Jay | Pending count, missing active-client coverage, caveats | Not started |
+| Temporary pre-cutover app-owned validation data wiped | Codex / Jay | Confirm no validation-only RetainOS rows remain before clean backfill | Not started |
 | No new CST/Glide edits made after freeze | Jay / Ben | Operator confirmation | Not started |
 | Customer operators reminded that RetainOS becomes source of truth after go-live | Jay / Ben | Message / meeting note | Not started |
 
