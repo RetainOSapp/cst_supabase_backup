@@ -315,6 +315,10 @@ const programFields: [string, string[]][] = [
     ],
   ],
 ];
+const nextStepsFieldCandidates =
+  programFields.find(([label]) => label === "Next Steps")?.[1] ?? [
+    "next_steps_value",
+  ];
 const outcomeFields: [string, string[]][] = [
   [
     "Success",
@@ -1601,6 +1605,124 @@ function ClientProfileEditModal({
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
               {saving ? "Saving..." : "Save Profile"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ClientNextStepsModal({
+  client,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  onClose: () => void;
+  onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
+}) {
+  const [nextSteps, setNextSteps] = useState(
+    textInputValue(valueFrom(client, nextStepsFieldCandidates)),
+  );
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-quick-update",
+      {
+        body: {
+          clientLegacyId: client.glide_row_id,
+          nextSteps,
+        },
+      },
+    );
+
+    setSaving(false);
+
+    if (error) {
+      setSaveError(await functionErrorMessage(error));
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close next steps editor"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Update Next Steps
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Saves to the client Program section and history.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="px-5 py-5">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Next Steps
+              </span>
+              <textarea
+                value={nextSteps}
+                onChange={(event) => setNextSteps(event.target.value)}
+                rows={8}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900"
+              />
+            </label>
+            {saveError ? (
+              <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !nextSteps.trim()}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Next Steps"}
             </button>
           </div>
         </form>
@@ -4822,6 +4944,7 @@ export function ClientDetail() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
   const [editingProfile, setEditingProfile] = useState(false);
+  const [editingNextSteps, setEditingNextSteps] = useState(false);
   const [editingOutcomes, setEditingOutcomes] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
   const [creatingContract, setCreatingContract] = useState(false);
@@ -5514,6 +5637,27 @@ export function ClientDetail() {
       ) : (
         <>
           <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
+            {activeTab === "program" ? (
+              <div className="mb-4 flex flex-col gap-3 border-b border-[#e4e9f0] pb-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+                    Program
+                  </h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Update the operating notes that CSMs use between check-ins.
+                  </p>
+                </div>
+                {canEditProfile ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditingNextSteps(true)}
+                    className="retainos-button-secondary"
+                  >
+                    Update Next Steps
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             <FieldGrid
               fields={activeFields}
               client={client}
@@ -5531,6 +5675,18 @@ export function ClientDetail() {
           canManageAssignment={canManageAssignment}
           canEditDirectorNotes={capabilities.canViewDirectorNotes}
           onClose={() => setEditingProfile(false)}
+          onSaved={(updatedClient, event) => {
+            setClient(updatedClient);
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
+      {editingNextSteps ? (
+        <ClientNextStepsModal
+          client={client}
+          onClose={() => setEditingNextSteps(false)}
           onSaved={(updatedClient, event) => {
             setClient(updatedClient);
             if (event) {

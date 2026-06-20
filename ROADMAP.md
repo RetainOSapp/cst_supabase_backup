@@ -38,6 +38,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[~]` `[qa]` Task Templates + Urgency V1: create a Company Settings task template, create a manual task from that template, create a new client and confirm enabled `client_created` templates auto-create tasks, confirm due/overdue badges on Tasks, and confirm `task_due` appears in Daily Pulse when enabled.
   - 2026-06-20 QA follow-up: clarified manual templates as New Task presets, auto-created template tasks now append/render client names, and list view now mirrors board status groupings with drag/drop.
   - 2026-06-20 follow-up: assigning a primary CSM now claims open unassigned tasks linked to that client; Tasks modal supports recurring tasks with repeat interval; completing a recurring task creates the next occurrence. Board/list status lanes now use soft RetainOS palette colors.
+- `[~]` `[qa]` Emily pilot feedback: Client Detail > Program now has an inline Update Next Steps action that saves through Quick Update history. QA: update Next Steps from Program tab and confirm Program field plus History both update.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -931,7 +932,9 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[ ]` See client update history.
 - `[ ]` Update dates of last / next contact.
 - `[ ]` Track call attendance.
-- `[ ]` Edit North Star and Next Steps.
+- `[~]` `[qa]` Edit Next Steps directly from Client Detail > Program.
+  - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.
+- `[ ]` `[priority: low]` Edit North Star directly from Client Detail > Program.
 - `[ ]` Create, assign, and update client tasks.
 - `[ ]` View archived tasks in client context.
 - `[x]` Create / update contracts for client.
