@@ -385,6 +385,11 @@ Deno.serve(async (req) => {
     const progressStatus = nullableText(body.progressStatus);
     const buyInStatus = nullableText(body.buyInStatus);
     const notes = nullableText(body.notes);
+    const outcomeUpdateTypes = new Set(
+      Array.isArray(body.outcomeUpdateTypes)
+        ? body.outcomeUpdateTypes.map((item) => cleanText(item)).filter(Boolean)
+        : [],
+    );
     const allowedOutcomes = await loadAllowedOutcomeValues(supabase, company.id);
 
     validateChoice("Success", successStatus, allowedOutcomes.success);
@@ -406,13 +411,22 @@ Deno.serve(async (req) => {
       outcomes_buy_in_for_filtering: buyInStatus,
     };
 
-    if ((client.outcomes_success_value ?? null) !== successStatus) {
+    if (
+      (client.outcomes_success_value ?? null) !== successStatus ||
+      outcomeUpdateTypes.has("success")
+    ) {
       nextOutcomes.outcomes_success_date = successStatus ? now : null;
     }
-    if ((client.outcomes_progress_value ?? null) !== progressStatus) {
+    if (
+      (client.outcomes_progress_value ?? null) !== progressStatus ||
+      outcomeUpdateTypes.has("progress")
+    ) {
       nextOutcomes.outcomes_progress_date = progressStatus ? now : null;
     }
-    if ((client.outcomes_buy_in_value ?? null) !== buyInStatus) {
+    if (
+      (client.outcomes_buy_in_value ?? null) !== buyInStatus ||
+      outcomeUpdateTypes.has("buy_in")
+    ) {
       nextOutcomes.outcomes_buy_in_date = buyInStatus ? now : null;
     }
 
@@ -482,6 +496,7 @@ Deno.serve(async (req) => {
             outcomes_buy_in_value: updatedClient.outcomes_buy_in_value ?? null,
           },
           custom_fields: customFieldUpdates.changes,
+          outcome_update_types: [...outcomeUpdateTypes],
         },
       })
       .select("*")
@@ -505,6 +520,7 @@ Deno.serve(async (req) => {
       metadata: {
         changed_fields: changes,
         custom_fields: customFieldUpdates.changes,
+        outcome_update_types: [...outcomeUpdateTypes],
         history_event_id: event.id,
       },
     });

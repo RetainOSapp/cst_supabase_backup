@@ -2084,16 +2084,11 @@ function ClientOutcomesInlineEditor({
     choices.progress,
   );
   const savedBuyInStatus = coerceOutcomeChoiceValue(currentBuyIn, choices.buyIn);
-  const selectedSuccessStatus =
-    successStatus && successStatus !== savedSuccessStatus ? successStatus : "";
-  const selectedProgressStatus =
-    progressStatus && progressStatus !== savedProgressStatus ? progressStatus : "";
-  const selectedBuyInStatus =
-    buyInStatus && buyInStatus !== savedBuyInStatus ? buyInStatus : "";
+  const successUpdatedAt = valueFrom(client, ["outcomes_success_date"]);
+  const progressUpdatedAt = valueFrom(client, ["outcomes_progress_date"]);
+  const buyInUpdatedAt = valueFrom(client, ["outcomes_buy_in_date"]);
   const hasOutcomeChanges =
-    selectedSuccessStatus !== "" ||
-    selectedProgressStatus !== "" ||
-    selectedBuyInStatus !== "";
+    successStatus !== "" || progressStatus !== "" || buyInStatus !== "";
 
   useEffect(() => {
     setSuccessStatus("");
@@ -2129,9 +2124,14 @@ function ClientOutcomesInlineEditor({
       {
         body: {
           clientLegacyId: client.glide_row_id,
-          successStatus: selectedSuccessStatus || savedSuccessStatus,
-          progressStatus: selectedProgressStatus || savedProgressStatus,
-          buyInStatus: selectedBuyInStatus || savedBuyInStatus,
+          successStatus: successStatus || savedSuccessStatus,
+          progressStatus: progressStatus || savedProgressStatus,
+          buyInStatus: buyInStatus || savedBuyInStatus,
+          outcomeUpdateTypes: [
+            successStatus ? "success" : null,
+            progressStatus ? "progress" : null,
+            buyInStatus ? "buy_in" : null,
+          ].filter(Boolean),
           notes,
           customFields: customFields.map((field) => ({
             id: field.id,
@@ -2168,20 +2168,25 @@ function ClientOutcomesInlineEditor({
     label: string,
     value: string,
     currentValue: string,
+    updatedAt: unknown,
     options: OutcomeChoice[],
     onChange: (value: string) => void,
   ) => {
-    const changeOptions = options.filter((choice) => choice.value !== currentValue);
     return (
       <label className="block rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
-        <span className="mb-3 flex items-center justify-between gap-3">
+        <span className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <span className="text-xs font-semibold uppercase tracking-wider text-[#586273]">
             {label}
           </span>
-          <span className="rounded-full border border-[#dbe3ee] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#364152]">
-            Current:{" "}
-            {options.find((option) => option.value === currentValue)?.label ??
-              "Not set"}
+          <span className="inline-flex items-center gap-2 rounded-full border border-[#dbe3ee] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#364152]">
+            <span>
+              Current:{" "}
+              {options.find((option) => option.value === currentValue)?.label ??
+                "Not set"}
+            </span>
+            <span className="font-medium text-[#6c7684]">
+              {formatDate(updatedAt)}
+            </span>
           </span>
         </span>
         <select
@@ -2191,7 +2196,7 @@ function ClientOutcomesInlineEditor({
           className="w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#162b3e] disabled:bg-[#f1f4f8] disabled:text-[#7b8494]"
         >
           <option value="">No change</option>
-          {changeOptions.map((choice) => (
+          {options.map((choice) => (
             <option key={choice.value} value={choice.value}>
               {choice.label}
             </option>
@@ -2208,6 +2213,7 @@ function ClientOutcomesInlineEditor({
           "Success",
           successStatus,
           savedSuccessStatus,
+          successUpdatedAt,
           choices.success,
           setSuccessStatus,
         )}
@@ -2215,6 +2221,7 @@ function ClientOutcomesInlineEditor({
           "Progress",
           progressStatus,
           savedProgressStatus,
+          progressUpdatedAt,
           choices.progress,
           setProgressStatus,
         )}
@@ -2222,6 +2229,7 @@ function ClientOutcomesInlineEditor({
           "Buy-in",
           buyInStatus,
           savedBuyInStatus,
+          buyInUpdatedAt,
           choices.buyIn,
           setBuyInStatus,
         )}
