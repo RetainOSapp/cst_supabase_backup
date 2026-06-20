@@ -2084,6 +2084,16 @@ function ClientOutcomesInlineEditor({
     choices.progress,
   );
   const savedBuyInStatus = coerceOutcomeChoiceValue(currentBuyIn, choices.buyIn);
+  const selectedSuccessStatus =
+    successStatus && successStatus !== savedSuccessStatus ? successStatus : "";
+  const selectedProgressStatus =
+    progressStatus && progressStatus !== savedProgressStatus ? progressStatus : "";
+  const selectedBuyInStatus =
+    buyInStatus && buyInStatus !== savedBuyInStatus ? buyInStatus : "";
+  const hasOutcomeChanges =
+    selectedSuccessStatus !== "" ||
+    selectedProgressStatus !== "" ||
+    selectedBuyInStatus !== "";
 
   useEffect(() => {
     setSuccessStatus("");
@@ -2101,9 +2111,7 @@ function ClientOutcomesInlineEditor({
   ]);
 
   const hasChanges =
-    successStatus !== "" ||
-    progressStatus !== "" ||
-    buyInStatus !== "" ||
+    hasOutcomeChanges ||
     customFields.some(
       (field) =>
         (customFieldDrafts[field.id] ?? "") !==
@@ -2121,9 +2129,9 @@ function ClientOutcomesInlineEditor({
       {
         body: {
           clientLegacyId: client.glide_row_id,
-          successStatus: successStatus || savedSuccessStatus,
-          progressStatus: progressStatus || savedProgressStatus,
-          buyInStatus: buyInStatus || savedBuyInStatus,
+          successStatus: selectedSuccessStatus || savedSuccessStatus,
+          progressStatus: selectedProgressStatus || savedProgressStatus,
+          buyInStatus: selectedBuyInStatus || savedBuyInStatus,
           notes,
           customFields: customFields.map((field) => ({
             id: field.id,
@@ -2162,33 +2170,36 @@ function ClientOutcomesInlineEditor({
     currentValue: string,
     options: OutcomeChoice[],
     onChange: (value: string) => void,
-  ) => (
-    <label className="block rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
-      <span className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-[#586273]">
-          {label}
+  ) => {
+    const changeOptions = options.filter((choice) => choice.value !== currentValue);
+    return (
+      <label className="block rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
+        <span className="mb-3 flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-[#586273]">
+            {label}
+          </span>
+          <span className="rounded-full border border-[#dbe3ee] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#364152]">
+            Current:{" "}
+            {options.find((option) => option.value === currentValue)?.label ??
+              "Not set"}
+          </span>
         </span>
-        <span className="rounded-full border border-[#dbe3ee] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#364152]">
-          Current:{" "}
-          {options.find((option) => option.value === currentValue)?.label ??
-            "Not set"}
-        </span>
-      </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={!canEdit || saving}
-        className="w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#162b3e] disabled:bg-[#f1f4f8] disabled:text-[#7b8494]"
-      >
-        <option value="">Not set</option>
-        {options.map((choice) => (
-          <option key={choice.value} value={choice.value}>
-            {choice.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+        <select
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={!canEdit || saving}
+          className="w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#162b3e] disabled:bg-[#f1f4f8] disabled:text-[#7b8494]"
+        >
+          <option value="">No change</option>
+          {changeOptions.map((choice) => (
+            <option key={choice.value} value={choice.value}>
+              {choice.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -3307,9 +3318,9 @@ function PathwayChangeModal({
     valueFrom(client, ["offer_milestones_current_milestone_id"]),
     relationLookup,
   );
+  const hasCurrentMilestone = Boolean(currentOfferId && currentMilestoneId);
   const canCompleteCurrentMilestone =
-    Boolean(currentOfferId && currentMilestoneId) &&
-    !isPresent(currentProgress?.completion_date);
+    hasCurrentMilestone && !isPresent(currentProgress?.completion_date);
 
   useEffect(() => {
     setNextStartMilestoneId((current) => current || defaultNextStartMilestoneId);
@@ -3470,47 +3481,37 @@ function PathwayChangeModal({
         </div>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 px-5 py-5">
-            <div className="rounded-lg border border-[#dbe3ee] bg-[#f8fafc] px-4 py-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#586273]">
-                Current pathway / milestone
+            <section className="retainos-section overflow-hidden">
+              <div className="border-b border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
+                <h3 className="retainos-section-title">Pathway progress</h3>
+                <p className="retainos-section-copy mt-1">
+                  Complete the current milestone when the client is ready to advance.
+                </p>
               </div>
-              <p className="mt-1 text-sm font-semibold text-[#162b3e]">
-                {currentOfferName !== "--" || currentMilestoneName !== "--"
-                  ? `${currentOfferName !== "--" ? currentOfferName : "Current pathway"} / ${
-                      currentMilestoneName !== "--"
-                        ? currentMilestoneName
-                        : "No active milestone"
-                    }`
-                  : "No pathway is currently configured for this client."}
-              </p>
-            </div>
-            {canCompleteCurrentMilestone ? (
-              <section className="retainos-section overflow-hidden">
-                <div className="border-b border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
-                  <h3 className="retainos-section-title">Pathway progress</h3>
-                  <p className="retainos-section-copy mt-1">
-                    Complete the current milestone when the client is ready to advance.
-                  </p>
-                </div>
-                <div className="space-y-4 px-4 py-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase text-[#586273]">
-                        Current pathway / milestone
-                      </div>
-                      <p className="mt-1.5 text-sm font-semibold text-[#162b3e]">
-                        {`${currentOfferName || "Current pathway"} / ${displayValue(
-                          currentConfiguredMilestone?.name ?? currentMilestoneName,
-                          relationLookup,
-                        )}`}
-                      </p>
+              <div className="space-y-4 px-4 py-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase text-[#586273]">
+                      Current pathway / milestone
+                    </div>
+                    <p className="mt-1.5 text-sm font-semibold text-[#162b3e]">
+                      {hasCurrentMilestone
+                        ? `${currentOfferName || "Current pathway"} / ${displayValue(
+                            currentConfiguredMilestone?.name ?? currentMilestoneName,
+                            relationLookup,
+                          )}`
+                        : "No current milestone is configured for this client."}
+                    </p>
+                    {hasCurrentMilestone ? (
                       <p className="mt-1 text-xs text-[#6c7684]">
                         Next state:{" "}
                         {nextConfiguredMilestone
                           ? displayValue(nextConfiguredMilestone.name, relationLookup)
                           : "Final milestone completed"}
                       </p>
-                    </div>
+                    ) : null}
+                  </div>
+                  {hasCurrentMilestone ? (
                     <label className="block min-w-[180px]">
                       <span className="retainos-field-label">Completion Date</span>
                       <input
@@ -3520,80 +3521,97 @@ function PathwayChangeModal({
                           setCompletionDate(event.target.value);
                           setNextStartDate((current) => current || event.target.value);
                         }}
-                        disabled={saving}
+                        disabled={saving || !canCompleteCurrentMilestone}
                         className="retainos-input"
                       />
                     </label>
-                  </div>
-                  {startableMilestones.length > 0 ? (
-                    <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
-                      <label className="flex items-start gap-3 text-sm font-semibold text-[#364152]">
-                        <input
-                          type="checkbox"
-                          checked={startAnotherMilestone}
-                          onChange={(event) =>
-                            setStartAnotherMilestone(event.target.checked)
-                          }
-                          disabled={saving}
-                          className="mt-0.5 h-4 w-4 rounded border-[#cbd2dc]"
-                        />
-                        <span>
-                          Start another milestone after completing this one
-                          <span className="mt-1 block text-xs font-normal text-[#6c7684]">
-                            Use the next milestone in line, or choose another active
-                            milestone.
-                          </span>
-                        </span>
-                      </label>
-                      {startAnotherMilestone ? (
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <label className="block">
-                            <span className="retainos-field-label">
-                              Milestone To Start
-                            </span>
-                            <select
-                              value={nextStartMilestoneId}
-                              onChange={(event) =>
-                                setNextStartMilestoneId(event.target.value)
-                              }
-                              disabled={saving}
-                              className="retainos-input"
-                            >
-                              {startableMilestones.map((milestone) => (
-                                <option
-                                  key={milestone.glide_row_id ?? milestone.name ?? "milestone"}
-                                  value={milestone.glide_row_id ?? ""}
-                                >
-                                  {displayValue(milestone.name, relationLookup)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="block">
-                            <span className="retainos-field-label">Start Date</span>
-                            <input
-                              type="date"
-                              value={nextStartDate}
-                              onChange={(event) => setNextStartDate(event.target.value)}
-                              disabled={saving}
-                              className="retainos-input"
-                            />
-                          </label>
-                        </div>
-                      ) : null}
-                    </div>
                   ) : null}
+                </div>
+                {hasCurrentMilestone && startableMilestones.length > 0 ? (
+                  <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
+                    <label className="flex items-start gap-3 text-sm font-semibold text-[#364152]">
+                      <input
+                        type="checkbox"
+                        checked={startAnotherMilestone}
+                        onChange={(event) =>
+                          setStartAnotherMilestone(event.target.checked)
+                        }
+                        disabled={saving || !canCompleteCurrentMilestone}
+                        className="mt-0.5 h-4 w-4 rounded border-[#cbd2dc]"
+                      />
+                      <span>
+                        Start another milestone after completing this one
+                        <span className="mt-1 block text-xs font-normal text-[#6c7684]">
+                          Use the next milestone in line, or choose another active
+                          milestone.
+                        </span>
+                      </span>
+                    </label>
+                    {startAnotherMilestone ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="retainos-field-label">
+                            Milestone To Start
+                          </span>
+                          <select
+                            value={nextStartMilestoneId}
+                            onChange={(event) =>
+                              setNextStartMilestoneId(event.target.value)
+                            }
+                            disabled={saving || !canCompleteCurrentMilestone}
+                            className="retainos-input"
+                          >
+                            {startableMilestones.map((milestone) => (
+                              <option
+                                key={milestone.glide_row_id ?? milestone.name ?? "milestone"}
+                                value={milestone.glide_row_id ?? ""}
+                              >
+                                {displayValue(milestone.name, relationLookup)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="retainos-field-label">Start Date</span>
+                          <input
+                            type="date"
+                            value={nextStartDate}
+                            onChange={(event) => setNextStartDate(event.target.value)}
+                            disabled={saving || !canCompleteCurrentMilestone}
+                            className="retainos-input"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {hasCurrentMilestone ? (
                   <button
                     type="button"
                     onClick={() => void completeCurrentMilestone()}
-                    disabled={saving || !completionDate}
+                    disabled={
+                      saving || !completionDate || !canCompleteCurrentMilestone
+                    }
                     className="rounded-full border border-[#34b389] bg-[#e7f6f0] px-4 py-2 text-sm font-semibold text-[#2a9272] hover:bg-white disabled:opacity-50 cursor-pointer"
                   >
-                    {saving ? "Completing..." : "Complete current milestone"}
+                    {saving
+                      ? "Completing..."
+                      : canCompleteCurrentMilestone
+                        ? "Complete current milestone"
+                        : "Current milestone completed"}
                   </button>
-                </div>
-              </section>
-            ) : null}
+                ) : null}
+              </div>
+            </section>
+            <div className="border-t border-[#e4e9f0] pt-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#586273]">
+                Change active pathway
+              </div>
+              <p className="mt-1 text-sm text-[#6c7684]">
+                Use this only when the client should move to a different pathway or
+                active milestone.
+              </p>
+            </div>
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Pathway
