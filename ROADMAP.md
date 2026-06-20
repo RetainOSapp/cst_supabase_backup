@@ -39,6 +39,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-06-20 QA follow-up: clarified manual templates as New Task presets, auto-created template tasks now append/render client names, and list view now mirrors board status groupings with drag/drop.
   - 2026-06-20 follow-up: assigning a primary CSM now claims open unassigned tasks linked to that client; Tasks modal supports recurring tasks with repeat interval; completing a recurring task creates the next occurrence. Board/list status lanes now use soft RetainOS palette colors.
 - `[~]` `[qa]` Emily pilot feedback: Client Detail > Program now has an inline Update Next Steps action that saves through Quick Update history. QA: update Next Steps from Program tab and confirm Program field plus History both update.
+  - 2026-06-20 QA fix: Program Next Steps modal now passes company id to `manage-client-quick-update`; History tab now has common filter pills and search.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -934,6 +935,7 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[ ]` Track call attendance.
 - `[~]` `[qa]` Edit Next Steps directly from Client Detail > Program.
   - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.
+  - 2026-06-20 QA fix: modal passes `companyLegacyId`; History tab added Contract / Last Contact / Next Steps / Health Scores pills and search.
 - `[ ]` `[priority: low]` Edit North Star directly from Client Detail > Program.
 - `[ ]` Create, assign, and update client tasks.
 - `[ ]` View archived tasks in client context.

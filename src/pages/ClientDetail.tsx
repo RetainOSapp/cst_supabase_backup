@@ -1638,6 +1638,7 @@ function ClientNextStepsModal({
       "manage-client-quick-update",
       {
         body: {
+          companyLegacyId: client.company_glide_row_id ?? client.company_id,
           clientLegacyId: client.glide_row_id,
           nextSteps,
         },
@@ -4823,7 +4824,65 @@ function getHistorySourceLabel(event: ClientHistoryEventRow) {
   return null;
 }
 
+type HistoryFilter = "all" | "contract" | "last_contact" | "next_steps" | "health";
+
+const HISTORY_FILTERS: { key: HistoryFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "contract", label: "Contract" },
+  { key: "last_contact", label: "Last Contact" },
+  { key: "next_steps", label: "Next Steps" },
+  { key: "health", label: "Health Scores" },
+];
+
+function historyEventMatchesFilter(event: ClientHistoryEventRow, filter: HistoryFilter) {
+  if (filter === "all") return true;
+  const haystack = [
+    event.event_type,
+    event.source,
+    event.title,
+    event.summary,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (filter === "contract") return haystack.includes("contract");
+  if (filter === "last_contact") return Boolean(event.last_contact_at);
+  if (filter === "next_steps") return Boolean(event.next_steps);
+  if (filter === "health") {
+    return Boolean(event.success_status || event.progress_status || event.buy_in_status);
+  }
+  return true;
+}
+
+function historyEventMatchesSearch(event: ClientHistoryEventRow, query: string) {
+  const text = query.trim().toLowerCase();
+  if (!text) return true;
+  return [
+    event.title,
+    event.summary,
+    event.notes,
+    event.next_steps,
+    event.success_status,
+    event.progress_status,
+    event.buy_in_status,
+    event.source,
+    event.event_type,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .includes(text);
+}
+
 function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
+  const [activeFilter, setActiveFilter] = useState<HistoryFilter>("all");
+  const [search, setSearch] = useState("");
+  const visibleEvents = events.filter(
+    (event) =>
+      historyEventMatchesFilter(event, activeFilter) &&
+      historyEventMatchesSearch(event, search),
+  );
+
   if (events.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
@@ -4834,7 +4893,44 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
 
   return (
     <div className="space-y-4">
-      {events.map((event) => {
+      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {HISTORY_FILTERS.map((filter) => (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => setActiveFilter(filter.key)}
+                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+                  activeFilter === filter.key
+                    ? "border-[#162b3e] bg-[#162b3e] text-white"
+                    : "border-[#cbd2dc] bg-white text-[#586273] hover:border-[#59abf0] hover:text-[#2b79c4]"
+                }`}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+          <label className="block w-full lg:w-72">
+            <span className="sr-only">Search history</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search history"
+              className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] placeholder:text-[#98a2b3] focus:border-[#59abf0] focus:outline-none focus:ring-1 focus:ring-[#59abf0]"
+            />
+          </label>
+        </div>
+      </div>
+
+      {visibleEvents.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+          No history events match this filter.
+        </div>
+      ) : null}
+
+      {visibleEvents.map((event) => {
         const sourceLabel = getHistorySourceLabel(event);
 
         return (
