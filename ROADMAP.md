@@ -37,6 +37,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Tasks V1.5 QA passed: company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` all work after hard refresh.
 - `[~]` `[qa]` Task Templates + Urgency V1: create a Company Settings task template, create a manual task from that template, create a new client and confirm enabled `client_created` templates auto-create tasks, confirm due/overdue badges on Tasks, and confirm `task_due` appears in Daily Pulse when enabled.
   - 2026-06-20 QA follow-up: clarified manual templates as New Task presets, auto-created template tasks now append/render client names, and list view now mirrors board status groupings with drag/drop.
+  - 2026-06-20 follow-up: assigning a primary CSM now claims open unassigned tasks linked to that client; Tasks modal supports recurring tasks with repeat interval; completing a recurring task creates the next occurrence. Board/list status lanes now use soft RetainOS palette colors.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -378,6 +379,7 @@ Next session lock:
   - Jay QA passed company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` after the follow-up `in-progress`/`in_progress` normalization fix.
   - 2026-06-18 Task Templates + Urgency V1 added `company_task_templates`, Company Settings template modal, manual New Task template picker, new-client auto-create hooks in `manage-client-create` and `zapier-create-client`, due today/due soon/overdue board signals, and Daily Pulse `task_due` section. SQL migration applied; `manage-company-customization`, `manage-client-create`, and `zapier-create-client` deployed. Awaiting Jay QA.
   - 2026-06-20 QA follow-up deployed `manage-client-create` and `zapier-create-client` again so auto-created task names render `{client_name}` / `{client}` or append the client name by default. Tasks list view now groups by status and supports drag/drop like board view.
+  - 2026-06-20 automation/recurring follow-up deployed `manage-client-task` and `manage-client-profile`: client CSM assignment claims open unassigned client tasks, and recurring tasks create the next occurrence when completed. Tasks board/list got soft status lane colors from the RetainOS palette.
   - Remaining later gaps after this QA: comments, attachments, recurring rules, realtime, richer notifications.
 - `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
 - `[~]` `[qa]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.

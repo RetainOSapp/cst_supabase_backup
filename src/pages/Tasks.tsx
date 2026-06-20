@@ -190,6 +190,17 @@ function dueBadge(task: TaskRow) {
   return null;
 }
 
+function taskMetadata(task: TaskRow | null | undefined) {
+  return task?.metadata && typeof task.metadata === "object" && !Array.isArray(task.metadata)
+    ? (task.metadata as Record<string, unknown>)
+    : {};
+}
+
+function getRecurringIntervalDays(task: TaskRow | null | undefined) {
+  const days = Number(taskMetadata(task).recurring_interval_days ?? 7);
+  return Number.isFinite(days) ? Math.min(365, Math.max(1, Math.round(days))) : 7;
+}
+
 function statusClasses(status: unknown) {
   const key = taskStatusKey(status);
   if (key === "done")
@@ -203,6 +214,36 @@ function statusClasses(status: unknown) {
   if (key === "todo")
     return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-gray-200 bg-gray-50 text-gray-600";
+}
+
+function statusSurfaceClasses(status: unknown) {
+  const key = taskStatusKey(status);
+  if (key === "todo")
+    return "border-[#E0922F]/30 bg-[#FCF3E6]/55";
+  if (key === "in-progress")
+    return "border-[#CBD2DC]/80 bg-[#F1F4F9]/70";
+  if (key === "waiting")
+    return "border-[#E0922F]/35 bg-[#FCF3E6]/75";
+  if (key === "done")
+    return "border-[#34B389]/30 bg-[#E7F6F0]/65";
+  if (key === "dismissed" || key === "archived")
+    return "border-[#586273]/25 bg-[#232932]/[0.06]";
+  return "border-gray-200 bg-gray-50";
+}
+
+function statusHeaderClasses(status: unknown) {
+  const key = taskStatusKey(status);
+  if (key === "todo")
+    return "border-[#E0922F]/20 bg-[#FCF3E6]/75 text-[#7a4a14]";
+  if (key === "in-progress")
+    return "border-[#CBD2DC]/70 bg-[#F7F9FC] text-[#3C4450]";
+  if (key === "waiting")
+    return "border-[#E0922F]/25 bg-[#FCF3E6] text-[#7a4a14]";
+  if (key === "done")
+    return "border-[#34B389]/25 bg-[#E7F6F0] text-[#2A9272]";
+  if (key === "dismissed" || key === "archived")
+    return "border-[#586273]/20 bg-[#232932]/[0.08] text-[#3C4450]";
+  return "border-gray-200 bg-gray-50 text-gray-800";
 }
 
 function readTasksCache() {
@@ -279,6 +320,11 @@ function TaskCard({
                 className={`rounded-full border px-2 py-0.5 text-xs font-medium ${dueSignal.className}`}
               >
                 {dueSignal.label}
+              </span>
+            ) : null}
+            {task.recurring_is_recurring === true ? (
+              <span className="rounded-full border border-[#CBD2DC] bg-[#F7F9FC] px-2 py-0.5 text-xs font-medium text-[#586273]">
+                Recurring
               </span>
             ) : null}
           </div>
@@ -426,6 +472,11 @@ function TaskListTable({
                   >
                     {taskStatusLabel(task.status_value)}
                   </span>
+                  {task.recurring_is_recurring === true ? (
+                    <span className="ml-2 rounded-full border border-[#CBD2DC] bg-[#F7F9FC] px-2 py-0.5 text-xs font-medium text-[#586273]">
+                      Recurring
+                    </span>
+                  ) : null}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
                   {displayValue(task.priority)}
@@ -491,6 +542,12 @@ function NewTaskModal({
     taskStatusKey(task?.status_value ?? "todo"),
   );
   const [externalLink, setExternalLink] = useState(task?.external_link ?? "");
+  const [recurringIsRecurring, setRecurringIsRecurring] = useState(
+    task?.recurring_is_recurring === true,
+  );
+  const [recurringIntervalDays, setRecurringIntervalDays] = useState(
+    getRecurringIntervalDays(task),
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const availableTeamMembers = teamMembers.filter(
@@ -512,6 +569,7 @@ function NewTaskModal({
     setPriority(template.priority ?? "");
     setStatusValue(taskStatusKey(template.status_value));
     setTaskDueDate(dateAfterToday(template.due_offset_days));
+    setRecurringIsRecurring(false);
     if (template.assign_to_type === "specific_member") {
       setAssignedToId(template.assigned_member_legacy_id ?? "");
     } else if (template.assign_to_type === "assigned_csm") {
@@ -543,6 +601,8 @@ function NewTaskModal({
           priority,
           statusValue,
           externalLink,
+          recurringIsRecurring,
+          recurringIntervalDays,
         },
       },
     );
@@ -732,6 +792,39 @@ function NewTaskModal({
                 placeholder="Optional"
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
               />
+            </label>
+            <label className="flex items-start gap-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-3 md:col-span-2">
+              <input
+                type="checkbox"
+                checked={recurringIsRecurring}
+                onChange={(event) => setRecurringIsRecurring(event.target.checked)}
+                disabled={saving}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-gray-900">
+                  Recurring task
+                </span>
+                <span className="mt-1 block text-xs text-gray-500">
+                  When this task is completed, RetainOS creates the next one.
+                </span>
+              </span>
+              <span className="w-36">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Every days
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={recurringIntervalDays}
+                  onChange={(event) =>
+                    setRecurringIntervalDays(Number(event.target.value) || 7)
+                  }
+                  disabled={saving || !recurringIsRecurring}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
+                />
+              </span>
             </label>
             {saveError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">
@@ -1150,9 +1243,12 @@ export function Tasks() {
     if (!data?.task) return null;
     const updatedTask = data.task as TaskRow;
     setTasks((current) =>
-      current.map((task) =>
-        task.glide_row_id === updatedTask.glide_row_id ? updatedTask : task,
-      ),
+      [
+        ...current.map((task) =>
+          task.glide_row_id === updatedTask.glide_row_id ? updatedTask : task,
+        ),
+        ...(data.nextTask ? [data.nextTask as TaskRow] : []),
+      ],
     );
     setSelectedTask((current) =>
       current?.glide_row_id === updatedTask.glide_row_id ? updatedTask : current,
@@ -1390,11 +1486,15 @@ export function Tasks() {
               className={`rounded-lg border transition ${
                 dragOverStatus === column.key
                   ? "border-indigo-300 bg-indigo-50"
-                  : "border-gray-200 bg-white"
+                  : statusSurfaceClasses(column.key)
               }`}
             >
-              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-                <h2 className="text-sm font-semibold text-gray-800">
+              <div
+                className={`flex items-center justify-between border-b px-4 py-3 ${statusHeaderClasses(
+                  column.key,
+                )}`}
+              >
+                <h2 className="text-sm font-semibold">
                   {column.label}
                 </h2>
                 <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -1435,10 +1535,18 @@ export function Tasks() {
               }}
               onDragLeave={() => setDragOverStatus(null)}
               onDrop={(event) => void handleDrop(event, column.key as TaskStatus)}
-              className={`min-h-80 rounded-lg border bg-gray-50 transition ${dragOverStatus === column.key ? "border-indigo-300 bg-indigo-50" : "border-gray-200"}`}
+              className={`min-h-80 rounded-lg border transition ${
+                dragOverStatus === column.key
+                  ? "border-indigo-300 bg-indigo-50"
+                  : statusSurfaceClasses(column.key)
+              }`}
             >
-              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-                <h2 className="text-sm font-semibold text-gray-800">
+              <div
+                className={`flex items-center justify-between border-b px-4 py-3 ${statusHeaderClasses(
+                  column.key,
+                )}`}
+              >
+                <h2 className="text-sm font-semibold">
                   {column.label}
                 </h2>
                 <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-600">

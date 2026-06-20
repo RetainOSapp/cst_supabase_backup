@@ -91,6 +91,29 @@ function changedFields(
   });
 }
 
+async function claimUnassignedClientTasks(
+  supabase: ReturnType<typeof createClient>,
+  client: Record<string, unknown>,
+  assignedCsmId: string | null,
+) {
+  if (!assignedCsmId) return { claimedTasks: [] as Record<string, unknown>[] };
+  const { data, error } = await supabase
+    .from("client_tasks")
+    .update({
+      assigned_to_id: assignedCsmId,
+      task_last_updated_date: new Date().toISOString(),
+    })
+    .eq("company_id", client.company_id)
+    .eq("client_id", client.glide_row_id)
+    .is("assigned_to_id", null)
+    .is("archived_at", null)
+    .eq("is_manually_archived", false)
+    .not("status_value", "in", '("done","completed","closed","dismissed","archived")')
+    .select("id, glide_row_id, task_name, assigned_to_id");
+  if (error) throw error;
+  return { claimedTasks: (data ?? []) as Record<string, unknown>[] };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -245,6 +268,13 @@ Deno.serve(async (req) => {
     if (updateError) throw updateError;
 
     const assignmentChanged = changes.includes("csm_team_member_id");
+    const claimResult = assignmentChanged
+      ? await claimUnassignedClientTasks(
+          supabase,
+          updatedClient,
+          (updatedClient.csm_team_member_id as string | null | undefined) ?? null,
+        )
+      : { claimedTasks: [] as Record<string, unknown>[] };
     const readableChanges = changes
       .filter((field) => field !== "csm_team_member_id")
       .map((field) => field.replaceAll("_", " "));
@@ -254,6 +284,13 @@ Deno.serve(async (req) => {
           ? `Primary CSM assigned to ${assignmentName}`
           : "Primary CSM unassigned",
       );
+      if (claimResult.claimedTasks.length > 0) {
+        readableChanges.push(
+          `${claimResult.claimedTasks.length} unassigned client task${
+            claimResult.claimedTasks.length === 1 ? "" : "s"
+          } claimed`,
+        );
+      }
     }
 
     const { data: event, error: historyError } = await supabase
@@ -272,6 +309,7 @@ Deno.serve(async (req) => {
           changed_fields: changes,
           before: client,
           after: updatedClient,
+          claimed_tasks: claimResult.claimedTasks,
         },
       })
       .select("*")
@@ -295,10 +333,16 @@ Deno.serve(async (req) => {
       metadata: {
         changed_fields: changes,
         history_event_id: event.id,
+        claimed_task_count: claimResult.claimedTasks.length,
       },
     });
 
-    return jsonResponse({ ok: true, client: updatedClient, event });
+    return jsonResponse({
+      ok: true,
+      client: updatedClient,
+      event,
+      claimedTasks: claimResult.claimedTasks,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return jsonResponse({ error: message }, 500);

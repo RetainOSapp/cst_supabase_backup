@@ -62,6 +62,26 @@ function normalizeDate(value: unknown) {
   return date.toISOString();
 }
 
+function addDaysIso(value: unknown, days: number) {
+  const date = value ? new Date(String(value)) : new Date();
+  if (Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
+function optionalBoundedInteger(value: unknown, fallback: number, min: number, max: number) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+function taskMetadata(task: Record<string, unknown>) {
+  return task.metadata && typeof task.metadata === "object" && !Array.isArray(task.metadata)
+    ? { ...(task.metadata as Record<string, unknown>) }
+    : {};
+}
+
 function normalizeStatus(value: unknown) {
   const text = cleanText(value).toLowerCase();
   if (!text) return null;
@@ -272,6 +292,22 @@ Deno.serve(async (req) => {
       if (body.externalLink !== undefined) {
         updatePayload.external_link = nullableText(body.externalLink);
       }
+      if (
+        body.recurringIsRecurring !== undefined ||
+        body.recurringIntervalDays !== undefined
+      ) {
+        const intervalDays = optionalBoundedInteger(
+          body.recurringIntervalDays,
+          Number(taskMetadata(existingTask).recurring_interval_days ?? 7),
+          1,
+          365,
+        );
+        updatePayload.recurring_is_recurring = Boolean(body.recurringIsRecurring);
+        updatePayload.metadata = {
+          ...taskMetadata(existingTask),
+          recurring_interval_days: intervalDays,
+        };
+      }
       if (body.statusValue !== undefined) {
         updatePayload.status_value = requestedStatus;
         if (requestedStatus === "done") {
@@ -296,6 +332,54 @@ Deno.serve(async (req) => {
         .select("*")
         .single();
       if (taskError) throw taskError;
+
+      let nextTask = null;
+      const recurringMeta = taskMetadata(task);
+      const shouldCreateNextRecurringTask =
+        requestedStatus === "done" &&
+        existingTask.completion_date === null &&
+        task.recurring_is_recurring === true &&
+        task.task_due_date;
+      if (shouldCreateNextRecurringTask) {
+        const intervalDays = optionalBoundedInteger(
+          recurringMeta.recurring_interval_days,
+          7,
+          1,
+          365,
+        );
+        const nextDueDate = addDaysIso(task.task_due_date, intervalDays);
+        if (nextDueDate) {
+          const { data: createdNextTask, error: nextTaskError } = await supabase
+            .from("client_tasks")
+            .insert({
+              company_id: task.company_id,
+              company_glide_row_id: task.company_glide_row_id,
+              glide_row_id: `task_${crypto.randomUUID()}`,
+              client_id: task.client_id,
+              task_name: task.task_name,
+              task_description: task.task_description,
+              task_due_date: nextDueDate,
+              task_last_updated_date: now,
+              start_date: now,
+              recurring_is_recurring: true,
+              created_by_id: actor.legacyMemberId,
+              assigned_to_id: task.assigned_to_id,
+              priority: task.priority,
+              status_value: "todo",
+              external_link: task.external_link,
+              metadata: {
+                ...recurringMeta,
+                recurring_interval_days: intervalDays,
+                recurring_parent_task_id: task.glide_row_id,
+                created_in: "recurring_task_completion",
+              },
+            })
+            .select("*")
+            .single();
+          if (nextTaskError) throw nextTaskError;
+          nextTask = createdNextTask;
+        }
+      }
 
       const { data: event, error: historyError } = await supabase
         .from("client_history_events")
@@ -337,7 +421,7 @@ Deno.serve(async (req) => {
         },
       });
 
-      return jsonResponse({ ok: true, task, event });
+      return jsonResponse({ ok: true, task, event, nextTask });
     }
 
     const taskName = cleanText(body.taskName);
@@ -402,6 +486,7 @@ Deno.serve(async (req) => {
       task_due_date: normalizeDate(body.taskDueDate),
       task_last_updated_date: now,
       start_date: now,
+      recurring_is_recurring: Boolean(body.recurringIsRecurring),
       created_by_id: actor.legacyMemberId,
       assigned_to_id: assignedToId,
       priority: nullableText(body.priority),
@@ -410,6 +495,12 @@ Deno.serve(async (req) => {
       metadata: {
         created_in: "retainos_task_write_pilot",
         actor_role: actor.role,
+        recurring_interval_days: optionalBoundedInteger(
+          body.recurringIntervalDays,
+          7,
+          1,
+          365,
+        ),
       },
     };
 
