@@ -2054,9 +2054,9 @@ function ClientOutcomesInlineEditor({
       "buy_in_status",
     ]),
   );
-  const [successStatus, setSuccessStatus] = useState(currentSuccess);
-  const [progressStatus, setProgressStatus] = useState(currentProgress);
-  const [buyInStatus, setBuyInStatus] = useState(currentBuyIn);
+  const [successStatus, setSuccessStatus] = useState("");
+  const [progressStatus, setProgressStatus] = useState("");
+  const [buyInStatus, setBuyInStatus] = useState("");
   const [notes, setNotes] = useState("");
   const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>(
     () => customFieldDraftsFromValues(customFields, customFieldValues, client),
@@ -2070,9 +2070,9 @@ function ClientOutcomesInlineEditor({
   );
 
   useEffect(() => {
-    setSuccessStatus(currentSuccess);
-    setProgressStatus(currentProgress);
-    setBuyInStatus(currentBuyIn);
+    setSuccessStatus("");
+    setProgressStatus("");
+    setBuyInStatus("");
     setCustomFieldDrafts(currentCustomFieldDrafts);
     setNotes("");
     setSaveError(null);
@@ -2085,9 +2085,9 @@ function ClientOutcomesInlineEditor({
   ]);
 
   const hasChanges =
-    successStatus !== currentSuccess ||
-    progressStatus !== currentProgress ||
-    buyInStatus !== currentBuyIn ||
+    successStatus !== "" ||
+    progressStatus !== "" ||
+    buyInStatus !== "" ||
     customFields.some(
       (field) =>
         (customFieldDrafts[field.id] ?? "") !==
@@ -2105,9 +2105,9 @@ function ClientOutcomesInlineEditor({
       {
         body: {
           clientLegacyId: client.glide_row_id,
-          successStatus,
-          progressStatus,
-          buyInStatus,
+          successStatus: successStatus || currentSuccess,
+          progressStatus: progressStatus || currentProgress,
+          buyInStatus: buyInStatus || currentBuyIn,
           notes,
           customFields: customFields.map((field) => ({
             id: field.id,
@@ -2133,6 +2133,9 @@ function ClientOutcomesInlineEditor({
         (data.event as ClientHistoryEventRow | undefined) ?? null,
         (data.customFields as CustomFieldChange[] | undefined) ?? [],
       );
+      setSuccessStatus("");
+      setProgressStatus("");
+      setBuyInStatus("");
       setNotes("");
     }
   }
@@ -2140,6 +2143,7 @@ function ClientOutcomesInlineEditor({
   const renderSelect = (
     label: string,
     value: string,
+    currentValue: string,
     options: OutcomeChoice[],
     onChange: (value: string) => void,
   ) => (
@@ -2149,7 +2153,9 @@ function ClientOutcomesInlineEditor({
           {label}
         </span>
         <span className="rounded-full border border-[#dbe3ee] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#364152]">
-          Current: {options.find((option) => option.value === value)?.label ?? "Not set"}
+          Current:{" "}
+          {options.find((option) => option.value === currentValue)?.label ??
+            "Not set"}
         </span>
       </span>
       <select
@@ -2171,9 +2177,27 @@ function ClientOutcomesInlineEditor({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {renderSelect("Success", successStatus, choices.success, setSuccessStatus)}
-        {renderSelect("Progress", progressStatus, choices.progress, setProgressStatus)}
-        {renderSelect("Buy-in", buyInStatus, choices.buyIn, setBuyInStatus)}
+        {renderSelect(
+          "Success",
+          successStatus,
+          currentSuccess,
+          choices.success,
+          setSuccessStatus,
+        )}
+        {renderSelect(
+          "Progress",
+          progressStatus,
+          currentProgress,
+          choices.progress,
+          setProgressStatus,
+        )}
+        {renderSelect(
+          "Buy-in",
+          buyInStatus,
+          currentBuyIn,
+          choices.buyIn,
+          setBuyInStatus,
+        )}
       </div>
       {customFields.length > 0 ? (
         <CustomFieldEditorGrid
@@ -3186,6 +3210,7 @@ function MilestoneActionModal({
 function PathwayChangeModal({
   client,
   offers,
+  clientMilestones,
   offerMilestones,
   relationLookup,
   onClose,
@@ -3193,6 +3218,7 @@ function PathwayChangeModal({
 }: {
   client: ClientRow;
   offers: OfferRow[];
+  clientMilestones: ClientMilestoneRow[];
   offerMilestones: OfferMilestoneRow[];
   relationLookup: Map<string, string>;
   onClose: () => void;
@@ -3218,6 +3244,45 @@ function PathwayChangeModal({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const currentOfferId = textInputValue(
+    valueFrom(client, ["offer_milestones_current_offer_id"]),
+  );
+  const currentMilestoneId = textInputValue(
+    valueFrom(client, ["offer_milestones_current_milestone_id"]),
+  );
+  const currentProgress =
+    clientMilestones.find(
+      (milestone) =>
+        String(milestone.offer_id ?? "") === String(currentOfferId) &&
+        String(milestone.milestone_id ?? "") === String(currentMilestoneId),
+    ) ?? null;
+  const currentOfferMilestones = offerMilestones
+    .filter((milestone) => String(milestone.offer_id ?? "") === String(currentOfferId))
+    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+  const currentMilestoneIndex = currentOfferMilestones.findIndex(
+    (milestone) =>
+      String(milestone.glide_row_id ?? "") === String(currentMilestoneId),
+  );
+  const currentConfiguredMilestone =
+    currentMilestoneIndex >= 0 ? currentOfferMilestones[currentMilestoneIndex] : null;
+  const nextConfiguredMilestone =
+    currentMilestoneIndex >= 0
+      ? currentOfferMilestones[currentMilestoneIndex + 1] ?? null
+      : null;
+  const startableMilestones = currentOfferMilestones.filter(
+    (milestone) =>
+      String(milestone.glide_row_id ?? "") !== String(currentMilestoneId),
+  );
+  const defaultNextStartMilestoneId =
+    nextConfiguredMilestone?.glide_row_id ??
+    startableMilestones[0]?.glide_row_id ??
+    "";
+  const [completionDate, setCompletionDate] = useState(todayInputValue());
+  const [startAnotherMilestone, setStartAnotherMilestone] = useState(false);
+  const [nextStartMilestoneId, setNextStartMilestoneId] = useState(
+    defaultNextStartMilestoneId,
+  );
+  const [nextStartDate, setNextStartDate] = useState(todayInputValue());
   const currentOfferName = displayValue(
     valueFrom(client, ["offer_milestones_current_offer_id"]),
     relationLookup,
@@ -3226,6 +3291,13 @@ function PathwayChangeModal({
     valueFrom(client, ["offer_milestones_current_milestone_id"]),
     relationLookup,
   );
+  const canCompleteCurrentMilestone =
+    Boolean(currentOfferId && currentMilestoneId) &&
+    !isPresent(currentProgress?.completion_date);
+
+  useEffect(() => {
+    setNextStartMilestoneId((current) => current || defaultNextStartMilestoneId);
+  }, [defaultNextStartMilestoneId]);
 
   function handleOfferChange(nextOfferId: string) {
     setOfferId(nextOfferId);
@@ -3274,6 +3346,84 @@ function PathwayChangeModal({
     }
   }
 
+  async function completeCurrentMilestone() {
+    if (saving || !canCompleteCurrentMilestone) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-milestone",
+      {
+        body: {
+          action: "complete_milestone",
+          clientLegacyId: client.glide_row_id,
+          offerId: currentOfferId,
+          milestoneId: currentMilestoneId,
+          startDate: dateInputValue(currentProgress?.start_date) || todayInputValue(),
+          completionDate,
+          notes,
+        },
+      },
+    );
+
+    if (error) {
+      setSaving(false);
+      setSaveError(error.message);
+      return;
+    }
+    if (data?.error) {
+      setSaving(false);
+      setSaveError(data.error);
+      return;
+    }
+    if (data?.client && data?.clientMilestone) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        data.clientMilestone as ClientMilestoneRow,
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+    }
+
+    if (startAnotherMilestone && nextStartMilestoneId) {
+      const { data: startData, error: startError } =
+        await supabase.functions.invoke("manage-client-milestone", {
+          body: {
+            action: "start_milestone",
+            clientLegacyId: client.glide_row_id,
+            offerId: currentOfferId,
+            milestoneId: nextStartMilestoneId,
+            startDate: nextStartDate || completionDate,
+            notes,
+          },
+        });
+
+      if (startError) {
+        setSaving(false);
+        setSaveError(
+          `Milestone completed, but RetainOS could not start the next milestone: ${startError.message}`,
+        );
+        return;
+      }
+      if (startData?.error) {
+        setSaving(false);
+        setSaveError(
+          `Milestone completed, but RetainOS could not start the next milestone: ${startData.error}`,
+        );
+        return;
+      }
+      if (startData?.client && startData?.clientMilestone) {
+        onSaved(
+          mapAppClientRow(startData.client as Record<string, unknown>),
+          startData.clientMilestone as ClientMilestoneRow,
+          (startData.event as ClientHistoryEventRow | undefined) ?? null,
+        );
+      }
+    }
+
+    setSaving(false);
+    onClose();
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
@@ -3318,6 +3468,114 @@ function PathwayChangeModal({
                   : "No pathway is currently configured for this client."}
               </p>
             </div>
+            {canCompleteCurrentMilestone ? (
+              <div className="rounded-lg border border-[#bbf7d0] bg-[#f0fdf4] px-4 py-3">
+                <div className="grid gap-3 sm:grid-cols-[1fr_180px] sm:items-end">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                      Complete Current Milestone
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-[#162b3e]">
+                      {displayValue(
+                        currentConfiguredMilestone?.name ?? currentMilestoneName,
+                        relationLookup,
+                      )}
+                    </p>
+                    <p className="mt-1 text-xs text-[#586273]">
+                      Next state:{" "}
+                      {nextConfiguredMilestone
+                        ? displayValue(nextConfiguredMilestone.name, relationLookup)
+                        : "Final milestone completed"}
+                    </p>
+                  </div>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-emerald-700">
+                      Completion Date
+                    </span>
+                    <input
+                      type="date"
+                      value={completionDate}
+                      onChange={(event) => {
+                        setCompletionDate(event.target.value);
+                        setNextStartDate((current) => current || event.target.value);
+                      }}
+                      disabled={saving}
+                      className="block w-full rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-emerald-50"
+                    />
+                  </label>
+                </div>
+                {startableMilestones.length > 0 ? (
+                  <div className="mt-3 rounded-md border border-emerald-100 bg-white/70 px-3 py-3">
+                    <label className="flex items-start gap-3 text-sm font-semibold text-[#364152]">
+                      <input
+                        type="checkbox"
+                        checked={startAnotherMilestone}
+                        onChange={(event) =>
+                          setStartAnotherMilestone(event.target.checked)
+                        }
+                        disabled={saving}
+                        className="mt-0.5 h-4 w-4 rounded border-[#cbd2dc]"
+                      />
+                      <span>
+                        Start another milestone after completing this one
+                        <span className="mt-1 block text-xs font-normal text-[#6c7684]">
+                          Use the next milestone in line, or choose another active
+                          milestone.
+                        </span>
+                      </span>
+                    </label>
+                    {startAnotherMilestone ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#586273]">
+                            Milestone To Start
+                          </span>
+                          <select
+                            value={nextStartMilestoneId}
+                            onChange={(event) =>
+                              setNextStartMilestoneId(event.target.value)
+                            }
+                            disabled={saving}
+                            className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] disabled:bg-[#f1f4f8]"
+                          >
+                            {startableMilestones.map((milestone) => (
+                              <option
+                                key={milestone.glide_row_id ?? milestone.name ?? "milestone"}
+                                value={milestone.glide_row_id ?? ""}
+                              >
+                                {displayValue(milestone.name, relationLookup)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-[#586273]">
+                            Start Date
+                          </span>
+                          <input
+                            type="date"
+                            value={nextStartDate}
+                            onChange={(event) => setNextStartDate(event.target.value)}
+                            disabled={saving}
+                            className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] disabled:bg-[#f1f4f8]"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void completeCurrentMilestone()}
+                    disabled={saving || !completionDate}
+                    className="rounded-full border border-[#34b389] bg-[#e7f6f0] px-4 py-2 text-sm font-semibold text-[#2a9272] hover:bg-white disabled:opacity-50 cursor-pointer"
+                  >
+                    {saving ? "Completing..." : "Complete current milestone"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Pathway
@@ -5990,6 +6248,7 @@ export function ClientDetail() {
         <PathwayChangeModal
           client={client}
           offers={offers}
+          clientMilestones={clientMilestones}
           offerMilestones={offerMilestones}
           relationLookup={displayLookup}
           onClose={() => setChangingPathway(false)}
