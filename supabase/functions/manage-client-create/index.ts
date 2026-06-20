@@ -72,6 +72,25 @@ function addDaysIso(value: string | null, days: number) {
   return base.toISOString();
 }
 
+function renderTemplateText(value: unknown, client: Record<string, unknown>) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  const clientName = String(client.client_name ?? "").trim();
+  return text
+    .replaceAll("{{client_name}}", clientName)
+    .replaceAll("{client_name}", clientName)
+    .replaceAll("{{client}}", clientName)
+    .replaceAll("{client}", clientName);
+}
+
+function renderAutoTaskName(template: Record<string, unknown>, client: Record<string, unknown>) {
+  const rendered = renderTemplateText(template.name, client);
+  const clientName = String(client.client_name ?? "").trim();
+  if (!rendered || !clientName) return rendered;
+  if (rendered.toLowerCase().includes(clientName.toLowerCase())) return rendered;
+  return `${rendered} - ${clientName}`;
+}
+
 async function resolveTemplateAssignee(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
@@ -143,7 +162,7 @@ async function createTasksFromClientTemplates({
         template,
         client,
       );
-      const taskName = String(template.name ?? "").trim();
+      const taskName = renderAutoTaskName(template, client);
       if (!taskName) continue;
       const dueOffsetDays = Number(template.due_offset_days ?? 0);
       const taskDueDate = addDaysIso(
@@ -158,7 +177,7 @@ async function createTasksFromClientTemplates({
           glide_row_id: `task_${crypto.randomUUID()}`,
           client_id: client.glide_row_id,
           task_name: taskName,
-          task_description: template.description ?? null,
+          task_description: renderTemplateText(template.description, client) || null,
           task_due_date: taskDueDate,
           task_last_updated_date: new Date().toISOString(),
           start_date: new Date().toISOString(),

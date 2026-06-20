@@ -347,12 +347,20 @@ function TaskListTable({
   tasks,
   clientById,
   teamMemberNameById,
+  canManage,
+  movingTaskId,
   onOpenTask,
+  onDragStart,
+  onDragEnd,
 }: {
   tasks: TaskRow[];
   clientById: Map<string, ClientRow>;
   teamMemberNameById: Map<string, string>;
+  canManage: boolean;
+  movingTaskId: string | null;
   onOpenTask: (task: TaskRow) => void;
+  onDragStart: (event: DragEvent<HTMLElement>, task: TaskRow) => void;
+  onDragEnd: (event: DragEvent<HTMLElement>) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -376,11 +384,19 @@ function TaskListTable({
             const client = task.client_id
               ? clientById.get(task.client_id)
               : undefined;
+            const dueSignal = dueBadge(task);
             return (
               <tr
                 key={task.glide_row_id}
+                draggable={canManage}
+                onDragStart={
+                  canManage ? (event) => onDragStart(event, task) : undefined
+                }
+                onDragEnd={canManage ? onDragEnd : undefined}
                 onClick={() => onOpenTask(task)}
-                className="cursor-pointer hover:bg-gray-50"
+                className={`cursor-pointer hover:bg-gray-50 ${
+                  movingTaskId === task.glide_row_id ? "opacity-50" : ""
+                } ${canManage ? "active:cursor-grabbing" : ""}`}
               >
                 <td className="max-w-sm px-4 py-3">
                   <div className="text-sm font-medium text-gray-900">
@@ -415,7 +431,16 @@ function TaskListTable({
                   {displayValue(task.priority)}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
-                  {formatDate(task.task_due_date)}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>{formatDate(task.task_due_date)}</span>
+                    {dueSignal ? (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-medium ${dueSignal.className}`}
+                      >
+                        {dueSignal.label}
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
                   {task.assigned_to_id
@@ -1350,14 +1375,53 @@ export function Tasks() {
           No tasks matched this view.
         </div>
       ) : viewMode === "list" ? (
-        <TaskListTable
-          tasks={tasks}
-          clientById={clientById}
-          teamMemberNameById={teamMemberNameById}
-          onOpenTask={(task) => {
-            if (canManageTasks) setSelectedTask(task);
-          }}
-        />
+        <div className="space-y-4">
+          {columns.map((column) => (
+            <section
+              key={column.key}
+              data-task-status={column.key}
+              onDragOver={(event) => {
+                if (!canManageTasks) return;
+                event.preventDefault();
+                setDragOverStatus(column.key as TaskStatus);
+              }}
+              onDragLeave={() => setDragOverStatus(null)}
+              onDrop={(event) => void handleDrop(event, column.key as TaskStatus)}
+              className={`rounded-lg border transition ${
+                dragOverStatus === column.key
+                  ? "border-indigo-300 bg-indigo-50"
+                  : "border-gray-200 bg-white"
+              }`}
+            >
+              <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                <h2 className="text-sm font-semibold text-gray-800">
+                  {column.label}
+                </h2>
+                <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium text-gray-600">
+                  {column.tasks.length}
+                </span>
+              </div>
+              {column.tasks.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-gray-500">
+                  No tasks in this status.
+                </div>
+              ) : (
+                <TaskListTable
+                  tasks={column.tasks}
+                  clientById={clientById}
+                  teamMemberNameById={teamMemberNameById}
+                  canManage={canManageTasks}
+                  movingTaskId={movingTaskId}
+                  onOpenTask={(task) => {
+                    if (canManageTasks) setSelectedTask(task);
+                  }}
+                  onDragStart={(event, task) => handleDragStart(event, task)}
+                  onDragEnd={(event) => void handleDragEnd(event)}
+                />
+              )}
+            </section>
+          ))}
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
           {columns.map((column) => (

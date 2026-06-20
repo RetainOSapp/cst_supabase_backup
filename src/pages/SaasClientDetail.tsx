@@ -2792,7 +2792,7 @@ function TaskTemplatesModal({
               Task Templates
             </h2>
             <p className="mt-1 text-sm text-[#667085]">
-              Configure reusable tasks and new-client auto-create rules.
+              Configure reusable New Task presets and new-client auto-create rules.
             </p>
           </div>
           <button
@@ -2828,7 +2828,7 @@ function TaskTemplatesModal({
                         <p className="mt-1 text-xs text-[#667085]">
                           {template.trigger_type === "client_created"
                             ? "Auto-create when a client is added"
-                            : "Manual task template"}{" "}
+                            : "Preset available in New Task"}{" "}
                           · due in {template.due_offset_days} day
                           {template.due_offset_days === 1 ? "" : "s"}
                         </p>
@@ -2895,6 +2895,10 @@ function TaskTemplatesModal({
                 }
                 className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
               />
+              <span className="mt-1 block text-xs text-[#667085]">
+                Auto-created client tasks append the client name. You can also use
+                {" {client_name}"} in the name or description.
+              </span>
             </label>
             <label className="block text-sm font-medium text-[#344054]">
               Description
@@ -2918,7 +2922,7 @@ function TaskTemplatesModal({
                 disabled={disabled || saving}
                 options={[
                   { value: "client_created", label: "When client is created" },
-                  { value: "manual", label: "Manual template" },
+                  { value: "manual", label: "Preset in New Task modal" },
                 ]}
                 onChange={(value) =>
                   setDraft((current) => ({ ...current, trigger_type: value }))
