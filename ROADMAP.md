@@ -35,11 +35,13 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` 2026-06-17 Client lifecycle/program closeout QA passed with Josh Garvey assigned to Ben; lifecycle controlled-write and offboarding items can be closed.
 - `[x]` Lifecycle closeout promoted the client lifecycle controlled-write and offboarding items to `[x]`; dashboard/CSM/notification proof remains Moves Method migration-day validation.
 - `[x]` Tasks V1.5 QA passed: company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` all work after hard refresh.
-- `[~]` `[qa]` Task Templates + Urgency V1: create a Company Settings task template, create a manual task from that template, create a new client and confirm enabled `client_created` templates auto-create tasks, confirm due/overdue badges on Tasks, and confirm `task_due` appears in Daily Pulse when enabled.
+- `[x]` Task Templates + Urgency V1 QA passed.
   - 2026-06-20 QA follow-up: clarified manual templates as New Task presets, auto-created template tasks now append/render client names, and list view now mirrors board status groupings with drag/drop.
   - 2026-06-20 follow-up: assigning a primary CSM now claims open unassigned tasks linked to that client; Tasks modal supports recurring tasks with repeat interval; completing a recurring task creates the next occurrence. Board/list status lanes now use soft RetainOS palette colors.
-- `[~]` `[qa]` Emily pilot feedback: Client Detail > Program now has an inline Update Next Steps action that saves through Quick Update history. QA: update Next Steps from Program tab and confirm Program field plus History both update.
+- `[~]` `[qa]` Emily pilot feedback final polish: QA Quick Update context card hierarchy/no embedded history, Client Detail > Program `Update Next Steps/Contact`, North Star field edit shortcut, Outcomes current-state badges, and Pathway modal current-state cue.
   - 2026-06-20 QA fix: Program Next Steps modal now passes company id to `manage-client-quick-update`; History tab now has common filter pills and search.
+  - 2026-06-20 final polish: Quick Update context cards now have soft visual hierarchy and no embedded history; Client Detail > Program can update Next Steps, last contact, and next contact together; North Star has an Edit shortcut to the profile modal; Outcomes shows current values before edits; Pathway change modal shows the current pathway/milestone before changing.
+  - Follow-up: company-level default next-contact interval should live in Company Settings and auto-fill next contact after last contact updates while remaining overrideable.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -933,10 +935,11 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[ ]` See client update history.
 - `[ ]` Update dates of last / next contact.
 - `[ ]` Track call attendance.
-- `[~]` `[qa]` Edit Next Steps directly from Client Detail > Program.
+- `[~]` `[qa]` Edit Next Steps/contact directly from Client Detail > Program.
   - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.
   - 2026-06-20 QA fix: modal passes `companyLegacyId`; History tab added Contract / Last Contact / Next Steps / Health Scores pills and search.
-- `[ ]` `[priority: low]` Edit North Star directly from Client Detail > Program.
+  - 2026-06-20 final polish: modal now also edits Date of Last Contact and Date of Next Contact.
+- `[~]` `[qa]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
 - `[ ]` Create, assign, and update client tasks.
 - `[ ]` View archived tasks in client context.
 - `[x]` Create / update contracts for client.

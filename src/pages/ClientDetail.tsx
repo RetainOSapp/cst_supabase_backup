@@ -319,6 +319,20 @@ const nextStepsFieldCandidates =
   programFields.find(([label]) => label === "Next Steps")?.[1] ?? [
     "next_steps_value",
   ];
+const lastContactFieldCandidates = [
+  "csm_date_of_last_contact",
+  "last_contact",
+  "last_contact_date",
+  "date_of_last_contact",
+  "last_contact_at",
+];
+const nextContactFieldCandidates = [
+  "csm_date_of_next_contact",
+  "next_contact",
+  "next_contact_date",
+  "date_of_next_contact",
+  "next_contact_at",
+];
 const outcomeFields: [string, string[]][] = [
   [
     "Success",
@@ -1232,6 +1246,14 @@ function dateInputValue(value: unknown) {
   return date.toISOString().slice(0, 10);
 }
 
+function dateTimeInputValue(value: unknown) {
+  if (!isPresent(value)) return "";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1625,6 +1647,12 @@ function ClientNextStepsModal({
   const [nextSteps, setNextSteps] = useState(
     textInputValue(valueFrom(client, nextStepsFieldCandidates)),
   );
+  const [lastContactAt, setLastContactAt] = useState(
+    dateTimeInputValue(valueFrom(client, lastContactFieldCandidates)),
+  );
+  const [nextContactAt, setNextContactAt] = useState(
+    dateInputValue(valueFrom(client, nextContactFieldCandidates)),
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -1641,6 +1669,8 @@ function ClientNextStepsModal({
           companyLegacyId: client.company_glide_row_id ?? client.company_id,
           clientLegacyId: client.glide_row_id,
           nextSteps,
+          lastContactAt,
+          nextContactAt,
         },
       },
     );
@@ -1676,10 +1706,10 @@ function ClientNextStepsModal({
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              Update Next Steps
+              Update Next Steps/Contact
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Saves to the client Program section and history.
+              Saves Program context and contact dates to client history.
             </p>
           </div>
           <button
@@ -1692,8 +1722,8 @@ function ClientNextStepsModal({
           </button>
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="px-5 py-5">
-            <label className="block">
+          <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Next Steps
               </span>
@@ -1704,8 +1734,32 @@ function ClientNextStepsModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900"
               />
             </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Date of Last Contact
+              </span>
+              <input
+                type="datetime-local"
+                value={lastContactAt}
+                onChange={(event) => setLastContactAt(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Date of Next Contact
+              </span>
+              <input
+                type="date"
+                value={nextContactAt}
+                onChange={(event) => setNextContactAt(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
             {saveError ? (
-              <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:col-span-2">
                 {saveError}
               </div>
             ) : null}
@@ -1720,10 +1774,10 @@ function ClientNextStepsModal({
             </button>
             <button
               type="submit"
-              disabled={saving || !nextSteps.trim()}
+              disabled={saving || (!nextSteps.trim() && !lastContactAt && !nextContactAt)}
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
-              {saving ? "Saving..." : "Save Next Steps"}
+              {saving ? "Saving..." : "Save Next Steps/Contact"}
             </button>
           </div>
         </form>
@@ -2090,8 +2144,13 @@ function ClientOutcomesInlineEditor({
     onChange: (value: string) => void,
   ) => (
     <label className="block rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
-      <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[#586273]">
-        {label}
+      <span className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-[#586273]">
+          {label}
+        </span>
+        <span className="rounded-full border border-[#dbe3ee] bg-white px-2 py-0.5 text-[11px] font-semibold text-[#364152]">
+          Current: {options.find((option) => option.value === value)?.label ?? "Not set"}
+        </span>
       </span>
       <select
         value={value}
@@ -3159,6 +3218,14 @@ function PathwayChangeModal({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const currentOfferName = displayValue(
+    valueFrom(client, ["offer_milestones_current_offer_id"]),
+    relationLookup,
+  );
+  const currentMilestoneName = displayValue(
+    valueFrom(client, ["offer_milestones_current_milestone_id"]),
+    relationLookup,
+  );
 
   function handleOfferChange(nextOfferId: string) {
     setOfferId(nextOfferId);
@@ -3219,7 +3286,7 @@ function PathwayChangeModal({
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              Change Pathway
+              Change Pathway & Milestones
             </h2>
             <p className="mt-1 text-sm text-gray-500">
               Directors and Super Admins can change the active pathway and
@@ -3237,6 +3304,20 @@ function PathwayChangeModal({
         </div>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 px-5 py-5">
+            <div className="rounded-lg border border-[#dbe3ee] bg-[#f8fafc] px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#586273]">
+                Current pathway / milestone
+              </div>
+              <p className="mt-1 text-sm font-semibold text-[#162b3e]">
+                {currentOfferName !== "--" || currentMilestoneName !== "--"
+                  ? `${currentOfferName !== "--" ? currentOfferName : "Current pathway"} / ${
+                      currentMilestoneName !== "--"
+                        ? currentMilestoneName
+                        : "No active milestone"
+                    }`
+                  : "No pathway is currently configured for this client."}
+              </p>
+            </div>
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Pathway
@@ -3322,11 +3403,15 @@ function FieldGrid({
   client,
   programChoices,
   relationLookup,
+  canEditNorthStar = false,
+  onEditNorthStar,
 }: {
   fields: [string, string[]][];
   client: ClientRow;
   programChoices: ProgramChoice[];
   relationLookup?: Map<string, string>;
+  canEditNorthStar?: boolean;
+  onEditNorthStar?: () => void;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -3335,8 +3420,19 @@ function FieldGrid({
           key={label}
           className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-4"
         >
-          <div className="text-[11px] font-semibold uppercase text-[#586273]">
-            {label}
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] font-semibold uppercase text-[#586273]">
+              {label}
+            </div>
+            {label === "North Star" && canEditNorthStar && onEditNorthStar ? (
+              <button
+                type="button"
+                onClick={onEditNorthStar}
+                className="rounded-full border border-[#cbd2dc] bg-white px-2.5 py-1 text-xs font-semibold text-[#364152] hover:border-[#3b82f6] hover:text-[#1d4ed8] cursor-pointer"
+              >
+                Edit
+              </button>
+            ) : null}
           </div>
           <div className="mt-2 text-sm font-medium text-[#162b3e]">
             {label === "Status" ? (
@@ -5749,7 +5845,7 @@ export function ClientDetail() {
                     onClick={() => setEditingNextSteps(true)}
                     className="retainos-button-secondary"
                   >
-                    Update Next Steps
+                    Update Next Steps/Contact
                   </button>
                 ) : null}
               </div>
@@ -5759,6 +5855,8 @@ export function ClientDetail() {
               client={client}
               programChoices={programChoices}
               relationLookup={displayLookup}
+              canEditNorthStar={activeTab === "program" && canEditProfile}
+              onEditNorthStar={() => setEditingProfile(true)}
             />
           </div>
           {activeTab === "details" ? <ClientExternalLinksSection client={client} /> : null}

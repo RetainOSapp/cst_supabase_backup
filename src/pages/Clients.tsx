@@ -34,21 +34,6 @@ type ClientRow = Record<string, unknown> & {
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
 };
-interface ClientHistoryEvent {
-  id: string;
-  legacy_client_glide_row_id: string;
-  next_steps: string | null;
-  last_contact_at: string | null;
-  next_contact_at: string | null;
-  success_status: string | null;
-  progress_status: string | null;
-  buy_in_status: string | null;
-  notes: string | null;
-  metadata?: {
-    custom_fields?: CustomFieldChange[];
-  } | null;
-  created_at: string;
-}
 type CompanyCustomFieldRow = {
   id: string;
   key: string;
@@ -845,13 +830,6 @@ function isDateInRange(value: unknown, start: Date, next: Date) {
   const date = new Date(String(value));
   return !Number.isNaN(date.getTime()) && date >= start && date < next;
 }
-function formatDateTime(value: unknown) {
-  if (!value) return "--";
-  const date = new Date(String(value));
-  return Number.isNaN(date.getTime())
-    ? formatValue(value)
-    : date.toLocaleString();
-}
 function toDateTimeInputValue(value: unknown) {
   if (!value) return "";
   const date = new Date(String(value));
@@ -1022,15 +1000,23 @@ function ReadOnlyField({
   value,
   display = "plain",
   lookup,
+  tone = "slate",
 }: {
   label: string;
   value: unknown;
   display?: "plain" | "rich" | "outcome";
   lookup?: Map<string, string>;
+  tone?: "blue" | "green" | "amber" | "slate";
 }) {
   const shownValue = lookup ? displayValue(value, lookup) : value;
+  const toneClasses = {
+    blue: "border-[#bfdbfe] bg-[#eff6ff]",
+    green: "border-[#bbf7d0] bg-[#f0fdf4]",
+    amber: "border-[#fde68a] bg-[#fffbeb]",
+    slate: "border-[#dbe3ee] bg-[#f8fafc]",
+  }[tone];
   return (
-    <div className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-3.5 py-3">
+    <div className={`rounded-md border px-3.5 py-3 ${toneClasses}`}>
       <div className="text-[11px] font-semibold uppercase text-[#586273]">
         {label}
       </div>
@@ -1093,7 +1079,6 @@ function QuickUpdateModal({
   onClientUpdated: (client: ClientRow) => void;
 }) {
   const [isPilotCompany, setIsPilotCompany] = useState(false);
-  const [historyEvents, setHistoryEvents] = useState<ClientHistoryEvent[]>([]);
   const [loadingPilotState, setLoadingPilotState] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1349,7 +1334,6 @@ function QuickUpdateModal({
 
       if (companyError || !company) {
         setIsPilotCompany(false);
-        setHistoryEvents([]);
         setCustomFields([]);
         setCustomFieldValues([]);
         setCustomFieldDrafts({});
@@ -1358,16 +1342,8 @@ function QuickUpdateModal({
       }
 
       setIsPilotCompany(true);
-      const [eventsResult, customFieldsResult, customFieldValuesResult] =
+      const [customFieldsResult, customFieldValuesResult] =
         await Promise.all([
-          supabase
-            .from("client_history_events")
-            .select(
-              "id, legacy_client_glide_row_id, next_steps, last_contact_at, next_contact_at, success_status, progress_status, buy_in_status, notes, metadata, created_at",
-            )
-            .eq("legacy_client_glide_row_id", client.glide_row_id)
-            .order("created_at", { ascending: false })
-            .limit(5),
           supabase
             .from("company_custom_fields")
             .select(
@@ -1389,11 +1365,6 @@ function QuickUpdateModal({
 
       if (cancelled) return;
 
-      if (eventsResult.error) {
-        setSaveError(eventsResult.error.message);
-      } else {
-        setHistoryEvents((eventsResult.data ?? []) as ClientHistoryEvent[]);
-      }
       const nextCustomFields = customFieldsResult.error
         ? []
         : ((customFieldsResult.data ?? []) as CompanyCustomFieldRow[]);
@@ -1491,11 +1462,6 @@ function QuickUpdateModal({
       return;
     }
 
-    if (data?.event) {
-      setHistoryEvents((current) =>
-        [data.event as ClientHistoryEvent, ...current].slice(0, 5),
-      );
-    }
     const customFieldChanges = Array.isArray(data?.customFields)
       ? (data.customFields as CustomFieldChange[])
       : [];
@@ -1562,11 +1528,6 @@ function QuickUpdateModal({
       setSaveError(data.error);
       return;
     }
-    if (data?.event) {
-      setHistoryEvents((current) =>
-        [data.event as ClientHistoryEvent, ...current].slice(0, 5),
-      );
-    }
     if (data?.client) {
       onClientUpdated(mapAppClientRow(data.client as Record<string, unknown>));
     }
@@ -1608,11 +1569,6 @@ function QuickUpdateModal({
           `Milestone completed, but RetainOS could not start the next milestone: ${startData.error}`,
         );
         return;
-      }
-      if (startData?.event) {
-        setHistoryEvents((current) =>
-          [startData.event as ClientHistoryEvent, ...current].slice(0, 5),
-        );
       }
       if (startData?.client) {
         onClientUpdated(mapAppClientRow(startData.client as Record<string, unknown>));
@@ -1669,19 +1625,23 @@ function QuickUpdateModal({
                 label="North Star"
                 value={valueFrom(client, northStarColumns)}
                 display="rich"
+                tone="blue"
               />
               <ReadOnlyField
                 label="Next Steps"
                 value={valueFrom(client, nextStepsColumns)}
                 display="rich"
+                tone="green"
               />
               <ReadOnlyField
                 label="Date of Last Contact"
                 value={formatDate(valueFrom(client, lastContactColumns))}
+                tone="slate"
               />
               <ReadOnlyField
                 label="Date of Next Contact"
                 value={formatDate(valueFrom(client, nextContactColumns))}
+                tone="amber"
               />
             </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1899,74 +1859,6 @@ function QuickUpdateModal({
             <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
               {saveMessage}
             </div>
-          ) : null}
-          {historyEvents.length > 0 ? (
-            <section className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc]">
-              <div className="border-b border-[#e4e9f0] px-4 py-3">
-                <h3 className="text-sm font-semibold text-[#162b3e]">
-                  Client history
-                </h3>
-              </div>
-              <div className="divide-y divide-gray-200">
-                {historyEvents.map((historyEvent) => (
-                  <article
-                    key={historyEvent.id}
-                    className="space-y-2 px-4 py-3 text-sm"
-                  >
-                    <div className="font-medium text-gray-900">
-                      {formatDateTime(historyEvent.created_at)}
-                    </div>
-                    {historyEvent.notes ? (
-                      <p className="text-gray-700">{historyEvent.notes}</p>
-                    ) : null}
-                    {historyEvent.next_steps ? (
-                      <p className="text-gray-700">
-                        <span className="font-medium">Next steps:</span>{" "}
-                        {historyEvent.next_steps}
-                      </p>
-                    ) : null}
-                    <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-                      {historyEvent.success_status ? (
-                        <span className="rounded-full bg-white px-2 py-1">
-                          Success:{" "}
-                          {choiceDisplay(
-                            historyEvent.success_status,
-                            successChoices,
-                          )}
-                        </span>
-                      ) : null}
-                      {historyEvent.progress_status ? (
-                        <span className="rounded-full bg-white px-2 py-1">
-                          Progress:{" "}
-                          {choiceDisplay(
-                            historyEvent.progress_status,
-                            progressChoices,
-                          )}
-                        </span>
-                      ) : null}
-                      {historyEvent.buy_in_status ? (
-                        <span className="rounded-full bg-white px-2 py-1">
-                          Buy In:{" "}
-                          {choiceDisplay(
-                            historyEvent.buy_in_status,
-                            buyInChoices,
-                          )}
-                        </span>
-                      ) : null}
-                      {(historyEvent.metadata?.custom_fields ?? []).map((field) => (
-                        <span
-                          key={`${historyEvent.id}-${field.id}`}
-                          className="rounded-full bg-white px-2 py-1"
-                        >
-                          {field.label ?? field.key ?? "Custom field"}:{" "}
-                          {field.after ?? "--"}
-                        </span>
-                      ))}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
           ) : null}
           </div>
           <div className="retainos-modal-footer sticky bottom-0 flex justify-end gap-3 px-6 py-4">
