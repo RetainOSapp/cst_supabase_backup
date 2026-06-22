@@ -122,6 +122,14 @@ interface OfferMilestone {
   position?: number | null;
   order?: number | null;
 }
+type ClientMilestoneProgress = Record<string, unknown> & {
+  id?: string | null;
+  glide_row_id?: string | null;
+  offer_id?: string | null;
+  milestone_id?: string | null;
+  start_date?: string | null;
+  completion_date?: string | null;
+};
 interface PilotReminder {
   id: string;
   type: "next-contact" | "renewal" | "paused-return" | "task-due";
@@ -1076,11 +1084,39 @@ function toDateInputValue(value: unknown) {
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
 }
+function dateFromValue(value: unknown) {
+  if (!isPresent(value)) return null;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 function milestoneSortValue(milestone: OfferMilestone) {
   const position = Number(milestone.position);
   if (Number.isFinite(position) && position > 0) return position;
   const order = Number(milestone.order);
   return Number.isFinite(order) ? order : 9999;
+}
+function textInputValue(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text === "--" ? "" : text;
+}
+function clientMilestoneSortTime(row: ClientMilestoneProgress) {
+  return (
+    dateFromValue(row.start_date)?.getTime() ??
+    dateFromValue(row.created_at)?.getTime() ??
+    dateFromValue(row.completion_date)?.getTime() ??
+    0
+  );
+}
+function pickActiveClientMilestone(rows: ClientMilestoneProgress[]) {
+  return (
+    rows
+      .filter(
+        (row) => isPresent(row.milestone_id) && !isPresent(row.completion_date),
+      )
+      .slice()
+      .sort((a, b) => clientMilestoneSortTime(b) - clientMilestoneSortTime(a))[0] ??
+    null
+  );
 }
 function normalizeOutcome(value: unknown) {
   const raw = formatValue(value).trim();
@@ -1373,7 +1409,7 @@ function QuickUpdateModal({
   const [nextStartMilestoneId, setNextStartMilestoneId] = useState("");
   const [nextStartDate, setNextStartDate] = useState(todayInputValue());
   const companyLegacyId = client.company_id ?? "";
-  const [currentOfferId] = useState(
+  const [currentOfferId, setCurrentOfferId] = useState(
     typeof client.offer_milestones_current_offer_id === "string"
       ? client.offer_milestones_current_offer_id
       : "",
@@ -1486,28 +1522,64 @@ function QuickUpdateModal({
   useEffect(() => {
     let cancelled = false;
     async function loadCurrentMilestone() {
-      if (!currentOfferId || !currentMilestoneId) {
+      let effectiveOfferId = currentOfferId;
+      let effectiveMilestoneId = currentMilestoneId;
+
+      const { data: progressRows, error: progressError } = await supabase
+        .from("client_milestones")
+        .select("*")
+        .eq("client_id", client.glide_row_id)
+        .order("created_at", { ascending: false });
+
+      if (!cancelled && progressError) {
+        console.error("Failed to load client milestone progress:", progressError);
+      }
+
+      const activeProgress = pickActiveClientMilestone(
+        ((progressRows ?? []) as ClientMilestoneProgress[]),
+      );
+      if (activeProgress) {
+        effectiveMilestoneId =
+          textInputValue(activeProgress.milestone_id) || effectiveMilestoneId;
+        effectiveOfferId = textInputValue(activeProgress.offer_id) || effectiveOfferId;
+      }
+
+      if (!effectiveOfferId && effectiveMilestoneId) {
+        const { data: milestoneOffer } = await supabase
+          .from("company_offer_milestones")
+          .select("offer_id")
+          .eq("glide_row_id", effectiveMilestoneId)
+          .maybeSingle();
+        effectiveOfferId =
+          textInputValue(milestoneOffer?.offer_id) || effectiveOfferId;
+      }
+
+      if (!effectiveOfferId || !effectiveMilestoneId) {
         setCurrentOfferName("");
         setCurrentMilestoneName("");
         setCurrentOfferMilestones([]);
         return;
       }
+      if (effectiveOfferId !== currentOfferId) setCurrentOfferId(effectiveOfferId);
+      if (effectiveMilestoneId !== currentMilestoneId) {
+        setCurrentMilestoneId(effectiveMilestoneId);
+      }
       const [appOfferResult, appMilestoneResult] = await Promise.all([
         supabase
           .from("company_offers")
           .select("name")
-          .eq("glide_row_id", currentOfferId)
+          .eq("glide_row_id", effectiveOfferId)
           .maybeSingle(),
         supabase
           .from("company_offer_milestones")
           .select("name")
-          .eq("glide_row_id", currentMilestoneId)
+          .eq("glide_row_id", effectiveMilestoneId)
           .maybeSingle(),
       ]);
       const appMilestonesResult = await supabase
         .from("company_offer_milestones")
         .select("glide_row_id, offer_id, name, position")
-        .eq("offer_id", currentOfferId)
+        .eq("offer_id", effectiveOfferId)
         .eq("status", "active")
         .order("position", { ascending: true, nullsFirst: false });
       const [offerResult, milestoneResult] = await Promise.all([
@@ -1516,14 +1588,14 @@ function QuickUpdateModal({
           : supabase
               .from("backup_company_offers")
               .select("name")
-              .eq("glide_row_id", currentOfferId)
+              .eq("glide_row_id", effectiveOfferId)
               .maybeSingle(),
         appMilestoneResult.data
           ? Promise.resolve(appMilestoneResult)
           : supabase
               .from("backup_company_offer_milestones")
               .select("name")
-              .eq("glide_row_id", currentMilestoneId)
+              .eq("glide_row_id", effectiveMilestoneId)
               .maybeSingle(),
       ]);
       const mirrorMilestonesResult =
@@ -1531,12 +1603,12 @@ function QuickUpdateModal({
           ? await supabase
               .from("backup_company_offer_milestones")
               .select("glide_row_id, offer_id, name, order")
-              .eq("offer_id", currentOfferId)
+              .eq("offer_id", effectiveOfferId)
               .order("order", { ascending: true, nullsFirst: false })
           : null;
       if (cancelled) return;
-      setCurrentOfferName(offerResult.data?.name ?? currentOfferId);
-      setCurrentMilestoneName(milestoneResult.data?.name ?? currentMilestoneId);
+      setCurrentOfferName(offerResult.data?.name ?? effectiveOfferId);
+      setCurrentMilestoneName(milestoneResult.data?.name ?? effectiveMilestoneId);
       setCurrentOfferMilestones(
         (((appMilestonesResult.data ?? []).length > 0
           ? appMilestonesResult.data
@@ -1549,7 +1621,7 @@ function QuickUpdateModal({
     return () => {
       cancelled = true;
     };
-  }, [currentMilestoneId, currentOfferId]);
+  }, [client.glide_row_id, currentMilestoneId, currentOfferId]);
 
   useEffect(() => {
     if (successChoices.length === 0) return;
@@ -2557,7 +2629,7 @@ function NewClientModal({
             </div>
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Offer / Pathway
+                Pathway
               </span>
               <select
                 value={offerId}
@@ -2584,7 +2656,7 @@ function NewClientModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
               >
                 <option value="">
-                  {offerId ? "Select milestone" : "Select an offer first"}
+                  {offerId ? "Select milestone" : "Select a pathway first"}
                 </option>
                 {offerMilestones.map((milestone) => (
                   <option key={milestone.glide_row_id} value={milestone.glide_row_id}>
@@ -4243,7 +4315,7 @@ export function Clients() {
                   htmlFor="clients-offer-filter"
                   className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
                 >
-                  Offer
+                  Pathway
                 </label>
                 <select
                   id="clients-offer-filter"
@@ -4259,7 +4331,7 @@ export function Clients() {
                   className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb] disabled:bg-[#f7f9fc] disabled:text-[#98a2b3]"
                 >
                   <option value="">
-                    {offersLoading ? "Loading offers..." : "All offers"}
+                    {offersLoading ? "Loading pathways..." : "All pathways"}
                   </option>
                   {offers.map((offer) => (
                     <option key={offer.glide_row_id} value={offer.glide_row_id}>

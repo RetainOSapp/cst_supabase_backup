@@ -422,3 +422,11 @@ For historical context:
 - Updated/deployed `supabase/functions/manage-client-profile/index.ts` so Edit Profile persists `client_general_info`; also updated/deployed `manage-client-create` to accept `generalInfo` for API/future create payload consistency.
 - Updated migration scripts `scripts/seed-ethical-scaling-clients-pilot.mjs` and `scripts/seed-company-write-mode.mjs` so future company/app-owned migrations carry `client_general_info`.
 - Added/applied `supabase/migrations/20260621130000_update_general_info_resource.sql`, refreshing `optional-general-info-section-on-client-profile` as draft `Using General Information on a client profile`. Resource readback confirmed Edit Profile, no-old-toggle boundary, and migration notes. `npm run build` passed with existing Beacon/Anthropic/chunk warnings.
+
+## Pathway Progress Consistency Patch - 2026-06-22
+
+- Jay found demo-blocking inconsistencies on Ali's profile: Client Detail and Quick Update could show stale `Optimized Journey / Deep Dive` current pathway/milestone while the milestone timeline showed the real active Back End progress.
+- Updated `src/pages/ClientDetail.tsx`: Pathways section and Change Pathway & Milestones modal now derive current pathway/milestone from the latest incomplete `client_milestones` row first, then fall back to legacy `clients.offer_milestones_current_*` fields only when no active progress row exists. The detail FieldGrid label now says `Pathway`, and relation lookups include pathway IDs from milestone history rows.
+- Updated `src/pages/Clients.tsx`: Quick Update now loads active `client_milestones` for the open client and uses that corrected pathway/milestone for both display and the `complete_milestone` payload. New Client and Clients filters now use Pathway wording instead of visible Offer wording.
+- `npm run build` passed. The build still shows existing local Beacon/Anthropic browser-externalization warnings because Beacon remains an intentionally uncommitted local pilot.
+- DO NOT COMMIT remains in force for the local Beacon pilot files unless Jay explicitly asks to ship Beacon: `package.json`, `package-lock.json`, `src/components/Header.tsx`, `src/components/Beacon.tsx`, `src/lib/beacon/*`, plus `old glide project test/`.

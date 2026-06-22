@@ -124,6 +124,11 @@ type OfferMilestoneRow = Record<string, unknown> & {
   ttv_milestone?: boolean | null;
   final_milestone?: boolean | null;
 };
+type CurrentPathwayContext = {
+  offerId: string;
+  milestoneId: string;
+  progress: ClientMilestoneRow | null;
+};
 type ClientTaskRow = Record<string, unknown> & {
   glide_row_id?: string | null;
   company_id?: string | null;
@@ -1318,6 +1323,58 @@ function daysBetweenValues(startValue: unknown, endValue: unknown) {
   if (!start || !end) return null;
   const msPerDay = 1000 * 60 * 60 * 24;
   return Math.max(0, Math.floor((end.getTime() - start.getTime()) / msPerDay));
+}
+function clientMilestoneSortTime(row: ClientMilestoneRow) {
+  return (
+    dateFromValue(row.start_date)?.getTime() ??
+    dateFromValue(row.created_at)?.getTime() ??
+    dateFromValue(row.completion_date)?.getTime() ??
+    0
+  );
+}
+function deriveCurrentPathwayContext(
+  client: ClientRow,
+  clientMilestones: ClientMilestoneRow[],
+  offerMilestones: OfferMilestoneRow[],
+): CurrentPathwayContext {
+  const activeProgress =
+    clientMilestones
+      .filter(
+        (milestone) =>
+          isPresent(milestone.milestone_id) &&
+          !isPresent(milestone.completion_date),
+      )
+      .slice()
+      .sort((a, b) => clientMilestoneSortTime(b) - clientMilestoneSortTime(a))[0] ??
+    null;
+  const fallbackOfferId = textInputValue(
+    valueFrom(client, ["offer_milestones_current_offer_id"]),
+  );
+  const fallbackMilestoneId = textInputValue(
+    valueFrom(client, ["offer_milestones_current_milestone_id"]),
+  );
+  const activeMilestoneId = textInputValue(activeProgress?.milestone_id);
+  const activeMilestoneOfferId =
+    offerMilestones.find(
+      (milestone) =>
+        isPresent(milestone.glide_row_id) &&
+        String(milestone.glide_row_id) === String(activeMilestoneId),
+    )?.offer_id ?? "";
+  const milestoneId = activeMilestoneId || fallbackMilestoneId;
+  const offerId =
+    textInputValue(activeProgress?.offer_id) ||
+    textInputValue(activeMilestoneOfferId) ||
+    fallbackOfferId;
+  const progress =
+    activeProgress ??
+    clientMilestones.find(
+      (milestone) =>
+        String(milestone.offer_id ?? "") === String(offerId) &&
+        String(milestone.milestone_id ?? "") === String(milestoneId),
+    ) ??
+    null;
+
+  return { offerId, milestoneId, progress };
 }
 
 function milestoneStatusClasses(status: string) {
@@ -3704,8 +3761,13 @@ function PathwayChangeModal({
     event: ClientHistoryEventRow | null,
   ) => void;
 }) {
+  const effectiveCurrent = deriveCurrentPathwayContext(
+    client,
+    clientMilestones,
+    offerMilestones,
+  );
   const initialOfferId =
-    textInputValue(valueFrom(client, ["offer_milestones_current_offer_id"])) ||
+    effectiveCurrent.offerId ||
     offers[0]?.glide_row_id ||
     "";
   const [offerId, setOfferId] = useState(initialOfferId);
@@ -3713,7 +3775,7 @@ function PathwayChangeModal({
     .filter((milestone) => milestone.offer_id === offerId)
     .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
   const initialMilestoneId =
-    textInputValue(valueFrom(client, ["offer_milestones_current_milestone_id"])) ||
+    effectiveCurrent.milestoneId ||
     milestonesForOffer[0]?.glide_row_id ||
     "";
   const [milestoneId, setMilestoneId] = useState(initialMilestoneId);
@@ -3737,18 +3799,9 @@ function PathwayChangeModal({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const currentOfferId = textInputValue(
-    valueFrom(client, ["offer_milestones_current_offer_id"]),
-  );
-  const currentMilestoneId = textInputValue(
-    valueFrom(client, ["offer_milestones_current_milestone_id"]),
-  );
-  const currentProgress =
-    clientMilestones.find(
-      (milestone) =>
-        String(milestone.offer_id ?? "") === String(currentOfferId) &&
-        String(milestone.milestone_id ?? "") === String(currentMilestoneId),
-    ) ?? null;
+  const currentOfferId = effectiveCurrent.offerId;
+  const currentMilestoneId = effectiveCurrent.milestoneId;
+  const currentProgress = effectiveCurrent.progress;
   const currentOfferMilestones = offerMilestones
     .filter((milestone) => String(milestone.offer_id ?? "") === String(currentOfferId))
     .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
@@ -3777,11 +3830,11 @@ function PathwayChangeModal({
   );
   const [nextStartDate, setNextStartDate] = useState(todayInputValue());
   const currentOfferName = displayValue(
-    valueFrom(client, ["offer_milestones_current_offer_id"]),
+    currentOfferId,
     relationLookup,
   );
   const currentMilestoneName = displayValue(
-    valueFrom(client, ["offer_milestones_current_milestone_id"]),
+    currentMilestoneId,
     relationLookup,
   );
   const hasCurrentMilestone = Boolean(currentOfferId && currentMilestoneId);
@@ -5076,18 +5129,27 @@ function PathwaysSection({
   onCompleteMilestone: (progress: ClientMilestoneRow | null) => void;
   onChangePathway: () => void;
 }) {
-  const offerValue = valueFrom(client, [
-    "offer_milestones_current_offer_id",
-    "offer_milestones_2nd_current_offer_id",
-    "offer_id",
-    "offer_name",
-  ]);
-  const rawMilestoneValue = valueFrom(client, [
-    "offer_milestones_current_milestone_id",
-    "offer_milestones_2nd_current_milestone_id",
-    "milestone_id",
-    "milestone_name",
-  ]);
+  const effectiveCurrent = deriveCurrentPathwayContext(
+    client,
+    clientMilestones,
+    offerMilestones,
+  );
+  const offerValue =
+    effectiveCurrent.offerId ||
+    valueFrom(client, [
+      "offer_milestones_current_offer_id",
+      "offer_milestones_2nd_current_offer_id",
+      "offer_id",
+      "offer_name",
+    ]);
+  const rawMilestoneValue =
+    effectiveCurrent.milestoneId ||
+    valueFrom(client, [
+      "offer_milestones_current_milestone_id",
+      "offer_milestones_2nd_current_milestone_id",
+      "milestone_id",
+      "milestone_name",
+    ]);
   const currentOfferMilestones = offerMilestones.filter((milestone) => {
     if (!isPresent(offerValue)) return false;
     return String(milestone.offer_id) === String(offerValue);
@@ -5120,6 +5182,7 @@ function PathwaysSection({
     ? rawMilestoneValue
     : fallbackMilestone?.glide_row_id ?? null;
   const currentProgress =
+    effectiveCurrent.progress ??
     clientMilestones.find(
       (milestone) => milestone.milestone_id === milestoneValue,
     ) ??
@@ -5585,13 +5648,14 @@ function PathwaysSection({
 
       <FieldGrid
         fields={[
-          ["Offer", ["offer_milestones_current_offer_id", "offer_id", "offer_name"]],
+          ["Pathway", ["offer_milestones_current_offer_id", "offer_id", "offer_name"]],
           ["Milestones", ["offer_milestones_current_milestone_id", "milestone_id"]],
           ["Last Contact", ["csm_date_of_last_contact"]],
           ["Next Contact", ["csm_date_of_next_contact"]],
         ]}
         client={{
           ...client,
+          offer_milestones_current_offer_id: offerValue,
           offer_milestones_current_milestone_id: milestoneValue,
         }}
         programChoices={[]}
@@ -6402,7 +6466,10 @@ export function ClientDetail() {
       const milestoneRelationIds = [
         ...((milestoneRows ?? []) as ClientMilestoneRow[]),
         ...((appMilestoneRows ?? []) as ClientMilestoneRow[]),
-      ].flatMap((row) => extractGlideIds(row.milestone_id));
+      ].flatMap((row) => [
+        ...extractGlideIds(row.offer_id),
+        ...extractGlideIds(row.milestone_id),
+      ]);
       const lookup = await resolveRelationNames([
         ...relationIds,
         ...milestoneRelationIds,
