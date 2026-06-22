@@ -27,6 +27,16 @@ function nullableText(value: unknown) {
   return text || null;
 }
 
+function normalizeArchetype(value: unknown) {
+  const text = cleanText(value).toLowerCase();
+  if (!text) return null;
+  if (text === "doer") return "Doer";
+  if (text === "controller") return "Controller";
+  if (text === "worrier") return "Worrier";
+  if (text === "follower") return "Follower";
+  return undefined;
+}
+
 function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -63,6 +73,13 @@ function daysBetween(startIso: string | null, endIso: string | null) {
     0,
     Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)),
   );
+}
+
+function optionalNumber(value: unknown) {
+  const text = cleanText(value);
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
 }
 
 function addDaysIso(value: string | null, days: number) {
@@ -303,6 +320,8 @@ Deno.serve(async (req) => {
     const requestedCsmId = nullableText(body.csmTeamMemberId);
     const assignedCsmId =
       actor.role === "csm" ? actor.legacyMemberId : requestedCsmId;
+    const requestedSecondaryAssigneeId =
+      actor.role === "csm" ? null : nullableText(body.secondaryAssigneeId);
 
     if (actor.role === "csm" && !assignedCsmId) {
       return jsonResponse(
@@ -311,23 +330,62 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (assignedCsmId) {
+    if (
+      assignedCsmId &&
+      requestedSecondaryAssigneeId &&
+      assignedCsmId === requestedSecondaryAssigneeId
+    ) {
+      return jsonResponse(
+        { error: "Secondary assignee must be different from Primary CSM." },
+        400,
+      );
+    }
+
+    if (assignedCsmId || requestedSecondaryAssigneeId) {
       const { data: members, error: memberError } = await supabase
         .from("company_members")
         .select("id, legacy_glide_row_id, status, hide_from_csm_list")
         .eq("company_id", company.id)
         .eq("status", "active");
       if (memberError) throw memberError;
-      const member = members?.find(
-        (candidate) =>
-          candidate.id === assignedCsmId ||
-          candidate.legacy_glide_row_id === assignedCsmId,
-      );
-      if (!member || member.hide_from_csm_list === true) {
+      const findAssignableMember = (memberId: string | null | undefined) =>
+        memberId
+          ? members?.find(
+              (candidate) =>
+                candidate.id === memberId ||
+                candidate.legacy_glide_row_id === memberId,
+            )
+          : null;
+
+      const primaryMember = findAssignableMember(assignedCsmId);
+      if (assignedCsmId && (!primaryMember || primaryMember.hide_from_csm_list === true)) {
         return jsonResponse(
           { error: "Assigned CSM is not an active client manager." },
           400,
         );
+      }
+
+      if (requestedSecondaryAssigneeId) {
+        const { data: settings, error: settingsError } = await supabase
+          .from("company_settings")
+          .select("enable_secondary_assignee")
+          .eq("company_id", company.id)
+          .maybeSingle();
+        if (settingsError) throw settingsError;
+        if (settings?.enable_secondary_assignee !== true) {
+          return jsonResponse(
+            { error: "Enable Secondary Assignee in company settings first." },
+            400,
+          );
+        }
+
+        const secondaryMember = findAssignableMember(requestedSecondaryAssigneeId);
+        if (!secondaryMember || secondaryMember.hide_from_csm_list === true) {
+          return jsonResponse(
+            { error: "Secondary assignee is not an active client manager." },
+            400,
+          );
+        }
       }
     }
 
@@ -339,6 +397,9 @@ Deno.serve(async (req) => {
     const requestedMilestoneId = nullableText(body.milestoneId);
     const contractStartDate = normalizeDate(body.contractStartDate);
     const contractEndDate = normalizeDate(body.contractEndDate);
+    const contractMonthlyValue = optionalNumber(body.contractMonthlyValue);
+    const contractReferenceLink = nullableText(body.contractReferenceLink);
+    const contractNotes = nullableText(body.contractNotes);
 
     let selectedOffer: Record<string, unknown> | null = null;
     let selectedMilestone: Record<string, unknown> | null = null;
@@ -375,6 +436,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    const clientArchetype = normalizeArchetype(body.clientArchetype);
+    if (clientArchetype === undefined) {
+      return jsonResponse(
+        { error: "Archetype must be one of: Doer, Controller, Worrier, Follower." },
+        400,
+      );
+    }
+
     const insertPayload = {
       glide_row_id: glideRowId,
       company_id: company.id,
@@ -382,11 +451,19 @@ Deno.serve(async (req) => {
       client_name: clientName,
       client_business: nullableText(body.clientBusiness),
       client_email: nullableText(body.clientEmail),
-      client_archetype_value: nullableText(body.clientArchetype),
+      client_email_secondary: nullableText(body.clientEmailSecondary),
+      client_email_tertiary: nullableText(body.clientEmailTertiary),
+      client_image: nullableText(body.clientImage),
+      client_archetype_value: clientArchetype,
       north_star_value: nullableText(body.northStar),
+      next_steps_value: nullableText(body.nextSteps),
+      client_general_info: nullableText(body.generalInfo),
+      client_director_notes:
+        actor.role === "super_admin" || actor.role === "director"
+          ? nullableText(body.directorNotes)
+          : null,
       csm_team_member_id: assignedCsmId,
-      csm_secondary_assignee_id:
-        actor.role === "csm" ? null : nullableText(body.secondaryAssigneeId),
+      csm_secondary_assignee_id: requestedSecondaryAssigneeId,
       client_age_date_onboarded: onboardedAt,
       program_status_value: programStatus,
       offer_milestones_current_offer_id: requestedOfferId,
@@ -398,6 +475,9 @@ Deno.serve(async (req) => {
       current_contract_end_date: contractEndDate,
       current_contract_end_date_for_filtering: contractEndDate,
       current_contract_of_days: daysBetween(contractStartDate, contractEndDate),
+      current_contract_monthly_value: contractMonthlyValue,
+      current_contract_reference_link: contractReferenceLink,
+      current_contract_notes: contractNotes,
       metadata: {
         created_in: "retainos_client_create_pilot",
         actor_role: actor.role,
@@ -440,7 +520,13 @@ Deno.serve(async (req) => {
     }
 
     let contract = null;
-    if (contractStartDate || contractEndDate) {
+    if (
+      contractStartDate ||
+      contractEndDate ||
+      contractMonthlyValue !== null ||
+      contractReferenceLink ||
+      contractNotes
+    ) {
       const { data, error } = await supabase
         .from("client_contracts")
         .insert({
@@ -451,6 +537,9 @@ Deno.serve(async (req) => {
           start_date: contractStartDate,
           end_date: contractEndDate,
           contract_days: daysBetween(contractStartDate, contractEndDate),
+          monthly_value: contractMonthlyValue,
+          reference_link: contractReferenceLink,
+          notes: contractNotes,
           status: "active",
           metadata: {
             actor_role: actor.role,

@@ -69,6 +69,53 @@ function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
 
+function normalizeEmailList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return [
+      ...new Set(
+        value
+          .flatMap((item) => normalizeEmailList(item))
+          .filter((email) => email.includes("@")),
+      ),
+    ];
+  }
+
+  const text = normalizeEmail(value);
+  if (!text) return [];
+  return [
+    ...new Set(
+      text
+        .split(/[\s,;]+/)
+        .map((item) => item.trim())
+        .filter((email) => email.includes("@")),
+    ),
+  ];
+}
+
+function clientEmailValues(client: Record<string, unknown>) {
+  return [
+    normalizeEmail(client.client_email),
+    normalizeEmail(client.client_email_secondary),
+    normalizeEmail(client.client_email_tertiary),
+  ].filter(Boolean);
+}
+
+function clientMatchesAnyEmail(
+  client: Record<string, unknown>,
+  submittedEmails: string[],
+) {
+  const submitted = new Set(submittedEmails.map((email) => normalizeEmail(email)));
+  return clientEmailValues(client).some((email) => submitted.has(email));
+}
+
+function matchedClientEmail(
+  client: Record<string, unknown>,
+  submittedEmails: string[],
+) {
+  const submitted = new Set(submittedEmails.map((email) => normalizeEmail(email)));
+  return clientEmailValues(client).find((email) => submitted.has(email)) ?? "";
+}
+
 function normalizeProvider(value: unknown) {
   return cleanText(value).toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "unknown";
 }
@@ -285,9 +332,16 @@ Deno.serve(async (req) => {
       cleanText(body.companyId) ||
       cleanText(body.companyGlideId) ||
       cleanText(body.company_glide_id);
-    const clientEmail = normalizeEmail(
-      body.client_email ?? body.clientEmail ?? body.email,
+    const clientEmails = normalizeEmailList(
+      body.client_email ??
+        body.clientEmail ??
+        body.email ??
+        body.attendee_emails ??
+        body.attendeeEmails ??
+        body.invitee_emails ??
+        body.inviteeEmails,
     );
+    const clientEmail = clientEmails[0] ?? "";
     const summary =
       cleanText(body.summary) ||
       cleanText(body.notes) ||
@@ -308,8 +362,11 @@ Deno.serve(async (req) => {
     if (!rawCompanyId) {
       return jsonResponse({ error: "company_id is required." }, 400);
     }
-    if (!clientEmail) {
-      return jsonResponse({ error: "client_email is required." }, 400);
+    if (clientEmails.length === 0) {
+      return jsonResponse(
+        { error: "client_email or attendee_emails is required." },
+        400,
+      );
     }
     if (!summary) {
       return jsonResponse({ error: "summary or notes is required." }, 400);
@@ -349,6 +406,7 @@ Deno.serve(async (req) => {
       payload: body,
       metadata: compactObject({
         client_email: clientEmail,
+        client_emails: clientEmails.length > 1 ? clientEmails : undefined,
         started_at: startedAt,
         recording_url: nullableText(body.recording_url) ?? nullableText(body.url),
         title: nullableText(body.title),
@@ -379,20 +437,32 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: clientRows, error: clientError } = await supabase
+    let clientQuery = supabase
       .from("clients")
       .select(
-        "id, glide_row_id, client_name, client_email, program_status_value, next_steps_value, csm_date_of_last_contact",
+        "id, glide_row_id, client_name, client_email, client_email_secondary, client_email_tertiary, program_status_value, next_steps_value, csm_date_of_last_contact",
       )
-      .eq("company_id", company.id)
-      .ilike("client_email", clientEmail);
+      .eq("company_id", company.id);
+
+    const emailClauses = clientEmails.flatMap((email) => {
+      const safeEmail = email.replaceAll(",", "");
+      return [
+        `client_email.ilike.${safeEmail}`,
+        `client_email_secondary.ilike.${safeEmail}`,
+        `client_email_tertiary.ilike.${safeEmail}`,
+      ];
+    });
+    clientQuery = clientQuery.or(emailClauses.join(","));
+
+    const { data: clientRows, error: clientError } = await clientQuery;
 
     if (clientError) throw clientError;
 
-    const activeClients = (clientRows ?? []).filter((client) =>
-      ACTIVE_PROGRAM_STATUSES.has(
-        String(client.program_status_value ?? "").trim().toLowerCase(),
-      ),
+    const activeClients = (clientRows ?? []).filter(
+      (client) =>
+        ACTIVE_PROGRAM_STATUSES.has(
+          String(client.program_status_value ?? "").trim().toLowerCase(),
+        ) && clientMatchesAnyEmail(client, clientEmails),
     );
 
     if (activeClients.length !== 1) {
@@ -415,6 +485,7 @@ Deno.serve(async (req) => {
             ...(intakeEvent.metadata ?? {}),
             total_matches: (clientRows ?? []).length,
             active_matches: activeClients.length,
+            submitted_client_emails: clientEmails,
           },
         })
         .eq("id", intakeEvent.id)
@@ -434,6 +505,7 @@ Deno.serve(async (req) => {
     }
 
     const client = activeClients[0];
+    const matchedEmail = matchedClientEmail(client, clientEmails) || clientEmail;
     const previousNextSteps = client.next_steps_value ?? null;
     const previousLastContact = client.csm_date_of_last_contact ?? null;
 
@@ -464,7 +536,8 @@ Deno.serve(async (req) => {
           integration_intake_event_id: intakeEvent.id,
           provider,
           external_event_id: externalEventId,
-          client_email: clientEmail,
+          client_email: matchedEmail,
+          submitted_client_emails: clientEmails,
           recording_url: nullableText(body.recording_url) ?? nullableText(body.url),
           title: nullableText(body.title),
           previous_next_steps: previousNextSteps,

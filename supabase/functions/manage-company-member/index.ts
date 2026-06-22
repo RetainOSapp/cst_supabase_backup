@@ -53,6 +53,52 @@ function normalizeCapacity(value: unknown) {
   return Math.max(0, Math.min(1000, num));
 }
 
+async function sendLoginInvite(
+  supabase: ReturnType<typeof createClient>,
+  email: string,
+) {
+  const appUrl =
+    Deno.env.get("RETAINOS_APP_URL") ??
+    Deno.env.get("SITE_URL") ??
+    Deno.env.get("APP_URL") ??
+    "https://app.retainos.ai";
+  const loginUrl = `${appUrl.replace(/\/$/, "")}/login`;
+  const { error: createError } = await supabase.auth.admin.createUser({
+    email,
+    email_confirm: true,
+  });
+  const alreadyExists =
+    createError?.message.toLowerCase().includes("already") ?? false;
+
+  if (createError && !alreadyExists) {
+    return {
+      sent: false,
+      provisioned: false,
+      error: createError.message,
+    };
+  }
+
+  const { error: otpError } = await supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false, emailRedirectTo: loginUrl },
+  });
+
+  if (otpError) {
+    return {
+      sent: false,
+      provisioned: !alreadyExists,
+      error: otpError.message,
+    };
+  }
+
+  return {
+    sent: true,
+    provisioned: !alreadyExists,
+    method: "email_otp",
+    loginUrl,
+  };
+}
+
 async function assertCanManageCompany(
   supabase: ReturnType<typeof createClient>,
   userEmail: string,
@@ -178,6 +224,8 @@ Deno.serve(async (req) => {
         .single();
       if (error) throw error;
 
+      const invite = await sendLoginInvite(supabase, email);
+
       await supabase.from("app_audit_events").insert({
         company_id: company.id,
         actor_auth_user_id: userData.user.id,
@@ -187,11 +235,14 @@ Deno.serve(async (req) => {
         entity_table: "company_members",
         entity_id: member.id,
         title: "Company member created",
-        summary: `${name} was added as ${role}.`,
+        summary: `${name} was added as ${role}.${
+          invite.sent ? " Login email sent." : " Login email failed."
+        }`,
         after_data: member,
+        metadata: { invite },
       });
 
-      return jsonResponse({ ok: true, member });
+      return jsonResponse({ ok: true, member, invite });
     }
 
     if (action === "update") {
@@ -251,6 +302,55 @@ Deno.serve(async (req) => {
       });
 
       return jsonResponse({ ok: true, member });
+    }
+
+    if (action === "send_invite") {
+      const memberId = cleanText(body.memberId);
+      if (!memberId) return jsonResponse({ error: "Missing member id." }, 400);
+
+      const { data: member, error: memberError } = await supabase
+        .from("company_members")
+        .select("*")
+        .eq("id", memberId)
+        .eq("company_id", company.id)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      if (!member) return jsonResponse({ error: "Member not found." }, 404);
+      if (member.status !== "active") {
+        return jsonResponse(
+          { error: "Only active team members can receive login invites." },
+          400,
+        );
+      }
+
+      const email = normalizeEmail(member.email);
+      if (!email || !email.includes("@")) {
+        return jsonResponse(
+          { error: "This team member does not have a valid email." },
+          400,
+        );
+      }
+
+      const invite = await sendLoginInvite(supabase, email);
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "company_member_invite_sent",
+        source: "team_admin",
+        entity_table: "company_members",
+        entity_id: member.id,
+        legacy_glide_row_id: member.legacy_glide_row_id,
+        title: invite.sent ? "Company member invite sent" : "Company member invite failed",
+        summary: invite.sent
+          ? `Login email sent to ${member.name ?? member.email}.`
+          : `Login email failed for ${member.name ?? member.email}.`,
+        after_data: member,
+        metadata: { invite },
+      });
+
+      return jsonResponse({ ok: true, member, invite });
     }
 
     if (action === "archive") {

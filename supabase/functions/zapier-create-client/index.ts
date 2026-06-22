@@ -22,6 +22,11 @@ type IntegrationSecretValidationResult =
       status: number;
     };
 
+type SupabaseClient = ReturnType<typeof createClient>;
+type JsonRecord = Record<string, unknown>;
+
+class RequestValidationError extends Error {}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -44,6 +49,16 @@ function firstNullableText(...values: unknown[]) {
     if (text) return text;
   }
   return null;
+}
+
+function normalizeArchetype(value: unknown) {
+  const text = cleanText(value).toLowerCase();
+  if (!text) return null;
+  if (text === "doer") return "Doer";
+  if (text === "controller") return "Controller";
+  if (text === "worrier") return "Worrier";
+  if (text === "follower") return "Follower";
+  return undefined;
 }
 
 function nullableNumber(value: unknown) {
@@ -445,7 +460,7 @@ async function resolveCompany(
 }
 
 async function resolveAssignableMember(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   companyId: string,
   value: unknown,
 ) {
@@ -474,7 +489,7 @@ async function resolveAssignableMember(
 }
 
 async function resolveOffer(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseClient,
   companyId: string,
   value: unknown,
 ) {
@@ -492,6 +507,158 @@ async function resolveOffer(
   if (!data) throw new Error("Offer ID is not active for this company.");
 
   return data.glide_row_id;
+}
+
+function customFieldRowsFromPayload(body: Record<string, unknown>) {
+  const modernPayload = body.custom_fields ?? body.customFields;
+  const rows = Array.isArray(modernPayload)
+    ? modernPayload
+    : modernPayload && typeof modernPayload === "object"
+      ? Object.entries(modernPayload as JsonRecord).map(([key, value]) => ({
+          key,
+          value,
+        }))
+      : [];
+  const normalizedRows = rows
+    .map((row) => (row && typeof row === "object" ? (row as JsonRecord) : null))
+    .filter((row): row is JsonRecord =>
+      Boolean(row && (cleanText(row.id) || cleanText(row.key))),
+    );
+
+  for (let index = 1; index <= 7; index += 1) {
+    const value = nullableText(body[`customfield${index}`]);
+    if (value) normalizedRows.push({ key: `customfield${index}`, value });
+  }
+
+  return normalizedRows;
+}
+
+function parseCustomFieldValue(field: JsonRecord, value: unknown) {
+  const fieldType = cleanText(field.field_type) || "text";
+  const options = Array.isArray(field.options) ? (field.options as JsonRecord[]) : [];
+  const optionValues = new Set(
+    options
+      .flatMap((option) => [cleanText(option.value), cleanText(option.label)])
+      .filter(Boolean)
+      .map((option) => option.toLowerCase()),
+  );
+
+  if (value === null || value === undefined || value === "") {
+    return { valueText: null, valueJson: null };
+  }
+
+  if (fieldType === "boolean") {
+    const raw = String(value).trim().toLowerCase();
+    if (!["true", "false", "yes", "no", "1", "0"].includes(raw)) {
+      throw new RequestValidationError(`${field.label ?? "Custom field"} must be yes or no.`);
+    }
+    const bool = raw === "true" || raw === "yes" || raw === "1";
+    return { valueText: String(bool), valueJson: bool };
+  }
+
+  if (fieldType === "number") {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      throw new RequestValidationError(`${field.label ?? "Custom field"} must be a number.`);
+    }
+    return { valueText: String(numeric), valueJson: numeric };
+  }
+
+  if (fieldType === "date") {
+    const raw = cleanText(value);
+    const date = new Date(raw);
+    if (!raw || Number.isNaN(date.getTime())) {
+      throw new RequestValidationError(`${field.label ?? "Custom field"} must be a valid date.`);
+    }
+    return { valueText: raw.slice(0, 10), valueJson: raw.slice(0, 10) };
+  }
+
+  if (fieldType === "multi_select") {
+    const values = Array.isArray(value)
+      ? value.map((item) => cleanText(item)).filter(Boolean)
+      : cleanText(value)
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+    if (optionValues.size > 0) {
+      for (const item of values) {
+        if (!optionValues.has(item.toLowerCase())) {
+          throw new RequestValidationError(`${field.label ?? "Custom field"} has an unsupported option.`);
+        }
+      }
+    }
+    return { valueText: values.join(", "), valueJson: values };
+  }
+
+  const text = cleanText(value);
+  if (fieldType === "single_select" && text && optionValues.size > 0) {
+    if (!optionValues.has(text.toLowerCase())) {
+      throw new RequestValidationError(`${field.label ?? "Custom field"} has an unsupported option.`);
+    }
+  }
+  return { valueText: text || null, valueJson: text || null };
+}
+
+async function prepareCustomFieldInserts(
+  supabase: SupabaseClient,
+  companyId: string,
+  clientLegacyId: string,
+  customFieldRows: JsonRecord[],
+) {
+  if (customFieldRows.length === 0) return { changes: [], inserts: [] };
+
+  const ids = [
+    ...new Set(customFieldRows.map((row) => cleanText(row.id)).filter(Boolean)),
+  ];
+  const keys = [
+    ...new Set(customFieldRows.map((row) => cleanText(row.key)).filter(Boolean)),
+  ];
+  const { data: allDefinitions, error: definitionsError } = await supabase
+    .from("company_custom_fields")
+    .select("id, key, label, field_type, options")
+    .eq("company_id", companyId)
+    .eq("entity_type", "client")
+    .eq("status", "active");
+  if (definitionsError) throw definitionsError;
+
+  const definitions = ((allDefinitions ?? []) as JsonRecord[]).filter(
+    (row) => ids.includes(String(row.id)) || keys.includes(String(row.key)),
+  );
+  const definitionById = new Map(definitions.map((row) => [String(row.id), row]));
+  const definitionByKey = new Map(definitions.map((row) => [String(row.key), row]));
+  const changes: JsonRecord[] = [];
+  const inserts: JsonRecord[] = [];
+
+  for (const item of customFieldRows) {
+    const definition =
+      definitionById.get(cleanText(item.id)) ?? definitionByKey.get(cleanText(item.key));
+    if (!definition) {
+      throw new RequestValidationError("A custom field is not enabled for this company.");
+    }
+    const parsed = parseCustomFieldValue(definition, item.value);
+    const id = String(definition.id);
+    changes.push({
+      id,
+      key: definition.key,
+      label: definition.label,
+      before: null,
+      after: parsed.valueText,
+    });
+    inserts.push({
+      company_id: companyId,
+      client_id: clientLegacyId,
+      custom_field_id: id,
+      field_key: definition.key,
+      value_text: parsed.valueText,
+      value_json: parsed.valueJson,
+      source_table: "client_custom_field_values",
+      metadata: {
+        updated_from: "zapier_create_client",
+      },
+    });
+  }
+
+  return { changes, inserts };
 }
 
 Deno.serve(async (req) => {
@@ -617,19 +784,25 @@ Deno.serve(async (req) => {
       nullableNumber(body.contract_monthly_value) ??
       nullableNumber(body.contractMonthlyValue);
 
-    const customFields: Record<string, string> = {};
-    for (let index = 1; index <= 7; index += 1) {
-      const value = nullableText(body[`customfield${index}`]);
-      if (value) customFields[`customfield${index}`] = value;
-    }
+    const customFieldRows = customFieldRowsFromPayload(body);
+    const metadataCustomFields = Object.fromEntries(
+      customFieldRows
+        .map((row) => [cleanText(row.key || row.id), row.value])
+        .filter(([key]) => Boolean(key)),
+    );
+    const customFieldUpdates = await prepareCustomFieldInserts(
+      supabase,
+      company.id,
+      glideRowId,
+      customFieldRows,
+    );
 
-    const archetype = firstNullableText(body.archetype, body.client_archetype, body.clientArchetype);
-    if (
-      archetype &&
-      !["doer", "controller", "worrier", "follower"].includes(archetype.toLowerCase())
-    ) {
+    const archetype = normalizeArchetype(
+      firstNullableText(body.archetype, body.client_archetype, body.clientArchetype),
+    );
+    if (archetype === undefined) {
       return jsonResponse(
-        { error: "Archetype must be one of: doer, controller, worrier, follower." },
+        { error: "Archetype must be one of: Doer, Controller, Worrier, Follower." },
         400,
       );
     }
@@ -643,6 +816,16 @@ Deno.serve(async (req) => {
         firstNullableText(body.client_business, body.clientBusiness, body.business, body.business_name),
       client_email:
         nullableText(body.client_email) ?? nullableText(body.clientEmail),
+      client_email_secondary:
+        nullableText(body.client_email_secondary) ??
+        nullableText(body.clientEmailSecondary) ??
+        nullableText(body.email_2) ??
+        nullableText(body.email2),
+      client_email_tertiary:
+        nullableText(body.client_email_tertiary) ??
+        nullableText(body.clientEmailTertiary) ??
+        nullableText(body.email_3) ??
+        nullableText(body.email3),
       client_archetype_value: archetype,
       north_star_value:
         firstNullableText(body.north_star, body.northStar, body.northstar),
@@ -668,7 +851,7 @@ Deno.serve(async (req) => {
         integration_token_prefix: authResult.tokenPrefix,
         client_phone: firstNullableText(body.client_phone, body.clientPhone, body.phone),
         mailing_address: firstNullableText(body.mailing_address, body.mailingAddress),
-        custom_fields: customFields,
+        custom_fields: metadataCustomFields,
       },
     };
 
@@ -707,6 +890,15 @@ Deno.serve(async (req) => {
       contract = data;
     }
 
+    if (customFieldUpdates.inserts.length > 0) {
+      const { error: customFieldsError } = await supabase
+        .from("client_custom_field_values")
+        .upsert(customFieldUpdates.inserts, {
+          onConflict: "company_id,client_id,custom_field_id",
+        });
+      if (customFieldsError) throw customFieldsError;
+    }
+
     const templateTaskResult = await createTasksFromClientTemplates({
       supabase,
       company,
@@ -729,6 +921,7 @@ Deno.serve(async (req) => {
           external_id: externalId,
           auth_mode: authResult.authMode,
           integration_token_prefix: authResult.tokenPrefix,
+          custom_fields: customFieldUpdates.changes,
           created_template_tasks: templateTaskResult.createdTasks,
           task_template_errors: templateTaskResult.taskErrors,
         },
@@ -753,6 +946,7 @@ Deno.serve(async (req) => {
         auth_mode: authResult.authMode,
         integration_token_id: authResult.tokenId,
         integration_token_prefix: authResult.tokenPrefix,
+        custom_fields: customFieldUpdates.changes,
         created_template_task_count: templateTaskResult.createdTasks.length,
         task_template_errors: templateTaskResult.taskErrors,
       },
@@ -763,11 +957,12 @@ Deno.serve(async (req) => {
       client,
       event,
       contract,
+      customFields: customFieldUpdates.changes,
       createdTemplateTasks: templateTaskResult.createdTasks,
       taskTemplateErrors: templateTaskResult.taskErrors,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, 500);
+    return jsonResponse({ error: message }, error instanceof RequestValidationError ? 400 : 500);
   }
 });

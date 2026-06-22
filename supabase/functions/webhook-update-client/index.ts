@@ -79,6 +79,20 @@ function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
 
+function clientEmailValues(client: JsonRecord) {
+  return [
+    normalizeEmail(client.client_email),
+    normalizeEmail(client.client_email_secondary),
+    normalizeEmail(client.client_email_tertiary),
+  ].filter(Boolean);
+}
+
+function clientMatchesEmail(client: JsonRecord, email: string) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return false;
+  return clientEmailValues(client).includes(normalized);
+}
+
 function normalizeProvider(value: unknown) {
   return cleanText(value).toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "unknown";
 }
@@ -629,6 +643,8 @@ Deno.serve(async (req) => {
       "glide_row_id",
       "client_name",
       "client_email",
+      "client_email_secondary",
+      "client_email_tertiary",
       "next_steps_value",
       "csm_date_of_last_contact",
       "csm_date_of_next_contact",
@@ -648,14 +664,20 @@ Deno.serve(async (req) => {
           .from("clients")
           .select(clientSelect)
           .eq("company_id", company.id)
-          .ilike("client_email", clientEmail)
+          .or(
+            [
+              `client_email.ilike.${clientEmail.replaceAll(",", "")}`,
+              `client_email_secondary.ilike.${clientEmail.replaceAll(",", "")}`,
+              `client_email_tertiary.ilike.${clientEmail.replaceAll(",", "")}`,
+            ].join(","),
+          )
           .is("archived_at", null);
 
     if (clientError) throw clientError;
 
     const emailSafeRows = requestedClientId && clientEmail
       ? (clientRows ?? []).filter(
-          (client) => normalizeEmail(client.client_email) === clientEmail,
+          (client) => clientMatchesEmail(client, clientEmail),
         )
       : clientRows ?? [];
 

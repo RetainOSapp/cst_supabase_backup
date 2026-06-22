@@ -39,6 +39,44 @@ function normalizeOutcome(value) {
   return text;
 }
 
+function normalizeArchetype(value) {
+  const text = cleanText(value)?.toLowerCase();
+  if (!text) return null;
+  if (text === "doer") return "Doer";
+  if (text === "controller") return "Controller";
+  if (text === "worrier") return "Worrier";
+  if (text === "follower") return "Follower";
+  return null;
+}
+
+const advocacyLegacyFields = [
+  { prefix: "advocacy_review", legacy: "review" },
+  { prefix: "advocacy_testimonial", legacy: "testimonial" },
+  { prefix: "advocacy_referral", legacy: "referral" },
+  { prefix: "advocacy_renewal_upsell", legacy: "renewal" },
+];
+
+function advocacySummaryFields(source) {
+  return advocacyLegacyFields.reduce((payload, config) => {
+    const askedAt = cleanDate(source[`outcomes_${config.legacy}_ask_date`]);
+    const receivedAt = cleanDate(source[`outcomes_${config.legacy}_yes_date`]);
+    const received =
+      source[`outcomes_${config.legacy}_set`] === true || Boolean(receivedAt);
+    const asked = Boolean(askedAt);
+    payload[`${config.prefix}_asked_count`] = asked ? 1 : 0;
+    payload[`${config.prefix}_received_count`] = received ? 1 : 0;
+    payload[`${config.prefix}_status`] = received
+      ? "received"
+      : asked
+        ? "asked"
+        : "not_asked";
+    payload[`${config.prefix}_last_asked_at`] = askedAt;
+    payload[`${config.prefix}_last_received_at`] = receivedAt;
+    payload[`${config.prefix}_last_note`] = null;
+    return payload;
+  }, {});
+}
+
 function clientPayload(source, company) {
   return {
     company_id: company.id,
@@ -48,9 +86,10 @@ function clientPayload(source, company) {
     client_business: cleanText(source.client_business),
     client_email: cleanText(source.client_email),
     client_image: cleanText(source.client_image),
-    client_archetype_value: cleanText(source.client_archetype_value),
+    client_archetype_value: normalizeArchetype(source.client_archetype_value),
     north_star_value: cleanText(source.north_star_value),
     next_steps_value: cleanText(source.next_steps_value),
+    client_general_info: cleanText(source.client_general_info),
     client_director_notes: cleanText(source.client_director_notes),
     csm_team_member_id: cleanText(source.csm_team_member_id),
     csm_secondary_assignee_id: cleanText(source.csm_secondary_assignee_id),
@@ -108,6 +147,7 @@ function clientPayload(source, company) {
     outcomes_buy_in_date: cleanDate(source.outcomes_buy_in_date),
     outcomes_suitable_value: cleanText(source.outcomes_suitable_value),
     outcomes_suitable_date: cleanDate(source.outcomes_suitable_date),
+    ...advocacySummaryFields(source),
     churn_reason_value: cleanText(source.churn_reason_value),
     churn_comments: cleanText(source.churn_comments),
     source_snapshot: source,

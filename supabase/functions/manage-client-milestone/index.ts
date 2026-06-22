@@ -9,7 +9,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ACTIONS = new Set(["set_pathway", "start_milestone", "complete_milestone"]);
+const ACTIONS = new Set([
+  "set_pathway",
+  "set_secondary_pathway",
+  "clear_secondary_pathway",
+  "start_milestone",
+  "complete_milestone",
+]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -68,6 +74,9 @@ function titleForAction(action: string, milestoneName: string) {
   if (action === "start_milestone") return `Milestone started: ${milestoneName}`;
   if (action === "complete_milestone")
     return `Milestone completed: ${milestoneName}`;
+  if (action === "set_secondary_pathway")
+    return `Secondary pathway changed: ${milestoneName}`;
+  if (action === "clear_secondary_pathway") return "Secondary pathway cleared";
   return `Pathway changed: ${milestoneName}`;
 }
 
@@ -206,19 +215,116 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (action === "set_pathway" && actor.role !== "super_admin" && actor.role !== "director") {
+    const now = new Date().toISOString();
+    const isPathwayChange =
+      action === "set_pathway" ||
+      action === "set_secondary_pathway" ||
+      action === "clear_secondary_pathway";
+
+    if (isPathwayChange && actor.role !== "super_admin" && actor.role !== "director") {
       return jsonResponse(
         { error: "Only Directors and Super Admins can change pathways." },
         403,
       );
     }
 
+    if (
+      action === "set_secondary_pathway" ||
+      action === "clear_secondary_pathway"
+    ) {
+      const { data: settings, error: settingsError } = await supabase
+        .from("company_settings")
+        .select("enable_secondary_offers")
+        .eq("company_id", company.id)
+        .maybeSingle();
+      if (settingsError) throw settingsError;
+      if (settings?.enable_secondary_offers !== true) {
+        return jsonResponse(
+          { error: "Enable Secondary Pathway in company settings first." },
+          400,
+        );
+      }
+    }
+
+    if (action === "clear_secondary_pathway") {
+      const beforeSecondary = {
+        offer_id: client.secondary_offer_milestones_current_offer_id ?? null,
+        milestone_id:
+          client.secondary_offer_milestones_current_milestone_id ?? null,
+      };
+      const { data: updatedClient, error: updateError } = await supabase
+        .from("clients")
+        .update({
+          secondary_offer_milestones_current_offer_id: null,
+          secondary_offer_milestones_current_milestone_id: null,
+          secondary_offer_milestones_current_milestone_change_date: now,
+        })
+        .eq("id", client.id)
+        .select("*")
+        .single();
+
+      if (updateError) throw updateError;
+
+      const { data: event, error: historyError } = await supabase
+        .from("client_history_events")
+        .insert({
+          company_id: company.id,
+          legacy_client_glide_row_id: clientLegacyId,
+          actor_auth_user_id: userData.user.id,
+          actor_member_id: actor.memberId,
+          event_type: "client_secondary_pathway_cleared",
+          source: "client_milestone",
+          title: "Secondary pathway cleared",
+          summary: "Cleared the client's secondary pathway.",
+          notes: nullableText(body.notes),
+          payload: {
+            actor_role: actor.role,
+            action,
+            before_secondary: beforeSecondary,
+            before: client,
+            after: updatedClient,
+          },
+        })
+        .select("*")
+        .single();
+
+      if (historyError) throw historyError;
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "client_secondary_pathway_cleared",
+        source: "client_milestone",
+        entity_table: "clients",
+        entity_id: updatedClient.id,
+        legacy_glide_row_id: updatedClient.glide_row_id,
+        title: event.title,
+        summary: event.summary,
+        before_data: client,
+        after_data: updatedClient,
+        metadata: {
+          history_event_id: event.id,
+          actor_role: actor.role,
+          action,
+          client_id: updatedClient.id,
+        },
+      });
+
+      return jsonResponse({
+        ok: true,
+        client: updatedClient,
+        clientMilestone: null,
+        event,
+      });
+    }
+
     const requestedOfferId =
-      action === "set_pathway"
+      isPathwayChange
         ? cleanText(body.offerId)
         : cleanText(body.offerId) || cleanText(client.offer_milestones_current_offer_id);
     const requestedMilestoneId =
-      action === "set_pathway"
+      isPathwayChange
         ? cleanText(body.milestoneId)
         : cleanText(body.milestoneId) ||
           cleanText(client.offer_milestones_current_milestone_id);
@@ -271,7 +377,6 @@ Deno.serve(async (req) => {
     const selectedMilestone = milestones[selectedIndex];
     const nextMilestone =
       action === "complete_milestone" ? milestones[selectedIndex + 1] : null;
-    const now = new Date().toISOString();
     const startDate = normalizeDate(body.startDate, action === "start_milestone" ? now : undefined);
     const completionDate = normalizeDate(
       body.completionDate,
@@ -285,13 +390,16 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Add a valid completion date." }, 400);
     }
 
-    const { data: existingProgress, error: existingError } = await supabase
-      .from("client_milestones")
-      .select("*")
-      .eq("client_id", client.glide_row_id)
-      .eq("milestone_id", requestedMilestoneId)
-      .is("archived_at", null)
-      .maybeSingle();
+    const { data: existingProgress, error: existingError } =
+      action === "set_secondary_pathway"
+        ? { data: null, error: null }
+        : await supabase
+            .from("client_milestones")
+            .select("*")
+            .eq("client_id", client.glide_row_id)
+            .eq("milestone_id", requestedMilestoneId)
+            .is("archived_at", null)
+            .maybeSingle();
 
     if (existingError) throw existingError;
 
@@ -345,18 +453,21 @@ Deno.serve(async (req) => {
       },
     };
 
-    const { data: progressRow, error: progressError } = existingProgress
-      ? await supabase
-          .from("client_milestones")
-          .update(progressPayload)
-          .eq("id", existingProgress.id)
-          .select("*")
-          .single()
-      : await supabase
-          .from("client_milestones")
-          .insert(progressPayload)
-          .select("*")
-          .single();
+    const { data: progressRow, error: progressError } =
+      action === "set_secondary_pathway"
+        ? { data: null, error: null }
+        : existingProgress
+          ? await supabase
+              .from("client_milestones")
+              .update(progressPayload)
+              .eq("id", existingProgress.id)
+              .select("*")
+              .single()
+          : await supabase
+              .from("client_milestones")
+              .insert(progressPayload)
+              .select("*")
+              .single();
 
     if (progressError) throw progressError;
 
@@ -365,6 +476,11 @@ Deno.serve(async (req) => {
       clientUpdate.offer_milestones_current_offer_id = requestedOfferId;
       clientUpdate.offer_milestones_current_milestone_id = requestedMilestoneId;
       clientUpdate.offer_milestones_current_milestone_change_date = now;
+    } else if (action === "set_secondary_pathway") {
+      clientUpdate.secondary_offer_milestones_current_offer_id = requestedOfferId;
+      clientUpdate.secondary_offer_milestones_current_milestone_id =
+        requestedMilestoneId;
+      clientUpdate.secondary_offer_milestones_current_milestone_change_date = now;
     } else if (action === "start_milestone") {
       clientUpdate.offer_milestones_current_offer_id = requestedOfferId;
       clientUpdate.offer_milestones_current_milestone_id = requestedMilestoneId;
@@ -394,9 +510,13 @@ Deno.serve(async (req) => {
         ? "client_milestone_started"
         : action === "complete_milestone"
           ? "client_milestone_completed"
+          : action === "set_secondary_pathway"
+            ? "client_secondary_pathway_changed"
           : "client_pathway_changed";
     const summaryParts = [
-      action === "set_pathway"
+      action === "set_secondary_pathway"
+        ? `Changed secondary pathway to ${offer.name} / ${selectedMilestoneName}.`
+        : action === "set_pathway"
         ? `Changed pathway to ${offer.name} / ${selectedMilestoneName}.`
         : action === "start_milestone"
           ? `Started ${selectedMilestoneName}.`
@@ -446,13 +566,18 @@ Deno.serve(async (req) => {
       actor_member_id: actor.memberId,
       event_type: eventType,
       source: "client_milestone",
-      entity_table: "client_milestones",
-      entity_id: progressRow.id,
-      legacy_glide_row_id: progressRow.glide_row_id,
+      entity_table:
+        action === "set_secondary_pathway" ? "clients" : "client_milestones",
+      entity_id:
+        action === "set_secondary_pathway" ? updatedClient.id : progressRow.id,
+      legacy_glide_row_id:
+        action === "set_secondary_pathway"
+          ? updatedClient.glide_row_id
+          : progressRow.glide_row_id,
       title: event.title,
       summary: event.summary,
       before_data: existingProgress ?? client,
-      after_data: progressRow,
+      after_data: action === "set_secondary_pathway" ? updatedClient : progressRow,
       metadata: {
         history_event_id: event.id,
         actor_role: actor.role,

@@ -25,6 +25,8 @@ interface CompanyRow {
   synced_at: string | null;
   view_override: string | null;
   enable_secondary_assignee: boolean | null;
+  enable_secondary_offers: boolean | null;
+  enable_archetypes: boolean | null;
   enable_call_ai_for_csms: boolean | null;
 }
 
@@ -162,6 +164,8 @@ interface CompanySettingsRow {
   default_client_view: "list" | "card" | "calendar";
   default_calendar_mode: "month" | "week" | "day";
   enable_secondary_assignee: boolean;
+  enable_secondary_offers: boolean;
+  enable_archetypes: boolean;
   enable_call_ai_for_csms: boolean;
   enable_embeds: boolean;
   enable_zapier_client_create: boolean;
@@ -307,6 +311,46 @@ const roleOptions: { label: string; value: TeamRole }[] = [
   { label: "Viewer", value: "viewer" },
 ];
 
+function inviteErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Invite email could not be sent.";
+}
+
+async function sendRetainOsLoginEmail(email: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    throw new Error("This team member does not have a valid email.");
+  }
+  const loginUrl = `${window.location.origin}/login`;
+
+  const { data: prepareData, error: prepareError } = await supabase.functions.invoke(
+    "prepare-login",
+    {
+      body: { email: normalizedEmail },
+    },
+  );
+
+  if (prepareError) {
+    throw new Error(prepareError.message);
+  }
+
+  if (prepareData?.ok === false) {
+    throw new Error(
+      prepareData.error ?? "This email is not configured for RetainOS access.",
+    );
+  }
+
+  const { error: otpError } = await supabase.auth.signInWithOtp({
+    email: normalizedEmail,
+    options: { shouldCreateUser: false, emailRedirectTo: loginUrl },
+  });
+
+  if (otpError) {
+    throw new Error(otpError.message);
+  }
+
+  return { email: normalizedEmail, loginUrl };
+}
+
 const integrationTokenTypeOptions = [
   {
     value: "call_summary_next_steps",
@@ -380,17 +424,26 @@ function TeamMemberCard({
   canManage,
   onEdit,
   onArchive,
+  onSendInvite,
 }: {
   member: TeamRow;
   canManage: boolean;
   onEdit: (member: TeamRow) => void;
   onArchive: (member: TeamRow) => void;
+  onSendInvite: (member: TeamRow) => void;
 }) {
   return (
     <article className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
       <div className="flex justify-end">
         {canManage ? (
-          <div className="flex gap-2 text-xs">
+          <div className="flex flex-wrap justify-end gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => onSendInvite(member)}
+              className="font-medium text-emerald-700 hover:text-emerald-800"
+            >
+              Send invite
+            </button>
             <button
               type="button"
               onClick={() => onEdit(member)}
@@ -465,7 +518,7 @@ function NewTeamMemberModal({
   canManage: boolean;
   member?: TeamRow | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (message?: string) => void;
   onArchive: (member: TeamRow) => void;
 }) {
   const isEditing = Boolean(member?.app_member_id);
@@ -519,7 +572,33 @@ function NewTeamMemberModal({
       return;
     }
 
-    onSaved();
+    const invite = data?.invite as { sent?: boolean; error?: string } | undefined;
+    if (isEditing) {
+      onSaved("Team member updated.");
+      return;
+    }
+
+    if (invite?.sent) {
+      onSaved(
+        `Team member added. Invite sent to ${email.trim().toLowerCase()}. They can log in at ${window.location.origin}/login.`,
+      );
+      return;
+    }
+
+    try {
+      const inviteResult = await sendRetainOsLoginEmail(email);
+      onSaved(
+        `Team member added. Invite sent to ${inviteResult.email}. They can log in at ${inviteResult.loginUrl}.`,
+      );
+    } catch (inviteError) {
+      onSaved(
+        invite?.error
+          ? `Team member added, but the invite email failed: ${invite.error}`
+          : `Team member added, but the invite email failed: ${inviteErrorMessage(
+              inviteError,
+            )}`,
+      );
+    }
   }
 
   return (
@@ -2434,6 +2513,8 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     default_client_view: defaultView,
     default_calendar_mode: "month",
     enable_secondary_assignee: company?.enable_secondary_assignee === true,
+    enable_secondary_offers: company?.enable_secondary_offers === true,
+    enable_archetypes: company?.enable_archetypes === true,
     enable_call_ai_for_csms: company?.enable_call_ai_for_csms === true,
     enable_embeds: false,
     enable_zapier_client_create: false,
@@ -3149,6 +3230,8 @@ function CompanySettingsSetup({
           defaultClientView: draft.default_client_view,
           defaultCalendarMode: draft.default_calendar_mode,
           enableSecondaryAssignee: draft.enable_secondary_assignee,
+          enableSecondaryOffers: draft.enable_secondary_offers,
+          enableArchetypes: draft.enable_archetypes,
           enableCallAiForCsms: draft.enable_call_ai_for_csms,
           enableEmbeds: draft.enable_embeds,
           enableZapierClientCreate: draft.enable_zapier_client_create,
@@ -3415,6 +3498,30 @@ function CompanySettingsSetup({
               setDraft((current) => ({
                 ...current,
                 enable_secondary_assignee: checked,
+              }))
+            }
+          />
+          <SettingsFlag
+            label="Secondary pathway"
+            description="Allow client profiles to track a second pathway/milestone pair for add-ons, call tracks, or parallel deliverables."
+            checked={draft.enable_secondary_offers}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_secondary_offers: checked,
+              }))
+            }
+          />
+          <SettingsFlag
+            label="Client archetypes"
+            description="Show client archetypes in roster views so teams can quickly personalize coaching and support."
+            checked={draft.enable_archetypes}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_archetypes: checked,
               }))
             }
           />
@@ -4091,6 +4198,7 @@ export function SaasClientDetail({
   const [teamSource, setTeamSource] = useState<TeamSource>("mirror");
   const [teamReloadKey, setTeamReloadKey] = useState(0);
   const [teamActionError, setTeamActionError] = useState<string | null>(null);
+  const [teamActionSuccess, setTeamActionSuccess] = useState<string | null>(null);
   const [teamStatusFilter, setTeamStatusFilter] =
     useState<TeamStatusFilter>("active");
   const [pathwaySource, setPathwaySource] = useState<PathwaySource>("mirror");
@@ -4534,7 +4642,7 @@ export function SaasClientDetail({
           supabase
             .from("company_settings")
             .select(
-              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, metadata, updated_at",
+              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, metadata, updated_at",
             )
             .eq("company_id", appCompany.id)
             .maybeSingle(),
@@ -4723,6 +4831,7 @@ export function SaasClientDetail({
     setEditingMember(member ?? null);
     setShowTeamModal(true);
     setTeamActionError(null);
+    setTeamActionSuccess(null);
   }
 
   function handleCloseTeamModal() {
@@ -4730,9 +4839,79 @@ export function SaasClientDetail({
     setEditingMember(null);
   }
 
-  function handleTeamSaved() {
+  function handleTeamSaved(message?: string) {
     handleCloseTeamModal();
+    setTeamActionSuccess(message ?? "Team member saved.");
     setTeamReloadKey((key) => key + 1);
+  }
+
+  async function handleSendInvite(member: TeamRow) {
+    if (!canManagePilotTeam || !member.app_member_id || !companyId) return;
+    if (!member.email) {
+      setTeamActionError("This team member does not have a valid email.");
+      setTeamActionSuccess(null);
+      return;
+    }
+
+    setTeamActionError(null);
+    setTeamActionSuccess(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-member",
+      {
+        body: {
+          action: "send_invite",
+          companyLegacyId: companyId,
+          memberId: member.app_member_id,
+        },
+      },
+    );
+
+    if (invokeError) {
+      try {
+        const inviteResult = await sendRetainOsLoginEmail(member.email);
+        setTeamActionSuccess(
+          `Invite sent to ${inviteResult.email}. They can log in at ${inviteResult.loginUrl}.`,
+        );
+      } catch (inviteError) {
+        setTeamActionError(`Invite failed: ${inviteErrorMessage(inviteError)}`);
+      }
+      return;
+    }
+
+    if (data?.error) {
+      try {
+        const inviteResult = await sendRetainOsLoginEmail(member.email);
+        setTeamActionSuccess(
+          `Invite sent to ${inviteResult.email}. They can log in at ${inviteResult.loginUrl}.`,
+        );
+      } catch (inviteError) {
+        setTeamActionError(
+          `Invite failed: ${data.error || inviteErrorMessage(inviteError)}`,
+        );
+      }
+      return;
+    }
+
+    const invite = data?.invite as { sent?: boolean; error?: string } | undefined;
+    if (invite?.sent) {
+      setTeamActionSuccess(
+        `Invite sent to ${member.email ?? "team member"}. They can log in at ${window.location.origin}/login.`,
+      );
+      return;
+    }
+
+    try {
+      const inviteResult = await sendRetainOsLoginEmail(member.email);
+      setTeamActionSuccess(
+        `Invite sent to ${inviteResult.email}. They can log in at ${inviteResult.loginUrl}.`,
+      );
+    } catch (inviteError) {
+      setTeamActionError(
+        invite?.error
+          ? `Invite failed: ${invite.error}`
+          : `Invite failed: ${inviteErrorMessage(inviteError)}`,
+      );
+    }
   }
 
   async function handleArchiveMember(member: TeamRow) {
@@ -4742,6 +4921,7 @@ export function SaasClientDetail({
     if (!confirmed) return;
 
     setTeamActionError(null);
+    setTeamActionSuccess(null);
     const { data, error: invokeError } = await supabase.functions.invoke(
       "manage-company-member",
       {
@@ -4764,6 +4944,7 @@ export function SaasClientDetail({
     }
 
     setTeamReloadKey((key) => key + 1);
+    setTeamActionSuccess(`${label} was archived.`);
     handleCloseTeamModal();
   }
 
@@ -4886,6 +5067,11 @@ export function SaasClientDetail({
               {teamActionError}
             </div>
           ) : null}
+          {teamActionSuccess ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              {teamActionSuccess}
+            </div>
+          ) : null}
 
           {teamStatusFilter === "active" ? (
             (["Director", "CSM", "Support", "Viewer"] as const).map((role) => {
@@ -4910,6 +5096,7 @@ export function SaasClientDetail({
                             canManage={canManagePilotTeam}
                             onEdit={handleOpenTeamModal}
                             onArchive={handleArchiveMember}
+                            onSendInvite={handleSendInvite}
                           />
                         ))}
                       </div>
@@ -4937,6 +5124,7 @@ export function SaasClientDetail({
                         canManage={false}
                         onEdit={handleOpenTeamModal}
                         onArchive={handleArchiveMember}
+                        onSendInvite={handleSendInvite}
                       />
                     ))}
                   </div>

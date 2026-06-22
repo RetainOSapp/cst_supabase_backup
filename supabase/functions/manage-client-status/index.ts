@@ -34,6 +34,21 @@ function nullableText(value: unknown) {
   return text || null;
 }
 
+function nullableBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "yes", "1"].includes(normalized)) return true;
+  if (["false", "no", "0"].includes(normalized)) return false;
+  return null;
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : {};
+}
+
 function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -162,7 +177,7 @@ Deno.serve(async (req) => {
     if (!ALLOWED_STATUS_VALUES.has(targetStatus)) {
       return jsonResponse({ error: "Choose a valid program status." }, 400);
     }
-    if (["paused", "suspended", "off-boarded"].includes(targetStatus) && !reason) {
+    if (["paused", "suspended"].includes(targetStatus) && !reason) {
       return jsonResponse({ error: "Add a reason for this status change." }, 400);
     }
     if (targetStatus === "paused" && !returnDate) {
@@ -228,6 +243,53 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "This client already has that status." }, 400);
     }
 
+    const requestedOffboardedAt =
+      targetStatus === "off-boarded" ? normalizeDate(body.offboardedAt) : null;
+    const contractEndForOffboarding =
+      targetStatus === "off-boarded"
+        ? normalizeDate(
+            client.current_contract_end_date_for_filtering ??
+              client.current_contract_end_date,
+          )
+        : null;
+    const offboardingChurned =
+      requestedOffboardedAt && contractEndForOffboarding
+        ? new Date(requestedOffboardedAt).getTime() <
+          new Date(contractEndForOffboarding).getTime()
+        : null;
+    const churnReason =
+      targetStatus === "off-boarded"
+        ? nullableText(body.churnReason) ?? reason
+        : null;
+    const churnReasonLabel =
+      targetStatus === "off-boarded"
+        ? nullableText(body.churnReasonLabel) ?? churnReason
+        : null;
+    const goodFitForOffer =
+      targetStatus === "off-boarded" ? nullableBoolean(body.goodFit) : null;
+    const offboardingNotes =
+      targetStatus === "off-boarded" ? nullableText(body.notes) : null;
+
+    if (targetStatus === "off-boarded" && !requestedOffboardedAt) {
+      return jsonResponse({ error: "Add the client's actual end date." }, 400);
+    }
+    if (targetStatus === "off-boarded" && goodFitForOffer === null) {
+      return jsonResponse(
+        { error: "Choose whether this client was a good fit for the offer." },
+        400,
+      );
+    }
+    if (targetStatus === "off-boarded" && offboardingChurned === true && !churnReason) {
+      return jsonResponse({ error: "Choose the churn reason." }, 400);
+    }
+    if (
+      targetStatus === "off-boarded" &&
+      offboardingChurned === true &&
+      !offboardingNotes
+    ) {
+      return jsonResponse({ error: "Add churn notes for this offboarding." }, 400);
+    }
+
     const now = new Date().toISOString();
     const pauseExtensionDays =
       targetStatus === "paused" && returnDate ? daysBetween(now, returnDate) : 0;
@@ -248,10 +310,41 @@ Deno.serve(async (req) => {
       pauseExtensionDays > 0 && Number.isFinite(currentContractDays)
         ? (currentContractDays as number) + pauseExtensionDays
         : client.current_contract_of_days;
+    const offboardingStatus =
+      offboardingChurned === true
+        ? "churned"
+        : offboardingChurned === false
+          ? "completed"
+          : "unknown";
+    const offboardingStatusReason =
+      targetStatus === "off-boarded"
+        ? offboardingChurned === true
+          ? churnReason
+          : offboardingChurned === false
+            ? "Completed contract / did not churn"
+            : "Offboarded - churn status needs review"
+        : reason;
+    const offboardingPayload =
+      targetStatus === "off-boarded"
+        ? {
+            ...recordFrom(recordFrom(client.metadata).offboarding),
+            actual_end_date: requestedOffboardedAt,
+            contract_end_date: contractEndForOffboarding,
+            churned: offboardingChurned,
+            churn_status: offboardingStatus,
+            churn_reason: offboardingChurned === true ? churnReason : null,
+            churn_reason_label:
+              offboardingChurned === true ? churnReasonLabel : null,
+            notes: offboardingNotes,
+            good_fit_for_offer: goodFitForOffer,
+            recorded_at: now,
+            recorded_by_role: actor.role,
+          }
+        : null;
 
     const updatePayload: Record<string, unknown> = {
       program_status_value: targetStatus,
-      program_status_reason: reason,
+      program_status_reason: offboardingStatusReason,
       program_paused_return_date: targetStatus === "paused" ? returnDate : null,
       program_latest_paused_date: targetStatus === "paused" ? now : client.program_latest_paused_date,
       program_latest_suspended_date:
@@ -265,10 +358,15 @@ Deno.serve(async (req) => {
     }
 
     if (targetStatus === "off-boarded") {
-      updatePayload.client_age_date_offboarded = now;
-      updatePayload.client_age_date_offboarded_for_filtering = now;
-      updatePayload.churn_reason_value = reason;
-      updatePayload.churn_comments = nullableText(body.notes);
+      updatePayload.client_age_date_offboarded = requestedOffboardedAt;
+      updatePayload.client_age_date_offboarded_for_filtering = requestedOffboardedAt;
+      updatePayload.churn_reason_value =
+        offboardingChurned === true ? churnReasonLabel ?? churnReason : null;
+      updatePayload.churn_comments = offboardingNotes;
+      updatePayload.metadata = {
+        ...recordFrom(client.metadata),
+        offboarding: offboardingPayload,
+      };
     } else if (targetStatus === "front-end" || targetStatus === "back-end") {
       updatePayload.client_age_date_offboarded = null;
       updatePayload.client_age_date_offboarded_for_filtering = null;
@@ -330,8 +428,17 @@ Deno.serve(async (req) => {
       .join(" ");
     const summaryParts = [
       `Changed status from ${client.program_status_value ?? "unset"} to ${targetStatus}.`,
-      reason ? `Reason: ${reason}` : null,
+      offboardingStatusReason ? `Reason: ${offboardingStatusReason}` : null,
       returnDate ? `Return date: ${returnDate.slice(0, 10)}` : null,
+      requestedOffboardedAt
+        ? `Actual end date: ${requestedOffboardedAt.slice(0, 10)}.`
+        : null,
+      targetStatus === "off-boarded"
+        ? `Churn status: ${offboardingStatus}.`
+        : null,
+      targetStatus === "off-boarded"
+        ? `Good fit: ${goodFitForOffer ? "Yes" : "No"}.`
+        : null,
       pauseExtensionDays > 0
         ? `Extended contract by ${pauseExtensionDays} day${pauseExtensionDays === 1 ? "" : "s"}.`
         : null,
@@ -353,8 +460,9 @@ Deno.serve(async (req) => {
           actor_role: actor.role,
           from_status: client.program_status_value,
           to_status: targetStatus,
-          reason,
+          reason: offboardingStatusReason,
           return_date: returnDate,
+          offboarding: offboardingPayload,
           pause_extension_days: pauseExtensionDays,
           updated_contract: updatedContract,
           before: client,
@@ -384,8 +492,9 @@ Deno.serve(async (req) => {
         actor_role: actor.role,
         from_status: client.program_status_value,
         to_status: targetStatus,
-        reason,
+        reason: offboardingStatusReason,
         return_date: returnDate,
+        offboarding: offboardingPayload,
         pause_extension_days: pauseExtensionDays,
         updated_contract_id: updatedContract?.id ?? null,
       },

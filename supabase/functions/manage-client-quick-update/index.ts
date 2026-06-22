@@ -10,6 +10,19 @@ const CORS_HEADERS = {
 };
 
 const WRITER_ROLES = new Set(["director", "support", "csm"]);
+const ADVOCACY_TYPES = new Set([
+  "review",
+  "testimonial",
+  "referral",
+  "renewal_upsell",
+]);
+const ADVOCACY_ACTIONS = new Set(["asked", "received"]);
+const ADVOCACY_PREFIXES: Record<string, string> = {
+  review: "advocacy_review",
+  testimonial: "advocacy_testimonial",
+  referral: "advocacy_referral",
+  renewal_upsell: "advocacy_renewal_upsell",
+};
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -46,6 +59,29 @@ function parseDateTime(value: unknown) {
   if (!raw) return null;
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function parseAdvocacyEvents(value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>) : null))
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+    .map((row) => {
+      const advocacyType = cleanText(row.advocacyType ?? row.type);
+      const action = cleanText(row.action);
+      if (!ADVOCACY_TYPES.has(advocacyType)) {
+        throw new Error("Choose a valid advocacy type.");
+      }
+      if (!ADVOCACY_ACTIONS.has(action)) {
+        throw new Error("Choose either asked or received for advocacy tracking.");
+      }
+      return {
+        advocacyType,
+        action,
+        occurredAt: parseDateTime(row.occurredAt) ?? new Date().toISOString(),
+        notes: cleanText(row.notes) || null,
+      };
+    });
 }
 
 function parseCustomFieldValue(field: Record<string, unknown>, value: unknown) {
@@ -226,6 +262,57 @@ async function resolveActor(
   throw new Error("You do not have permission to quick update this client.");
 }
 
+async function refreshAdvocacySummary(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  clientLegacyId: string,
+) {
+  const { data, error } = await supabase
+    .from("client_advocacy_events")
+    .select("advocacy_type, action, occurred_at, notes, created_at")
+    .eq("company_id", companyId)
+    .eq("client_legacy_id", clientLegacyId);
+
+  if (error) throw error;
+
+  const payload: Record<string, unknown> = {};
+  for (const [type, prefix] of Object.entries(ADVOCACY_PREFIXES)) {
+    const rows = ((data ?? []) as Record<string, unknown>[]).filter(
+      (row) => row.advocacy_type === type,
+    );
+    const askedRows = rows.filter((row) => row.action === "asked");
+    const receivedRows = rows.filter((row) => row.action === "received");
+    const latest = [...rows].sort((left, right) => {
+      const leftDate = new Date(
+        String(left.occurred_at ?? left.created_at ?? "1970-01-01"),
+      ).getTime();
+      const rightDate = new Date(
+        String(right.occurred_at ?? right.created_at ?? "1970-01-01"),
+      ).getTime();
+      return rightDate - leftDate;
+    })[0];
+    payload[`${prefix}_asked_count`] = askedRows.length;
+    payload[`${prefix}_received_count`] = receivedRows.length;
+    payload[`${prefix}_status`] =
+      receivedRows.length > 0 ? "received" : askedRows.length > 0 ? "asked" : "not_asked";
+    payload[`${prefix}_last_asked_at`] =
+      askedRows
+        .map((row) => row.occurred_at as string | null)
+        .filter(Boolean)
+        .sort()
+        .at(-1) ?? null;
+    payload[`${prefix}_last_received_at`] =
+      receivedRows
+        .map((row) => row.occurred_at as string | null)
+        .filter(Boolean)
+        .sort()
+        .at(-1) ?? null;
+    payload[`${prefix}_last_note`] = cleanText(latest?.notes) || null;
+  }
+
+  return payload;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -292,12 +379,12 @@ Deno.serve(async (req) => {
     const actor = await resolveActor(supabase, userEmail, company.id);
 
     const { data: client, error: clientError } = await supabase
-      .from("backup_company_clients")
+      .from("clients")
       .select(
-        "glide_row_id, company_id, client_name, csm_team_member_id, csm_secondary_assignee_id",
+        "id, glide_row_id, company_id, company_glide_row_id, client_name, csm_team_member_id, csm_secondary_assignee_id",
       )
       .eq("glide_row_id", clientLegacyId)
-      .eq("company_id", companyLegacyId)
+      .eq("company_id", company.id)
       .maybeSingle();
 
     if (clientError) throw clientError;
@@ -324,6 +411,7 @@ Deno.serve(async (req) => {
     const successStatus = cleanText(body.successStatus);
     const progressStatus = cleanText(body.progressStatus);
     const buyInStatus = cleanText(body.buyInStatus);
+    const advocacyEvents = parseAdvocacyEvents(body.advocacyEvents);
     const customFieldUpdates = await prepareCustomFieldUpdates(
       supabase,
       company.id,
@@ -339,6 +427,7 @@ Deno.serve(async (req) => {
       !successStatus &&
       !progressStatus &&
       !buyInStatus &&
+      advocacyEvents.length === 0 &&
       customFieldUpdates.changes.length === 0
     ) {
       return jsonResponse(
@@ -367,6 +456,7 @@ Deno.serve(async (req) => {
         actor_role: actor.role,
         client_name: client.client_name ?? null,
         custom_fields: customFieldUpdates.changes,
+        advocacy_events: advocacyEvents,
       },
     };
 
@@ -377,6 +467,41 @@ Deno.serve(async (req) => {
       .single();
 
     if (insertError) throw insertError;
+
+    let insertedAdvocacyEvents: Record<string, unknown>[] = [];
+    if (advocacyEvents.length > 0) {
+      const { data: advocacyRows, error: advocacyError } = await supabase
+        .from("client_advocacy_events")
+        .insert(
+          advocacyEvents.map((advocacyEvent) => ({
+            company_id: company.id,
+            client_id: client.id,
+            client_legacy_id: clientLegacyId,
+            company_legacy_id: company.legacy_glide_row_id,
+            advocacy_type: advocacyEvent.advocacyType,
+            action: advocacyEvent.action,
+            occurred_at: advocacyEvent.occurredAt,
+            notes: advocacyEvent.notes,
+            csm_team_member_id: client.csm_team_member_id ?? null,
+            actor_member_id: actor.memberId,
+            actor_member_legacy_id: actor.legacyMemberId,
+            actor_auth_user_id: userData.user.id,
+            source: "quick_update",
+            metadata: {
+              history_event_id: event.id,
+              actor_role: actor.role,
+            },
+          })),
+        )
+        .select("*");
+      if (advocacyError) throw advocacyError;
+      insertedAdvocacyEvents = (advocacyRows ?? []) as Record<string, unknown>[];
+    }
+
+    const advocacySummaryUpdates =
+      advocacyEvents.length > 0
+        ? await refreshAdvocacySummary(supabase, company.id, clientLegacyId)
+        : {};
 
     const clientUpdates = {
       next_steps_value: nextSteps || null,
@@ -391,6 +516,7 @@ Deno.serve(async (req) => {
       outcomes_buy_in_value: buyInStatus || null,
       outcomes_buy_in_for_filtering: buyInStatus || null,
       outcomes_buy_in_date: buyInStatus ? new Date().toISOString() : null,
+      ...advocacySummaryUpdates,
     };
 
     const { data: updatedClient, error: updateClientError } = await supabase
@@ -427,6 +553,7 @@ Deno.serve(async (req) => {
         event,
         updated_client: updatedClient,
         custom_fields: customFieldUpdates.changes,
+        advocacy_events: insertedAdvocacyEvents,
       },
     });
 
@@ -435,6 +562,7 @@ Deno.serve(async (req) => {
       event,
       client: updatedClient,
       customFields: customFieldUpdates.changes,
+      advocacyEvents: insertedAdvocacyEvents,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

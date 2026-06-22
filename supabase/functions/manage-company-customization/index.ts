@@ -316,6 +316,8 @@ Deno.serve(async (req) => {
         default_client_view: defaultClientView,
         default_calendar_mode: defaultCalendarMode,
         enable_secondary_assignee: Boolean(body.enableSecondaryAssignee),
+        enable_secondary_offers: Boolean(body.enableSecondaryOffers),
+        enable_archetypes: Boolean(body.enableArchetypes),
         enable_call_ai_for_csms: Boolean(body.enableCallAiForCsms),
         enable_embeds: Boolean(body.enableEmbeds),
         enable_zapier_client_create: Boolean(body.enableZapierClientCreate),
@@ -343,6 +345,8 @@ Deno.serve(async (req) => {
         .from("companies")
         .update({
           enable_secondary_assignee: payload.enable_secondary_assignee,
+          enable_secondary_offers: payload.enable_secondary_offers,
+          enable_archetypes: payload.enable_archetypes,
           enable_call_ai_for_csms: payload.enable_call_ai_for_csms,
         })
         .eq("id", company.id);

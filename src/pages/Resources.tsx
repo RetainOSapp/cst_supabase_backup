@@ -176,6 +176,10 @@ function retainOsResourceCategory(resource: ResourceRow): ResourceCategory {
   const text = resourceSearchText(resource);
   const dynamicKey = resource.dynamic_key ?? "";
 
+  if (text.includes("resource category: working with clients")) {
+    return "working_with_clients";
+  }
+
   if (
     dynamicKey.includes("webhook") ||
     text.includes("zapier") ||
@@ -398,6 +402,8 @@ function ParameterTable() {
   const rows = [
     ["client_name", "Required", "Full name of the client."],
     ["client_email", "Required", "Email address of the client."],
+    ["client_email_secondary", "Optional", "Alternate email used for integration matching."],
+    ["client_email_tertiary", "Optional", "Second alternate email used for integration matching."],
     ["business_name", "Optional", "Business or company name for the client."],
     ["client_phone", "Optional", "Client phone number. Stored as webhook metadata for now."],
     ["north_star", "Optional", "Client North Star."],
@@ -410,6 +416,16 @@ function ParameterTable() {
     ["notes", "Optional", "Initial notes or next steps."],
     ["archetype", "Optional", "Must be doer, controller, worrier, or follower."],
     ["external_id", "Optional", "External CRM/deal ID for duplicate protection."],
+    [
+      "custom_fields",
+      "Optional",
+      "Object or array of active RetainOS custom field keys/IDs and values to save on the new client.",
+    ],
+    [
+      "customfield1..customfield7",
+      "Optional",
+      "Legacy CST slot names. RetainOS maps these when matching active custom field source keys exist.",
+    ],
   ];
 
   return (
@@ -707,7 +723,7 @@ function ClientCallSummaryWebhookGuide({
 }) {
   const rows: Array<[string, "Required" | "Optional", string]> = [
     ["company_id", "Required", "Your selected company ID. RetainOS uses this to route the summary to the right account."],
-    ["client_email", "Required", "The exact client email as it appears in RetainOS."],
+    ["client_email", "Required", "The exact client email as it appears in RetainOS. You can also send attendee_emails when your provider returns the full invitee list."],
     ["summary", "Required", "The summary, notes, or next steps to save for the client."],
     ["started_at", "Optional", "Call date/time. RetainOS uses this as Date of Last Contact when present."],
     ["external_call_id", "Optional", "Provider call ID. Recommended because it prevents duplicate processing when a Zap retries."],
@@ -798,9 +814,9 @@ function ClientCallSummaryWebhookGuide({
           <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
             <h3 className="font-semibold text-[#162b3e]">Contact and notes update</h3>
             <p className="mt-2">
-              RetainOS matches the email to one active client, updates last
-              contact from the call timestamp when provided, and saves the summary
-              to Next Steps.
+              RetainOS matches the submitted client email, or the attendee email
+              list, to one active client. It updates last contact from the call
+              timestamp when provided and saves the summary to Next Steps.
             </p>
           </div>
           <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
@@ -809,6 +825,26 @@ function ClientCallSummaryWebhookGuide({
               Previous values are preserved in client history, and unmatched or
               ambiguous emails are stored for review instead of updating the wrong
               client.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Optional Summary Cleanup">
+        <div className="grid gap-4 text-sm text-[#586273] md:grid-cols-2">
+          <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="font-semibold text-[#162b3e]">Use provider output directly</h3>
+            <p className="mt-2">
+              Map the Fathom AI summary, or another provider's summary field,
+              directly into summary when the format is already useful for CSMs.
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4">
+            <h3 className="font-semibold text-[#162b3e]">Clean it before sending</h3>
+            <p className="mt-2">
+              If the provider summary is too long, add an automation step before
+              the webhook to extract only key takeaways and next steps, then map
+              that cleaned reply into summary.
             </p>
           </div>
         </div>
@@ -827,8 +863,8 @@ function ClientCallSummaryWebhookGuide({
             <h3 className="font-semibold text-[#162b3e]">If the client does not update</h3>
             <p className="mt-2">
               Check company_id, the company-specific integration token, exact
-              client_email, valid JSON formatting, and that summary is present
-              before retrying.
+              client_email or attendee_emails, valid JSON formatting, and that
+              summary is present before retrying.
             </p>
           </div>
         </div>
@@ -1338,6 +1374,8 @@ export function Resources() {
         {
           client_name: "{{client_name}}",
           client_email: "{{client_email}}",
+          client_email_secondary: "{{client_email_secondary}}",
+          client_email_tertiary: "{{client_email_tertiary}}",
           business_name: "{{business_name}}",
           client_phone: "{{client_phone}}",
           north_star: "{{north_star}}",
@@ -1350,6 +1388,9 @@ export function Resources() {
           notes: "{{notes}}",
           archetype: "{{archetype}}",
           external_id: "{{external_id}}",
+          custom_fields: {
+            custom_field_key_or_id: "{{custom_field_value}}",
+          },
           customfield1: "{{customfield1}}",
           customfield2: "{{customfield2}}",
           customfield3: "{{customfield3}}",
@@ -1389,6 +1430,7 @@ export function Resources() {
           provider: "fathom",
           external_call_id: "{{provider_call_id}}",
           client_email: "{{client_email}}",
+          attendee_emails: "{{meeting_invitee_emails}}",
           summary: "{{call_summary_or_next_steps}}",
           started_at: "{{call_started_at}}",
           recording_url: "{{recording_url}}",

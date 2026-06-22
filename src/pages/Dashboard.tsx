@@ -21,6 +21,7 @@ import { ComingSoonModal, ComingSoonPanel } from "../components/ComingSoon.tsx";
 import { supabase } from "../lib/supabase.ts";
 import { type DashboardKpiSqlParams } from "../lib/dashboardKpiSql.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
+import { advocacyDefinitions, type AdvocacyType } from "../lib/clientAdvocacy.ts";
 
 const MONTH_OPTIONS_COUNT = 25;
 
@@ -32,6 +33,7 @@ const OFFER_QUERY_KEY = "offerId";
 const DETAIL_PAGE_SIZE = 25;
 const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
 const PROFILE_UPKEEP_FRESHNESS_DAYS = 14;
+const MILESTONE_MISMATCH_KEY = "milestone-mismatch";
 
 type DashboardTab = "overview" | "charts" | "ai";
 
@@ -116,6 +118,16 @@ interface Offer {
   name: string | null;
 }
 
+interface OfferMilestone {
+  glide_row_id: string;
+  offer_id?: string | null;
+  name: string | null;
+  position?: number | null;
+  order?: number | null;
+  status?: string | null;
+  archived_at?: string | null;
+}
+
 interface ProgramChoice {
   program_value: string | null;
   program_label: string | null;
@@ -139,7 +151,8 @@ interface DashboardChartData {
   programDistribution: ChartDatum[];
   buyInDistribution: ChartDatum[];
   progressDistribution: ChartDatum[];
-  clientsByOffer: ChartDatum[];
+  clientsByJourney: ChartDatum[];
+  journeyMilestoneIds: string[];
   tasksByStatus: ChartDatum[];
   csmWorkload: ChartDatum[];
 }
@@ -149,6 +162,26 @@ interface CapacityRow {
   name: string;
   activeClients: number;
   capacity: number | null;
+}
+
+interface AdvocacyMetric {
+  type: AdvocacyType;
+  label: string;
+  asked: number;
+  received: number;
+}
+
+interface TtvMetric {
+  averageDays: number | null;
+  reachedCount: number;
+  configuredMilestones: number;
+  reachedClients: ChartClientRow[];
+  ttvMilestones: Array<{
+    id: string;
+    name: string;
+    offerId: string | null;
+    offerName: string;
+  }>;
 }
 
 type ChartClientRow = Record<string, unknown> & {
@@ -245,6 +278,22 @@ interface OfferKpiContractRow {
   client_id: string | null;
   end_date: string | null;
 }
+
+type TtvClientRow = {
+  glide_row_id: string;
+  client_name?: string | null;
+  client_image?: string | null;
+  csm_team_member_id?: string | null;
+  client_age_date_onboarded?: string | null;
+  current_contract_start_date?: string | null;
+};
+
+type TtvProgressRow = {
+  client_id: string | null;
+  milestone_id: string | null;
+  completion_date: string | null;
+  time_to_hit_days?: number | null;
+};
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -799,6 +848,21 @@ function countBy<T>(
     .sort((a, b) => b.value - a.value);
 }
 
+function countByOrdered<T>(
+  rows: T[],
+  getKey: (row: T) => string | null | undefined,
+  labelMap = new Map<string, string>(),
+  orderMap = new Map<string, number>(),
+) {
+  return countBy(rows, getKey, labelMap).sort((a, b) => {
+    const aOrder = orderMap.get(a.key) ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = orderMap.get(b.key) ?? Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    if (a.value !== b.value) return b.value - a.value;
+    return a.label.localeCompare(b.label);
+  });
+}
+
 function chartTotal(data: ChartDatum[]) {
   return data.reduce((sum, item) => sum + item.value, 0);
 }
@@ -807,6 +871,13 @@ function dateFromValue(value: unknown) {
   if (!value) return null;
   const date = new Date(String(value));
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function daysBetweenDates(start: Date, end: Date) {
+  return Math.max(
+    0,
+    Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)),
+  );
 }
 
 function addDays(date: Date, days: number) {
@@ -1199,6 +1270,24 @@ export function Dashboard() {
   const [activeRenewingClients, setActiveRenewingClients] = useState<number | null>(null);
   const [primaryKpiLoading, setPrimaryKpiLoading] = useState(false);
   const [retentionKpiLoading, setRetentionKpiLoading] = useState(false);
+  const [advocacyMetrics, setAdvocacyMetrics] = useState<AdvocacyMetric[]>(() =>
+    advocacyDefinitions.map((definition) => ({
+      type: definition.type,
+      label: definition.label,
+      asked: 0,
+      received: 0,
+    })),
+  );
+  const [advocacyLoading, setAdvocacyLoading] = useState(false);
+  const [ttvMetric, setTtvMetric] = useState<TtvMetric>({
+    averageDays: null,
+    reachedCount: 0,
+    configuredMilestones: 0,
+    reachedClients: [],
+    ttvMilestones: [],
+  });
+  const [ttvLoading, setTtvLoading] = useState(false);
+  const [ttvMilestonesOpen, setTtvMilestonesOpen] = useState(false);
   const kpiLoading = primaryKpiLoading || retentionKpiLoading;
   const [activeDetailKey, setActiveDetailKey] = useState<KpiDetailKey | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
@@ -1216,7 +1305,8 @@ export function Dashboard() {
     programDistribution: [],
     buyInDistribution: [],
     progressDistribution: [],
-    clientsByOffer: [],
+    clientsByJourney: [],
+    journeyMilestoneIds: [],
     tasksByStatus: [],
     csmWorkload: [],
   });
@@ -2346,6 +2436,454 @@ export function Dashboard() {
   ]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadAdvocacyMetrics() {
+      const appCompany = appCompanyByLegacyId.get(appliedFilters.companyId);
+      if (!appCompany?.id) {
+        setAdvocacyMetrics(
+          advocacyDefinitions.map((definition) => ({
+            type: definition.type,
+            label: definition.label,
+            asked: 0,
+            received: 0,
+          })),
+        );
+        return;
+      }
+
+      setAdvocacyLoading(true);
+      let eligibleClientIds: Set<string> | null = null;
+
+      if (
+        appliedFilters.offerId ||
+        appliedFilters.program ||
+        appliedFilters.clientStartDate.startDate ||
+        appliedFilters.clientStartDate.endDate ||
+        (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId)
+      ) {
+        let clientQuery = supabase
+          .from("clients")
+          .select("glide_row_id")
+          .eq("company_id", appCompany.id);
+
+        if (appliedFilters.offerId) {
+          clientQuery = clientQuery.eq(
+            "offer_milestones_current_offer_id",
+            appliedFilters.offerId,
+          );
+        }
+        if (appliedProgramValues.length === 1) {
+          clientQuery = clientQuery.eq("program_status_value", appliedProgramValues[0]);
+        } else if (appliedProgramValues.length > 1) {
+          clientQuery = clientQuery.in("program_status_value", appliedProgramValues);
+        }
+        if (appliedFilters.clientStartDate.startDate) {
+          clientQuery = clientQuery.gte(
+            "client_age_date_onboarded",
+            appliedFilters.clientStartDate.startDate,
+          );
+        }
+        if (appliedFilters.clientStartDate.endDate) {
+          clientQuery = clientQuery.lt(
+            "client_age_date_onboarded",
+            `${appliedFilters.clientStartDate.endDate}T23:59:59.999`,
+          );
+        }
+        if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+          clientQuery = clientQuery.eq(
+            "csm_secondary_assignee_id",
+            appliedFilters.secondaryAssigneeId,
+          );
+        }
+
+        const { data: clientRows, error: clientError } = await clientQuery.limit(5000);
+        if (clientError) {
+          console.error("Failed to load advocacy client filter rows:", clientError);
+          if (!cancelled) setAdvocacyLoading(false);
+          return;
+        }
+        eligibleClientIds = new Set(
+          (clientRows ?? [])
+            .map((row) => row.glide_row_id)
+            .filter((id): id is string => typeof id === "string" && id.length > 0),
+        );
+      }
+
+      let eventQuery = supabase
+        .from("client_advocacy_events")
+        .select("advocacy_type, action, client_legacy_id")
+        .eq("company_id", appCompany.id);
+
+      if (appliedFilters.csmId) {
+        eventQuery = eventQuery.eq("csm_team_member_id", appliedFilters.csmId);
+      }
+      if (appliedFilters.dateRange.startDate) {
+        eventQuery = eventQuery.gte("occurred_at", appliedFilters.dateRange.startDate);
+      }
+      if (appliedFilters.dateRange.endDate) {
+        eventQuery = eventQuery.lt(
+          "occurred_at",
+          `${appliedFilters.dateRange.endDate}T23:59:59.999`,
+        );
+      }
+
+      const { data: events, error } = await eventQuery.limit(5000);
+      if (error) {
+        console.error("Failed to load advocacy metrics:", error);
+        if (!cancelled) setAdvocacyLoading(false);
+        return;
+      }
+
+      const nextMetrics = advocacyDefinitions.map((definition) => {
+        const matching = ((events ?? []) as Record<string, unknown>[]).filter(
+          (event) =>
+            event.advocacy_type === definition.type &&
+            (!eligibleClientIds ||
+              eligibleClientIds.has(String(event.client_legacy_id ?? ""))),
+        );
+        return {
+          type: definition.type,
+          label: definition.label,
+          asked: matching.filter((event) => event.action === "asked").length,
+          received: matching.filter((event) => event.action === "received").length,
+        };
+      });
+
+      if (!cancelled) {
+        setAdvocacyMetrics(nextMetrics);
+        setAdvocacyLoading(false);
+      }
+    }
+
+    void loadAdvocacyMetrics();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appCompanyByLegacyId,
+    appliedFilters.clientStartDate.endDate,
+    appliedFilters.clientStartDate.startDate,
+    appliedFilters.companyId,
+    appliedFilters.csmId,
+    appliedFilters.dateRange.endDate,
+    appliedFilters.dateRange.startDate,
+    appliedFilters.offerId,
+    appliedFilters.program,
+    appliedFilters.secondaryAssigneeId,
+    appliedProgramValues,
+    appliedShowSecondaryFilter,
+    reportVersion,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const resetMetric = () =>
+      setTtvMetric({
+        averageDays: null,
+        reachedCount: 0,
+        configuredMilestones: 0,
+        reachedClients: [],
+        ttvMilestones: [],
+      });
+
+    async function loadTtvMetric() {
+      if (!appliedFilters.companyId) {
+        resetMetric();
+        setTtvLoading(false);
+        return;
+      }
+
+      setTtvLoading(true);
+      const appCompany = appCompanyByLegacyId.get(appliedFilters.companyId);
+      const usesAppTtv =
+        appCompany?.migration_status === "pilot" ||
+        appCompany?.migration_status === "migrated";
+
+      const offerIds = appliedFilters.offerId
+        ? [appliedFilters.offerId]
+        : offers
+            .map((offer) => offer.glide_row_id)
+            .filter((id): id is string => Boolean(id));
+
+      if (!usesAppTtv && offerIds.length === 0) {
+        if (!cancelled) {
+          resetMetric();
+          setTtvLoading(false);
+        }
+        return;
+      }
+
+      let ttvMilestoneResult;
+      if (usesAppTtv && appCompany?.id) {
+        let milestoneQuery = supabase
+          .from("company_offer_milestones")
+          .select("glide_row_id, offer_id, name")
+          .eq("company_id", appCompany.id)
+          .eq("is_ttv_milestone", true)
+          .eq("status", "active");
+        if (appliedFilters.offerId) {
+          milestoneQuery = milestoneQuery.eq("offer_id", appliedFilters.offerId);
+        }
+        ttvMilestoneResult = await milestoneQuery;
+      } else {
+        ttvMilestoneResult = await supabase
+          .from("backup_company_offer_milestones")
+          .select("glide_row_id, offer_id, name")
+          .in("offer_id", offerIds)
+          .eq("ttv_milestone", true);
+      }
+
+      if (cancelled) return;
+      if (ttvMilestoneResult.error) {
+        console.error("Failed to load TTV milestones:", ttvMilestoneResult.error);
+        resetMetric();
+        setTtvLoading(false);
+        return;
+      }
+
+      const ttvMilestoneIds = [
+        ...new Set(
+          ((ttvMilestoneResult.data ?? []) as { glide_row_id?: string | null }[])
+            .map((milestone) => milestone.glide_row_id)
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      const offerNameById = new Map(
+        offers.map((offer) => [
+          offer.glide_row_id,
+          offer.name ?? offer.glide_row_id,
+        ]),
+      );
+      const ttvMilestones = (
+        (ttvMilestoneResult.data ?? []) as {
+          glide_row_id?: string | null;
+          offer_id?: string | null;
+          name?: string | null;
+        }[]
+      )
+        .filter((milestone) => Boolean(milestone.glide_row_id))
+        .map((milestone) => ({
+          id: String(milestone.glide_row_id),
+          name: milestone.name ?? String(milestone.glide_row_id),
+          offerId: milestone.offer_id ?? null,
+          offerName:
+            (milestone.offer_id && offerNameById.get(milestone.offer_id)) ??
+            milestone.offer_id ??
+            "Unknown pathway",
+        }));
+
+      if (ttvMilestoneIds.length === 0) {
+        resetMetric();
+        setTtvLoading(false);
+        return;
+      }
+
+      const clientTable = usesAppTtv ? "clients" : "backup_company_clients";
+      const companyColumn = usesAppTtv ? "company_id" : "company_id";
+      const companyValue = usesAppTtv && appCompany?.id
+        ? appCompany.id
+        : appliedFilters.companyId;
+      let clientQuery = supabase
+        .from(clientTable)
+        .select(
+          [
+            "glide_row_id",
+            "client_name",
+            "client_image",
+            "client_age_date_onboarded",
+            "current_contract_start_date",
+            "csm_team_member_id",
+            "csm_secondary_assignee_id",
+            "program_status_value",
+            "offer_milestones_current_offer_id",
+          ].join(", "),
+        )
+        .eq(companyColumn, companyValue)
+        .range(0, 4999);
+
+      if (assignedTeamMemberId) {
+        clientQuery = clientQuery.or(
+          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+        );
+      } else if (appliedFilters.csmId) {
+        clientQuery = clientQuery.eq("csm_team_member_id", appliedFilters.csmId);
+      }
+      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+        clientQuery = clientQuery.eq(
+          "csm_secondary_assignee_id",
+          appliedFilters.secondaryAssigneeId,
+        );
+      }
+      if (appliedProgramValues.length === 1) {
+        clientQuery = clientQuery.eq("program_status_value", appliedProgramValues[0]);
+      } else if (appliedProgramValues.length > 1) {
+        clientQuery = clientQuery.in("program_status_value", appliedProgramValues);
+      }
+      if (appliedFilters.offerId) {
+        clientQuery = clientQuery.eq(
+          "offer_milestones_current_offer_id",
+          appliedFilters.offerId,
+        );
+      }
+      if (appliedFilters.clientStartDate.startDate) {
+        clientQuery = clientQuery.gte(
+          "client_age_date_onboarded",
+          `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
+        );
+      }
+      if (appliedFilters.clientStartDate.endDate) {
+        clientQuery = clientQuery.lt(
+          "client_age_date_onboarded",
+          addDays(
+            new Date(`${appliedFilters.clientStartDate.endDate}T00:00:00.000Z`),
+            1,
+          ).toISOString(),
+        );
+      }
+
+      const { data: clientsData, error: clientsError } = await clientQuery;
+      if (cancelled) return;
+      if (clientsError) {
+        console.error("Failed to load TTV client rows:", clientsError);
+        resetMetric();
+        setTtvLoading(false);
+        return;
+      }
+
+      const clients = ((clientsData ?? []) as unknown) as TtvClientRow[];
+      const clientIds = clients
+        .map((client) => client.glide_row_id)
+        .filter((id): id is string => Boolean(id));
+      if (clientIds.length === 0) {
+        setTtvMetric({
+          averageDays: null,
+          reachedCount: 0,
+          configuredMilestones: ttvMilestoneIds.length,
+          reachedClients: [],
+          ttvMilestones,
+        });
+        setTtvLoading(false);
+        return;
+      }
+
+      const startDateByClientId = new Map(
+        clients.map((client) => [
+          client.glide_row_id,
+          dateFromValue(
+            client.client_age_date_onboarded ?? client.current_contract_start_date,
+          ),
+        ]),
+      );
+      const progressSelect = usesAppTtv
+        ? "client_id, milestone_id, completion_date, time_to_hit_days"
+        : "client_id, milestone_id, completion_date";
+      let progressQuery = supabase
+        .from(usesAppTtv ? "client_milestones" : "backup_company_clients_milestones")
+        .select(progressSelect)
+        .in("client_id", clientIds)
+        .in("milestone_id", ttvMilestoneIds)
+        .not("completion_date", "is", null)
+        .range(0, 4999);
+
+      if (usesAppTtv && appCompany?.id) {
+        progressQuery = progressQuery.eq("company_id", appCompany.id);
+      }
+      if (appliedFilters.dateRange.startDate) {
+        progressQuery = progressQuery.gte(
+          "completion_date",
+          `${appliedFilters.dateRange.startDate}T00:00:00.000Z`,
+        );
+      }
+      if (appliedFilters.dateRange.endDate) {
+        progressQuery = progressQuery.lt(
+          "completion_date",
+          addDays(
+            new Date(`${appliedFilters.dateRange.endDate}T00:00:00.000Z`),
+            1,
+          ).toISOString(),
+        );
+      }
+
+      const { data: progressData, error: progressError } = await progressQuery;
+      if (cancelled) return;
+      if (progressError) {
+        console.error("Failed to load TTV milestone progress:", progressError);
+        resetMetric();
+        setTtvLoading(false);
+        return;
+      }
+
+      const daysByClientId = new Map<string, number>();
+      (((progressData ?? []) as unknown) as TtvProgressRow[]).forEach((progress) => {
+        if (!progress.client_id) return;
+        const completionDate = dateFromValue(progress.completion_date);
+        const startDate = startDateByClientId.get(progress.client_id) ?? null;
+        const days =
+          startDate && completionDate
+            ? daysBetweenDates(startDate, completionDate)
+            : typeof progress.time_to_hit_days === "number"
+              ? progress.time_to_hit_days
+              : null;
+        if (days === null || !Number.isFinite(days)) return;
+        const previous = daysByClientId.get(progress.client_id);
+        if (previous === undefined || days < previous) {
+          daysByClientId.set(progress.client_id, days);
+        }
+      });
+
+      const dayValues = [...daysByClientId.values()];
+      const reachedClients = clients
+        .filter((client) => daysByClientId.has(client.glide_row_id))
+        .map((client) => ({
+          ...client,
+          client_name: client.client_name ?? null,
+          client_image: client.client_image ?? null,
+          csm_team_member_id: client.csm_team_member_id ?? null,
+          csm_secondary_assignee_id: null,
+          program_status_value: null,
+          outcomes_buy_in_for_filtering: null,
+          outcomes_progress_for_filtering: null,
+          offer_milestones_current_offer_id: null,
+        })) as ChartClientRow[];
+      setTtvMetric({
+        averageDays:
+          dayValues.length > 0
+            ? Math.round(dayValues.reduce((sum, value) => sum + value, 0) / dayValues.length)
+            : null,
+        reachedCount: dayValues.length,
+        configuredMilestones: ttvMilestoneIds.length,
+        reachedClients,
+        ttvMilestones,
+      });
+      setTtvLoading(false);
+    }
+
+    void loadTtvMetric();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appCompanyByLegacyId,
+    appliedFilters.clientStartDate.endDate,
+    appliedFilters.clientStartDate.startDate,
+    appliedFilters.companyId,
+    appliedFilters.csmId,
+    appliedFilters.dateRange.endDate,
+    appliedFilters.dateRange.startDate,
+    appliedFilters.offerId,
+    appliedFilters.program,
+    appliedFilters.secondaryAssigneeId,
+    appliedProgramValues,
+    appliedShowSecondaryFilter,
+    assignedTeamMemberId,
+    offers,
+    reportVersion,
+  ]);
+
+  useEffect(() => {
     if (!activeDetailKey || !appliedFilters.companyId) {
       setDetailRows([]);
       setDetailTotalCount(0);
@@ -2706,7 +3244,8 @@ export function Dashboard() {
         programDistribution: [],
         buyInDistribution: [],
         progressDistribution: [],
-        clientsByOffer: [],
+        clientsByJourney: [],
+        journeyMilestoneIds: [],
         tasksByStatus: [],
         csmWorkload: [],
       });
@@ -2937,6 +3476,9 @@ export function Dashboard() {
         ),
       ];
       let offerNameById = new Map<string, string>();
+      let milestoneNameById = new Map<string, string>();
+      let milestoneOrderById = new Map<string, number>();
+      let journeyMilestoneIds: string[] = [];
 
       if (offerIds.length > 0) {
         const { data: offers, error: offersError } = await supabase
@@ -2953,7 +3495,69 @@ export function Dashboard() {
         }
       }
 
+      if (appliedFilters.offerId) {
+        const { data: milestones, error: milestonesError } = appliedUsesAppClients
+          ? await supabase
+              .from("company_offer_milestones")
+              .select("glide_row_id, offer_id, name, position, status, archived_at")
+              .eq("offer_id", appliedFilters.offerId)
+              .order("position", { ascending: true, nullsFirst: false })
+          : await supabase
+              .from("backup_company_offer_milestones")
+              .select("glide_row_id, offer_id, name, order")
+              .eq("offer_id", appliedFilters.offerId)
+              .order("order", { ascending: true, nullsFirst: false });
+        if (!cancelled) {
+          if (milestonesError) {
+            console.error("Failed to load milestone labels:", milestonesError);
+          }
+          const rows = (milestones ?? []) as OfferMilestone[];
+          journeyMilestoneIds = rows.map((milestone) => milestone.glide_row_id);
+
+          milestoneNameById = new Map(
+            rows.map((milestone) => [
+              milestone.glide_row_id,
+              `${milestone.name ?? milestone.glide_row_id}${
+                milestone.status === "archived" || milestone.archived_at
+                  ? " (Archived)"
+                  : ""
+              }`,
+            ]),
+          );
+          milestoneNameById.set("not-set", "No current milestone");
+          milestoneNameById.set(MILESTONE_MISMATCH_KEY, "Milestone mismatch");
+          milestoneOrderById = new Map(
+            rows.map((milestone, index) => [
+              milestone.glide_row_id,
+              Number(milestone.position ?? milestone.order ?? index),
+            ]),
+          );
+          milestoneOrderById.set(MILESTONE_MISMATCH_KEY, Number.MAX_SAFE_INTEGER - 1);
+        }
+      }
+
       if (cancelled) return;
+
+      const journeyMilestoneIdSet = new Set(journeyMilestoneIds);
+      const getJourneyMilestoneKey = (client: ChartClientRow) => {
+        const milestoneId = client.offer_milestones_current_milestone_id;
+        if (!milestoneId) return null;
+        return journeyMilestoneIdSet.has(milestoneId)
+          ? milestoneId
+          : MILESTONE_MISMATCH_KEY;
+      };
+      const clientsByJourney = appliedFilters.offerId
+        ? countByOrdered(
+            clients,
+            getJourneyMilestoneKey,
+            milestoneNameById,
+            milestoneOrderById,
+          )
+        : countBy(
+            clients,
+            (client) => client.offer_milestones_current_offer_id,
+            offerNameById,
+          );
 
       setChartData({
         programDistribution: countBy(clients, (client) => client.program_status_value),
@@ -2965,11 +3569,8 @@ export function Dashboard() {
           clients,
           (client) => client.outcomes_progress_for_filtering,
         ),
-        clientsByOffer: countBy(
-          clients,
-          (client) => client.offer_milestones_current_offer_id,
-          offerNameById,
-        ),
+        clientsByJourney,
+        journeyMilestoneIds,
         tasksByStatus: countBy(tasks, (task) => task.status_value),
         csmWorkload: countBy(
           activeClientsForWorkload,
@@ -3260,6 +3861,62 @@ export function Dashboard() {
 
           <div className="pt-2">
             <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+              Journey
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                Avg. Time to Value
+              </div>
+              <div className="mt-2 text-3xl font-semibold text-gray-900">
+                {ttvLoading
+                  ? "..."
+                  : ttvMetric.averageDays === null
+                    ? "--"
+                    : `${ttvMetric.averageDays}`}
+              </div>
+              <div className="mt-1 text-sm text-gray-500">
+                {ttvMetric.averageDays === null ? "days" : "days average"}
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setChartDetail({
+                      title: "Avg. Time to Value: Reached",
+                      rows: ttvMetric.reachedClients,
+                    })
+                  }
+                  disabled={ttvLoading || ttvMetric.reachedCount === 0}
+                  className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-left transition enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 disabled:cursor-default"
+                >
+                  <div className="text-xs uppercase tracking-wider text-gray-500">
+                    Reached
+                  </div>
+                  <div className="mt-1 font-semibold text-gray-900">
+                    {ttvLoading ? "..." : ttvMetric.reachedCount}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTtvMilestonesOpen(true)}
+                  disabled={ttvLoading || ttvMetric.configuredMilestones === 0}
+                  className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-left transition enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 disabled:cursor-default"
+                >
+                  <div className="text-xs uppercase tracking-wider text-gray-500">
+                    TTV Points
+                  </div>
+                  <div className="mt-1 font-semibold text-gray-900">
+                    {ttvLoading ? "..." : ttvMetric.configuredMilestones}
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
               Contracts & Retention
             </h2>
           </div>
@@ -3310,6 +3967,65 @@ export function Dashboard() {
                   : undefined
               }
             />
+          </div>
+
+          <div className="pt-2">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
+              Advocacy & Growth
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {advocacyMetrics.map((metric) => {
+              const conversion =
+                metric.asked > 0
+                  ? Math.round((metric.received / metric.asked) * 100)
+                  : null;
+              return (
+                <div
+                  key={metric.type}
+                  className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                        {metric.label}
+                      </div>
+                      <div className="mt-2 text-3xl font-semibold text-gray-900">
+                        {advocacyLoading ? "..." : metric.received}
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        received
+                      </div>
+                    </div>
+                    <div className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">
+                      {conversion === null ? "--" : `${conversion}%`}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                    <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+                      <div className="text-xs uppercase tracking-wider text-gray-500">
+                        Asked
+                      </div>
+                      <div className="mt-1 font-semibold text-gray-900">
+                        {advocacyLoading ? "..." : metric.asked}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+                      <div className="text-xs uppercase tracking-wider text-gray-500">
+                        Ratio
+                      </div>
+                      <div className="mt-1 font-semibold text-gray-900">
+                        {advocacyLoading
+                          ? "..."
+                          : metric.asked > 0
+                            ? `${metric.asked}:${metric.received}`
+                            : "--"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
         </div>
@@ -3410,18 +4126,36 @@ export function Dashboard() {
                 />
               </ChartCard>
               <ChartCard
-                title="Clients By Offer"
-                subtitle="Top current offers for filtered clients"
+                title={
+                  appliedFilters.offerId ? "Clients By Milestone" : "Clients By Offer"
+                }
+                subtitle={
+                  appliedFilters.offerId
+                    ? "Current milestone breakdown for the selected offer"
+                    : "Top current offers for filtered clients"
+                }
               >
                 <BarChart
-                  data={chartData.clientsByOffer}
+                  data={chartData.clientsByJourney}
                   onItemClick={
                     canUseDashboardDrilldowns
-                      ? (item) =>
+                        ? (item) =>
                           openChartDetail(
-                            "Clients By Offer",
+                            appliedFilters.offerId
+                              ? "Clients By Milestone"
+                              : "Clients By Offer",
                             item,
-                            (client) => client.offer_milestones_current_offer_id,
+                            (client) => {
+                              if (!appliedFilters.offerId) {
+                                return client.offer_milestones_current_offer_id;
+                              }
+                              const milestoneId =
+                                client.offer_milestones_current_milestone_id;
+                              if (!milestoneId) return null;
+                              return chartData.journeyMilestoneIds.includes(milestoneId)
+                                ? milestoneId
+                                : MILESTONE_MISMATCH_KEY;
+                            },
                           )
                       : undefined
                   }
@@ -3808,6 +4542,70 @@ export function Dashboard() {
                   <code>{kpiInfoModal.sql}</code>
                 </pre>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ttvMilestonesOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close TTV points dialog"
+            onClick={() => setTtvMilestonesOpen(false)}
+            className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl border border-gray-200 bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Configured TTV Points
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {ttvMetric.ttvMilestones.length.toLocaleString()} configured
+                  milestone
+                  {ttvMetric.ttvMilestones.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTtvMilestonesOpen(false)}
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+              >
+                <span className="sr-only">Close</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path d="M4.22 4.22a.75.75 0 0 1 1.06 0L10 8.94l4.72-4.72a.75.75 0 1 1 1.06 1.06L11.06 10l4.72 4.72a.75.75 0 1 1-1.06 1.06L10 11.06l-4.72 4.72a.75.75 0 1 1-1.06-1.06L8.94 10 4.22 5.28a.75.75 0 0 1 0-1.06Z" />
+                </svg>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {ttvMetric.ttvMilestones.length === 0 ? (
+                <div className="py-10 text-center text-sm text-gray-500">
+                  No TTV milestones are configured for the selected filters.
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {ttvMetric.ttvMilestones.map((milestone) => (
+                    <div key={milestone.id} className="py-3">
+                      <div className="text-sm font-medium text-gray-900">
+                        {milestone.name}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {milestone.offerName}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

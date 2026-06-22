@@ -12,6 +12,19 @@ const CORS_HEADERS = {
 const WRITER_ROLES = new Set(["director", "support", "csm"]);
 const SUCCESS_VALUES = new Set(["yes", "no"]);
 const HEALTH_VALUES = new Set(["green", "yellow", "red"]);
+const ADVOCACY_TYPES = new Set([
+  "review",
+  "testimonial",
+  "referral",
+  "renewal_upsell",
+]);
+const ADVOCACY_ACTIONS = new Set(["asked", "received"]);
+const ADVOCACY_PREFIXES: Record<string, string> = {
+  review: "advocacy_review",
+  testimonial: "advocacy_testimonial",
+  referral: "advocacy_referral",
+  renewal_upsell: "advocacy_renewal_upsell",
+};
 const FALLBACK_OUTCOME_VALUES = {
   success: SUCCESS_VALUES,
   progress: HEALTH_VALUES,
@@ -32,6 +45,36 @@ function cleanText(value: unknown) {
 function nullableText(value: unknown) {
   const text = cleanText(value);
   return text || null;
+}
+
+function parseDateTime(value: unknown) {
+  const raw = cleanText(value);
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function parseAdvocacyEvents(value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>) : null))
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+    .map((row) => {
+      const advocacyType = cleanText(row.advocacyType ?? row.type);
+      const action = cleanText(row.action);
+      if (!ADVOCACY_TYPES.has(advocacyType)) {
+        throw new Error("Choose a valid advocacy type.");
+      }
+      if (!ADVOCACY_ACTIONS.has(action)) {
+        throw new Error("Choose either asked or received for advocacy tracking.");
+      }
+      return {
+        advocacyType,
+        action,
+        occurredAt: parseDateTime(row.occurredAt) ?? new Date().toISOString(),
+        notes: cleanText(row.notes) || null,
+      };
+    });
 }
 
 function normalizeEmail(value: unknown) {
@@ -252,6 +295,57 @@ async function prepareCustomFieldUpdates(
   return { changes, upserts };
 }
 
+async function refreshAdvocacySummary(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  clientLegacyId: string,
+) {
+  const { data, error } = await supabase
+    .from("client_advocacy_events")
+    .select("advocacy_type, action, occurred_at, notes, created_at")
+    .eq("company_id", companyId)
+    .eq("client_legacy_id", clientLegacyId);
+
+  if (error) throw error;
+
+  const payload: Record<string, unknown> = {};
+  for (const [type, prefix] of Object.entries(ADVOCACY_PREFIXES)) {
+    const rows = ((data ?? []) as Record<string, unknown>[]).filter(
+      (row) => row.advocacy_type === type,
+    );
+    const askedRows = rows.filter((row) => row.action === "asked");
+    const receivedRows = rows.filter((row) => row.action === "received");
+    const latest = [...rows].sort((left, right) => {
+      const leftDate = new Date(
+        String(left.occurred_at ?? left.created_at ?? "1970-01-01"),
+      ).getTime();
+      const rightDate = new Date(
+        String(right.occurred_at ?? right.created_at ?? "1970-01-01"),
+      ).getTime();
+      return rightDate - leftDate;
+    })[0];
+    payload[`${prefix}_asked_count`] = askedRows.length;
+    payload[`${prefix}_received_count`] = receivedRows.length;
+    payload[`${prefix}_status`] =
+      receivedRows.length > 0 ? "received" : askedRows.length > 0 ? "asked" : "not_asked";
+    payload[`${prefix}_last_asked_at`] =
+      askedRows
+        .map((row) => row.occurred_at as string | null)
+        .filter(Boolean)
+        .sort()
+        .at(-1) ?? null;
+    payload[`${prefix}_last_received_at`] =
+      receivedRows
+        .map((row) => row.occurred_at as string | null)
+        .filter(Boolean)
+        .sort()
+        .at(-1) ?? null;
+    payload[`${prefix}_last_note`] = cleanText(latest?.notes) || null;
+  }
+
+  return payload;
+}
+
 async function loadAllowedOutcomeValues(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
@@ -385,6 +479,7 @@ Deno.serve(async (req) => {
     const progressStatus = nullableText(body.progressStatus);
     const buyInStatus = nullableText(body.buyInStatus);
     const notes = nullableText(body.notes);
+    const advocacyEvents = parseAdvocacyEvents(body.advocacyEvents);
     const outcomeUpdateTypes = new Set(
       Array.isArray(body.outcomeUpdateTypes)
         ? body.outcomeUpdateTypes.map((item) => cleanText(item)).filter(Boolean)
@@ -402,6 +497,11 @@ Deno.serve(async (req) => {
       body.customFields,
     );
 
+    const advocacySummaryUpdates =
+      advocacyEvents.length > 0
+        ? await refreshAdvocacySummary(supabase, company.id, clientLegacyId)
+        : {};
+
     const nextOutcomes: Record<string, unknown> = {
       outcomes_success_value: successStatus,
       outcomes_success_value_for_filtering: successStatus,
@@ -409,6 +509,7 @@ Deno.serve(async (req) => {
       outcomes_progress_for_filtering: progressStatus,
       outcomes_buy_in_value: buyInStatus,
       outcomes_buy_in_for_filtering: buyInStatus,
+      ...advocacySummaryUpdates,
     };
 
     if (
@@ -434,6 +535,7 @@ Deno.serve(async (req) => {
     if (
       changes.length === 0 &&
       customFieldUpdates.changes.length === 0 &&
+      advocacyEvents.length === 0 &&
       !notes
     ) {
       return jsonResponse({ error: "No outcome changes to save." }, 400);
@@ -457,6 +559,49 @@ Deno.serve(async (req) => {
           onConflict: "company_id,client_id,custom_field_id",
         });
       if (customFieldsError) throw customFieldsError;
+    }
+
+    let insertedAdvocacyEvents: Record<string, unknown>[] = [];
+    if (advocacyEvents.length > 0) {
+      const { data: advocacyRows, error: advocacyError } = await supabase
+        .from("client_advocacy_events")
+        .insert(
+          advocacyEvents.map((advocacyEvent) => ({
+            company_id: company.id,
+            client_id: client.id,
+            client_legacy_id: clientLegacyId,
+            company_legacy_id: client.company_glide_row_id ?? null,
+            advocacy_type: advocacyEvent.advocacyType,
+            action: advocacyEvent.action,
+            occurred_at: advocacyEvent.occurredAt,
+            notes: advocacyEvent.notes,
+            csm_team_member_id: client.csm_team_member_id ?? null,
+            actor_member_id: actor.memberId,
+            actor_member_legacy_id: actor.legacyMemberId,
+            actor_auth_user_id: userData.user.id,
+            source: "client_outcomes",
+            metadata: {
+              actor_role: actor.role,
+            },
+          })),
+        )
+        .select("*");
+      if (advocacyError) throw advocacyError;
+      insertedAdvocacyEvents = (advocacyRows ?? []) as Record<string, unknown>[];
+
+      const refreshedAdvocacySummary = await refreshAdvocacySummary(
+        supabase,
+        company.id,
+        clientLegacyId,
+      );
+      const { data: refreshedClient, error: refreshedError } = await supabase
+        .from("clients")
+        .update(refreshedAdvocacySummary)
+        .eq("id", client.id)
+        .select("*")
+        .single();
+      if (refreshedError) throw refreshedError;
+      Object.assign(updatedClient, refreshedClient);
     }
 
     const { data: event, error: historyError } = await supabase
@@ -497,6 +642,7 @@ Deno.serve(async (req) => {
           },
           custom_fields: customFieldUpdates.changes,
           outcome_update_types: [...outcomeUpdateTypes],
+          advocacy_events: insertedAdvocacyEvents,
         },
       })
       .select("*")
@@ -521,6 +667,7 @@ Deno.serve(async (req) => {
         changed_fields: changes,
         custom_fields: customFieldUpdates.changes,
         outcome_update_types: [...outcomeUpdateTypes],
+        advocacy_events: insertedAdvocacyEvents,
         history_event_id: event.id,
       },
     });
@@ -530,6 +677,7 @@ Deno.serve(async (req) => {
       client: updatedClient,
       event,
       customFields: customFieldUpdates.changes,
+      advocacyEvents: insertedAdvocacyEvents,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

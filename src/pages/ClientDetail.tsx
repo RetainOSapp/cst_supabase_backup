@@ -12,6 +12,16 @@ import {
   type NotificationPreference,
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
+import { uploadClientImage } from "../lib/clientImageUpload.ts";
+import { ClientAdvocacyPanel } from "../components/ClientAdvocacyPanel.tsx";
+import {
+  buildAdvocacyEventDrafts,
+  emptyAdvocacyDrafts,
+  type AdvocacyType,
+} from "../lib/clientAdvocacy.ts";
+
+const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
+const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as const;
 
 type ClientRow = Record<string, unknown> & {
   glide_row_id: string;
@@ -22,6 +32,8 @@ type ClientRow = Record<string, unknown> & {
   csm_team_member_id?: string | null;
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
+  secondary_offer_milestones_current_offer_id?: string | null;
+  secondary_offer_milestones_current_milestone_id?: string | null;
 };
 interface TeamMember {
   glide_row_id: string;
@@ -45,6 +57,16 @@ type OutcomeChoiceRow = {
   progress_display?: string | null;
   buy_in_value?: string | null;
   buy_in_display?: string | null;
+};
+type CompanyChurnReasonRow = {
+  id: string;
+  value: string;
+  label: string;
+  category?: string | null;
+  requires_notes?: boolean | null;
+  counts_as_churn?: boolean | null;
+  position?: number | null;
+  status?: string | null;
 };
 type OfferRow = Record<string, unknown> & {
   glide_row_id: string;
@@ -74,6 +96,15 @@ const contractTypeOptions = [
   { value: "add_on", label: "Add-on" },
   { value: "other", label: "Other" },
 ];
+
+function normalizeClientArchetype(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (text === "doer") return "Doer";
+  if (text === "controller") return "Controller";
+  if (text === "worrier") return "Worrier";
+  if (text === "follower") return "Follower";
+  return "";
+}
 type ClientMilestoneRow = Record<string, unknown> & {
   id?: string | null;
   glide_row_id?: string | null;
@@ -372,6 +403,7 @@ const pathwayFields: [string, string[]][] = [
     "Pathway",
     [
       "offer_milestones_current_offer_id",
+      "secondary_offer_milestones_current_offer_id",
       "offer_milestones_2nd_current_offer_id",
       "offer_id",
       "offer_current_value",
@@ -394,6 +426,7 @@ const pathwayFields: [string, string[]][] = [
     "Milestones",
     [
       "offer_milestones_current_milestone_id",
+      "secondary_offer_milestones_current_milestone_id",
       "offer_milestones_2nd_current_milestone_id",
       "milestone_id",
       "milestone_name",
@@ -1425,6 +1458,7 @@ function ClientProfileEditModal({
   client,
   teamMembers,
   canManageAssignment,
+  secondaryAssigneeEnabled,
   canEditDirectorNotes,
   onClose,
   onSaved,
@@ -1432,6 +1466,7 @@ function ClientProfileEditModal({
   client: ClientRow;
   teamMembers: TeamMember[];
   canManageAssignment: boolean;
+  secondaryAssigneeEnabled: boolean;
   canEditDirectorNotes: boolean;
   onClose: () => void;
   onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
@@ -1441,11 +1476,29 @@ function ClientProfileEditModal({
     textInputValue(client.client_business),
   );
   const [clientEmail, setClientEmail] = useState(textInputValue(client.client_email));
+  const [clientEmailSecondary, setClientEmailSecondary] = useState(
+    textInputValue(client.client_email_secondary),
+  );
+  const [clientEmailTertiary, setClientEmailTertiary] = useState(
+    textInputValue(client.client_email_tertiary),
+  );
+  const [clientImage, setClientImage] = useState(textInputValue(client.client_image));
+  const [clientImageUploading, setClientImageUploading] = useState(false);
   const [clientArchetype, setClientArchetype] = useState(
-    textInputValue(client.client_archetype_value),
+    normalizeClientArchetype(client.client_archetype_value),
   );
   const [northStar, setNorthStar] = useState(
     textInputValue(valueFrom(client, ["north_star_value"])),
+  );
+  const [generalInfo, setGeneralInfo] = useState(
+    textInputValue(
+      valueFrom(client, [
+        "client_general_info",
+        "client_general_information",
+        "general_info",
+        "general_information",
+      ]),
+    ),
   );
   const [directorNotes, setDirectorNotes] = useState(
     textInputValue(valueFrom(client, ["client_director_notes"])),
@@ -1453,12 +1506,37 @@ function ClientProfileEditModal({
   const [csmTeamMemberId, setCsmTeamMemberId] = useState(
     client.csm_team_member_id ?? "",
   );
+  const [csmSecondaryAssigneeId, setCsmSecondaryAssigneeId] = useState(
+    client.csm_secondary_assignee_id ?? "",
+  );
   const availableAssignees = teamMembers.filter(
     (member) =>
       member.is_archived !== true && member.role_hide_from_csm_list !== true,
   );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleImageUpload(file: File | null) {
+    if (!file) return;
+    setClientImageUploading(true);
+    setSaveError(null);
+    try {
+      const publicUrl = await uploadClientImage({
+        file,
+        companyLegacyId: client.company_glide_row_id ?? client.company_id ?? "",
+        clientLegacyId: client.glide_row_id,
+      });
+      setClientImage(publicUrl);
+    } catch (uploadError) {
+      setSaveError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Unable to upload client image.",
+      );
+    } finally {
+      setClientImageUploading(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1474,10 +1552,21 @@ function ClientProfileEditModal({
           clientName,
           clientBusiness,
           clientEmail,
+          clientEmailSecondary,
+          clientEmailTertiary,
+          clientImage,
           clientArchetype,
           northStar,
+          generalInfo,
           directorNotes,
-          ...(canManageAssignment ? { csmTeamMemberId } : {}),
+          ...(canManageAssignment
+            ? {
+                csmTeamMemberId,
+                ...(secondaryAssigneeEnabled
+                  ? { csmSecondaryAssigneeId }
+                  : {}),
+              }
+            : {}),
         },
       },
     );
@@ -1564,34 +1653,132 @@ function ClientProfileEditModal({
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Archetype
+                  Email 2
                 </span>
                 <input
+                  type="email"
+                  value={clientEmailSecondary}
+                  onChange={(event) => setClientEmailSecondary(event.target.value)}
+                  placeholder="Optional alternate email"
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Email 3
+                </span>
+                <input
+                  type="email"
+                  value={clientEmailTertiary}
+                  onChange={(event) => setClientEmailTertiary(event.target.value)}
+                  placeholder="Optional alternate email"
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
+                />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Profile Image
+                </span>
+                <div className="grid gap-3 md:grid-cols-[auto_1fr]">
+                  <div className="grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+                    {clientImage ? (
+                      <img
+                        src={clientImage}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      "Image"
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null;
+                        void handleImageUpload(file);
+                        event.target.value = "";
+                      }}
+                      disabled={saving || clientImageUploading}
+                      className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-indigo-700 disabled:opacity-50"
+                    />
+                    <input
+                      type="url"
+                      value={clientImage}
+                      onChange={(event) => setClientImage(event.target.value)}
+                      disabled={saving || clientImageUploading}
+                      placeholder={
+                        clientImageUploading
+                          ? "Uploading..."
+                          : "Or paste an image URL"
+                      }
+                      className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+                    />
+                  </div>
+                </div>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Archetype
+                </span>
+                <select
                   value={clientArchetype}
                   onChange={(event) => setClientArchetype(event.target.value)}
                   className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                />
-              </label>
-            </div>
-            {canManageAssignment ? (
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Primary CSM
-                </span>
-                <select
-                  value={csmTeamMemberId}
-                  onChange={(event) => setCsmTeamMemberId(event.target.value)}
-                  disabled={saving}
-                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
                 >
-                  <option value="">Unassigned</option>
-                  {availableAssignees.map((member) => (
-                    <option key={member.glide_row_id} value={member.glide_row_id}>
-                      {member.name ?? "(unnamed)"}
+                  <option value="">No archetype</option>
+                  {clientArchetypeOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
                     </option>
                   ))}
                 </select>
               </label>
+            </div>
+            {canManageAssignment ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                    Primary CSM
+                  </span>
+                  <select
+                    value={csmTeamMemberId}
+                    onChange={(event) => setCsmTeamMemberId(event.target.value)}
+                    disabled={saving}
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                  >
+                    <option value="">Unassigned</option>
+                    {availableAssignees.map((member) => (
+                      <option key={member.glide_row_id} value={member.glide_row_id}>
+                        {member.name ?? "(unnamed)"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {secondaryAssigneeEnabled ? (
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                      Secondary Assignee
+                    </span>
+                    <select
+                      value={csmSecondaryAssigneeId}
+                      onChange={(event) =>
+                        setCsmSecondaryAssigneeId(event.target.value)
+                      }
+                      disabled={saving}
+                      className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                    >
+                      <option value="">No secondary assignee</option>
+                      {availableAssignees.map((member) => (
+                        <option key={member.glide_row_id} value={member.glide_row_id}>
+                          {member.name ?? "(unnamed)"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
             ) : null}
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -1602,6 +1789,18 @@ function ClientProfileEditModal({
                 onChange={(event) => setNorthStar(event.target.value)}
                 rows={5}
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                General Information
+              </span>
+              <textarea
+                value={generalInfo}
+                onChange={(event) => setGeneralInfo(event.target.value)}
+                rows={4}
+                placeholder="Evergreen context that is useful for supporting this client."
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400"
               />
             </label>
             {canEditDirectorNotes ? (
@@ -1846,6 +2045,7 @@ function ClientOutcomesEditModal({
   const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>(
     () => customFieldDraftsFromValues(customFields, customFieldValues, client),
   );
+  const [advocacyDrafts, setAdvocacyDrafts] = useState(emptyAdvocacyDrafts);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   useEffect(() => {
@@ -1873,6 +2073,7 @@ function ClientOutcomesEditModal({
             id: field.id,
             value: customFieldDrafts[field.id] ?? "",
           })),
+          advocacyEvents: buildAdvocacyEventDrafts(advocacyDrafts),
         },
       },
     );
@@ -1996,6 +2197,17 @@ function ClientOutcomesEditModal({
             </div>
           ) : null}
 
+          <div className="mt-4">
+            <ClientAdvocacyPanel
+              client={client}
+              drafts={advocacyDrafts}
+              disabled={saving}
+              onChange={(type: AdvocacyType, draft) =>
+                setAdvocacyDrafts((current) => ({ ...current, [type]: draft }))
+              }
+            />
+          </div>
+
           {saveError ? (
             <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {saveError}
@@ -2071,6 +2283,7 @@ function ClientOutcomesInlineEditor({
   const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>(
     () => customFieldDraftsFromValues(customFields, customFieldValues, client),
   );
+  const [advocacyDrafts, setAdvocacyDrafts] = useState(emptyAdvocacyDrafts);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -2089,12 +2302,14 @@ function ClientOutcomesInlineEditor({
   const buyInUpdatedAt = valueFrom(client, ["outcomes_buy_in_date"]);
   const hasOutcomeChanges =
     successStatus !== "" || progressStatus !== "" || buyInStatus !== "";
+  const advocacyEvents = buildAdvocacyEventDrafts(advocacyDrafts);
 
   useEffect(() => {
     setSuccessStatus("");
     setProgressStatus("");
     setBuyInStatus("");
     setCustomFieldDrafts(currentCustomFieldDrafts);
+    setAdvocacyDrafts(emptyAdvocacyDrafts());
     setNotes("");
     setSaveError(null);
   }, [
@@ -2107,6 +2322,7 @@ function ClientOutcomesInlineEditor({
 
   const hasChanges =
     hasOutcomeChanges ||
+    advocacyEvents.length > 0 ||
     customFields.some(
       (field) =>
         (customFieldDrafts[field.id] ?? "") !==
@@ -2137,6 +2353,7 @@ function ClientOutcomesInlineEditor({
             id: field.id,
             value: customFieldDrafts[field.id] ?? "",
           })),
+          advocacyEvents,
         },
       },
     );
@@ -2160,6 +2377,7 @@ function ClientOutcomesInlineEditor({
       setSuccessStatus("");
       setProgressStatus("");
       setBuyInStatus("");
+      setAdvocacyDrafts(emptyAdvocacyDrafts());
       setNotes("");
     }
   }
@@ -2249,6 +2467,14 @@ function ClientOutcomesInlineEditor({
           }
         />
       ) : null}
+      <ClientAdvocacyPanel
+        client={client}
+        drafts={advocacyDrafts}
+        disabled={!canEdit || saving}
+        onChange={(type: AdvocacyType, draft) =>
+          setAdvocacyDrafts((current) => ({ ...current, [type]: draft }))
+        }
+      />
       {canEdit ? (
         <>
           <label className="block">
@@ -2292,11 +2518,13 @@ function ClientOutcomesInlineEditor({
 function ClientStatusModal({
   client,
   programChoices,
+  churnReasons,
   onClose,
   onSaved,
 }: {
   client: ClientRow;
   programChoices: ProgramChoice[];
+  churnReasons: CompanyChurnReasonRow[];
   onClose: () => void;
   onSaved: (
     client: ClientRow,
@@ -2340,12 +2568,51 @@ function ClientStatusModal({
   );
   const [reason, setReason] = useState("");
   const [returnDate, setReturnDate] = useState("");
+  const [offboardedAt, setOffboardedAt] = useState(todayInputValue());
+  const [churnReason, setChurnReason] = useState("");
+  const [customChurnReason, setCustomChurnReason] = useState("");
+  const [goodFit, setGoodFit] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const requiresReason = ["paused", "suspended", "off-boarded"].includes(
-    targetStatus ?? "",
+  const isOffboarding = targetStatus === "off-boarded";
+  const sortedChurnReasons = useMemo(
+    () =>
+      churnReasons
+        .filter((item) => item.status !== "archived")
+        .slice()
+        .sort((a, b) => {
+          const byPosition = (a.position ?? 0) - (b.position ?? 0);
+          if (byPosition !== 0) return byPosition;
+          return a.label.localeCompare(b.label);
+        }),
+    [churnReasons],
   );
+  const selectedChurnReason = sortedChurnReasons.find(
+    (item) => item.value === churnReason,
+  );
+  const contractEndDateValue = valueFrom(client, [
+    "current_contract_end_date_for_filtering",
+    "current_contract_end_date",
+  ]);
+  const contractEndDateInput = dateInputValue(contractEndDateValue);
+  const actualEndDate = dateFromValue(offboardedAt);
+  const contractEndDate = dateFromValue(contractEndDateValue);
+  const churned =
+    isOffboarding && actualEndDate && contractEndDate
+      ? actualEndDate.getTime() < contractEndDate.getTime()
+      : null;
+  const churnStatusLabel =
+    churned === true
+      ? "Churned"
+      : churned === false
+        ? "Completed - did not churn"
+        : "Needs review";
+  const offboardingReasonValue =
+    sortedChurnReasons.length > 0
+      ? selectedChurnReason?.value ?? ""
+      : customChurnReason.trim();
+  const requiresReason = ["paused", "suspended"].includes(targetStatus ?? "");
   const requiresReturnDate = targetStatus === "paused";
   const isReactivation =
     targetStatus === "front-end" || targetStatus === "back-end";
@@ -2353,6 +2620,24 @@ function ClientStatusModal({
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (saving) return;
+    if (isOffboarding) {
+      if (!offboardedAt) {
+        setSaveError("Add the client's actual end date.");
+        return;
+      }
+      if (churned === true && !offboardingReasonValue) {
+        setSaveError("Choose the churn reason for this offboarding.");
+        return;
+      }
+      if (churned === true && !notes.trim()) {
+        setSaveError("Add churn notes so the team has the context.");
+        return;
+      }
+      if (!goodFit) {
+        setSaveError("Choose whether this client was a good fit for the offer.");
+        return;
+      }
+    }
     setSaving(true);
     setSaveError(null);
 
@@ -2362,8 +2647,21 @@ function ClientStatusModal({
         body: {
           clientLegacyId: client.glide_row_id,
           targetStatus,
-          reason,
+          reason: isOffboarding
+            ? churned === true
+              ? selectedChurnReason?.label ?? offboardingReasonValue
+              : churned === false
+                ? "Completed contract / did not churn"
+                : "Offboarded - churn status needs review"
+            : reason,
           returnDate,
+          offboardedAt: isOffboarding ? offboardedAt : null,
+          churnReason: isOffboarding && churned === true ? offboardingReasonValue : null,
+          churnReasonLabel:
+            isOffboarding && churned === true
+              ? selectedChurnReason?.label ?? offboardingReasonValue
+              : null,
+          goodFit: isOffboarding ? goodFit === "yes" : null,
           notes,
         },
       },
@@ -2380,6 +2678,14 @@ function ClientStatusModal({
       return;
     }
     if (data?.client) {
+      window.localStorage.setItem(
+        CLIENTS_ROSTER_REFRESH_KEY,
+        JSON.stringify({
+          clientId: client.glide_row_id,
+          status: targetStatus,
+          updatedAt: Date.now(),
+        }),
+      );
       onSaved(
         mapAppClientRow(data.client as Record<string, unknown>),
         (data.event as ClientHistoryEventRow | undefined) ?? null,
@@ -2487,24 +2793,153 @@ function ClientStatusModal({
                 </span>
               </label>
             ) : null}
+            {isOffboarding ? (
+              <div className="space-y-4 rounded-md border border-gray-200 bg-gray-50 px-4 py-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                      Actual End Date
+                    </span>
+                    <input
+                      type="date"
+                      value={offboardedAt}
+                      onChange={(event) => setOffboardedAt(event.target.value)}
+                      required
+                      disabled={saving}
+                      className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                    />
+                  </label>
+                  <div className="rounded-md border border-gray-200 bg-white px-3 py-2 text-sm">
+                    <span className="block text-xs font-medium uppercase tracking-wider text-gray-500">
+                      Contract End
+                    </span>
+                    <span className="mt-1 block font-medium text-gray-900">
+                      {contractEndDateInput
+                        ? formatDate(contractEndDateInput)
+                        : "No contract end date"}
+                    </span>
+                  </div>
+                </div>
+                <div
+                  className={`rounded-md border px-4 py-3 text-sm ${
+                    churned === true
+                      ? "border-red-200 bg-red-50 text-red-800"
+                      : churned === false
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  RetainOS classification: <strong>{churnStatusLabel}</strong>
+                  {churned === null ? (
+                    <span className="ml-1">
+                      Add or review the contract end date before relying on churn
+                      reporting.
+                    </span>
+                  ) : null}
+                </div>
+                {churned === true ? (
+                  sortedChurnReasons.length > 0 ? (
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Churn Reason
+                      </span>
+                      <select
+                        value={churnReason}
+                        onChange={(event) => setChurnReason(event.target.value)}
+                        required
+                        disabled={saving}
+                        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                      >
+                        <option value="">Choose a churn reason</option>
+                        {sortedChurnReasons.map((item) => (
+                          <option key={item.id} value={item.value}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Churn Reason
+                      </span>
+                      <input
+                        type="text"
+                        value={customChurnReason}
+                        onChange={(event) => setCustomChurnReason(event.target.value)}
+                        required
+                        disabled={saving}
+                        placeholder="Why did the client churn?"
+                        className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+                      />
+                    </label>
+                  )
+                ) : null}
+                <fieldset>
+                  <legend className="mb-2 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                    Good Fit For This Offer?
+                  </legend>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ["yes", "Yes"],
+                      ["no", "No"],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setGoodFit(value)}
+                        disabled={saving}
+                        className={`rounded-md border px-3 py-2 text-sm font-medium cursor-pointer disabled:opacity-50 ${
+                          goodFit === value
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-700"
+                            : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                    {churned === true ? "Churn Notes" : "Offboarding Notes"}
+                  </span>
+                  <textarea
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    rows={3}
+                    required={churned === true}
+                    disabled={saving}
+                    placeholder={
+                      churned === true
+                        ? "What happened, and what should the team learn from it?"
+                        : "Optional final context for history"
+                    }
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+                  />
+                </label>
+              </div>
+            ) : null}
             {isReactivation ? (
               <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                 Moving back to Front End or Back End is the reactivation step.
               </div>
             ) : null}
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Notes
-              </span>
-              <textarea
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                rows={3}
-                disabled={saving}
-                placeholder="Optional extra context for history"
-                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
-              />
-            </label>
+            {!isOffboarding ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Notes
+                </span>
+                <textarea
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  rows={3}
+                  disabled={saving}
+                  placeholder="Optional extra context for history"
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+                />
+              </label>
+            ) : null}
             {saveError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {saveError}
@@ -2524,7 +2959,11 @@ function ClientStatusModal({
               disabled={saving}
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
-              {saving ? "Saving..." : "Save Status"}
+              {saving
+                ? "Saving..."
+                : isOffboarding
+                  ? "Finalize Offboarding"
+                  : "Save Status"}
             </button>
           </div>
         </form>
@@ -3248,6 +3687,7 @@ function PathwayChangeModal({
   clientMilestones,
   offerMilestones,
   relationLookup,
+  secondaryPathwaysEnabled,
   onClose,
   onSaved,
 }: {
@@ -3256,10 +3696,11 @@ function PathwayChangeModal({
   clientMilestones: ClientMilestoneRow[];
   offerMilestones: OfferMilestoneRow[];
   relationLookup: Map<string, string>;
+  secondaryPathwaysEnabled: boolean;
   onClose: () => void;
   onSaved: (
     client: ClientRow,
-    milestone: ClientMilestoneRow,
+    milestone: ClientMilestoneRow | null,
     event: ClientHistoryEventRow | null,
   ) => void;
 }) {
@@ -3276,6 +3717,23 @@ function PathwayChangeModal({
     milestonesForOffer[0]?.glide_row_id ||
     "";
   const [milestoneId, setMilestoneId] = useState(initialMilestoneId);
+  const initialSecondaryOfferId =
+    textInputValue(valueFrom(client, [
+      "secondary_offer_milestones_current_offer_id",
+      "offer_milestones_2nd_current_offer_id",
+    ])) || "";
+  const [secondaryOfferId, setSecondaryOfferId] = useState(initialSecondaryOfferId);
+  const secondaryMilestonesForOffer = offerMilestones
+    .filter((milestone) => milestone.offer_id === secondaryOfferId)
+    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+  const initialSecondaryMilestoneId =
+    textInputValue(valueFrom(client, [
+      "secondary_offer_milestones_current_milestone_id",
+      "offer_milestones_2nd_current_milestone_id",
+    ])) || secondaryMilestonesForOffer[0]?.glide_row_id || "";
+  const [secondaryMilestoneId, setSecondaryMilestoneId] = useState(
+    initialSecondaryMilestoneId,
+  );
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -3342,11 +3800,65 @@ function PathwayChangeModal({
     setMilestoneId(firstMilestone?.glide_row_id ?? "");
   }
 
+  function handleSecondaryOfferChange(nextOfferId: string) {
+    setSecondaryOfferId(nextOfferId);
+    const firstMilestone = offerMilestones
+      .filter((milestone) => milestone.offer_id === nextOfferId)
+      .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b))[0];
+    setSecondaryMilestoneId(firstMilestone?.glide_row_id ?? "");
+  }
+
+  async function saveSecondaryPathway() {
+    if (saving) return false;
+    const hadSecondaryPathway = Boolean(
+      textInputValue(valueFrom(client, [
+        "secondary_offer_milestones_current_offer_id",
+        "offer_milestones_2nd_current_offer_id",
+      ])),
+    );
+    const action =
+      secondaryOfferId && secondaryMilestoneId
+        ? "set_secondary_pathway"
+        : hadSecondaryPathway
+          ? "clear_secondary_pathway"
+          : "";
+    if (!action) return true;
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-milestone",
+      {
+        body: {
+          action,
+          clientLegacyId: client.glide_row_id,
+          offerId: secondaryOfferId || undefined,
+          milestoneId: secondaryMilestoneId || undefined,
+          notes,
+        },
+      },
+    );
+    if (error) {
+      setSaveError(error.message);
+      return false;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return false;
+    }
+    if (data?.client) {
+      onSaved(
+        mapAppClientRow(data.client as Record<string, unknown>),
+        (data.clientMilestone as ClientMilestoneRow | undefined) ?? null,
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+    }
+    return true;
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (saving) return;
     setSaving(true);
     setSaveError(null);
+    let primarySaved = false;
 
     const { data, error } = await supabase.functions.invoke(
       "manage-client-milestone",
@@ -3361,22 +3873,33 @@ function PathwayChangeModal({
       },
     );
 
-    setSaving(false);
-
     if (error) {
+      setSaving(false);
       setSaveError(error.message);
       return;
     }
     if (data?.error) {
+      setSaving(false);
       setSaveError(data.error);
       return;
     }
     if (data?.client && data?.clientMilestone) {
+      primarySaved = true;
       onSaved(
         mapAppClientRow(data.client as Record<string, unknown>),
         data.clientMilestone as ClientMilestoneRow,
         (data.event as ClientHistoryEventRow | undefined) ?? null,
       );
+    }
+    if (secondaryPathwaysEnabled) {
+      const secondarySaved = await saveSecondaryPathway();
+      if (!secondarySaved) {
+        setSaving(false);
+        return;
+      }
+    }
+    setSaving(false);
+    if (primarySaved || secondaryPathwaysEnabled) {
       onClose();
     }
   }
@@ -3659,6 +4182,59 @@ function PathwayChangeModal({
                 ))}
               </select>
             </label>
+            {secondaryPathwaysEnabled ? (
+              <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#586273]">
+                  Secondary pathway
+                </div>
+                <p className="mt-1 text-sm text-[#6c7684]">
+                  Optional add-on, call track, or parallel deliverable.
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                      Pathway
+                    </span>
+                    <select
+                      value={secondaryOfferId}
+                      onChange={(event) =>
+                        handleSecondaryOfferChange(event.target.value)
+                      }
+                      disabled={saving}
+                      className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                    >
+                      <option value="">No secondary pathway</option>
+                      {offers.map((offer) => (
+                        <option key={offer.glide_row_id} value={offer.glide_row_id}>
+                          {offer.name ?? offer.glide_row_id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                      Milestone
+                    </span>
+                    <select
+                      value={secondaryMilestoneId}
+                      onChange={(event) => setSecondaryMilestoneId(event.target.value)}
+                      disabled={saving || !secondaryOfferId}
+                      className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                    >
+                      <option value="">Choose milestone</option>
+                      {secondaryMilestonesForOffer.map((milestone) => (
+                        <option
+                          key={milestone.glide_row_id ?? milestone.name ?? "milestone"}
+                          value={milestone.glide_row_id ?? ""}
+                        >
+                          {displayValue(milestone.name, relationLookup)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            ) : null}
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Notes
@@ -4480,6 +5056,7 @@ function PathwaysSection({
   offerMilestones,
   relationLookup,
   notificationPreferences,
+  secondaryPathwaysEnabled,
   canAdvanceMilestones,
   canManagePathways,
   onStartMilestone,
@@ -4492,6 +5069,7 @@ function PathwaysSection({
   offerMilestones: OfferMilestoneRow[];
   relationLookup: Map<string, string>;
   notificationPreferences: NotificationPreference[];
+  secondaryPathwaysEnabled: boolean;
   canAdvanceMilestones: boolean;
   canManagePathways: boolean;
   onStartMilestone: (progress: ClientMilestoneRow | null) => void;
@@ -4768,6 +5346,14 @@ function PathwaysSection({
     contractElapsedDays !== null
       ? Math.max(1, Math.min(selectedTimelineDays, contractElapsedDays + 1))
       : null;
+  const secondaryOfferValue = valueFrom(client, [
+    "secondary_offer_milestones_current_offer_id",
+    "offer_milestones_2nd_current_offer_id",
+  ]);
+  const secondaryMilestoneValue = valueFrom(client, [
+    "secondary_offer_milestones_current_milestone_id",
+    "offer_milestones_2nd_current_milestone_id",
+  ]);
 
   return (
     <div className="space-y-5 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
@@ -4976,6 +5562,27 @@ function PathwaysSection({
         </div>
       </div>
 
+      {secondaryPathwaysEnabled ? (
+        <div className="rounded-lg border border-[#e4e9f0] bg-[#fbfcfe] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
+            Secondary Pathway
+          </div>
+          {isPresent(secondaryOfferValue) || isPresent(secondaryMilestoneValue) ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[#586273]">
+              <span className="font-semibold text-[#162b3e]">
+                {displayValue(secondaryOfferValue, relationLookup)}
+              </span>
+              <span>/</span>
+              <span>{displayValue(secondaryMilestoneValue, relationLookup)}</span>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-[#6c7684]">
+              No secondary pathway configured.
+            </p>
+          )}
+        </div>
+      ) : null}
+
       <FieldGrid
         fields={[
           ["Offer", ["offer_milestones_current_offer_id", "offer_id", "offer_name"]],
@@ -5001,6 +5608,7 @@ function PathwaysSection({
               const milestoneId = milestone?.glide_row_id ?? progress?.milestone_id;
               const targetDays =
                 milestone?.target_days_to_complete_from_onboarding_date;
+              const isTtvMilestone = Boolean(milestone?.ttv_milestone);
               const duration =
                 progress?.duration_days ??
                 daysBetweenValues(progress?.start_date, progress?.completion_date);
@@ -5013,10 +5621,17 @@ function PathwaysSection({
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <div className="font-medium text-gray-900">
-                      {milestone
-                        ? displayValue(milestone.name)
-                        : displayValue(progress?.milestone_id, relationLookup)}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-gray-900">
+                        {milestone
+                          ? displayValue(milestone.name)
+                          : displayValue(progress?.milestone_id, relationLookup)}
+                      </span>
+                      {isTtvMilestone ? (
+                        <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.04em] text-sky-700">
+                          Time to Value
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-1 text-xs text-gray-500">
                       Start: {formatDate(progress?.start_date)} · Completed:{" "}
@@ -5423,6 +6038,7 @@ export function ClientDetail() {
   const [customFieldValues, setCustomFieldValues] = useState<
     ClientCustomFieldValueRow[]
   >([]);
+  const [churnReasons, setChurnReasons] = useState<CompanyChurnReasonRow[]>([]);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
   const [outcomeChoices, setOutcomeChoices] = useState<OutcomeChoiceSets>({
     success: [],
@@ -5434,6 +6050,8 @@ export function ClientDetail() {
   const [notificationPreferences, setNotificationPreferences] = useState<
     NotificationPreference[]
   >(mergeNotificationPreferences(null));
+  const [secondaryPathwaysEnabled, setSecondaryPathwaysEnabled] = useState(false);
+  const [secondaryAssigneeEnabled, setSecondaryAssigneeEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
@@ -5456,6 +6074,8 @@ export function ClientDetail() {
     async function loadClient() {
       setLoading(true);
       setError(null);
+      setSecondaryAssigneeEnabled(false);
+      setSecondaryPathwaysEnabled(false);
       const { data: appClient, error: appClientError } = await supabase
         .from("clients")
         .select("*")
@@ -5517,6 +6137,7 @@ export function ClientDetail() {
       );
       const offerIds = [
         nextClient.offer_milestones_current_offer_id,
+        nextClient.secondary_offer_milestones_current_offer_id,
         nextClient.offer_milestones_2nd_current_offer_id,
       ].filter((id): id is string => typeof id === "string" && id.trim() !== "");
       const companyGlideRowId =
@@ -5559,6 +6180,7 @@ export function ClientDetail() {
         { data: appContractRows },
         { data: choices },
         { data: outcomeChoiceRows },
+        churnReasonsResult,
         { data: milestoneRows },
         { data: appMilestoneRows },
         { data: offerMilestoneRows },
@@ -5567,6 +6189,7 @@ export function ClientDetail() {
         { data: historyRows },
         customFieldsResult,
         customFieldValuesResult,
+        companySettingsResult,
       ] = await Promise.all([
         useAppOwnedHistoricalActivity
           ? Promise.resolve({ data: [] })
@@ -5598,6 +6221,16 @@ export function ClientDetail() {
                 "success_value, success_display, progress_value, progress_display, buy_in_value, buy_in_display",
               )
               .order("index", { ascending: true }),
+        appPathwayCompany?.id
+          ? supabase
+              .from("company_churn_reasons")
+              .select(
+                "id, value, label, category, requires_notes, counts_as_churn, position, status",
+              )
+              .eq("company_id", appPathwayCompany.id)
+              .eq("status", "active")
+              .order("position", { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
         useAppOwnedHistoricalActivity
           ? Promise.resolve({ data: [] })
           : supabase
@@ -5666,8 +6299,30 @@ export function ClientDetail() {
               .eq("company_id", appPathwayCompany.id)
               .eq("client_id", nextClient.glide_row_id)
           : Promise.resolve({ data: [], error: null }),
+        appPathwayCompany?.id
+          ? supabase
+              .from("company_settings")
+              .select("enable_secondary_assignee, enable_secondary_offers")
+              .eq("company_id", appPathwayCompany.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
       ]);
       if (!cancelled) {
+        if (!companySettingsResult.error) {
+          setSecondaryAssigneeEnabled(
+            companySettingsResult.data?.enable_secondary_assignee === true,
+          );
+          setSecondaryPathwaysEnabled(
+            companySettingsResult.data?.enable_secondary_offers === true,
+          );
+        } else {
+          console.error(
+            "Failed to load company settings:",
+            companySettingsResult.error,
+          );
+          setSecondaryPathwaysEnabled(false);
+          setSecondaryAssigneeEnabled(false);
+        }
         if (customFieldsResult.error) {
           console.error("Failed to load company custom fields:", customFieldsResult.error);
         }
@@ -5677,11 +6332,19 @@ export function ClientDetail() {
             customFieldValuesResult.error,
           );
         }
+        if (churnReasonsResult.error) {
+          console.error("Failed to load company churn reasons:", churnReasonsResult.error);
+        }
         setContracts([
           ...((appContractRows ?? []) as ContractRow[]),
           ...((contractRows ?? []) as ContractRow[]),
         ]);
         setProgramChoices((choices ?? []) as ProgramChoice[]);
+        setChurnReasons(
+          churnReasonsResult.error
+            ? []
+            : ((churnReasonsResult.data ?? []) as CompanyChurnReasonRow[]),
+        );
         const nextOutcomeChoices = appPathwayCompany?.id
           ? outcomeChoicesFromDefinitions(
               (outcomeChoiceRows ?? []) as Record<string, unknown>[],
@@ -6090,6 +6753,7 @@ export function ClientDetail() {
           offerMilestones={offerMilestones}
           relationLookup={displayLookup}
           notificationPreferences={notificationPreferences}
+          secondaryPathwaysEnabled={secondaryPathwaysEnabled}
           canAdvanceMilestones={canEditProfile && capabilities.canAdvanceClientMilestones}
           canManagePathways={canEditProfile && capabilities.canManageClientPathways}
           onStartMilestone={(progress) =>
@@ -6169,6 +6833,7 @@ export function ClientDetail() {
           client={client}
           teamMembers={teamMembers}
           canManageAssignment={canManageAssignment}
+          secondaryAssigneeEnabled={secondaryAssigneeEnabled}
           canEditDirectorNotes={capabilities.canViewDirectorNotes}
           onClose={() => setEditingProfile(false)}
           onSaved={(updatedClient, event) => {
@@ -6211,6 +6876,7 @@ export function ClientDetail() {
         <ClientStatusModal
           client={client}
           programChoices={programChoices}
+          churnReasons={churnReasons}
           onClose={() => setChangingStatus(false)}
           onSaved={(updatedClient, event, updatedContract) => {
             setClient(updatedClient);
@@ -6295,10 +6961,11 @@ export function ClientDetail() {
           clientMilestones={clientMilestones}
           offerMilestones={offerMilestones}
           relationLookup={displayLookup}
+          secondaryPathwaysEnabled={secondaryPathwaysEnabled}
           onClose={() => setChangingPathway(false)}
           onSaved={(updatedClient, milestone, event) => {
             setClient(updatedClient);
-            upsertMilestone(milestone);
+            if (milestone) upsertMilestone(milestone);
             if (event) {
               setHistoryEvents((current) => [event, ...current].slice(0, 25));
             }

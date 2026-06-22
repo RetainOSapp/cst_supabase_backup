@@ -143,3 +143,282 @@ For historical context:
 - Emily QA correction: Outcomes now treats blank or same-as-current dropdowns as `No change` so no-op saves are blocked in the UI. Pathway modal always renders the Quick Update-style `Pathway progress` block above pathway reassignment fields, even when the current milestone is already completed. Frontend-only; `npm run build` and `npx tsc --noEmit` passed.
 - Outcomes model correction: Outcomes are event-style updates. Current badges show saved value/date, dropdowns allow selecting the same color again, and `manage-client-outcomes` now refreshes the selected outcome date even when the value does not change. Deployed `manage-client-outcomes` to `zjauqflzxzsbpnivzsct`; `npm run build` and `npx tsc --noEmit` passed.
 - Emily final QA passed: Jay confirmed Outcomes same-color event updates work and Pathway modal polish is done. `ROADMAP.md` promoted the Emily QA item to `[x]`.
+
+## RetainOS Resources Working With Clients v2 - 2026-06-20
+
+- Added `supabase/migrations/20260620110000_retainos_resources_working_clients_v2_seed.sql` from `RETAINOS_RESOURCES_MIGRATION_v2.md`, seeding the 42 missing Working with Clients entries as RetainOS Help drafts.
+- Updated `src/pages/Resources.tsx` categorization to honor `Resource category: Working with Clients` content markers before dashboard/automation inference.
+- Applied the SQL via `npm run db:apply:sql -- supabase/migrations/20260620110000_retainos_resources_working_clients_v2_seed.sql`; service-role readback confirmed 43 Working with Clients draft resources including the prior Client Details screen draft.
+- `npm run build` passed. Existing Beacon/package/Header dirty work remains unrelated and intentionally uncommitted per current warnings.
+
+## Team Invite Flow Resource Audit - 2026-06-20
+
+- Built local RetainOS invite flow for `How to Invite a Team Member`: `supabase/functions/manage-company-member/index.ts` now provisions/sends login email on create and supports `send_invite`; `src/pages/SaasClientDetail.tsx` shows invite success/error banners and adds Send invite on active team cards.
+- Follow-up fix after Send invite returned non-2xx from the stale deployed Edge Function: `src/pages/SaasClientDetail.tsx` now falls back to `prepare-login` + `supabase.auth.signInWithOtp` for the selected member email, so invite delivery works even before `manage-company-member` is redeployed.
+- Brand-new user onboarding nuance: invite success messages now include the RetainOS `/login` URL and OTP sends include `emailRedirectTo`; the `invite-team-member` resource was reapplied with login URL guidance.
+- Added/applied `supabase/migrations/20260620123000_update_invite_team_member_resource.sql`; service-role readback confirmed `invite-team-member` draft includes RetainOS flow and Send invite copy.
+- `npm run build` passed. `deno check` was unavailable in this shell. `npx supabase functions deploy manage-company-member --project-ref zjauqflzxzsbpnivzsct` hung twice, including with escalation, and was interrupted; deploy this function from a normal authenticated terminal before QA.
+
+## Client Offboarding Resource Audit - 2026-06-20
+
+- Upgraded `src/pages/ClientDetail.tsx` status modal for Offboarded: actual end date, contract-end comparison, churn/completed/needs-review classification, company churn reason dropdown with typed fallback, churn notes requirement when churned, and good-fit yes/no capture.
+- QA follow-up: `src/pages/ClientDetail.tsx` now writes a roster refresh token after successful status changes, and `src/pages/Clients.tsx` waits for app-owned company detection before loading roster rows. This prevents the Clients page from briefly or persistently showing stale mirrored program statuses until hard refresh.
+- Updated/deployed `supabase/functions/manage-client-status/index.ts`; live deploy to project `zjauqflzxzsbpnivzsct` succeeded. The function now computes churn server-side, saves actual offboard date, churn data, offer-fit metadata, and richer history/audit payloads.
+- Added/applied `supabase/migrations/20260620133000_update_offboard_client_resource.sql`; service-role readback confirmed `how-to-offboard-a-client` includes actual end date and good-fit guidance.
+- `npm run build` passed. `deno check` remains unavailable in this shell. `ROADMAP.md` has a `[qa]` item for Jay to test the richer RetainOS offboarding flow before publishing/re-recording the resource.
+
+## Milestones And Offers Resource Audit - 2026-06-20
+
+- Audited `How to Customize Milestones and Offers`; RetainOS already supports the core flow through Admin Hub / SaaS Client Detail > Pathways & Milestones using `manage-company-pathway`.
+- Confirmed create/edit/archive/restore pathways and milestones, move up/down milestone ordering, active-client archive blockers, and mirror-only read-only fallback are live. RetainOS uses safer archive/restore instead of Glide-style delete.
+- Added/applied `supabase/migrations/20260620143000_update_customize_milestones_offers_resource.sql`; service-role readback confirmed `customize-milestones-offers` includes Pathways & Milestones, archive guardrails, and reorder guidance.
+
+## Manual Client Creation Resource Audit - 2026-06-20
+
+- Upgraded `src/pages/Clients.tsx` New Client modal with optional profile image URL, next steps, Director Notes for Director/SuperAdmin, and richer initial contract fields: monthly value, contract link, and contract notes.
+- Updated/deployed `supabase/functions/manage-client-create/index.ts` to persist those fields into app-owned `clients` and initial `client_contracts`; deploy to project `zjauqflzxzsbpnivzsct` succeeded.
+- Added/applied `supabase/migrations/20260620150000_update_add_clients_manually_resource.sql`; service-role readback confirmed `add-clients-manually` includes + New Client, contract details, and after-creation guidance.
+- `npm run build` passed after the code changes. RetainOS intentionally handles Slack/folder/supporting links after creation through the client profile links section, and custom fields through Quick Update / Client Detail outcomes instead of inside the create modal.
+- Image upload follow-up: added `src/lib/clientImageUpload.ts` and deployed `supabase/functions/upload-client-image/index.ts`; New Client and Client Detail > Edit Profile can now upload JPG/PNG/WEBP/GIF client images up to 5 MB or paste an image URL. Redeployed `manage-client-profile` so profile edits persist `client_image`. Added/applied `20260620152000_update_add_clients_manually_image_upload.sql`.
+
+## Filtering Clients Overview Resource Audit - 2026-06-20
+
+- Upgraded `src/pages/Clients.tsx` filters for the old CST "Filtering Clients (Overview)" use cases: milestone, renewal window, last-contact age, next-contact window, Success, Progress, and Buy-In. List/card/calendar queries now share the same applied filters.
+- Corrected the Success filter to use `outcomes_success_value_for_filtering` for both app-owned and mirrored client rows after live schema readback showed `backup_company_clients.outcomes_success_for_filtering` does not exist.
+- Added/applied `supabase/migrations/20260620153000_update_filtering_clients_overview_resource.sql`; service-role readback confirmed `filtering-clients-overview` is a draft titled "Filtering clients in RetainOS" with milestone, calendar, Apply filters, and revenue-scope notes.
+- `npm run build` passed. Revenue forecast math from the old CST walkthrough remains out of this Clients overview and should be validated under Dashboard / CSM reporting resources.
+
+## Client Full Card Details Resource Audit - 2026-06-20
+
+- Audited the old CST "Client Full Card Details" transcript against current RetainOS Client Detail. No product patch was needed: current RetainOS already has profile edit/image upload, Program next-steps/contact update, Outcomes, Contract, Pathways & Milestones, Client Links, Tasks, History, and richer offboarding/status actions.
+- Added/applied `supabase/migrations/20260620154000_update_client_full_card_details_resource.sql`; service-role readback confirmed `client-full-card-details` is now a draft titled "Understanding and updating a client profile" with paired workflow, Client Links, and offboarding notes.
+- The same migration lightly cross-links `filtering-clients-overview` to the client profile resource. No app build was run because this slice changed only resource SQL and handoff docs.
+
+## Contact Cadence Resource Merge - 2026-06-20
+
+- Added Last Contact and Next Contact sort options to `src/pages/Clients.tsx` List/Card views. Sorts use `csm_date_of_last_contact` and `csm_date_of_next_contact`; live schema readback confirmed both columns exist on app-owned and mirrored client tables.
+- Added/applied `supabase/migrations/20260620155000_merge_contact_cadence_resources.sql`. `using-date-of-last-contact-and-date-of-next-contact-features` is now the canonical draft "Tracking client contact cadence"; `date-of-last-contact-sorting-clients` and `date-of-next-contact` are draft merged pointers.
+- `npm run build` passed. The first SQL apply failed because `resources.type = article` violates the table check constraint; migration was corrected to keep pointer rows as `video` and reapplied successfully.
+
+## AI Call Summary Webhook Resource Audit - 2026-06-20
+
+- Audited the old CST/Fathom/Zapier transcript against RetainOS. Core flow was already live: company-scoped token, company ID, summary/notes payload, exact email match, Next Steps update, Last Contact update, history event, intake audit/idempotency, and Integration Review Queue.
+- Hardened `supabase/functions/ingest-client-call-summary/index.ts` so payloads can send `client_email` or provider attendee/invitee email lists. RetainOS still only auto-updates when exactly one active app-owned client matches; zero/multiple matches go to review.
+- Updated `src/pages/Resources.tsx` Call Summary / Next Steps guide with attendee_emails and optional summary cleanup guidance. Added/applied `supabase/migrations/20260620160000_update_ai_call_summary_resource.sql`; readback confirmed attendee email, review queue, optional cleanup, and Call AI boundary notes.
+- `npm run build` passed. Deployed `ingest-client-call-summary` to Supabase project `zjauqflzxzsbpnivzsct`. Smoke test with attendee_emails reached company validation, confirming the new payload shape is accepted by the deployed endpoint.
+
+## Task Management Resource Audit - 2026-06-20
+
+- Audited the old CST "Task Management in RetainOS" transcript against current RetainOS. No product patch was needed: current Tasks already has board/list views, status drag/drop, task detail edit modal, company-level and client-linked tasks, task templates, due urgency, recurring tasks, Daily Pulse visibility, and Client Detail > Tasks.
+- Added/applied `supabase/migrations/20260620161000_update_task_management_resource.sql`; service-role readback confirmed `task-management-in-retainos` is a draft with template, recurring, Daily Pulse, mirror-only, and known-later-scope guidance.
+- No app build was run because this slice changed only resource SQL and handoff docs. Current later task gaps remain comments, attachments, advanced recurring rules, realtime, and richer notification delivery.
+
+## Quick Update Resource Audit - 2026-06-20
+
+- Audited the old text-only CST "How to Make a Quick Update" notes against current RetainOS. No product patch was needed: Quick Update already supports Next Steps, Notes, Date of Last Contact, Date of Next Contact, Success, Progress, Buy-In, active company custom fields, and current milestone completion/start-next for app-owned pilot/migrated companies.
+- Added/applied `supabase/migrations/20260620162000_update_quick_update_resource.sql`; service-role readback confirmed `how-to-make-a-quick-update` is now titled "Making a quick update in RetainOS" and includes pathway progress, offer-change boundary, and call-attendance future-scope guidance.
+- No app build was run because this slice changed only resource SQL and handoff docs. Product note: pathway/offer reassignment intentionally remains in Client Detail > Pathways & Milestones rather than Quick Update.
+
+## Redundant Client Details Screen Resource Cleanup - 2026-06-20
+
+- Removed the old `client-details-screen` RetainOS Help draft because the transcript was really about Clients list/detail-card views plus Quick Update context, and those concepts are now covered by Filtering Clients, Quick Update, contact cadence, and the full client profile resource.
+- Added/applied `supabase/migrations/20260620163000_remove_redundant_client_details_screen_resource.sql`; service-role readback confirmed zero remaining `client-details-screen` resource rows.
+- No app build was run because this slice changed only resource SQL and handoff docs.
+
+## Assign New Clients To CSM Resource Audit - 2026-06-20
+
+- Audited the old CST "Assigning New Clients to a CSM" transcript against RetainOS. The current RetainOS truth is assignment during New Client creation or reassignment from Client Detail > Edit Profile; the old CST-style Director profile notification/new assignment popup is not live and remains later notification scope.
+- Added `Unassigned` to the Clients CSM filter in `src/pages/Clients.tsx` so Admin/Director/Support users can find clients that still need a primary CSM. The filter works for app-owned and mirrored client queries.
+- Added/applied `supabase/migrations/20260620164000_update_assign_new_clients_csm_resource.sql`; service-role readback confirmed `assign-new-clients-csm` is now titled "Assigning new clients to a CSM in RetainOS" and documents creation assignment, Unassigned filtering, Edit Profile reassignment, task claiming, role limits, and no-popup guidance.
+- `npm run build` passed after the Clients filter change.
+- Follow-up note: `ROADMAP.md` notification backlog now explicitly tracks a future "Unassigned new client reminder" that should trigger for active/new clients with no Primary CSM and link to Clients filtered by `CSM = Unassigned`.
+- Removed the related old CSM-facing assignment acknowledgement draft because it depended entirely on non-live CST popup behavior. Added/applied `supabase/migrations/20260620165000_remove_acknowledge_new_client_assignment_resource.sql`; service-role readback confirmed zero remaining `acknowledging-a-new-client-assigned-to-you-as-a-csm` rows. `ROADMAP.md` now tracks "New client assigned to CSM notification / acknowledgement" as future notification scope.
+
+## Filtering Deep Dive Resource Merge - 2026-06-20
+
+- Audited the old CST "Filtering Clients (Deep Dive)" transcript against the already-upgraded RetainOS Clients filters. No product patch was needed: RetainOS covers CSM, unassigned CSM, status, offer/pathway, milestone, renewals, last contact, next contact, Success, Progress, Buy-In, combined filters, and clear/apply behavior.
+- Added `ROADMAP.md` low-priority future feature for renewal forecast / predicted pipeline revenue. Note says Beacon could likely provide the first lightweight version using renewal windows, health signals, CSM, offer/pathway, and contract values before a dedicated UI calculator exists.
+- Added/applied `supabase/migrations/20260620170000_merge_filtering_deep_dive_resource.sql`; service-role readback confirmed `filtering-clients-overview` remains the canonical draft "Filtering clients in RetainOS" with deep-dive strategic examples, and `filtering-clients-deep-dive` has zero remaining rows.
+- No app build was run because this slice changed only resource SQL and handoff docs.
+
+## Custom Fields Resource And Webhook Audit - 2026-06-20
+
+- Audited the old CST "Custom Fields" walkthrough against RetainOS. RetainOS is stronger than CST for setup and day-to-day usage: app-owned company custom field definitions support typed fields/options/order/archive, and active fields appear in Quick Update plus Client Detail > Outcomes.
+- Closed the creation-time webhook gap: `supabase/functions/zapier-create-client/index.ts` now accepts modern `custom_fields` / `customFields` payloads as an object or array, keeps legacy `customfield1..customfield7` compatibility, validates submitted values against active company custom field definitions, writes `client_custom_field_values`, and returns/history/audits custom field changes.
+- Updated `src/pages/Resources.tsx` New Client Webhook dynamic guide to show `custom_fields` plus legacy slot parameters.
+- Added/applied `supabase/migrations/20260620171000_update_custom_fields_resource.sql`; service-role readback confirmed `custom-fields` is now titled "Custom fields in RetainOS" and includes no-five-slot-limit, webhook, and Quick Update guidance.
+- `npm run build` passed. Deployed `zapier-create-client` to Supabase project `zjauqflzxzsbpnivzsct`.
+
+## Contact Cadence Pointer Resource Cleanup - 2026-06-20
+
+- User flagged the third contact-date transcript as repetitive. The conceptual merge had already happened in `20260620155000_merge_contact_cadence_resources.sql`, but the old `date-of-last-contact-sorting-clients` and `date-of-next-contact` drafts still existed as merged pointers.
+- Added/applied `supabase/migrations/20260620172000_remove_contact_cadence_pointer_resources.sql`; service-role readback confirmed only `using-date-of-last-contact-and-date-of-next-contact-features` remains, titled "Tracking client contact cadence".
+- No app build was run because this slice changed only resource SQL and handoff docs.
+
+## Custom Client Reminders Resource Audit - 2026-06-20
+
+- Audited the old CST "Creating Custom Client Reminders" walkthrough. Pushback decision: do not build a separate reminders object for V1 because RetainOS already covers reminder-style work through client-linked tasks with due dates, due/overdue state, Tasks page visibility, Client Detail > Tasks, Clients reminder bell, and Daily Pulse `task_due`.
+- Added/applied `supabase/migrations/20260620173000_update_custom_client_reminders_resource.sql`; service-role readback confirmed `creating-custom-client-reminders` is now titled "Creating client reminders with tasks" and explicitly says Quick Update reminder creation / a separate Reminders panel are not live.
+- Updated `ROADMAP.md` task section to capture the product decision and optional future scope: a Quick Update shortcut that creates a client-linked task/reminder.
+- No app build was run because this slice changed only resource SQL and handoff docs.
+
+## Multiple Client Emails - 2026-06-20
+
+- Built the RetainOS version of "Managing Multiple Email Addresses per Client": added `client_email_secondary` and `client_email_tertiary` to app-owned `clients` via `supabase/migrations/20260620174000_client_alternate_emails.sql`, including lower-case indexes.
+- Updated `src/pages/ClientDetail.tsx` Edit Profile with Email 2 and Email 3 fields. Updated `manage-client-profile` to persist them, `manage-client-create` / `zapier-create-client` to accept creation-time alternate emails, and `src/pages/Resources.tsx` New Client Webhook guide with `client_email_secondary` / `client_email_tertiary`.
+- Updated automation matching in `ingest-client-call-summary`, `webhook-update-client`, and `manage-integration-review` so Email, Email 2, and Email 3 can all match integration payloads. Ambiguous matches still go to review rather than auto-applying.
+- Added/applied `supabase/migrations/20260620175000_update_multiple_client_emails_resource.sql`; service-role readback confirmed the resource is titled "Managing multiple email addresses per client" and includes Email 2 plus review-safety guidance.
+- `npm run build` passed. Applied the schema/resource SQL and deployed `manage-client-profile`, `manage-client-create`, `zapier-create-client`, `ingest-client-call-summary`, `webhook-update-client`, and `manage-integration-review` to Supabase project `zjauqflzxzsbpnivzsct`. Live select confirmed the new columns are queryable.
+
+## Secondary Pathways - 2026-06-20
+
+- Built the RetainOS version of old CST "Adding Secondary Offers" as company-gated Secondary pathway tracking, not a second program lifecycle.
+- Added/applied `supabase/migrations/20260620180000_secondary_client_pathways.sql`: `company_settings.enable_secondary_offers`, `companies.enable_secondary_offers`, and app-owned `clients.secondary_offer_milestones_current_offer_id`, `secondary_offer_milestones_current_milestone_id`, `secondary_offer_milestones_current_milestone_change_date` with indexes.
+- Updated `src/pages/SaasClientDetail.tsx`, `src/lib/appOwnedData.ts`, and `supabase/functions/manage-company-customization/index.ts` so Company Settings > Feature gates can save the Secondary pathway flag. Deployed `manage-company-customization` to project `zjauqflzxzsbpnivzsct`.
+- Updated `supabase/functions/manage-client-milestone/index.ts` with `set_secondary_pathway` and `clear_secondary_pathway`, Director/SuperAdmin-only permissioning, company-setting enforcement, client history events, and app audit events. Deployed `manage-client-milestone` to project `zjauqflzxzsbpnivzsct`.
+- Updated `src/pages/ClientDetail.tsx`: Client Detail > Pathways & Milestones now loads the company setting, shows a Secondary Pathway summary when enabled, and the Change Pathway & Milestones modal can set or clear the secondary pathway/milestone.
+- Added/applied `supabase/migrations/20260620181000_update_secondary_offers_resource.sql`; because live `resources` had no existing row for this slug, the migration now upserts `adding-secondary-offers` as draft "Adding secondary pathways".
+- `npm run build` passed. Live service-role smoke check confirmed secondary pathway columns/settings are queryable and the resource draft exists. `ROADMAP.md` marks this as `[qa]`; Jay still needs to test enable setting, set secondary pathway, clear secondary pathway, and resource wording before publishing/re-recording.
+
+## Secondary Assignee - 2026-06-20
+
+- Completed RetainOS Secondary Assignee support for app-owned pilot/migrated clients. Existing plumbing already included `company_settings.enable_secondary_assignee`, `clients.csm_secondary_assignee_id`, CSM access scoping, Clients/Dashboard filters, and task/milestone/outcome permission checks.
+- Updated `src/pages/Clients.tsx`: + New Client now shows Secondary Assignee when the selected company has the feature gate enabled and the actor is not a CSM creating their own assigned client.
+- Updated `src/pages/ClientDetail.tsx`: Client Detail > Edit Profile now loads `enable_secondary_assignee` and shows Secondary Assignee beside Primary CSM when the feature gate is enabled.
+- Hardened `supabase/functions/manage-client-create/index.ts` and `supabase/functions/manage-client-profile/index.ts`: Secondary Assignee is accepted only when company settings enable it, must be an active visible company member, and cannot equal the Primary CSM. Deployed both functions to Supabase project `zjauqflzxzsbpnivzsct`.
+- Added/applied `supabase/migrations/20260620182000_secondary_assignee_resource.sql`, creating the `adding-secondary-assignee` RetainOS Help draft.
+- `npm run build` passed. Live service-role smoke check confirmed `adding-secondary-assignee` exists and `clients.csm_secondary_assignee_id` / `company_settings.enable_secondary_assignee` are queryable. `ROADMAP.md` marks this as `[qa]`; Jay should test enable setting, create client with secondary assignee, edit/clear secondary assignee, and CSM visibility as secondary assignee.
+- QA correction: Jay found New Client did not respect the newly enabled Secondary Assignee while existing Client Detail did. Root cause was `src/pages/Clients.tsx` loading `enable_secondary_assignee` from `backup_companies` only; patched it to merge app-owned `companies.enable_secondary_assignee` for pilot/migrated companies before gating the New Client modal. Frontend-only; `npm run build` passed.
+
+## Archetypes In Client Views - 2026-06-21
+
+- Built the RetainOS version of old CST "Archetypes — In Client Views" as a company-gated roster signal. Archetype editing already existed in + New Client and Client Detail > Edit Profile through `client_archetype_value`.
+- Added/applied `supabase/migrations/20260621100000_archetypes_in_client_views.sql`: `company_settings.enable_archetypes` and `companies.enable_archetypes`.
+- Updated `src/pages/SaasClientDetail.tsx` and `supabase/functions/manage-company-customization/index.ts`: Company Settings > Feature gates now has `Client archetypes`, saves to `company_settings`, and mirrors the flag onto `companies`. Deployed `manage-company-customization` to Supabase project `zjauqflzxzsbpnivzsct`.
+- Updated `src/pages/Clients.tsx`: pilot/migrated companies merge app-owned `enable_archetypes`; List view shows an Archetype column when enabled; Card view shows Archetype as a compact meta row when enabled.
+- Updated `src/lib/appOwnedData.ts` so shared company loading includes `enable_archetypes`.
+- Added/applied `supabase/migrations/20260621101000_update_archetypes_client_views_resource.sql`, refreshing `archetypes-in-client-views` as a RetainOS Help draft.
+- `npm run build` passed. Live service-role smoke check confirmed `company_settings.enable_archetypes`, `companies.enable_archetypes`, and the `archetypes-in-client-views` resource draft are queryable. `ROADMAP.md` marks this as `[qa]`; Jay should enable Client archetypes, verify List/Card display, edit a client archetype, and confirm roster updates.
+- QA correction: Archetype is now a controlled dropdown in + New Client and Client Detail > Edit Profile with only Doer, Controller, Worrier, and Follower. `manage-client-create`, `manage-client-profile`, and `zapier-create-client` normalize accepted values to those Title Case labels and reject invalid values; all three functions were deployed to `zjauqflzxzsbpnivzsct`.
+- Added/applied `supabase/migrations/20260621102000_normalize_client_archetypes.sql` and `20260621103000_update_archetype_dropdown_resource.sql`. Live readback for Ethical Scaling confirmed `Doer: 31`, `Controller: 26`, `Worrier: 6`, `Follower: 27`, blank `70`, and `0` lowercase archetype values. The resource draft now documents the controlled dropdown.
+- Updated `scripts/seed-ethical-scaling-clients-pilot.mjs` and generic `scripts/seed-company-write-mode.mjs` so future app-owned company migrations normalize legacy Glide archetypes to the same dropdown labels.
+
+## How To Manage Clients Resource Audit - 2026-06-21
+
+- Audited the old CST CSM orientation Loom transcript. No new app build was needed for the orientation itself: RetainOS already covers Clients List/Card views, search/filters, Quick Update, Next Steps/notes/contact cadence, Progress/Buy-In/Success, custom fields, pathway milestone completion, Client Detail, links, tasks, history, contracts, and lifecycle controls.
+- Real product gap found: old CST had dedicated Testimonial / Review / Referral asked/received controls. RetainOS can identify advocacy candidates with Success + green Progress/Buy-In filters, but dedicated advocacy write controls remain future scope. `ROADMAP.md` now calls this out explicitly under client outcomes.
+- Added/applied `supabase/migrations/20260621104000_update_how_to_manage_clients_resource.sql`, refreshing `how-to-manage-clients` as draft "How to manage clients in RetainOS" with CSM orientation structure and RetainOS boundaries. Live readback confirmed the resource draft exists and includes the advocacy gap note.
+
+## Advocacy Tracking - 2026-06-21
+
+- Built RetainOS Advocacy & Growth tracking for Review, Testimonial, Referral, and Renewal / Upsell. Added `src/lib/clientAdvocacy.ts` and `src/components/ClientAdvocacyPanel.tsx`.
+- Added/applied `supabase/migrations/20260621105000_client_advocacy_tracking.sql`: `client_advocacy_events` plus app-owned `clients` advocacy summary columns for status, asked count, received count, last asked date, last received date, and latest note. Migration backfilled existing app-owned clients from legacy Glide fields.
+- Updated/deployed `supabase/functions/manage-client-quick-update/index.ts` and `supabase/functions/manage-client-outcomes/index.ts`. Both now accept `advocacyEvents`, insert asked/received event rows, refresh client summary counts, and include advocacy context in history/audit payloads.
+- Updated `src/pages/Clients.tsx`: Quick Update now has an Advocacy & Growth panel. Updated `src/pages/ClientDetail.tsx`: Outcomes tab and the older outcomes modal now include the same panel.
+- Updated `src/pages/Dashboard.tsx`: Dashboard > Overview now shows Advocacy & Growth cards for asked, received, and ask-to-received ratio by Review, Testimonial, Referral, and Renewal / Upsell. Reporting uses app-owned `client_advocacy_events`, event dates, CSM snapshot, and the existing dashboard filters where applicable.
+- Updated `scripts/seed-company-write-mode.mjs` so future Glide-to-app-owned company migrations map legacy advocacy fields into summary columns and `glide_migration` event rows. Updated `scripts/seed-ethical-scaling-clients-pilot.mjs` summary mapping so reruns preserve the new fields.
+- Added/applied `supabase/migrations/20260621110000_update_advocacy_resource.sql` and `20260621111000_update_manage_clients_advocacy_boundary.sql`. `reviews-testimonials-and-referrals` is now titled "Tracking reviews, testimonials, referrals, and renewal opportunities"; `how-to-manage-clients` no longer says advocacy controls are missing.
+- `npm run build` passed. Live readback for Ethical Scaling showed advocacy events: review asked `3` / received `6`, testimonial asked `19` / received `32`, referral asked `11` / received `19`, renewal/upsell received `3`. `ROADMAP.md` marks this as `[qa]`.
+- Jay QA passed the main slice: testimonial save worked from Client Detail, Dashboard > Overview advocacy cards looked good, and dashboard filters worked. Quick Update layout was adjusted so Pathway progress appears before Advocacy & Growth; frontend-only reorder in `src/pages/Clients.tsx`, and `npm run build` passed.
+- Client Advocacy Triggers follow-up: added Clients roster filters for Review, Testimonial, Referral, and Renewal / Upsell status (`Any`, `Not asked`, `Asked`, `Received`) for app-owned pilot/migrated companies. Filters combine with the existing CSM/status/pathway/contact/health filters and apply to list/card/calendar client queries.
+- Added/applied `supabase/migrations/20260621114000_update_advocacy_triggers_resource.sql`, merging the old `Client Advocacy Triggers` walkthrough into the canonical `reviews-testimonials-and-referrals` resource and deleting the duplicate trigger-specific draft.
+- `npm run build` passed after the Clients filter changes. Service-role readback confirmed only the canonical advocacy resource remains and it includes the Clients-filter section. Ethical Scaling smoke counts confirmed the new status columns are queryable: review `153/1/6`, testimonial `128/0/32`, referral `141/0/19`, renewal `157/0/3` for `not_asked/asked/received`.
+- Filter UI polish follow-up: `src/pages/Clients.tsx` now keeps Client Name, Status, CSM, Offer, Secondary Assignee when enabled, Last Contact, and Next Contact visible, and moves Milestone/Renewals, Success/Progress/Buy-In, and Advocacy filters into collapsible `Journey & Contract`, `Health & Outcomes`, and `Advocacy & Growth` sections with active-count badges. `npm run build` passed; browser smoke reached login on local `/clients`, so Jay still needs authenticated visual QA.
+
+## Next Steps Resource Audit - 2026-06-21
+
+- User flagged `Using the Next Steps Feature` as repetitive with Quick Update / Manage Clients. No product patch was needed.
+- Added/applied `supabase/migrations/20260621112000_update_next_steps_resource.sql`, retitling the draft to `Using Next Steps well` and narrowing it to writing best practices, example structure, history/accountability, and when to use Quick Update vs Program update vs Tasks.
+- Live readback confirmed the `using-the-next-steps-feature` resource is draft, includes Best practices / Related resources, and explicitly says not to re-record the full Quick Update workflow there.
+
+## Client History Log Resource Audit - 2026-06-21
+
+- Audited the old CST `Understanding the Client History Log` transcript against RetainOS. No product patch was needed: RetainOS already has a dedicated Client Detail > History tab with filter pills, search, timestamps, source labels, and app-owned history events across the write flows that are live.
+- Added/applied `supabase/migrations/20260621113000_update_client_history_log_resource.sql`, retitling the resource to `Understanding client history in RetainOS` and replacing the old three-dot CST drawer workflow with the RetainOS History tab workflow. The migration upserts the resource because live readback showed the draft row was not present before the first update-only pass.
+- Service-role readback confirmed `understanding-the-client-history-log` exists as draft, includes the RetainOS History tab guidance, and includes the Call AI boundary.
+- Updated `ROADMAP.md` to correct the stale note that History only showed Quick Update events. Remaining history gaps are narrower: AR status changes, call attendance, and deeper task history if users need it.
+
+## North Star Resource Audit - 2026-06-21
+
+- Audited old CST `Leveraging North Star for Proactive Coaching`. No product patch was needed: RetainOS already supports North Star during New Client creation, app-owned profile editing, Zapier/new-client payloads, Quick Update context display, and profile-update history events.
+- Added/applied `supabase/migrations/20260621115000_update_north_star_resource.sql`, refreshing the resource as draft `Leveraging North Star for proactive coaching`.
+- The updated resource positions North Star as the long-term destination, Next Steps as current actions, Tasks as owned work, and the History tab as the place to review previous North Star/profile changes instead of the old CST inline field history.
+- Service-role readback confirmed the resource exists as draft and includes destination/History/Quick Update guidance.
+
+## Admin Tools Overview Resource Audit - 2026-06-21
+
+- Audited old CST `Tools for Admins Only`. No product patch was needed: RetainOS already has the relevant role/capability model and admin surfaces through Dashboard, Clients, CSM Reports, Tasks, Resources, and Admin Hub.
+- Added/applied `supabase/migrations/20260621116000_update_admin_tools_overview_resource.sql`, refreshing `admin-tools-overview` as draft `Admin and Director tools in RetainOS`.
+- The updated resource maps old CST concepts into RetainOS: Dashboard/Charts for cohort-style analysis, CSM Reports for CSM/profile-upkeep review, Admin Hub for company/team/configuration, and Resources for help/company resources.
+- It explicitly marks old CST popup-style alerts and the old More > Call AI pattern as boundary/future/dedicated-resource scope rather than pretending those exact flows are live.
+- Service-role readback confirmed the resource exists as draft and includes role model, Admin Hub, CSM Reports, and popup-boundary guidance.
+
+## Terminology Guide Resource Audit - 2026-06-21
+
+- Audited old CST `RetainOS Terminology Guide`. No product patch was needed; the best RetainOS version is a glossary resource for onboarding and migration language alignment.
+- Added/applied `supabase/migrations/20260621117000_update_terminology_guide_resource.sql`, refreshing `retainos-terminology-guide` as a draft glossary.
+- The updated guide covers account roles, client lifecycle statuses, pathway/offer and milestone language, North Star / Next Steps / contact cadence, Success / Progress / Buy-In, advocacy and renewal/upsell terms, contracts, Dashboard / CSM Reports, Admin Hub, app-owned vs mirrored data, and old CST-to-RetainOS language shifts.
+- Service-role readback confirmed the resource exists as draft and includes lifecycle, advocacy, app-owned data, and language-shift sections.
+
+## Progress And Buy-In Resource Audit - 2026-06-21
+
+- Audited old CST `Using Progress and Buy-in for Effective Coaching`. No product patch was needed: RetainOS already supports Success / Progress / Buy-In updates from Quick Update and Client Detail > Outcomes, Clients > Filters > Health & Outcomes, Dashboard > Charts distributions, and client History context.
+- Added/applied `supabase/migrations/20260621118000_update_progress_buy_in_resource.sql`, refreshing `using-progress-and-buy-in-for-more-effective-coaching` as draft `Using Progress and Buy-In for effective coaching`.
+- The updated resource reframes the walkthrough as an operating guide: Progress vs Buy-In definitions, Success boundary, traffic-light calibration, where to update/review/filter, Dashboard usage, CSM/Admin best practices, and a Progress x Buy-In coaching matrix.
+- Service-role readback confirmed the live draft includes Quick Update, Dashboard > Charts, Coaching matrix, definitions, and History guidance.
+
+## Paused And Suspended Resource Audit - 2026-06-21
+
+- Audited old CST `Marking a Client as Paused or Suspended`. No product patch was needed: RetainOS already supports Paused and Suspended through the controlled Client Detail lifecycle/status flow, requires reasons, requires a paused return date, records status changes in client History, supports Clients status filtering, and shows current status mix in Dashboard > Charts > Program Distribution.
+- Added/applied `supabase/migrations/20260621119000_update_paused_suspended_resource.sql`, refreshing `marking-a-client-as-paused-or-suspended` as draft `Marking a client as paused or suspended`.
+- The updated resource documents RetainOS-specific behavior that did not exist in the old CST transcript: paused return date requirement, app-owned contract extension for the approved pause window where a contract exists, reactivation to Front End / Back End, paused-return notification scope, and the boundary that dedicated Director email alerts for paused/suspended status changes remain roadmap scope.
+- Service-role readback confirmed the live draft includes return date, contract extension, Status filter, Program Distribution, History, and Director email alert boundary guidance.
+
+## Dashboard Milestone Breakdown By Offer - 2026-06-21
+
+- Audited old CST `Milestone Progress Breakdown by Offer` and found a real dashboard behavior gap: RetainOS had Dashboard > Charts > Clients By Offer and an Offer filter, but selecting one offer still grouped by offer, producing a one-bar chart instead of the old CST milestone breakdown.
+- Updated `src/pages/Dashboard.tsx`: the existing journey chart now stays `Clients By Offer` when no Offer filter is applied, and switches to `Clients By Milestone` when a specific Offer is applied. It loads milestone labels/order from `company_offer_milestones` for app-owned companies or `backup_company_offer_milestones` for mirror-only companies, counts clients by `offer_milestones_current_milestone_id`, and keeps chart drilldowns pointed at the right client segment.
+- Added/applied `supabase/migrations/20260621120000_update_milestone_progress_breakdown_resource.sql`, refreshing the `milestone-progress-breakdown-by-offer` draft resource to match the RetainOS behavior and old CST intent.
+- `npm run build` passed. Service-role readback confirmed the resource draft includes Clients By Offer, Clients By Milestone, drilldown, and Secondary Pathway boundary guidance. `ROADMAP.md` marks the chart switch as `[qa]`; Jay should test Dashboard > Charts with All offers, then select one Offer and confirm the chart title/data/drilldown change.
+- QA follow-up: Jay saw a raw milestone ID in the milestone chart. Live readback for `Pm4s3detsuobvj5xm04q6q` found no matching app-owned/mirror milestone row and no currently assigned clients, but the edge case was valid. Patched `src/pages/Dashboard.tsx` so the chart loads archived app-owned milestones too, labels them as `(Archived)`, labels clients with no milestone as `No current milestone`, and labels missing legacy references as `Unknown milestone (<short id>)` instead of showing the full raw ID. `npm run build` passed.
+- Added/applied `supabase/migrations/20260621121000_update_milestone_breakdown_edge_case_resource.sql`; service-role readback confirmed the resource draft now includes Archived and Unknown milestone guidance.
+- QA follow-up 2: Jay still saw `Unknown milestone (pM4S3dET...)`. Case-insensitive readback showed that exact milestone exists as `Buy-in` for offer `Ud4LVWyfSKuCfZlRVeQnzQ`, but at least one filtered client (`Marianne Lehikoinen`) had current offer `8Mv0j3xjQpGWQvhaMAdGyg` while still pointing at the `Buy-in` milestone from the other offer. Patched `src/pages/Dashboard.tsx` so the selected-offer milestone chart also resolves current milestone IDs present in the filtered client set even when the milestone belongs to another offer, and labels those as `(from another offer)` for cleanup visibility. `npm run build` passed.
+- Added/applied `supabase/migrations/20260621122000_update_milestone_cross_offer_resource.sql`; service-role readback confirmed the milestone resource includes cross-offer mismatch guidance.
+- QA follow-up 3: The `(from another offer)` label was confusing because it surfaced a foreign milestone named `Buy-in` inside the selected offer's milestone breakdown. Patched `src/pages/Dashboard.tsx` again so selected-offer milestone charts only show milestones that belong to the selected offer plus a single `Milestone mismatch` cleanup bucket for clients whose current milestone is outside that offer. Drilldown on the bucket still opens the affected clients. `npm run build` passed.
+- Added/applied `supabase/migrations/20260621123000_update_milestone_mismatch_resource.sql`; service-role readback confirmed the resource now says `Milestone mismatch` and no longer includes the old `from another offer` guidance.
+
+## Tracking TTV Resource And Dashboard Metric - 2026-06-21
+
+- Audited old CST `Tracking TTV (Time to Value)`. RetainOS already had the configuration foundation: `company_offer_milestones.is_ttv_milestone`, mirrored `backup_company_offer_milestones.ttv_milestone`, Admin Hub milestone editing, and migration scripts that preserve TTV flags.
+- Product gap closed in `src/pages/Dashboard.tsx`: Dashboard > Overview now includes a Journey card for `Avg. Time to Value`, plus `Reached` count and `TTV Points`. Formula is TTV milestone completion date minus client onboarding/start date, averaged across clients who reached an active configured TTV milestone in the selected filters. The loader respects company, CSM, secondary assignee, program/status, offer, client start date, and Date Range completion date filters.
+- Updated `src/pages/ClientDetail.tsx`: Client Detail > Pathways & Milestones > Milestone Timeline now labels configured TTV milestones with a `Time to Value` badge.
+- Added/applied `supabase/migrations/20260621124000_update_tracking_ttv_resource.sql`, refreshing the `tracking-time-to-value` draft resource for RetainOS. Service-role readback confirmed the resource includes Dashboard, Client Detail, filter rules, and Value Activation guidance.
+- `npm run build` passed. Supabase smoke check found active TTV milestone example `Tracking` for Ethical Scaling plus an archived test TTV milestone; the Dashboard metric was tightened to active app-owned TTV milestones only. `ROADMAP.md` marks Average Time to Value / TTV as `[qa]`; Jay should validate Admin Hub config, Dashboard metric, filters, and Client Detail badge.
+- QA follow-up: `src/pages/Dashboard.tsx` now makes the TTV card details clickable. Clicking `Reached` opens the existing client-list chart detail modal with clients who reached TTV. Clicking `TTV Points` opens a configured milestone dialog because that number represents TTV milestone configuration, not clients. `npm run build` passed.
+- Added/applied `supabase/migrations/20260621125000_update_ttv_clickthrough_resource.sql`; service-role readback confirmed the TTV resource now includes `Click Reached` and `Click TTV Points` guidance.
+- QA follow-up 2: Jay found the `Reached` clickthrough showed `Unnamed client` rows. Root cause was the TTV client query not selecting `client_name` / `client_image` before reusing the shared chart detail modal. Patched `src/pages/Dashboard.tsx` to include both fields in the TTV client query; `npm run build` passed.
+
+## Retention And Churn Resource Audit - 2026-06-21
+
+- Audited old CST `Understanding Retention and Churn`. No product patch was needed: RetainOS already records renewals through contract-created retention events, calculates churn during controlled offboarding by comparing actual end date against contract end date, and surfaces Retained / Retention % / Up For Renewal / Churn % in Dashboard > Overview > Contracts & Retention with drilldowns.
+- Added/applied `supabase/migrations/20260621126000_update_retention_churn_resource.sql`, refreshing `retention-churn-metrics` as draft `Understanding retention and churn in RetainOS`.
+- The updated resource documents RetainOS formulas, contract renewal workflow, offboarding churn workflow, Clients renewal filters, Dashboard drilldowns, migration QA checks, and the boundary that predictive renewal forecast / pipeline revenue is future Dashboard / CSM Reports / Beacon-assisted scope.
+- Service-role readback confirmed the live draft includes the Retention % formula, Churn % formula, contract flow, offboarding flow, forecast boundary, and migration QA checklist.
+
+## Global Note Search - 2026-06-21
+
+- Built the old CST `Global Note Search Across Client Profiles` as a RetainOS Clients view mode rather than a hidden table switch.
+- Added/applied `supabase/migrations/20260621127000_global_client_note_search.sql`, creating RPC `search_client_notes`. It searches current Next Steps, app-owned `client_history_events` text fields, and migrated `backup_company_clients_history` values for filtered clients. It returns paginated rows with source labels, client metadata, matched text, event date, and total count.
+- Updated `src/pages/Clients.tsx`: List / Cards / Calendar now has a fourth `Notes` mode. Notes mode has its own keyword search, uses the applied Clients filters before querying notes, highlights matched snippets, shows source badges, paginates results, and links to the matched client profile.
+- Added/applied `supabase/migrations/20260621128000_update_global_note_search_resource.sql`, refreshing `global-note-search-across-client-profiles` as draft `Global note search across client profiles`.
+- Verification: `npm run build` passed with the existing Beacon/Anthropic browser externalization and chunk-size warnings. Service-role smoke test on Ethical Scaling returned `book` matches through the RPC, and resource readback confirmed Clients > Notes, filter behavior, legacy history coverage, and non-AI-search boundary guidance.
+- `ROADMAP.md` marks Global client note search as `[~] [qa]`; Jay should test visual feel, useful known search terms, CSM/offer filters, and at least one known migrated legacy history example.
+
+## Client General Information - 2026-06-21
+
+- Audited old CST `Optional General Info Section on Client Profile`. RetainOS could already display legacy/mirrored General Information in Client Detail > Program, but app-owned clients did not yet have a dedicated editable field.
+- Added/applied `supabase/migrations/20260621129000_client_general_info.sql`, adding `clients.client_general_info` and backfilling from `backup_company_clients.client_general_info` where available. Ethical Scaling smoke readback found no non-empty legacy General Info examples, but the mapping is now present for companies that used it.
+- Updated `src/pages/ClientDetail.tsx`: Edit Profile now includes `General Information` below North Star and sends `generalInfo` to the profile function.
+- Updated/deployed `supabase/functions/manage-client-profile/index.ts` so Edit Profile persists `client_general_info`; also updated/deployed `manage-client-create` to accept `generalInfo` for API/future create payload consistency.
+- Updated migration scripts `scripts/seed-ethical-scaling-clients-pilot.mjs` and `scripts/seed-company-write-mode.mjs` so future company/app-owned migrations carry `client_general_info`.
+- Added/applied `supabase/migrations/20260621130000_update_general_info_resource.sql`, refreshing `optional-general-info-section-on-client-profile` as draft `Using General Information on a client profile`. Resource readback confirmed Edit Profile, no-old-toggle boundary, and migration notes. `npm run build` passed with existing Beacon/Anthropic/chunk warnings.

@@ -27,6 +27,16 @@ function nullableText(value: unknown) {
   return text || null;
 }
 
+function normalizeArchetype(value: unknown) {
+  const text = cleanText(value).toLowerCase();
+  if (!text) return null;
+  if (text === "doer") return "Doer";
+  if (text === "controller") return "Controller";
+  if (text === "worrier") return "Worrier";
+  if (text === "follower") return "Follower";
+  return undefined;
+}
+
 function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -161,7 +171,7 @@ Deno.serve(async (req) => {
     const { data: client, error: clientError } = await supabase
       .from("clients")
       .select(
-        "id, company_id, glide_row_id, company_glide_row_id, client_name, client_business, client_email, client_archetype_value, north_star_value, client_director_notes, csm_team_member_id, csm_secondary_assignee_id",
+        "id, company_id, glide_row_id, company_glide_row_id, client_name, client_business, client_email, client_email_secondary, client_email_tertiary, client_image, client_archetype_value, north_star_value, client_general_info, client_director_notes, csm_team_member_id, csm_secondary_assignee_id",
       )
       .eq("glide_row_id", clientLegacyId)
       .maybeSingle();
@@ -205,12 +215,24 @@ Deno.serve(async (req) => {
       }
     }
 
+    const clientArchetype = normalizeArchetype(body.clientArchetype);
+    if (clientArchetype === undefined) {
+      return jsonResponse(
+        { error: "Archetype must be one of: Doer, Controller, Worrier, Follower." },
+        400,
+      );
+    }
+
     const nextProfile: Record<string, unknown> = {
       client_name: nullableText(body.clientName) ?? client.client_name,
       client_business: nullableText(body.clientBusiness),
       client_email: nullableText(body.clientEmail),
-      client_archetype_value: nullableText(body.clientArchetype),
+      client_email_secondary: nullableText(body.clientEmailSecondary),
+      client_email_tertiary: nullableText(body.clientEmailTertiary),
+      client_image: nullableText(body.clientImage),
+      client_archetype_value: clientArchetype,
       north_star_value: nullableText(body.northStar),
+      client_general_info: nullableText(body.generalInfo),
     };
 
     if (actor.role === "super_admin" || actor.role === "director") {
@@ -218,37 +240,83 @@ Deno.serve(async (req) => {
     }
 
     let assignmentName: string | null = null;
+    let secondaryAssignmentName: string | null = null;
     if (
       actor.role === "super_admin" ||
       actor.role === "director" ||
       actor.role === "support"
     ) {
       const requestedCsmId = nullableText(body.csmTeamMemberId);
-      if (requestedCsmId) {
+      const secondaryWasSubmitted =
+        Object.prototype.hasOwnProperty.call(body, "csmSecondaryAssigneeId") ||
+        Object.prototype.hasOwnProperty.call(body, "secondaryAssigneeId");
+      const requestedSecondaryAssigneeId = secondaryWasSubmitted
+        ? nullableText(body.csmSecondaryAssigneeId ?? body.secondaryAssigneeId)
+        : undefined;
+      if (
+        requestedCsmId &&
+        requestedSecondaryAssigneeId &&
+        requestedCsmId === requestedSecondaryAssigneeId
+      ) {
+        return jsonResponse(
+          { error: "Secondary assignee must be different from Primary CSM." },
+          400,
+        );
+      }
+
+      if (requestedCsmId || requestedSecondaryAssigneeId || secondaryWasSubmitted) {
         const { data: members, error: memberError } = await supabase
           .from("company_members")
-          .select("id, legacy_glide_row_id, status, hide_from_csm_list")
+          .select("id, legacy_glide_row_id, status, hide_from_csm_list, name")
           .eq("company_id", company.id)
           .eq("status", "active");
         if (memberError) throw memberError;
 
-        const member = members?.find(
-          (candidate) =>
-            candidate.id === requestedCsmId ||
-            candidate.legacy_glide_row_id === requestedCsmId,
-        );
-        if (!member || member.hide_from_csm_list === true) {
+        const findAssignableMember = (memberId: string | null | undefined) =>
+          memberId
+            ? members?.find(
+                (candidate) =>
+                  candidate.id === memberId ||
+                  candidate.legacy_glide_row_id === memberId,
+              )
+            : null;
+
+        const primaryMember = findAssignableMember(requestedCsmId);
+        if (requestedCsmId && (!primaryMember || primaryMember.hide_from_csm_list === true)) {
           return jsonResponse(
             { error: "Assigned CSM is not an active client manager." },
             400,
           );
         }
-        const { data: memberName } = await supabase
-          .from("company_members")
-          .select("name")
-          .eq("id", member.id)
-          .single();
-        assignmentName = memberName?.name ?? null;
+        assignmentName = primaryMember?.name ?? null;
+
+        if (secondaryWasSubmitted) {
+          const { data: settings, error: settingsError } = await supabase
+            .from("company_settings")
+            .select("enable_secondary_assignee")
+            .eq("company_id", company.id)
+            .maybeSingle();
+          if (settingsError) throw settingsError;
+          if (settings?.enable_secondary_assignee !== true) {
+            return jsonResponse(
+              { error: "Enable Secondary Assignee in company settings first." },
+              400,
+            );
+          }
+
+          const secondaryMember = findAssignableMember(requestedSecondaryAssigneeId);
+          if (
+            requestedSecondaryAssigneeId &&
+            (!secondaryMember || secondaryMember.hide_from_csm_list === true)
+          ) {
+            return jsonResponse(
+              { error: "Secondary assignee is not an active client manager." },
+              400,
+            );
+          }
+          secondaryAssignmentName = secondaryMember?.name ?? null;
+          nextProfile.csm_secondary_assignee_id = requestedSecondaryAssigneeId ?? null;
+        }
       }
       nextProfile.csm_team_member_id = requestedCsmId;
     }
@@ -268,6 +336,7 @@ Deno.serve(async (req) => {
     if (updateError) throw updateError;
 
     const assignmentChanged = changes.includes("csm_team_member_id");
+    const secondaryAssignmentChanged = changes.includes("csm_secondary_assignee_id");
     const claimResult = assignmentChanged
       ? await claimUnassignedClientTasks(
           supabase,
@@ -276,7 +345,11 @@ Deno.serve(async (req) => {
         )
       : { claimedTasks: [] as Record<string, unknown>[] };
     const readableChanges = changes
-      .filter((field) => field !== "csm_team_member_id")
+      .filter(
+        (field) =>
+          field !== "csm_team_member_id" &&
+          field !== "csm_secondary_assignee_id",
+      )
       .map((field) => field.replaceAll("_", " "));
     if (assignmentChanged) {
       readableChanges.push(
@@ -291,6 +364,13 @@ Deno.serve(async (req) => {
           } claimed`,
         );
       }
+    }
+    if (secondaryAssignmentChanged) {
+      readableChanges.push(
+        secondaryAssignmentName
+          ? `Secondary Assignee set to ${secondaryAssignmentName}`
+          : "Secondary Assignee cleared",
+      );
     }
 
     const { data: event, error: historyError } = await supabase

@@ -1,0 +1,107 @@
+-- Seed the expanded RetainOS Help > Working with Clients draft resources from
+-- RETAINOS_RESOURCES_MIGRATION_v2.md.
+-- These remain drafts until the RetainOS UI and replacement Looms are finalized.
+
+with seed (
+  slug,
+  title,
+  audience,
+  description,
+  loom_embed_url,
+  sort_order,
+  retainos_equivalent
+) as (
+  values
+    ('how-to-make-a-quick-update', 'How to Make a Quick Update', 'CSM, Admin', 'Enable CSMs to log client interactions and update key health metrics quickly without entering the full client profile.', null, 220, 'Clients > Quick Update (yellow lightning bolt)'),
+    ('how-to-offboard-a-client', 'How to Offboard a Client', 'CSM, Admin', 'Guide CSMs through the correct offboarding flow in RetainOS, ensuring churn data is captured accurately.', 'https://www.loom.com/share/ef3f3d322ed74a6e9a674de780a83b1d', 230, 'Clients > Client Detail > Program > Offboarded'),
+    ('churn-reports', 'Churn Reports', 'CSM, Admin', 'Ensure CSMs capture complete churn data in RetainOS for department-level review and improvement.', 'https://www.loom.com/share/5de3a563f6e4493aada3bf554eacc77e', 240, 'Clients > Offboarding > Churn Notes'),
+    ('reviews-testimonials-and-referrals', 'Reviews, Testimonials, and Referrals', 'CSM, Admin', 'Help CSMs track and act on client advocacy opportunities at the right moments in the client journey.', 'https://www.loom.com/share/f277bd74adf7488e8c35c5e6f4e01325', 250, 'Clients > Client Detail > Outcomes > Testimonial / Review / Referral'),
+    ('upselling-clients', 'Upselling Clients', 'CSM, Admin', 'Guide CSMs through identifying and executing upsell opportunities using RetainOS data.', 'https://www.loom.com/share/893e7683a3f24ad88cb04c56451e092d', 260, 'Clients > Client Detail > Program > Backend'),
+    ('filtering-clients-overview', 'Filtering Clients (Overview)', 'CSM, Admin', 'Introduce the client filtering system in RetainOS for quick client lookup.', 'https://www.loom.com/share/bf57b657bb024c93987ff5b7eeed22f6', 270, 'Clients > Filters'),
+    ('client-full-card-details', 'Client Full Card Details', 'CSM, Admin', 'Give CSMs and Admins a complete reference for reading and editing everything available in the full client card in RetainOS.', 'https://www.loom.com/share/8b720a9352934ab59c2ffa4e2b25b7fd', 280, 'Clients > Client Detail (View & Edit)'),
+    ('acknowledging-a-new-client-assigned-to-you-as-a-csm', 'Acknowledging a New Client Assigned to You as a CSM', 'CSM', 'Walk CSMs through what happens when a new client is auto-assigned to them via the Zapier integration in RetainOS.', 'https://www.loom.com/share/b0009768a4ed4acfbf1604d579bdf003', 290, 'Clients > Notifications > New Client Assignment'),
+    ('filtering-clients-deep-dive', 'Filtering Clients (Deep Dive)', 'CSM, Admin', 'Teach CSMs and Admins how to use RetainOS filters strategically for coaching, health score management, and renewal planning.', 'https://www.loom.com/share/e3bd76785c04475eb092b3a644772637', 300, 'Clients > Filters'),
+    ('call-analysis-how-to-admin-only', 'Call Analysis How-To (Admin Only)', 'Admin', 'Train Admins on how to review and use Call AI analysis results within RetainOS.', 'https://www.loom.com/share/e60fe7483c5d4ea1a3221423ad7d7219', 310, 'Call AI > Analysis Log'),
+    ('call-ai-qc-process-admin-only', 'Call AI QC Process (Admin Only)', 'Admin', 'Guide Admins through the quality control process for Call AI outputs in RetainOS.', 'https://www.loom.com/share/1f160b7591e747179760236ab110d25d', 320, 'Call AI > QC Review'),
+    ('date-of-last-contact-sorting-clients', 'Date of Last Contact - Sorting Clients', 'CSM, Admin', 'Help CSMs prioritize outreach by sorting their client list by last contact date in RetainOS.', 'https://www.loom.com/share/aa79bd974cd547acab1642d40f58a807', 330, 'Clients > Sort > Date of Last Contact'),
+    ('forecast-hub-projections-and-revenue-pipeline', 'Forecast Hub - Projections and Revenue Pipeline', 'Admin', 'Give Admins a forward-looking view of renewal pipeline and revenue projections using RetainOS data.', 'https://www.loom.com/share/09105f27229c47e7906bda6b02c4def2', 340, 'Dashboard > Forecast Hub'),
+    ('archetypes-in-client-views', 'Archetypes - In Client Views', 'CSM, Admin', 'Help CSMs use client archetype data in RetainOS to personalize coaching and identify performance patterns.', 'https://www.loom.com/share/359beee7916b45f299f2583ac0728d2b', 350, 'Clients > Client Detail > Archetype'),
+    ('date-of-next-contact', 'Date of Next Contact', 'CSM, Admin', 'Enable CSMs to proactively schedule and track next contact dates for each client in RetainOS.', 'https://www.loom.com/share/c840c73292394dd5a02290bf71ceab90', 360, 'Clients > Client Detail > Date of Next Contact'),
+    ('manually-override-sentiment-on-call-ai', 'Manually Override Sentiment on Call AI', 'Admin', 'Give Admins the ability to correct inaccurate Call AI sentiment scores in RetainOS to maintain data integrity.', 'https://www.loom.com/share/2bbd8015a22049aaa136d2ea20bcceb4', 370, 'Call AI > Analysis Log > Override Sentiment'),
+    ('how-to-manage-clients', 'How to Manage Clients', 'CSM, Admin', 'Provide a high-level overview of the full client management toolkit available in RetainOS.', 'https://www.loom.com/share/e0f509ba440f4e5d9a6ede28d9d6aa19', 380, 'Clients (general)'),
+    ('using-the-next-steps-feature', 'Using the Next Steps Feature', 'CSM, Admin', 'Help CSMs use the Next Steps field effectively to drive consistent client progress in RetainOS.', 'https://www.loom.com/share/45273309c9be4c89af3fe33d9f662b6d', 390, 'Clients > Client Detail > Next Steps'),
+    ('leveraging-north-star-for-proactive-coaching', 'Leveraging North Star for Proactive Coaching', 'CSM, Admin', 'Teach CSMs how to use the client''s North Star (goal and expectation) to drive proactive, personalized coaching in RetainOS.', 'https://www.loom.com/share/9c1aaacbdefb443dae8c753febffc7b8', 400, 'Clients > Client Detail > North Star'),
+    ('using-progress-and-buy-in-for-more-effective-coaching', 'Using Progress and Buy-in for More Effective Coaching', 'CSM, Admin', 'Help CSMs interpret and act on Progress and Buy-in health scores to improve client outcomes in RetainOS.', 'https://www.loom.com/share/f5c328479c2c43189e3a2d8ccda90db9', 410, 'Clients > Client Detail > Outcomes > Progress / Buy-in'),
+    ('using-date-of-last-contact-and-date-of-next-contact-features', 'Using Date of Last Contact and Date of Next Contact Features', 'CSM, Admin', 'Show CSMs how to use both contact date fields together for proactive outreach management in RetainOS.', 'https://www.loom.com/share/bd47340883714bcfbe5282386f55d279', 420, 'Clients > Client Detail > Date of Last Contact / Date of Next Contact'),
+    ('tracking-conversion-in-retainos', 'Tracking Conversion in RetainOS', 'CSM, Admin', 'Ensure CSMs correctly log client upgrades and renewals as conversions in RetainOS so KPI tracking is accurate.', 'https://www.loom.com/share/738a541fd6e34fd9a1c886f85b051d6a', 430, 'Clients > Client Detail > Program > Backend / Backend (Restart)'),
+    ('adding-secondary-offers', 'Adding Secondary Offers', 'Admin', 'Enable Admins to configure and use secondary offer tracking for clients with multiple or add-on products in RetainOS.', 'https://www.loom.com/share/c2e9f21879f74df08f577fea7274d4f6', 440, 'Admin > Settings > Secondary Offers'),
+    ('customizing-views', 'Customizing Views', 'Admin', 'Allow Admins to configure how much client data is visible across different views in RetainOS to match team workflow preferences.', 'https://www.loom.com/share/33d39cc7ea29412d9d3f13120d504256', 450, 'Admin > Settings > View Customization'),
+    ('accounts-receivable', 'Accounts Receivable', 'Admin, CSM', 'Give teams visibility into client accounts receivable status directly within the RetainOS client profile.', 'https://www.loom.com/share/0cea9749354e495da33f05bbd8fead08', 460, 'Clients > Client Detail > Accounts Receivable / Admin > Settings'),
+    ('creating-custom-client-reminders', 'Creating Custom Client Reminders', 'CSM, Admin', 'Help CSMs stay on top of key client dates and follow-ups using custom reminders in RetainOS.', 'https://www.loom.com/share/746eaf9a00bd4457a07c927c0bb45c35', 470, 'Clients > Client Detail > Reminders / Quick Update > Reminder'),
+    ('understanding-the-client-history-log', 'Understanding the Client History Log', 'CSM, Admin', 'Help CSMs and Admins review the change history on a client profile for accountability and context in RetainOS.', 'https://www.loom.com/share/0b1198ad7cca46eda66936a8dbecf775', 480, 'Clients > Client Detail > History Log (3-dot menu)'),
+    ('marking-a-client-as-paused-or-suspended', 'Marking a Client as Paused or Suspended', 'CSM, Admin', 'Ensure CSMs correctly log paused or suspended client statuses in RetainOS and that Admins are alerted appropriately.', 'https://www.loom.com/share/eefe83cb5ced451382f12433f3205bd6', 490, 'Clients > Client Detail > Program > Paused / Suspended'),
+    ('global-note-search-across-client-profiles', 'Global Note Search Across Client Profiles', 'CSM, Admin', 'Allow CSMs and Admins to quickly locate past notes across all client profiles using keyword search in RetainOS.', 'https://www.loom.com/share/28725bf410ac4c4d8c72065c5f439dc2', 500, 'Clients > Global Note Search'),
+    ('automatic-call-transcript-integration-with-fathom-and-zoom', 'Automatic Call Transcript Integration with Fathom and Zoom', 'Admin', 'Enable teams to automate call transcript ingestion from Fathom and Zoom into RetainOS for Call AI processing.', 'https://www.loom.com/share/2e05cc36673840819b0b7b647f7e322b', 510, 'Automations > Webhooks > Fathom / Zoom Transcript Integration'),
+    ('ai-generated-call-summaries-pulled-into-client-profiles', 'AI-Generated Call Summaries Pulled into Client Profiles', 'Admin, CSM', 'Automate the population of call summaries and next steps into RetainOS client notes via Fathom integration.', 'https://www.loom.com/share/746e45dd58e645da9509424fb2005419', 520, 'Automations > Webhooks > AI Summary > Notes & Next Steps'),
+    ('automated-renewal-opportunity-detection', 'Automated Renewal Opportunity Detection', 'Admin', 'Surface renewal-ready clients automatically in RetainOS so CSMs can initiate conversations at the right time.', 'https://www.loom.com/share/c5ad804c39cd4b9b996a3684308f8683', 530, 'Dashboard > Renewals / Clients > Filters > Renewals'),
+    ('client-advocacy-triggers-reviews-testimonials-and-referrals', 'Client Advocacy Triggers: Reviews, Testimonials, and Referrals', 'CSM, Admin', 'Help CSMs identify and act on the best moments to request reviews, testimonials, and referrals based on client journey signals in RetainOS.', 'https://www.loom.com/share/b6b0a2408c114759bf965b7ac6439233', 540, 'Clients > Client Detail > Advocacy Indicators'),
+    ('renewal-tracking-and-visibility-enhancements', 'Renewal Tracking and Visibility Enhancements', 'Admin, CSM', 'Give CSMs and Admins full visibility into renewal outreach history and follow-up cadence in RetainOS.', 'https://www.loom.com/share/2dc6aa2c38a447e7a7a982cb0c61ce3d', 550, 'Clients > Client Detail > Renewal Tracking'),
+    ('optional-general-info-section-on-client-profile', 'Optional General Info Section on Client Profile', 'CSM, Admin', 'Enable CSMs to capture personal context and relationship-building details about a client in a dedicated section of the RetainOS client profile.', 'https://www.loom.com/share/1cc1bed7508b4fdab9bd8a3d898f3c99', 560, 'Clients > Client Detail > General Info'),
+    ('alert-when-csms-are-beyond-70-capacity', 'Alert When CSMs Are Beyond 70% Capacity', 'Admin, Director', 'Alert Admins proactively when CSM capacity approaches a risk threshold in RetainOS so they can take action before quality is affected.', 'https://www.loom.com/share/29cb0b614d024a6aa5e76322decc4401', 570, 'Dashboard > Capacity > 70% Alert'),
+    ('tagging-team-members-in-call-ai-for-review', 'Tagging Team Members in Call AI for Review', 'Admin, CSM', 'Enable collaborative call review by allowing Admins and CSMs to tag each other on Call AI analyses in RetainOS.', 'https://www.loom.com/share/5a3967070c9d4e98ad367971c4554e2d', 580, 'Call AI > Analysis Log > Tag Team Member'),
+    ('task-management-in-retainos', 'Task Management in RetainOS', 'CSM, Admin', 'Help CSMs and Admins create, assign, and track tasks tied to client profiles in RetainOS.', 'https://www.loom.com/share/19efc6ae66474936a486cbc0c86604a3', 590, 'Clients > Client Detail > Tasks / Task Management'),
+    ('managing-multiple-email-addresses-per-client', 'Managing Multiple Email Addresses per Client', 'Admin, CSM', 'Ensure accurate client matching across Fathom and Call AI integrations by supporting multiple email addresses per client in RetainOS.', 'https://www.loom.com/share/9d2c87501ebf4bcb89b5a9594aea8c53', 600, 'Clients > Client Detail > Edit > Email Addresses'),
+    ('how-to-use-retainos-for-day-to-day-client-management', 'How to Use RetainOS for Day-to-Day Client Management', 'CSM, Admin', 'Provide a comprehensive orientation walkthrough for CSMs on daily RetainOS usage from login to end-of-day workflow.', 'https://www.loom.com/share/a2603efcc0704126a7fed3d45fd74d63', 610, 'General / Onboarding'),
+    ('payment-tracking', 'Payment Tracking', 'Admin, CSM', 'Enable teams to track client payment status directly within RetainOS for AR visibility.', 'https://www.loom.com/share/8c46413c4c9640b8a46fb41e424453c4', 620, 'Clients > Client Detail > Payment Tracking / Accounts Receivable'),
+    ('call-ai-scoring-system', 'Call AI Scoring System', 'Admin, CSM', 'Help CSMs and Admins understand how Call AI scores calls, what criteria are evaluated, and how to interpret results in RetainOS.', 'https://www.loom.com/share/2cb32e997e5a48cc989beb6f390701c4', 630, 'Call AI > Scoring Guide')
+)
+insert into public.resources (
+  slug,
+  title,
+  type,
+  description,
+  content,
+  loom_embed_url,
+  status,
+  is_dynamic,
+  dynamic_key,
+  sort_order,
+  scope,
+  company_legacy_id
+)
+select
+  slug,
+  title,
+  'video',
+  description,
+  concat(
+    'Resource category: Working with Clients',
+    E'\n\nAudience: ',
+    audience,
+    E'\n\nOperational purpose: ',
+    description,
+    E'\n\nRetainOS equivalent: ',
+    coalesce(retainos_equivalent, 'Confirm during RetainOS rewrite.'),
+    E'\n\nRetainOS review note: Draft migrated from RETAINOS_RESOURCES_MIGRATION_v2.md. Use the detailed Working with Clients source block there for Glide copy, rewrite notes, and re-recording guidance before publishing.'
+  ),
+  loom_embed_url,
+  'draft',
+  false,
+  null,
+  sort_order,
+  'retainos_help',
+  null
+from seed
+on conflict (slug) do update set
+  title = excluded.title,
+  type = excluded.type,
+  description = excluded.description,
+  content = excluded.content,
+  loom_embed_url = excluded.loom_embed_url,
+  status = excluded.status,
+  is_dynamic = excluded.is_dynamic,
+  dynamic_key = excluded.dynamic_key,
+  sort_order = excluded.sort_order,
+  scope = excluded.scope,
+  company_legacy_id = excluded.company_legacy_id,
+  updated_at = now();

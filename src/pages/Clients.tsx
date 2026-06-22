@@ -18,11 +18,28 @@ import {
 } from "../lib/companySettings.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
+import { uploadClientImage } from "../lib/clientImageUpload.ts";
+import { ClientAdvocacyPanel } from "../components/ClientAdvocacyPanel.tsx";
+import {
+  advocacyDefinitions,
+  buildAdvocacyEventDrafts,
+  emptyAdvocacyDrafts,
+  type AdvocacyType,
+} from "../lib/clientAdvocacy.ts";
 
 const PAGE_SIZE = 12;
-type ViewMode = "list" | "card" | "calendar";
+const NOTE_SEARCH_PAGE_SIZE = 12;
+const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
+const UNASSIGNED_CSM_FILTER = "__unassigned";
+const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as const;
+type ViewMode = "list" | "card" | "calendar" | "notes";
 type CalendarMode = "month" | "week" | "day";
-type SortField = "client_name" | "onboarded" | "renewal";
+type SortField =
+  | "client_name"
+  | "onboarded"
+  | "renewal"
+  | "last_contact"
+  | "next_contact";
 type SortDirection = "asc" | "desc";
 type ClientRow = Record<string, unknown> & {
   glide_row_id: string;
@@ -86,6 +103,7 @@ interface Company {
   glide_row_id: string;
   name: string | null;
   enable_secondary_assignee: boolean | null;
+  enable_archetypes?: boolean | null;
 }
 interface TeamMember {
   glide_row_id: string;
@@ -120,25 +138,150 @@ interface NotificationRow {
   legacy_client_id: string | null;
   metadata?: Record<string, unknown> | null;
 }
+interface NoteSearchResult {
+  source_key: string;
+  source_type: string | null;
+  source_label: string | null;
+  client_id: string;
+  client_name: string | null;
+  client_image: string | null;
+  csm_team_member_id: string | null;
+  event_date: string | null;
+  matched_text: string | null;
+  total_count: number | null;
+}
 interface ClientFilters {
   companyId: string;
   csmId: string;
   secondaryAssigneeId: string;
   offerId: string;
+  milestoneId: string;
   programs: string[];
   clientName: string;
   lastContact: string;
+  lastContactAge: string;
+  nextContactWindow: string;
+  renewalWindow: string;
+  successStatus: string;
+  progressStatus: string;
+  buyInStatus: string;
+  reviewAdvocacyStatus: string;
+  testimonialAdvocacyStatus: string;
+  referralAdvocacyStatus: string;
+  renewalUpsellAdvocacyStatus: string;
 }
+type AdvocacyFilterField =
+  | "reviewAdvocacyStatus"
+  | "testimonialAdvocacyStatus"
+  | "referralAdvocacyStatus"
+  | "renewalUpsellAdvocacyStatus";
 const emptyFilters: ClientFilters = {
   companyId: "",
   csmId: "",
   secondaryAssigneeId: "",
   offerId: "",
+  milestoneId: "",
   programs: [],
   clientName: "",
   lastContact: "",
+  lastContactAge: "",
+  nextContactWindow: "",
+  renewalWindow: "",
+  successStatus: "",
+  progressStatus: "",
+  buyInStatus: "",
+  reviewAdvocacyStatus: "",
+  testimonialAdvocacyStatus: "",
+  referralAdvocacyStatus: "",
+  renewalUpsellAdvocacyStatus: "",
 };
 const CLIENTS_CACHE_KEY = "cst.clientsRosterState.v1";
+
+const renewalWindowOptions = [
+  { value: "overdue", label: "Overdue" },
+  { value: "next_7", label: "Next 7 days" },
+  { value: "next_14", label: "Next 14 days" },
+  { value: "next_30", label: "Next 30 days" },
+  { value: "next_60", label: "Next 60 days" },
+  { value: "next_90", label: "Next 90 days" },
+];
+
+const lastContactAgeOptions = [
+  { value: "never", label: "Never contacted" },
+  { value: "older_7", label: "More than 7 days ago" },
+  { value: "older_14", label: "More than 14 days ago" },
+  { value: "older_30", label: "More than 30 days ago" },
+  { value: "older_60", label: "More than 60 days ago" },
+  { value: "older_90", label: "More than 90 days ago" },
+  { value: "older_180", label: "More than 180 days ago" },
+  { value: "older_365", label: "More than 365 days ago" },
+];
+
+const nextContactWindowOptions = [
+  { value: "overdue", label: "Overdue" },
+  { value: "none", label: "No next contact set" },
+  { value: "next_7", label: "Next 7 days" },
+  { value: "next_14", label: "Next 14 days" },
+  { value: "next_30", label: "Next 30 days" },
+  { value: "next_60", label: "Next 60 days" },
+  { value: "next_90", label: "Next 90 days" },
+];
+
+const healthFilterOptions = [
+  { value: "green", label: "Green" },
+  { value: "yellow", label: "Yellow" },
+  { value: "red", label: "Red" },
+];
+
+const successFilterOptions = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+];
+
+const advocacyFilterOptions = [
+  { value: "not_asked", label: "Not asked" },
+  { value: "asked", label: "Asked" },
+  { value: "received", label: "Received" },
+];
+
+const advocacyFilterFields: Record<AdvocacyType, AdvocacyFilterField> = {
+  review: "reviewAdvocacyStatus",
+  testimonial: "testimonialAdvocacyStatus",
+  referral: "referralAdvocacyStatus",
+  renewal_upsell: "renewalUpsellAdvocacyStatus",
+};
+
+const advocacyStatusColumns: Record<AdvocacyType, string> = {
+  review: "advocacy_review_status",
+  testimonial: "advocacy_testimonial_status",
+  referral: "advocacy_referral_status",
+  renewal_upsell: "advocacy_renewal_upsell_status",
+};
+
+function startOfTodayIso() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+function endOfDayIso(daysFromToday: number) {
+  const date = new Date();
+  date.setHours(23, 59, 59, 999);
+  date.setDate(date.getDate() + daysFromToday);
+  return date.toISOString();
+}
+
+function startOfDayIso(daysFromToday: number) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + daysFromToday);
+  return date.toISOString();
+}
+
+function daysFromWindow(value: string) {
+  const match = value.match(/_(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
 
 function clientFiltersEqual(left: ClientFilters, right: ClientFilters) {
   return (
@@ -146,8 +289,19 @@ function clientFiltersEqual(left: ClientFilters, right: ClientFilters) {
     left.csmId === right.csmId &&
     left.secondaryAssigneeId === right.secondaryAssigneeId &&
     left.offerId === right.offerId &&
+    left.milestoneId === right.milestoneId &&
     left.clientName === right.clientName &&
     left.lastContact === right.lastContact &&
+    left.lastContactAge === right.lastContactAge &&
+    left.nextContactWindow === right.nextContactWindow &&
+    left.renewalWindow === right.renewalWindow &&
+    left.successStatus === right.successStatus &&
+    left.progressStatus === right.progressStatus &&
+    left.buyInStatus === right.buyInStatus &&
+    left.reviewAdvocacyStatus === right.reviewAdvocacyStatus &&
+    left.testimonialAdvocacyStatus === right.testimonialAdvocacyStatus &&
+    left.referralAdvocacyStatus === right.referralAdvocacyStatus &&
+    left.renewalUpsellAdvocacyStatus === right.renewalUpsellAdvocacyStatus &&
     left.programs.length === right.programs.length &&
     left.programs.every((program) => right.programs.includes(program))
   );
@@ -179,7 +333,9 @@ function readClientsCache(): ClientsCacheState | null {
       appliedFilters: { ...emptyFilters, ...(parsed.appliedFilters ?? {}) },
       page: Math.max(1, Number(parsed.page) || 1),
       viewMode:
-        parsed.viewMode === "card" || parsed.viewMode === "calendar"
+        parsed.viewMode === "card" ||
+        parsed.viewMode === "calendar" ||
+        parsed.viewMode === "notes"
           ? parsed.viewMode
           : "list",
       viewModeCompanyId:
@@ -197,7 +353,10 @@ function readClientsCache(): ClientsCacheState | null {
           : undefined,
       calendarModeUserOverride: parsed.calendarModeUserOverride === true,
       sortField:
-        parsed.sortField === "onboarded" || parsed.sortField === "renewal"
+        parsed.sortField === "onboarded" ||
+        parsed.sortField === "renewal" ||
+        parsed.sortField === "last_contact" ||
+        parsed.sortField === "next_contact"
           ? parsed.sortField
           : "client_name",
       sortDirection: parsed.sortDirection === "desc" ? "desc" : "asc",
@@ -218,6 +377,16 @@ function toViewMode(value: DefaultClientView): ViewMode {
 function toCalendarMode(value: DefaultCalendarMode): CalendarMode {
   return value;
 }
+
+function normalizeClientArchetype(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (text === "doer") return "Doer";
+  if (text === "controller") return "Controller";
+  if (text === "worrier") return "Worrier";
+  if (text === "follower") return "Follower";
+  return "";
+}
+
 function mapAppClientRow(row: Record<string, unknown>): ClientRow {
   const companyId =
     typeof row.company_glide_row_id === "string"
@@ -363,6 +532,8 @@ const renewalColumns = [
 function sortColumnFor(field: SortField) {
   if (field === "onboarded") return "client_age_date_onboarded";
   if (field === "renewal") return "current_contract_end_date_for_filtering";
+  if (field === "last_contact") return "csm_date_of_last_contact";
+  if (field === "next_contact") return "csm_date_of_next_contact";
   return "client_name";
 }
 
@@ -703,6 +874,64 @@ function formatDate(value: unknown) {
     ? formatValue(value)
     : date.toLocaleDateString();
 }
+
+function plainText(value: unknown) {
+  return String(value ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function noteSnippet(value: unknown, query: string) {
+  const text = plainText(value);
+  const trimmedQuery = query.trim().toLowerCase();
+  if (!text || !trimmedQuery) return text;
+  const index = text.toLowerCase().indexOf(trimmedQuery);
+  if (index < 0) return text.length > 260 ? `${text.slice(0, 260)}...` : text;
+  const start = Math.max(0, index - 100);
+  const end = Math.min(text.length, index + trimmedQuery.length + 180);
+  return `${start > 0 ? "... " : ""}${text.slice(start, end)}${end < text.length ? " ..." : ""}`;
+}
+
+function HighlightedSnippet({ text, query }: { text: string; query: string }) {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = trimmedQuery.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let index = lowerText.indexOf(lowerQuery);
+
+  while (index >= 0) {
+    if (index > cursor) {
+      parts.push(text.slice(cursor, index));
+    }
+    parts.push(
+      <mark
+        key={`${index}-${parts.length}`}
+        className="rounded bg-[#fff1a8] px-0.5 text-[#162b3e]"
+      >
+        {text.slice(index, index + trimmedQuery.length)}
+      </mark>,
+    );
+    cursor = index + trimmedQuery.length;
+    index = lowerText.indexOf(lowerQuery, cursor);
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+  return <>{parts}</>;
+}
 function monthInputValue(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -920,6 +1149,26 @@ function coerceChoiceValue(value: string, choices: OutcomeChoice[]) {
   );
   return match?.value ?? normalized;
 }
+
+function applyAdvocacyStatusFilters<TQuery>(
+  query: TQuery,
+  filters: ClientFilters,
+  useAppClients: boolean,
+): TQuery {
+  if (!useAppClients) return query;
+  let nextQuery = query as unknown as {
+    eq: (column: string, value: string) => unknown;
+  };
+  for (const definition of advocacyDefinitions) {
+    const value = filters[advocacyFilterFields[definition.type]];
+    if (!value) continue;
+    nextQuery = nextQuery.eq(advocacyStatusColumns[definition.type], value) as {
+      eq: (column: string, value: string) => unknown;
+    };
+  }
+  return nextQuery as unknown as TQuery;
+}
+
 function titleize(value: string) {
   return value
     .split(/[\s_-]+/)
@@ -1111,6 +1360,7 @@ function QuickUpdateModal({
     ClientCustomFieldValueRow[]
   >([]);
   const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>({});
+  const [advocacyDrafts, setAdvocacyDrafts] = useState(emptyAdvocacyDrafts);
   const [notes, setNotes] = useState("");
   const [currentOfferName, setCurrentOfferName] = useState("");
   const [currentMilestoneName, setCurrentMilestoneName] = useState("");
@@ -1445,6 +1695,7 @@ function QuickUpdateModal({
             id: field.id,
             value: customFieldDrafts[field.id] ?? "",
           })),
+          advocacyEvents: buildAdvocacyEventDrafts(advocacyDrafts),
           notes,
         },
       },
@@ -1470,6 +1721,7 @@ function QuickUpdateModal({
       onClientUpdated(mapAppClientRow(data.client as Record<string, unknown>));
     }
     setNotes("");
+    setAdvocacyDrafts(emptyAdvocacyDrafts());
     onClose();
   }
 
@@ -1837,6 +2089,14 @@ function QuickUpdateModal({
               ) : null}
             </div>
           </section>
+          <ClientAdvocacyPanel
+            client={client}
+            drafts={advocacyDrafts}
+            disabled={!isPilotCompany || saving}
+            onChange={(type: AdvocacyType, draft) =>
+              setAdvocacyDrafts((current) => ({ ...current, [type]: draft }))
+            }
+          />
           <div
             className={`rounded-md border px-4 py-3 text-sm ${
               isPilotCompany
@@ -1889,6 +2149,8 @@ function NewClientModal({
   programChoices,
   offers,
   assignedTeamMemberId,
+  secondaryAssigneeEnabled,
+  canEditDirectorNotes,
   onClose,
   onCreated,
 }: {
@@ -1897,6 +2159,8 @@ function NewClientModal({
   programChoices: ProgramChoice[];
   offers: Offer[];
   assignedTeamMemberId: string;
+  secondaryAssigneeEnabled: boolean;
+  canEditDirectorNotes: boolean;
   onClose: () => void;
   onCreated: (client: ClientRow) => void;
 }) {
@@ -1908,21 +2172,50 @@ function NewClientModal({
   const [clientName, setClientName] = useState("");
   const [clientBusiness, setClientBusiness] = useState("");
   const [clientEmail, setClientEmail] = useState("");
+  const [clientImage, setClientImage] = useState("");
+  const [clientImageUploading, setClientImageUploading] = useState(false);
   const [clientArchetype, setClientArchetype] = useState("");
   const [northStar, setNorthStar] = useState("");
+  const [nextSteps, setNextSteps] = useState("");
+  const [directorNotes, setDirectorNotes] = useState("");
   const [dateOnboarded, setDateOnboarded] = useState(today);
   const [programStatusValue, setProgramStatusValue] = useState(
     programChoices[0]?.program_value ?? "front-end",
   );
   const [csmTeamMemberId, setCsmTeamMemberId] = useState(assignedTeamMemberId);
+  const [secondaryAssigneeId, setSecondaryAssigneeId] = useState("");
   const [offerId, setOfferId] = useState("");
   const [offerMilestones, setOfferMilestones] = useState<OfferMilestone[]>([]);
   const [milestoneId, setMilestoneId] = useState("");
   const [createInitialContract, setCreateInitialContract] = useState(false);
   const [contractStartDate, setContractStartDate] = useState(today);
   const [contractEndDate, setContractEndDate] = useState("");
+  const [contractMonthlyValue, setContractMonthlyValue] = useState("");
+  const [contractReferenceLink, setContractReferenceLink] = useState("");
+  const [contractNotes, setContractNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleImageUpload(file: File | null) {
+    if (!file) return;
+    setClientImageUploading(true);
+    setSaveError(null);
+    try {
+      const publicUrl = await uploadClientImage({
+        file,
+        companyLegacyId,
+      });
+      setClientImage(publicUrl);
+    } catch (uploadError) {
+      setSaveError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Unable to upload client image.",
+      );
+    } finally {
+      setClientImageUploading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1978,15 +2271,24 @@ function NewClientModal({
           clientName,
           clientBusiness,
           clientEmail,
+          clientImage,
           clientArchetype,
           northStar,
+          nextSteps,
+          ...(canEditDirectorNotes ? { directorNotes } : {}),
           dateOnboarded,
           programStatusValue,
           csmTeamMemberId,
+          ...(secondaryAssigneeEnabled && !assignedTeamMemberId
+            ? { secondaryAssigneeId }
+            : {}),
           offerId,
           milestoneId,
           contractStartDate: createInitialContract ? contractStartDate : "",
           contractEndDate: createInitialContract ? contractEndDate : "",
+          contractMonthlyValue: createInitialContract ? contractMonthlyValue : "",
+          contractReferenceLink: createInitialContract ? contractReferenceLink : "",
+          contractNotes: createInitialContract ? contractNotes : "",
         },
       },
     );
@@ -2072,6 +2374,49 @@ function NewClientModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
               />
             </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Profile Image
+              </span>
+              <div className="grid gap-3 md:grid-cols-[auto_1fr]">
+                <div className="grid h-16 w-16 place-items-center overflow-hidden rounded-full border border-gray-200 bg-gray-50 text-xs font-semibold text-gray-500">
+                  {clientImage ? (
+                    <img
+                      src={clientImage}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    "Image"
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      void handleImageUpload(file);
+                      event.target.value = "";
+                    }}
+                    disabled={saving || clientImageUploading}
+                    className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-[#eaf4fe] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#2b79c4] disabled:opacity-50"
+                  />
+                  <input
+                    type="url"
+                    value={clientImage}
+                    onChange={(event) => setClientImage(event.target.value)}
+                    disabled={saving || clientImageUploading}
+                    placeholder={
+                      clientImageUploading
+                        ? "Uploading..."
+                        : "Or paste an image URL"
+                    }
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+                  />
+                </div>
+              </div>
+            </label>
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Status
@@ -2126,16 +2471,43 @@ function NewClientModal({
                 ))}
               </select>
             </label>
+            {secondaryAssigneeEnabled && !assignedTeamMemberId ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Secondary Assignee
+                </span>
+                <select
+                  value={secondaryAssigneeId}
+                  onChange={(event) => setSecondaryAssigneeId(event.target.value)}
+                  disabled={saving}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
+                >
+                  <option value="">No secondary assignee</option>
+                  {availableAssignees.map((member) => (
+                    <option key={member.glide_row_id} value={member.glide_row_id}>
+                      {member.name ?? "(unnamed)"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Archetype
               </span>
-              <input
+              <select
                 value={clientArchetype}
                 onChange={(event) => setClientArchetype(event.target.value)}
                 disabled={saving}
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
-              />
+              >
+                <option value="">No archetype</option>
+                {clientArchetypeOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block md:col-span-2">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -2149,6 +2521,32 @@ function NewClientModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
               />
             </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Next Steps
+              </span>
+              <textarea
+                value={nextSteps}
+                onChange={(event) => setNextSteps(event.target.value)}
+                rows={3}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            {canEditDirectorNotes ? (
+              <label className="block md:col-span-2">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Director Notes
+                </span>
+                <textarea
+                  value={directorNotes}
+                  onChange={(event) => setDirectorNotes(event.target.value)}
+                  rows={3}
+                  disabled={saving}
+                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                />
+              </label>
+            ) : null}
             <div className="md:col-span-2 border-t border-[#e4e9f0] pt-5">
               <h3 className="retainos-section-title">
                 Initial journey and contract
@@ -2231,6 +2629,45 @@ function NewClientModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
               />
             </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Monthly Value
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={contractMonthlyValue}
+                onChange={(event) => setContractMonthlyValue(event.target.value)}
+                disabled={saving || !createInitialContract}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Contract Link
+              </span>
+              <input
+                type="url"
+                value={contractReferenceLink}
+                onChange={(event) => setContractReferenceLink(event.target.value)}
+                disabled={saving || !createInitialContract}
+                placeholder="https://..."
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Contract Notes
+              </span>
+              <textarea
+                value={contractNotes}
+                onChange={(event) => setContractNotes(event.target.value)}
+                rows={3}
+                disabled={saving || !createInitialContract}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
             {saveError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">
                 {saveError}
@@ -2291,6 +2728,49 @@ function FilterInput({
     </div>
   );
 }
+
+function FilterSection({
+  title,
+  activeCount,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  activeCount: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="border-t border-[#edf1f5] pt-4 sm:col-span-2 lg:col-span-4">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1 text-left transition-colors hover:bg-[#f7f9fc] cursor-pointer"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wider text-[#586273]">
+          {title}
+        </span>
+        <span className="flex items-center gap-2 text-xs font-semibold text-[#586273]">
+          {activeCount > 0 ? (
+            <span className="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[#2b79c4]">
+              {activeCount} active
+            </span>
+          ) : null}
+          <span className="text-[#98a2b3]">{open ? "Hide" : "Show"}</span>
+        </span>
+      </button>
+      {open ? (
+        <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {children}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function EmptyState({
   text,
   tone = "gray",
@@ -2481,10 +2961,16 @@ export function Clients() {
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [offersLoading, setOffersLoading] = useState(false);
+  const [filterMilestones, setFilterMilestones] = useState<OfferMilestone[]>([]);
+  const [filterMilestonesLoading, setFilterMilestonesLoading] = useState(false);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
+  const [appClientCompanyIdsLoaded, setAppClientCompanyIdsLoaded] = useState(false);
   const [appClientCompanyIds, setAppClientCompanyIds] = useState<Set<string>>(
     () => new Set(),
+  );
+  const [rosterRefreshToken, setRosterRefreshToken] = useState(() =>
+    window.localStorage.getItem(CLIENTS_ROSTER_REFRESH_KEY) ?? "",
   );
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [calendarClients, setCalendarClients] = useState<ClientRow[]>([]);
@@ -2497,6 +2983,13 @@ export function Clients() {
   const [calendarDate, setCalendarDate] = useState(() => new Date());
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [noteSearch, setNoteSearch] = useState("");
+  const [appliedNoteSearch, setAppliedNoteSearch] = useState("");
+  const [noteResults, setNoteResults] = useState<NoteSearchResult[]>([]);
+  const [noteResultsLoading, setNoteResultsLoading] = useState(false);
+  const [noteResultsError, setNoteResultsError] = useState<string | null>(null);
+  const [noteResultsTotal, setNoteResultsTotal] = useState(0);
+  const [noteResultsPage, setNoteResultsPage] = useState(1);
   const [pilotReminders, setPilotReminders] = useState<PilotReminder[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
@@ -2520,6 +3013,11 @@ export function Clients() {
     null,
   );
   const [newClientOpen, setNewClientOpen] = useState(false);
+  const [expandedFilterSections, setExpandedFilterSections] = useState({
+    journey: true,
+    health: false,
+    advocacy: false,
+  });
   const selectedCompany = useMemo(
     () =>
       companies.find((company) => company.glide_row_id === filters.companyId) ??
@@ -2528,6 +3026,24 @@ export function Clients() {
   );
   const showSecondaryAssigneeFilter =
     selectedCompany?.enable_secondary_assignee === true;
+  const showAdvocacyFilters = appClientCompanyIds.has(filters.companyId);
+  const journeyFilterCount = [filters.milestoneId, filters.renewalWindow].filter(
+    Boolean,
+  ).length;
+  const healthFilterCount = [
+    filters.successStatus,
+    filters.progressStatus,
+    filters.buyInStatus,
+  ].filter(Boolean).length;
+  const advocacyFilterCount = [
+    filters.reviewAdvocacyStatus,
+    filters.testimonialAdvocacyStatus,
+    filters.referralAdvocacyStatus,
+    filters.renewalUpsellAdvocacyStatus,
+  ].filter(Boolean).length;
+  const journeyFiltersOpen = expandedFilterSections.journey;
+  const healthFiltersOpen = expandedFilterSections.health;
+  const advocacyFiltersOpen = expandedFilterSections.advocacy;
   const availableTeamMembers = useMemo(
     () =>
       teamMembers.filter(
@@ -2547,9 +3063,33 @@ export function Clients() {
       ),
     [teamMembers],
   );
+  const offerNameById = useMemo(
+    () =>
+      new Map(
+        offers.map((offer) => [offer.glide_row_id, offer.name ?? "Unnamed offer"]),
+      ),
+    [offers],
+  );
+  const visibleFilterMilestones = useMemo(
+    () =>
+      filterMilestones.filter(
+        (milestone) => !filters.offerId || milestone.offer_id === filters.offerId,
+      ),
+    [filterMilestones, filters.offerId],
+  );
   const totalPages = Math.max(1, Math.ceil(totalClients / PAGE_SIZE));
   const pageStart = totalClients === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const pageEnd = Math.min(page * PAGE_SIZE, totalClients);
+  const noteResultsTotalPages = Math.max(
+    1,
+    Math.ceil(noteResultsTotal / NOTE_SEARCH_PAGE_SIZE),
+  );
+  const noteResultsPageStart =
+    noteResultsTotal === 0 ? 0 : (noteResultsPage - 1) * NOTE_SEARCH_PAGE_SIZE + 1;
+  const noteResultsPageEnd = Math.min(
+    noteResultsPage * NOTE_SEARCH_PAGE_SIZE,
+    noteResultsTotal,
+  );
   const assignedTeamMemberId = capabilities.canViewOnlyAssignedClients
     ? teamMemberId
     : "";
@@ -2636,6 +3176,7 @@ export function Clients() {
       csmId: assignedTeamMemberId,
       secondaryAssigneeId: "",
       offerId: "",
+      milestoneId: "",
     }));
     setAppliedFilters((prev) => ({
       ...prev,
@@ -2643,25 +3184,80 @@ export function Clients() {
       csmId: assignedTeamMemberId,
       secondaryAssigneeId: "",
       offerId: "",
+      milestoneId: "",
     }));
     setPage(1);
     setSearchParams({ companyId: effectiveCompanyId }, { replace: true });
   }, [assignedTeamMemberId, effectiveCompanyId, searchParams, setSearchParams]);
   useEffect(() => {
+    function syncRosterRefreshToken() {
+      const nextToken =
+        window.localStorage.getItem(CLIENTS_ROSTER_REFRESH_KEY) ?? "";
+      setRosterRefreshToken((current) =>
+        current === nextToken ? current : nextToken,
+      );
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        syncRosterRefreshToken();
+      }
+    }
+
+    window.addEventListener("focus", syncRosterRefreshToken);
+    window.addEventListener("storage", syncRosterRefreshToken);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", syncRosterRefreshToken);
+      window.removeEventListener("storage", syncRosterRefreshToken);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
     async function loadCompanies() {
+      setAppClientCompanyIdsLoaded(false);
       const [backupCompaniesResult, appCompaniesResult] = await Promise.all([
         supabase
-        .from("backup_companies")
-        .select("glide_row_id, name, enable_secondary_assignee")
-        .or("archived.is.null,archived.eq.false")
+          .from("backup_companies")
+          .select("glide_row_id, name, enable_secondary_assignee")
+          .or("archived.is.null,archived.eq.false")
           .order("name", { ascending: true }),
         supabase
           .from("companies")
-          .select("legacy_glide_row_id, migration_status")
+          .select(
+            "legacy_glide_row_id, migration_status, enable_secondary_assignee, enable_archetypes",
+          )
           .in("migration_status", ["pilot", "migrated"]),
       ]);
 
-      let rows = (backupCompaniesResult.data ?? []) as Company[];
+      const appCompanySettingsByLegacyId = new Map(
+        (appCompaniesResult.data ?? [])
+          .filter(
+            (company) =>
+              typeof company.legacy_glide_row_id === "string" &&
+              company.legacy_glide_row_id !== "",
+          )
+          .map((company) => [
+            company.legacy_glide_row_id as string,
+            {
+              enable_secondary_assignee:
+                company.enable_secondary_assignee === true,
+              enable_archetypes: company.enable_archetypes === true,
+            },
+          ]),
+      );
+      let rows = ((backupCompaniesResult.data ?? []) as Company[]).map((company) => {
+        const appSettings =
+          appCompanySettingsByLegacyId.get(company.glide_row_id);
+        return appSettings === undefined
+          ? company
+          : {
+              ...company,
+              enable_secondary_assignee: appSettings.enable_secondary_assignee,
+              enable_archetypes: appSettings.enable_archetypes,
+            };
+      });
       if (!canUseCompanySwitcher && effectiveCompanyId) {
         rows = rows.filter((company) => company.glide_row_id === effectiveCompanyId);
       }
@@ -2677,6 +3273,7 @@ export function Clients() {
             .filter((id): id is string => typeof id === "string" && id !== ""),
         ),
       );
+      setAppClientCompanyIdsLoaded(true);
     }
     void loadCompanies();
   }, [canUseCompanySwitcher, effectiveCompanyId]);
@@ -2758,7 +3355,7 @@ export function Clients() {
         filters.offerId &&
         !rows.some((offer) => offer.glide_row_id === filters.offerId)
       ) {
-        setFilters((prev) => ({ ...prev, offerId: "" }));
+        setFilters((prev) => ({ ...prev, offerId: "", milestoneId: "" }));
       }
       setOffersLoading(false);
     }
@@ -2767,6 +3364,51 @@ export function Clients() {
       cancelled = true;
     };
   }, [appClientCompanyIds, filters.companyId, filters.offerId]);
+
+  useEffect(() => {
+    if (!filters.companyId) {
+      setFilterMilestones([]);
+      setFilterMilestonesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    async function loadFilterMilestones() {
+      setFilterMilestonesLoading(true);
+      const usesAppMilestones = appClientCompanyIds.has(filters.companyId);
+      const offerIds = offers
+        .map((offer) => offer.glide_row_id)
+        .filter((id): id is string => typeof id === "string" && id.trim() !== "");
+      const { data, error } = usesAppMilestones
+        ? await supabase
+            .from("company_offer_milestones")
+            .select("glide_row_id, offer_id, name, position")
+            .eq("company_glide_row_id", filters.companyId)
+            .eq("status", "active")
+            .order("position", { ascending: true, nullsFirst: false })
+        : offerIds.length > 0
+          ? await supabase
+              .from("backup_company_offer_milestones")
+              .select("glide_row_id, offer_id, name, order")
+              .in("offer_id", offerIds)
+              .order("order", { ascending: true, nullsFirst: false })
+          : { data: [], error: null };
+      if (cancelled) return;
+      if (error) console.error("Failed to load filter milestones:", error);
+      const rows = (data ?? []) as OfferMilestone[];
+      setFilterMilestones(rows);
+      if (
+        filters.milestoneId &&
+        !rows.some((milestone) => milestone.glide_row_id === filters.milestoneId)
+      ) {
+        setFilters((prev) => ({ ...prev, milestoneId: "" }));
+      }
+      setFilterMilestonesLoading(false);
+    }
+    void loadFilterMilestones();
+    return () => {
+      cancelled = true;
+    };
+  }, [appClientCompanyIds, filters.companyId, filters.milestoneId, offers]);
   useEffect(() => {
     if (!filters.companyId || programChoices.length > 0) return;
     let cancelled = false;
@@ -2794,6 +3436,10 @@ export function Clients() {
       setClientsLoading(false);
       return;
     }
+    if (!appClientCompanyIdsLoaded) {
+      setClientsLoading(true);
+      return;
+    }
     setClientsLoading(true);
     setClientsError(null);
     const from = (page - 1) * PAGE_SIZE;
@@ -2817,7 +3463,10 @@ export function Clients() {
         `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
       );
     } else if (appliedFilters.csmId) {
-      query = query.eq("csm_team_member_id", appliedFilters.csmId);
+      query =
+        appliedFilters.csmId === UNASSIGNED_CSM_FILTER
+          ? query.is("csm_team_member_id", null)
+          : query.eq("csm_team_member_id", appliedFilters.csmId);
     }
     if (appliedFilters.secondaryAssigneeId)
       query = query.eq(
@@ -2826,19 +3475,56 @@ export function Clients() {
       );
     if (appliedFilters.offerId)
       query = query.eq("offer_milestones_current_offer_id", appliedFilters.offerId);
+    if (appliedFilters.milestoneId)
+      query = query.eq(
+        "offer_milestones_current_milestone_id",
+        appliedFilters.milestoneId,
+      );
     if (appliedFilters.programs.length > 0)
       query = query.in("program_status_value", appliedFilters.programs);
-    if (appliedFilters.lastContact) {
-      const dayStart = new Date(
-        `${appliedFilters.lastContact}T00:00:00.000Z`,
-      ).toISOString();
-      const dayEnd = new Date(
-        `${appliedFilters.lastContact}T23:59:59.999Z`,
-      ).toISOString();
-      query = query
-        .gte("csm_date_of_last_contact", dayStart)
-        .lte("csm_date_of_last_contact", dayEnd);
+    if (appliedFilters.renewalWindow === "overdue") {
+      query = query.lt("current_contract_end_date_for_filtering", startOfTodayIso());
+    } else if (appliedFilters.renewalWindow) {
+      const days = daysFromWindow(appliedFilters.renewalWindow);
+      if (days !== null) {
+        query = query
+          .gte("current_contract_end_date_for_filtering", startOfTodayIso())
+          .lte("current_contract_end_date_for_filtering", endOfDayIso(days));
+      }
     }
+    if (appliedFilters.lastContactAge === "never") {
+      query = query.is("csm_date_of_last_contact", null);
+    } else if (appliedFilters.lastContactAge) {
+      const days = daysFromWindow(appliedFilters.lastContactAge);
+      if (days !== null) {
+        query = query.lt("csm_date_of_last_contact", startOfDayIso(-days));
+      }
+    }
+    if (appliedFilters.nextContactWindow === "overdue") {
+      query = query.lt("csm_date_of_next_contact", startOfTodayIso());
+    } else if (appliedFilters.nextContactWindow === "none") {
+      query = query.is("csm_date_of_next_contact", null);
+    } else if (appliedFilters.nextContactWindow) {
+      const days = daysFromWindow(appliedFilters.nextContactWindow);
+      if (days !== null) {
+        query = query
+          .gte("csm_date_of_next_contact", startOfTodayIso())
+          .lte("csm_date_of_next_contact", endOfDayIso(days));
+      }
+    }
+    if (appliedFilters.successStatus) {
+      query = query.eq(
+        "outcomes_success_value_for_filtering",
+        appliedFilters.successStatus,
+      );
+    }
+    if (appliedFilters.progressStatus) {
+      query = query.eq("outcomes_progress_for_filtering", appliedFilters.progressStatus);
+    }
+    if (appliedFilters.buyInStatus) {
+      query = query.eq("outcomes_buy_in_for_filtering", appliedFilters.buyInStatus);
+    }
+    query = applyAdvocacyStatusFilters(query, appliedFilters, useAppClients);
     query = query
       .order(sortColumnFor(sortField), {
         ascending: sortDirection === "asc",
@@ -2861,9 +3547,11 @@ export function Clients() {
     setClientsLoading(false);
   }, [
     appClientCompanyIds,
+    appClientCompanyIdsLoaded,
     appliedFilters,
     assignedTeamMemberId,
     page,
+    rosterRefreshToken,
     sortDirection,
     sortField,
   ]);
@@ -2875,6 +3563,10 @@ export function Clients() {
       setCalendarClients([]);
       setCalendarTasks([]);
       setCalendarLoading(false);
+      return;
+    }
+    if (!appClientCompanyIdsLoaded) {
+      setCalendarLoading(true);
       return;
     }
 
@@ -2904,7 +3596,10 @@ export function Clients() {
         `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
       );
     } else if (appliedFilters.csmId) {
-      query = query.eq("csm_team_member_id", appliedFilters.csmId);
+      query =
+        appliedFilters.csmId === UNASSIGNED_CSM_FILTER
+          ? query.is("csm_team_member_id", null)
+          : query.eq("csm_team_member_id", appliedFilters.csmId);
     }
     if (appliedFilters.secondaryAssigneeId) {
       query = query.eq(
@@ -2915,20 +3610,58 @@ export function Clients() {
     if (appliedFilters.offerId) {
       query = query.eq("offer_milestones_current_offer_id", appliedFilters.offerId);
     }
+    if (appliedFilters.milestoneId) {
+      query = query.eq(
+        "offer_milestones_current_milestone_id",
+        appliedFilters.milestoneId,
+      );
+    }
     if (appliedFilters.programs.length > 0) {
       query = query.in("program_status_value", appliedFilters.programs);
     }
-    if (appliedFilters.lastContact) {
-      const dayStart = new Date(
-        `${appliedFilters.lastContact}T00:00:00.000Z`,
-      ).toISOString();
-      const dayEnd = new Date(
-        `${appliedFilters.lastContact}T23:59:59.999Z`,
-      ).toISOString();
-      query = query
-        .gte("csm_date_of_last_contact", dayStart)
-        .lte("csm_date_of_last_contact", dayEnd);
+    if (appliedFilters.renewalWindow === "overdue") {
+      query = query.lt("current_contract_end_date_for_filtering", startOfTodayIso());
+    } else if (appliedFilters.renewalWindow) {
+      const days = daysFromWindow(appliedFilters.renewalWindow);
+      if (days !== null) {
+        query = query
+          .gte("current_contract_end_date_for_filtering", startOfTodayIso())
+          .lte("current_contract_end_date_for_filtering", endOfDayIso(days));
+      }
     }
+    if (appliedFilters.lastContactAge === "never") {
+      query = query.is("csm_date_of_last_contact", null);
+    } else if (appliedFilters.lastContactAge) {
+      const days = daysFromWindow(appliedFilters.lastContactAge);
+      if (days !== null) {
+        query = query.lt("csm_date_of_last_contact", startOfDayIso(-days));
+      }
+    }
+    if (appliedFilters.nextContactWindow === "overdue") {
+      query = query.lt("csm_date_of_next_contact", startOfTodayIso());
+    } else if (appliedFilters.nextContactWindow === "none") {
+      query = query.is("csm_date_of_next_contact", null);
+    } else if (appliedFilters.nextContactWindow) {
+      const days = daysFromWindow(appliedFilters.nextContactWindow);
+      if (days !== null) {
+        query = query
+          .gte("csm_date_of_next_contact", startOfTodayIso())
+          .lte("csm_date_of_next_contact", endOfDayIso(days));
+      }
+    }
+    if (appliedFilters.successStatus) {
+      query = query.eq(
+        "outcomes_success_value_for_filtering",
+        appliedFilters.successStatus,
+      );
+    }
+    if (appliedFilters.progressStatus) {
+      query = query.eq("outcomes_progress_for_filtering", appliedFilters.progressStatus);
+    }
+    if (appliedFilters.buyInStatus) {
+      query = query.eq("outcomes_buy_in_for_filtering", appliedFilters.buyInStatus);
+    }
+    query = applyAdvocacyStatusFilters(query, appliedFilters, useAppClients);
 
     const appTasksQuery = useAppClients
       ? supabase
@@ -2991,15 +3724,89 @@ export function Clients() {
     setCalendarLoading(false);
   }, [
     appClientCompanyIds,
+    appClientCompanyIdsLoaded,
     appliedFilters,
     assignedTeamMemberId,
     calendarDate,
     calendarMode,
+    rosterRefreshToken,
     viewMode,
   ]);
   useEffect(() => {
     void loadCalendarClients();
   }, [loadCalendarClients]);
+  const loadNoteResults = useCallback(async () => {
+    if (viewMode !== "notes") {
+      setNoteResultsLoading(false);
+      return;
+    }
+    if (!appliedFilters.companyId) {
+      setNoteResults([]);
+      setNoteResultsTotal(0);
+      setNoteResultsLoading(false);
+      return;
+    }
+
+    const searchTerm = appliedNoteSearch.trim();
+    if (searchTerm.length < 2) {
+      setNoteResults([]);
+      setNoteResultsTotal(0);
+      setNoteResultsError(null);
+      setNoteResultsLoading(false);
+      return;
+    }
+
+    setNoteResultsLoading(true);
+    setNoteResultsError(null);
+
+    const { data, error } = await supabase.rpc("search_client_notes", {
+      p_company_id: appliedFilters.companyId,
+      p_search: searchTerm,
+      p_client_name: appliedFilters.clientName || null,
+      p_csm_id: assignedTeamMemberId ? null : appliedFilters.csmId || null,
+      p_assigned_team_member_id: assignedTeamMemberId || null,
+      p_secondary_assignee_id: appliedFilters.secondaryAssigneeId || null,
+      p_program_values:
+        appliedFilters.programs.length > 0 ? appliedFilters.programs : null,
+      p_offer_id: appliedFilters.offerId || null,
+      p_milestone_id: appliedFilters.milestoneId || null,
+      p_renewal_window: appliedFilters.renewalWindow || null,
+      p_last_contact_age: appliedFilters.lastContactAge || null,
+      p_next_contact_window: appliedFilters.nextContactWindow || null,
+      p_success_status: appliedFilters.successStatus || null,
+      p_progress_status: appliedFilters.progressStatus || null,
+      p_buy_in_status: appliedFilters.buyInStatus || null,
+      p_review_advocacy_status: appliedFilters.reviewAdvocacyStatus || null,
+      p_testimonial_advocacy_status:
+        appliedFilters.testimonialAdvocacyStatus || null,
+      p_referral_advocacy_status: appliedFilters.referralAdvocacyStatus || null,
+      p_renewal_upsell_advocacy_status:
+        appliedFilters.renewalUpsellAdvocacyStatus || null,
+      p_limit: NOTE_SEARCH_PAGE_SIZE,
+      p_offset: (noteResultsPage - 1) * NOTE_SEARCH_PAGE_SIZE,
+    });
+
+    if (error) {
+      console.error("Failed to search client notes:", error);
+      setNoteResults([]);
+      setNoteResultsTotal(0);
+      setNoteResultsError(error.message);
+    } else {
+      const rows = (data ?? []) as NoteSearchResult[];
+      setNoteResults(rows);
+      setNoteResultsTotal(Number(rows[0]?.total_count ?? 0));
+    }
+    setNoteResultsLoading(false);
+  }, [
+    appliedFilters,
+    appliedNoteSearch,
+    assignedTeamMemberId,
+    noteResultsPage,
+    viewMode,
+  ]);
+  useEffect(() => {
+    void loadNoteResults();
+  }, [loadNoteResults]);
   useEffect(() => {
     let cancelled = false;
     async function loadPilotReminders() {
@@ -3173,6 +3980,16 @@ export function Clients() {
       secondaryAssigneeId: showSecondaryAssigneeFilter
         ? filters.secondaryAssigneeId
         : "",
+      reviewAdvocacyStatus: showAdvocacyFilters ? filters.reviewAdvocacyStatus : "",
+      testimonialAdvocacyStatus: showAdvocacyFilters
+        ? filters.testimonialAdvocacyStatus
+        : "",
+      referralAdvocacyStatus: showAdvocacyFilters
+        ? filters.referralAdvocacyStatus
+        : "",
+      renewalUpsellAdvocacyStatus: showAdvocacyFilters
+        ? filters.renewalUpsellAdvocacyStatus
+        : "",
     };
     return !clientFiltersEqual(nextAppliedFilters, appliedFilters);
   }, [
@@ -3180,6 +3997,7 @@ export function Clients() {
     assignedTeamMemberId,
     effectiveCompanyId,
     filters,
+    showAdvocacyFilters,
     showSecondaryAssigneeFilter,
   ]);
   function applyFilters() {
@@ -3191,9 +4009,20 @@ export function Clients() {
       secondaryAssigneeId: showSecondaryAssigneeFilter
         ? filters.secondaryAssigneeId
         : "",
+      reviewAdvocacyStatus: showAdvocacyFilters ? filters.reviewAdvocacyStatus : "",
+      testimonialAdvocacyStatus: showAdvocacyFilters
+        ? filters.testimonialAdvocacyStatus
+        : "",
+      referralAdvocacyStatus: showAdvocacyFilters
+        ? filters.referralAdvocacyStatus
+        : "",
+      renewalUpsellAdvocacyStatus: showAdvocacyFilters
+        ? filters.renewalUpsellAdvocacyStatus
+        : "",
     };
     setAppliedFilters(next);
     setPage(1);
+    setNoteResultsPage(1);
     setSearchParams(next.companyId ? { companyId: next.companyId } : {}, {
       replace: true,
     });
@@ -3211,6 +4040,9 @@ export function Clients() {
     setClients([]);
     setTotalClients(0);
     setPage(1);
+    setNoteResults([]);
+    setNoteResultsTotal(0);
+    setNoteResultsPage(1);
     setSortField("client_name");
     setSortDirection("asc");
     viewModeTouchedRef.current = false;
@@ -3251,6 +4083,14 @@ export function Clients() {
     last: valueFrom(client, lastContactColumns),
     next: valueFrom(client, nextContactColumns),
     buyIn: valueFrom(client, buyInColumns),
+    archetype: normalizeClientArchetype(
+      valueFrom(client, [
+        "client_archetype_value",
+        "client_archetype",
+        "archetype_value",
+        "archetype",
+      ]),
+    ),
     pathway: valueFrom(client, pathwayColumns),
     progress: valueFrom(client, progressColumns),
     onboarded: valueFrom(client, onboardedColumns),
@@ -3386,6 +4226,7 @@ export function Clients() {
                     <option value="">
                       {teamMembersLoading ? "Loading team..." : "All CSMs"}
                     </option>
+                    <option value={UNASSIGNED_CSM_FILTER}>Unassigned</option>
                     {availableTeamMembers.map((member) => (
                       <option
                         key={member.glide_row_id}
@@ -3408,7 +4249,11 @@ export function Clients() {
                   id="clients-offer-filter"
                   value={filters.offerId}
                   onChange={(e) =>
-                    setFilters((prev) => ({ ...prev, offerId: e.target.value }))
+                    setFilters((prev) => ({
+                      ...prev,
+                      offerId: e.target.value,
+                      milestoneId: "",
+                    }))
                   }
                   disabled={offersLoading}
                   className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb] disabled:bg-[#f7f9fc] disabled:text-[#98a2b3]"
@@ -3462,19 +4307,267 @@ export function Clients() {
                 >
                   Last Contact
                 </label>
-                <input
+                <select
                   id="clients-last-contact-filter"
-                  type="date"
-                  value={filters.lastContact}
+                  value={filters.lastContactAge}
                   onChange={(event) =>
                     setFilters((prev) => ({
                       ...prev,
-                      lastContact: event.target.value,
+                      lastContactAge: event.target.value,
                     }))
                   }
                   className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
-                />
+                >
+                  <option value="">Any last contact</option>
+                  {lastContactAgeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
+              <div>
+                <label
+                  htmlFor="clients-next-contact-filter"
+                  className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                >
+                  Next Contact
+                </label>
+                <select
+                  id="clients-next-contact-filter"
+                  value={filters.nextContactWindow}
+                  onChange={(event) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      nextContactWindow: event.target.value,
+                    }))
+                  }
+                  className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+                >
+                  <option value="">Any next contact</option>
+                  {nextContactWindowOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <FilterSection
+                title="Journey & Contract"
+                activeCount={journeyFilterCount}
+                open={journeyFiltersOpen}
+                onToggle={() =>
+                  setExpandedFilterSections((current) => ({
+                    ...current,
+                    journey: !journeyFiltersOpen,
+                  }))
+                }
+              >
+                <div>
+                  <label
+                    htmlFor="clients-milestone-filter"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                  >
+                    Milestone
+                  </label>
+                  <select
+                    id="clients-milestone-filter"
+                    value={filters.milestoneId}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        milestoneId: e.target.value,
+                      }))
+                    }
+                    disabled={
+                      filterMilestonesLoading ||
+                      visibleFilterMilestones.length === 0
+                    }
+                    className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb] disabled:bg-[#f7f9fc] disabled:text-[#98a2b3]"
+                  >
+                    <option value="">
+                      {filterMilestonesLoading
+                        ? "Loading milestones..."
+                        : "All milestones"}
+                    </option>
+                    {visibleFilterMilestones.map((milestone) => {
+                      const offerName = offerNameById.get(milestone.offer_id ?? "");
+                      return (
+                        <option
+                          key={milestone.glide_row_id}
+                          value={milestone.glide_row_id}
+                        >
+                          {filters.offerId || !offerName
+                            ? (milestone.name ?? "(unnamed)")
+                            : `${offerName} / ${milestone.name ?? "(unnamed)"}`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="clients-renewal-window-filter"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                  >
+                    Renewals
+                  </label>
+                  <select
+                    id="clients-renewal-window-filter"
+                    value={filters.renewalWindow}
+                    onChange={(event) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        renewalWindow: event.target.value,
+                      }))
+                    }
+                    className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+                  >
+                    <option value="">All renewal dates</option>
+                    {renewalWindowOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </FilterSection>
+              <FilterSection
+                title="Health & Outcomes"
+                activeCount={healthFilterCount}
+                open={healthFiltersOpen}
+                onToggle={() =>
+                  setExpandedFilterSections((current) => ({
+                    ...current,
+                    health: !healthFiltersOpen,
+                  }))
+                }
+                >
+                <div>
+                  <label
+                    htmlFor="clients-success-filter"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                  >
+                    Success
+                  </label>
+                  <select
+                    id="clients-success-filter"
+                    value={filters.successStatus}
+                    onChange={(event) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        successStatus: event.target.value,
+                      }))
+                    }
+                    className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+                  >
+                    <option value="">Any success</option>
+                    {successFilterOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="clients-progress-filter"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                  >
+                    Progress
+                  </label>
+                  <select
+                    id="clients-progress-filter"
+                    value={filters.progressStatus}
+                    onChange={(event) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        progressStatus: event.target.value,
+                      }))
+                    }
+                    className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+                  >
+                    <option value="">Any progress</option>
+                    {healthFilterOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label
+                    htmlFor="clients-buy-in-filter"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                  >
+                    Buy-In
+                  </label>
+                  <select
+                    id="clients-buy-in-filter"
+                    value={filters.buyInStatus}
+                    onChange={(event) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        buyInStatus: event.target.value,
+                      }))
+                    }
+                    className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+                  >
+                    <option value="">Any buy-in</option>
+                    {healthFilterOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </FilterSection>
+              {showAdvocacyFilters ? (
+                <FilterSection
+                  title="Advocacy & Growth"
+                  activeCount={advocacyFilterCount}
+                  open={advocacyFiltersOpen}
+                  onToggle={() =>
+                    setExpandedFilterSections((current) => ({
+                      ...current,
+                      advocacy: !advocacyFiltersOpen,
+                    }))
+                  }
+                >
+                  {advocacyDefinitions.map((definition) => {
+                    const field = advocacyFilterFields[definition.type];
+                    const selectId = `clients-${definition.type.replace("_", "-")}-advocacy-filter`;
+                    return (
+                      <div key={definition.type}>
+                        <label
+                          htmlFor={selectId}
+                          className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                        >
+                          {definition.shortLabel}
+                        </label>
+                        <select
+                          id={selectId}
+                          value={filters[field] as string}
+                          onChange={(event) =>
+                            setFilters((prev) => ({
+                              ...prev,
+                              [field]: event.target.value,
+                            }))
+                          }
+                          className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+                        >
+                          <option value="">Any {definition.shortLabel.toLowerCase()}</option>
+                          {advocacyFilterOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </FilterSection>
+              ) : null}
             </>
           )}
         </div>
@@ -3510,10 +4603,16 @@ export function Clients() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-[#162b3e]">
-                Client List
+                {viewMode === "notes" ? "Client Notes" : "Client List"}
               </h2>
               <p className="mt-1 text-sm text-[#586273]">
-                {clientsLoading
+                {viewMode === "notes"
+                  ? appliedNoteSearch.trim().length >= 2
+                    ? noteResultsLoading
+                      ? "Searching notes..."
+                      : `${noteResultsTotal.toLocaleString()} note result${noteResultsTotal === 1 ? "" : "s"}`
+                    : "Search notes, next steps, and history across filtered clients"
+                  : clientsLoading
                   ? "Loading clients..."
                   : `${totalClients.toLocaleString()} client${totalClients === 1 ? "" : "s"}`}
               </p>
@@ -3552,8 +4651,20 @@ export function Clients() {
               >
                 Calendar
               </ViewButton>
+              <ViewButton
+                active={viewMode === "notes"}
+                onClick={() => {
+                  viewModeTouchedRef.current = true;
+                  defaultAppliedCompanyRef.current =
+                    appliedFilters.companyId || filters.companyId || "";
+                  setViewMode("notes");
+                  setNoteResultsPage(1);
+                }}
+              >
+                Notes
+              </ViewButton>
             </div>
-            {viewMode !== "calendar" ? (
+            {viewMode === "list" || viewMode === "card" ? (
               <div className="flex flex-wrap items-center gap-2">
                 <label
                   htmlFor="clients-sort-field"
@@ -3573,6 +4684,8 @@ export function Clients() {
                   <option value="client_name">Client name</option>
                   <option value="onboarded">Onboarded date</option>
                   <option value="renewal">Renewal date</option>
+                  <option value="last_contact">Last contact</option>
+                  <option value="next_contact">Next contact</option>
                 </select>
                 <button
                   type="button"
@@ -3656,7 +4769,31 @@ export function Clients() {
               </div>
             )}
           </div>
-          {clientsError && viewMode !== "calendar" ? (
+          {viewMode === "notes" ? (
+            <NoteSearchPanel
+              search={noteSearch}
+              appliedSearch={appliedNoteSearch}
+              onSearchChange={setNoteSearch}
+              onSubmit={() => {
+                setAppliedNoteSearch(noteSearch.trim());
+                setNoteResultsPage(1);
+              }}
+              results={noteResults}
+              loading={noteResultsLoading}
+              error={noteResultsError}
+              total={noteResultsTotal}
+              page={noteResultsPage}
+              totalPages={noteResultsTotalPages}
+              pageStart={noteResultsPageStart}
+              pageEnd={noteResultsPageEnd}
+              onPageChange={setNoteResultsPage}
+              teamMemberNameById={teamMemberNameById}
+              renderClientAvatar={renderClientAvatar}
+              onOpenClient={(id) =>
+                navigate(`/clients/${encodeURIComponent(id)}`)
+              }
+            />
+          ) : clientsError && viewMode !== "calendar" ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {clientsError}
             </div>
@@ -3686,7 +4823,8 @@ export function Clients() {
                 No clients matched these filters.
               </p>
               <p className="mx-auto mt-2 max-w-md text-sm text-[#586273]">
-                Try clearing status, CSM, offer, date, or search filters to see more clients.
+                Try clearing status, CSM, offer, milestone, renewal, contact, or
+                health filters to see more clients.
               </p>
               <button
                 type="button"
@@ -3703,6 +4841,7 @@ export function Clients() {
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
+              showArchetypes={selectedCompany?.enable_archetypes === true}
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
@@ -3715,13 +4854,16 @@ export function Clients() {
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
+              showArchetypes={selectedCompany?.enable_archetypes === true}
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
               onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
             />
           )}
-          {viewMode !== "calendar" && !clientsLoading && totalClients > 0 && (
+          {(viewMode === "list" || viewMode === "card") &&
+            !clientsLoading &&
+            totalClients > 0 && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
               <p className="text-sm text-[#586273]">
                 Showing {pageStart}-{pageEnd} of {totalClients.toLocaleString()}
@@ -3774,6 +4916,8 @@ export function Clients() {
           programChoices={programChoices}
           offers={offers}
           assignedTeamMemberId={assignedTeamMemberId}
+          secondaryAssigneeEnabled={selectedCompany?.enable_secondary_assignee === true}
+          canEditDirectorNotes={capabilities.canViewDirectorNotes}
           onClose={() => setNewClientOpen(false)}
           onCreated={(client) => {
             setClients((current) => [client, ...current].slice(0, PAGE_SIZE));
@@ -3791,6 +4935,7 @@ function ClientTable({
   teamMemberNameById,
   renderClientAvatar,
   clientMeta,
+  showArchetypes,
   onOpenClient,
   onQuickUpdate,
 }: {
@@ -3805,7 +4950,9 @@ function ClientTable({
     renewal: unknown;
     buyIn: unknown;
     progress: unknown;
+    archetype: unknown;
   };
+  showArchetypes: boolean;
   onOpenClient: (id: string) => void;
   onQuickUpdate?: (client: ClientRow) => void;
 }) {
@@ -3817,6 +4964,7 @@ function ClientTable({
             {[
               "Client",
               "CSM",
+              ...(showArchetypes ? ["Archetype"] : []),
               "Status",
               "Onboarded",
               "Renewal",
@@ -3861,6 +5009,11 @@ function ClientTable({
                   {teamMemberNameById.get(client.csm_team_member_id ?? "") ??
                     "Unassigned"}
                 </td>
+                {showArchetypes ? (
+                  <td className="px-4 py-3 text-sm text-[#586273]">
+                    {displayValue(meta.archetype)}
+                  </td>
+                ) : null}
                 <td className="px-4 py-3">
                   <ProgramStatusPill
                     value={client.program_status_value}
@@ -3915,6 +5068,7 @@ function ClientCards({
   teamMemberNameById,
   renderClientAvatar,
   clientMeta,
+  showArchetypes,
   onOpenClient,
   onQuickUpdate,
 }: {
@@ -3929,7 +5083,9 @@ function ClientCards({
     renewal: unknown;
     buyIn: unknown;
     progress: unknown;
+    archetype: unknown;
   };
+  showArchetypes: boolean;
   onOpenClient: (id: string) => void;
   onQuickUpdate?: (client: ClientRow) => void;
 }) {
@@ -3975,6 +5131,9 @@ function ClientCards({
                 label="Progress"
                 value={<OutcomePill value={meta.progress} />}
               />
+              {showArchetypes ? (
+                <MiniMeta label="Archetype" value={displayValue(meta.archetype)} />
+              ) : null}
               <MiniMeta label="Last Contact" value={formatDate(meta.last)} />
               <MiniMeta label="Onboarded" value={formatDate(meta.onboarded)} />
               <MiniMeta label="Renewal" value={formatDate(meta.renewal)} />
@@ -3997,6 +5156,192 @@ function ClientCards({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function sourceTypeTone(sourceType: string | null) {
+  if (sourceType?.includes("current")) return "bg-[#eaf4fe] text-[#2b79c4]";
+  if (sourceType?.includes("call")) return "bg-violet-50 text-violet-700";
+  if (sourceType?.includes("legacy")) return "bg-amber-50 text-amber-700";
+  if (sourceType?.includes("next_steps")) return "bg-emerald-50 text-emerald-700";
+  return "bg-[#f1f4f8] text-[#586273]";
+}
+
+function NoteSearchPanel({
+  search,
+  appliedSearch,
+  onSearchChange,
+  onSubmit,
+  results,
+  loading,
+  error,
+  total,
+  page,
+  totalPages,
+  pageStart,
+  pageEnd,
+  onPageChange,
+  teamMemberNameById,
+  renderClientAvatar,
+  onOpenClient,
+}: {
+  search: string;
+  appliedSearch: string;
+  onSearchChange: (value: string) => void;
+  onSubmit: () => void;
+  results: NoteSearchResult[];
+  loading: boolean;
+  error: string | null;
+  total: number;
+  page: number;
+  totalPages: number;
+  pageStart: number;
+  pageEnd: number;
+  onPageChange: (page: number) => void;
+  teamMemberNameById: Map<string, string>;
+  renderClientAvatar: (client: ClientRow, size?: string) => React.ReactNode;
+  onOpenClient: (id: string) => void;
+}) {
+  const trimmedSearch = appliedSearch.trim();
+  return (
+    <div className="space-y-4">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+        className="rounded-md border border-[#e4e9f0] bg-white p-4 shadow-sm"
+      >
+        <label
+          htmlFor="clients-note-search"
+          className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#586273]"
+        >
+          Search Notes
+        </label>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <input
+            id="clients-note-search"
+            type="search"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search notes, next steps, call summaries, and history"
+            className="block min-w-0 flex-1 rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm text-[#162b3e] placeholder:text-[#98a2b3] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+          />
+          <button
+            type="submit"
+            disabled={loading || search.trim().length < 2}
+            className="rounded-full bg-[#59abf0] px-5 py-2.5 text-sm font-semibold text-[#162b3e] shadow-sm transition-colors hover:bg-[#3b8fd9] hover:text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+          >
+            {loading ? "Searching..." : "Search"}
+          </button>
+        </div>
+      </form>
+
+      {error ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+
+      {trimmedSearch.length < 2 ? (
+        <EmptyState text="Enter at least two characters to search across client notes and history." />
+      ) : loading ? (
+        <div className="flex items-center justify-center rounded-md border border-[#e4e9f0] bg-white py-20">
+          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
+        </div>
+      ) : results.length === 0 ? (
+        <EmptyState text="No notes matched that search inside the current filters." />
+      ) : (
+        <div className="overflow-hidden rounded-md border border-[#e4e9f0] bg-white shadow-sm">
+          <div className="divide-y divide-[#edf1f5]">
+            {results.map((result) => {
+              const client: ClientRow = {
+                glide_row_id: result.client_id,
+                client_name: result.client_name,
+                client_image: result.client_image,
+                csm_team_member_id: result.csm_team_member_id,
+              };
+              const snippet = noteSnippet(result.matched_text, trimmedSearch);
+              return (
+                <article key={result.source_key} className="px-5 py-4">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${sourceTypeTone(result.source_type)}`}
+                        >
+                          {result.source_label ?? "History"}
+                        </span>
+                        <span className="text-xs font-medium text-[#7b8494]">
+                          {formatDate(result.event_date)}
+                        </span>
+                      </div>
+                      <p className="mt-3 whitespace-pre-line text-sm leading-6 text-[#162b3e]">
+                        <HighlightedSnippet text={snippet} query={trimmedSearch} />
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center justify-between gap-4 rounded-md border border-[#edf1f5] bg-[#f7f9fc] px-3 py-3 md:w-72">
+                      <div className="flex min-w-0 items-center gap-3">
+                        {renderClientAvatar(client, "h-10 w-10")}
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => onOpenClient(result.client_id)}
+                            className="block truncate text-left text-sm font-semibold text-[#162b3e] hover:text-[#2b79c4] cursor-pointer"
+                          >
+                            {result.client_name ?? "Unnamed client"}
+                          </button>
+                          <div className="truncate text-xs text-[#586273]">
+                            {teamMemberNameById.get(result.csm_team_member_id ?? "") ??
+                              "Unassigned"}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onOpenClient(result.client_id)}
+                        className="shrink-0 text-sm font-semibold text-[#2b79c4] hover:text-[#162b3e] cursor-pointer"
+                      >
+                        View
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!loading && total > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="text-sm text-[#586273]">
+            Showing {pageStart}-{pageEnd} of {total.toLocaleString()}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.max(1, page - 1))}
+              disabled={page === 1}
+              className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-gray-600">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages}
+              className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

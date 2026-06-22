@@ -13,6 +13,8 @@ export interface UnifiedCompany {
   synced_at: string | null;
   view_override: string | null;
   enable_secondary_assignee: boolean | null;
+  enable_secondary_offers: boolean | null;
+  enable_archetypes: boolean | null;
   enable_call_ai_for_csms: boolean | null;
   migration_status: MigrationStatus | "glide_mirror";
   source: DataSource;
@@ -42,6 +44,8 @@ interface AppCompanyRow {
   status: "active" | "paused" | "archived" | null;
   migration_status: MigrationStatus;
   enable_secondary_assignee: boolean | null;
+  enable_secondary_offers: boolean | null;
+  enable_archetypes: boolean | null;
   enable_call_ai_for_csms: boolean | null;
   view_override: string | null;
   updated_at: string | null;
@@ -56,6 +60,8 @@ interface MirrorCompanyRow {
   synced_at: string | null;
   view_override: string | null;
   enable_secondary_assignee: boolean | null;
+  enable_secondary_offers?: boolean | null;
+  enable_archetypes?: boolean | null;
   enable_call_ai_for_csms: boolean | null;
 }
 
@@ -106,6 +112,8 @@ function mapAppCompany(row: AppCompanyRow): UnifiedCompany | null {
     synced_at: row.updated_at,
     view_override: row.view_override,
     enable_secondary_assignee: row.enable_secondary_assignee,
+    enable_secondary_offers: row.enable_secondary_offers,
+    enable_archetypes: row.enable_archetypes,
     enable_call_ai_for_csms: row.enable_call_ai_for_csms,
     migration_status: row.migration_status,
     source: "app_owned",
@@ -123,6 +131,8 @@ function mapMirrorCompany(row: MirrorCompanyRow): UnifiedCompany {
     synced_at: row.synced_at,
     view_override: row.view_override,
     enable_secondary_assignee: row.enable_secondary_assignee,
+    enable_secondary_offers: row.enable_secondary_offers ?? null,
+    enable_archetypes: row.enable_archetypes ?? null,
     enable_call_ai_for_csms: row.enable_call_ai_for_csms,
     migration_status: "glide_mirror",
     source: "mirror",
@@ -172,7 +182,7 @@ export async function loadUnifiedCompanies() {
     supabase
       .from("companies")
       .select(
-        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_call_ai_for_csms, view_override, updated_at, archived_at",
+        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, view_override, updated_at, archived_at",
       )
       .in("migration_status", ["pilot", "migrated"])
       .order("name", { ascending: true }),
@@ -209,7 +219,7 @@ export async function loadUnifiedCompanyByLegacyId(legacyCompanyId: string) {
     supabase
       .from("companies")
       .select(
-        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_call_ai_for_csms, view_override, updated_at, archived_at",
+        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, view_override, updated_at, archived_at",
       )
       .eq("legacy_glide_row_id", legacyCompanyId)
       .in("migration_status", ["pilot", "migrated"])
