@@ -896,7 +896,8 @@ function ClientUpdateWebhookGuide({
 }) {
   const rows: Array<[string, "Required" | "Optional", string]> = [
     ["company_id", "Required", "Your selected company ID. The submitted token must belong to this same company."],
-    ["client_email", "Required", "Exact client email for matching. If matching is unclear, the event goes to the Integration Review Queue."],
+    ["client_email", "Required", "Exact client email for matching, unless you send client_id instead. If matching is unclear, the event goes to the Integration Review Queue."],
+    ["client_id", "Optional", "App-owned RetainOS client UUID. Use this instead of email only when your integration already has the RetainOS client id."],
     ["next_steps", "Optional", "Replace the client's Next Steps."],
     ["notes", "Optional", "History context or note body for the webhook update."],
     ["last_contact", "Optional", "Date or timestamp for Date of Last Contact."],
@@ -905,8 +906,40 @@ function ClientUpdateWebhookGuide({
     ["pathway_id", "Optional", "Active Pathway ID for the selected company. `offer_id` is still accepted as a legacy alias."],
     ["secondary_pathway_id", "Optional", "Secondary Pathway ID. Send with secondary_milestone_id when this update should set a secondary pathway."],
     ["secondary_milestone_id", "Optional", "Secondary Milestone ID that belongs to secondary_pathway_id."],
+    ["custom_fields", "Optional", "Object or array of active RetainOS custom field keys/IDs and values to update on the client."],
     ["external_event_id", "Optional", "External event ID for duplicate protection."],
   ];
+  const profileUpdateBodyTemplate = JSON.stringify(
+    {
+      company_id: companyId || "{{company_id}}",
+      provider: "zapier",
+      external_event_id: "{{external_event_id}}",
+      client_email: "{{client_email}}",
+      next_steps: "{{next_steps}}",
+      last_contact: "{{last_contact}}",
+      next_contact: "{{next_contact}}",
+      assigned_to: "{{assigned_to}}",
+      custom_fields: {
+        custom_field_key_or_id: "{{custom_field_value}}",
+      },
+      notes: "{{notes}}",
+    },
+    null,
+    2,
+  );
+  const secondaryPathwayBodyTemplate = JSON.stringify(
+    {
+      company_id: companyId || "{{company_id}}",
+      provider: "zapier",
+      external_event_id: "{{external_event_id}}",
+      client_email: "{{client_email}}",
+      secondary_pathway_id: "{{secondary_pathway_id}}",
+      secondary_milestone_id: "{{secondary_milestone_id}}",
+      notes: "{{notes}}",
+    },
+    null,
+    2,
+  );
 
   return (
     <>
@@ -966,14 +999,51 @@ function ClientUpdateWebhookGuide({
       </Section>
 
       <Section
-        title="4. Copy the Request Body"
+        title="4. Start From the Safe Request Body"
         action={<CopyButton value={bodyTemplate} />}
       >
         <p className="mb-3 text-sm text-[#586273]">
-          This V1 endpoint updates a narrow safe set of client fields. Program
-          status changes stay in RetainOS lifecycle workflows.
+          Start with this minimal body, then add only the optional fields your Zap
+          actually maps. Do not send blank optional fields; blank values can clear
+          fields when the key is present. Program status changes stay in RetainOS
+          lifecycle workflows.
         </p>
         <CodeBlock value={bodyTemplate} />
+      </Section>
+
+      <Section title="Common Optional Payloads">
+        <div className="grid gap-5 xl:grid-cols-2">
+          <div>
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-[#162b3e]">
+                  Profile fields
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-[#586273]">
+                  Use this when Zapier should update notes, contact dates,
+                  assignment, Next Steps, or custom fields.
+                </p>
+              </div>
+              <CopyButton value={profileUpdateBodyTemplate} />
+            </div>
+            <CodeBlock value={profileUpdateBodyTemplate} />
+          </div>
+          <div>
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-[#162b3e]">
+                  Secondary pathway
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-[#586273]">
+                  Use this for a conditional second Zapier step after the client
+                  already exists in RetainOS.
+                </p>
+              </div>
+              <CopyButton value={secondaryPathwayBodyTemplate} />
+            </div>
+            <CodeBlock value={secondaryPathwayBodyTemplate} />
+          </div>
+        </div>
       </Section>
 
       <Section title="Supported Fields">
@@ -1460,11 +1530,6 @@ export function Resources() {
           provider: "zapier",
           external_event_id: "{{external_event_id}}",
           client_email: "{{client_email}}",
-          next_steps: "{{next_steps}}",
-          next_contact: "{{next_contact}}",
-          pathway_id: "{{pathway_id}}",
-          secondary_pathway_id: "{{secondary_pathway_id}}",
-          secondary_milestone_id: "{{secondary_milestone_id}}",
           notes: "{{notes}}",
         },
         null,
