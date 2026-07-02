@@ -430,3 +430,7 @@ For historical context:
 - Updated `src/pages/Clients.tsx`: Quick Update now loads active `client_milestones` for the open client and uses that corrected pathway/milestone for both display and the `complete_milestone` payload. New Client and Clients filters now use Pathway wording instead of visible Offer wording.
 - `npm run build` passed. The build still shows existing local Beacon/Anthropic browser-externalization warnings because Beacon remains an intentionally uncommitted local pilot.
 - DO NOT COMMIT remains in force for the local Beacon pilot files unless Jay explicitly asks to ship Beacon: `package.json`, `package-lock.json`, `src/components/Header.tsx`, `src/components/Beacon.tsx`, `src/lib/beacon/*`, plus `old glide project test/`.
+
+## QA Closeout - 2026-07-02
+
+- Jay approved Archetypes, Secondary Assignee, and Offboarding actual-end-date/churn. Secondary Pathway remains in QA after a modal save fix: unchanged primary pathway writes are skipped, unchanged secondary values are skipped, secondary milestone selection is validated, and Edge Function errors now surface their real messages.

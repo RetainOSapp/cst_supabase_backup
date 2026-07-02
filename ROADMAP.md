@@ -47,14 +47,15 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-06-20 outcome model correction: Outcomes are event-style updates, not static profile diffs. Current badges show saved value/date, dropdowns allow saving the same color again, and `manage-client-outcomes` refreshes the selected outcome date even when the value does not change. Deployed `manage-client-outcomes`.
   - 2026-06-20 Jay QA passed: Outcomes same-color event updates now work, and Pathway modal polish is done.
   - Follow-up: company-level default next-contact interval should live in Company Settings and auto-fill next contact after last contact updates while remaining overrideable.
-- `[~]` `[qa]` 2026-06-20 Offboarding actual-end-date/churn upgrade is ready for Jay QA.
+- `[x]` Offboarding actual-end-date/churn upgrade QA passed.
   - Client Detail > Change Status > Offboarded now requires the actual end date and offer-fit answer, auto-classifies churn against the current contract end date, requires churn reason/notes only when churned, writes offboarding metadata/history/audit, and updates the RetainOS Help draft.
   - QA follow-up fix: Clients roster now waits for app-owned table detection and listens for a Client Detail status-change refresh token, so returning to `/clients` should show Offboarded without hard refresh.
 - `[~]` `[qa]` 2026-06-20 Secondary pathway support is ready for Jay QA.
   - Company Settings > Feature gates can enable Secondary pathway; Client Detail > Pathways & Milestones can set or clear the secondary pathway/milestone and shows it as a separate summary. `adding-secondary-offers` is now the RetainOS "Adding secondary pathways" draft.
-- `[~]` `[qa]` 2026-06-20 Secondary assignee support is ready for Jay QA.
+  - 2026-07-02 QA fix: Change Pathway & Milestones now skips unnecessary primary pathway writes when only secondary pathway changes, only calls secondary writes when secondary values changed, validates secondary milestone selection, and surfaces real Edge Function errors.
+- `[x]` Secondary assignee support QA passed.
   - Company Settings > Feature gates can enable Secondary assignee; + New Client and Client Detail > Edit Profile can set/clear the Secondary Assignee. Server validation requires an active visible team member and prevents using the same person as Primary CSM. `adding-secondary-assignee` is a draft RetainOS Help resource.
-- `[~]` `[qa]` 2026-06-21 Archetypes in client views is ready for Jay QA.
+- `[x]` Archetypes in client views QA passed.
   - Company Settings > Feature gates can enable Client archetypes; Clients List view shows an Archetype column and Card view shows Archetype as a compact meta row. + New Client and Client Detail > Edit Profile now use a controlled dropdown limited to Doer, Controller, Worrier, and Follower. `archetypes-in-client-views` is refreshed as a RetainOS Help draft.
 - `[x]` 2026-06-21 Advocacy tracking QA passed.
   - Quick Update and Client Detail > Outcomes now track Review, Testimonial, Referral, and Renewal / Upsell asks and received events with repeat counts and optional notes. Dashboard > Overview has Advocacy & Growth cards for asked, received, and ratio by current filters. Ethical Scaling app-owned data was backfilled from legacy Glide fields.

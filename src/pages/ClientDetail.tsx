@@ -3869,6 +3869,22 @@ function PathwayChangeModal({
         "offer_milestones_2nd_current_offer_id",
       ])),
     );
+    const initialSecondaryOfferValue = textInputValue(valueFrom(client, [
+      "secondary_offer_milestones_current_offer_id",
+      "offer_milestones_2nd_current_offer_id",
+    ]));
+    const initialSecondaryMilestoneValue = textInputValue(valueFrom(client, [
+      "secondary_offer_milestones_current_milestone_id",
+      "offer_milestones_2nd_current_milestone_id",
+    ]));
+    const secondaryChanged =
+      secondaryOfferId !== initialSecondaryOfferValue ||
+      secondaryMilestoneId !== initialSecondaryMilestoneValue;
+    if (!secondaryChanged) return true;
+    if (secondaryOfferId && !secondaryMilestoneId) {
+      setSaveError("Choose a secondary milestone first.");
+      return false;
+    }
     const action =
       secondaryOfferId && secondaryMilestoneId
         ? "set_secondary_pathway"
@@ -3889,7 +3905,7 @@ function PathwayChangeModal({
       },
     );
     if (error) {
-      setSaveError(error.message);
+      setSaveError(await functionErrorMessage(error));
       return false;
     }
     if (data?.error) {
@@ -3912,37 +3928,41 @@ function PathwayChangeModal({
     setSaving(true);
     setSaveError(null);
     let primarySaved = false;
+    const primaryChanged =
+      offerId !== currentOfferId || milestoneId !== currentMilestoneId;
 
-    const { data, error } = await supabase.functions.invoke(
-      "manage-client-milestone",
-      {
-        body: {
-          action: "set_pathway",
-          clientLegacyId: client.glide_row_id,
-          offerId,
-          milestoneId,
-          notes,
+    if (primaryChanged) {
+      const { data, error } = await supabase.functions.invoke(
+        "manage-client-milestone",
+        {
+          body: {
+            action: "set_pathway",
+            clientLegacyId: client.glide_row_id,
+            offerId,
+            milestoneId,
+            notes,
+          },
         },
-      },
-    );
-
-    if (error) {
-      setSaving(false);
-      setSaveError(error.message);
-      return;
-    }
-    if (data?.error) {
-      setSaving(false);
-      setSaveError(data.error);
-      return;
-    }
-    if (data?.client && data?.clientMilestone) {
-      primarySaved = true;
-      onSaved(
-        mapAppClientRow(data.client as Record<string, unknown>),
-        data.clientMilestone as ClientMilestoneRow,
-        (data.event as ClientHistoryEventRow | undefined) ?? null,
       );
+
+      if (error) {
+        setSaving(false);
+        setSaveError(await functionErrorMessage(error));
+        return;
+      }
+      if (data?.error) {
+        setSaving(false);
+        setSaveError(data.error);
+        return;
+      }
+      if (data?.client && data?.clientMilestone) {
+        primarySaved = true;
+        onSaved(
+          mapAppClientRow(data.client as Record<string, unknown>),
+          data.clientMilestone as ClientMilestoneRow,
+          (data.event as ClientHistoryEventRow | undefined) ?? null,
+        );
+      }
     }
     if (secondaryPathwaysEnabled) {
       const secondarySaved = await saveSecondaryPathway();
