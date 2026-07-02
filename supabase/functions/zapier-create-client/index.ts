@@ -504,9 +504,49 @@ async function resolveOffer(
     .eq("status", "active")
     .maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error("Offer ID is not active for this company.");
+  if (!data) throw new Error("Pathway ID is not active for this company.");
 
   return data.glide_row_id;
+}
+
+async function resolveOfferMilestone(
+  supabase: SupabaseClient,
+  companyId: string,
+  offerId: string,
+  value: unknown,
+) {
+  const requested = cleanText(value);
+  if (!requested) return null;
+
+  const { data, error } = await supabase
+    .from("company_offer_milestones")
+    .select("glide_row_id, name, status")
+    .eq("company_id", companyId)
+    .eq("offer_id", offerId)
+    .eq("glide_row_id", requested)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new Error("Secondary milestone ID is not active for the selected secondary pathway.");
+  }
+
+  return data;
+}
+
+async function assertSecondaryPathwaysEnabled(
+  supabase: SupabaseClient,
+  companyId: string,
+) {
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("enable_secondary_offers")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.enable_secondary_offers !== true) {
+    throw new Error("Secondary Pathway must be enabled in company settings first.");
+  }
 }
 
 function customFieldRowsFromPayload(body: Record<string, unknown>) {
@@ -765,8 +805,50 @@ Deno.serve(async (req) => {
     const offerId = await resolveOffer(
       supabase,
       company.id,
-      body.offer_id ?? body.offerId,
+      body.pathway_id ?? body.pathwayId ?? body.offer_id ?? body.offerId,
     );
+    const secondaryOfferValue =
+      body.secondary_pathway_id ??
+      body.secondaryPathwayId ??
+      body.secondary_offer_id ??
+      body.secondaryOfferId ??
+      body.secondary_pathway_offer_id ??
+      body.secondaryPathwayOfferId;
+    const secondaryMilestoneValue =
+      body.secondary_milestone_id ??
+      body.secondaryMilestoneId ??
+      body.secondary_pathway_milestone_id ??
+      body.secondaryPathwayMilestoneId;
+    const hasSecondaryOffer = Boolean(cleanText(secondaryOfferValue));
+    const hasSecondaryMilestone = Boolean(cleanText(secondaryMilestoneValue));
+    if (hasSecondaryOffer !== hasSecondaryMilestone) {
+      return jsonResponse(
+        {
+          error:
+            "Secondary pathway requires both secondary_pathway_id and secondary_milestone_id.",
+        },
+        400,
+      );
+    }
+    let secondaryOfferId: string | null = null;
+    let secondaryMilestone: Record<string, unknown> | null = null;
+    if (hasSecondaryOffer && hasSecondaryMilestone) {
+      await assertSecondaryPathwaysEnabled(supabase, company.id);
+      secondaryOfferId = await resolveOffer(
+        supabase,
+        company.id,
+        secondaryOfferValue,
+      );
+      if (!secondaryOfferId) {
+        return jsonResponse({ error: "Choose a secondary pathway first." }, 400);
+      }
+      secondaryMilestone = await resolveOfferMilestone(
+        supabase,
+        company.id,
+        secondaryOfferId,
+        secondaryMilestoneValue,
+      );
+    }
 
     const now = new Date().toISOString();
     const onboardedAt =
@@ -838,6 +920,11 @@ Deno.serve(async (req) => {
         nullableText(body.programStatusValue) ??
         "front-end",
       offer_milestones_current_offer_id: offerId,
+      secondary_offer_milestones_current_offer_id: secondaryOfferId,
+      secondary_offer_milestones_current_milestone_id:
+        (secondaryMilestone?.glide_row_id as string | null | undefined) ?? null,
+      secondary_offer_milestones_current_milestone_change_date:
+        secondaryMilestone ? now : null,
       current_contract_start_date: contractStartDate,
       current_contract_end_date: contractEndDate,
       current_contract_end_date_for_filtering: contractEndDate,
@@ -851,6 +938,13 @@ Deno.serve(async (req) => {
         integration_token_prefix: authResult.tokenPrefix,
         client_phone: firstNullableText(body.client_phone, body.clientPhone, body.phone),
         mailing_address: firstNullableText(body.mailing_address, body.mailingAddress),
+        secondary_pathway: secondaryMilestone
+          ? {
+              offer_id: secondaryOfferId,
+              milestone_id: secondaryMilestone.glide_row_id,
+              milestone_name: secondaryMilestone.name,
+            }
+          : null,
         custom_fields: metadataCustomFields,
       },
     };
@@ -922,6 +1016,13 @@ Deno.serve(async (req) => {
           auth_mode: authResult.authMode,
           integration_token_prefix: authResult.tokenPrefix,
           custom_fields: customFieldUpdates.changes,
+          secondary_pathway: secondaryMilestone
+            ? {
+                offer_id: secondaryOfferId,
+                milestone_id: secondaryMilestone.glide_row_id,
+                milestone_name: secondaryMilestone.name,
+              }
+            : null,
           created_template_tasks: templateTaskResult.createdTasks,
           task_template_errors: templateTaskResult.taskErrors,
         },
@@ -947,6 +1048,13 @@ Deno.serve(async (req) => {
         integration_token_id: authResult.tokenId,
         integration_token_prefix: authResult.tokenPrefix,
         custom_fields: customFieldUpdates.changes,
+        secondary_pathway: secondaryMilestone
+          ? {
+              offer_id: secondaryOfferId,
+              milestone_id: secondaryMilestone.glide_row_id,
+              milestone_name: secondaryMilestone.name,
+            }
+          : null,
         created_template_task_count: templateTaskResult.createdTasks.length,
         task_template_errors: templateTaskResult.taskErrors,
       },

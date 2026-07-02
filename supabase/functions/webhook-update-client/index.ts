@@ -14,6 +14,9 @@ const CLIENT_UPDATE_FIELDS = [
   "csm_date_of_last_contact",
   "csm_date_of_next_contact",
   "offer_milestones_current_offer_id",
+  "secondary_offer_milestones_current_offer_id",
+  "secondary_offer_milestones_current_milestone_id",
+  "secondary_offer_milestones_current_milestone_change_date",
   "csm_team_member_id",
 ] as const;
 
@@ -407,9 +410,53 @@ async function resolveOffer(
     .eq("status", "active")
     .maybeSingle();
   if (error) throw error;
-  if (!data) throw new RequestValidationError("Offer ID is not active for this company.");
+  if (!data) throw new RequestValidationError("Pathway ID is not active for this company.");
 
   return data;
+}
+
+async function resolveOfferMilestone(
+  supabase: SupabaseClient,
+  companyId: string,
+  offerId: string,
+  value: unknown,
+) {
+  const requested = cleanText(value);
+  if (!requested) return null;
+
+  const { data, error } = await supabase
+    .from("company_offer_milestones")
+    .select("glide_row_id, name, status")
+    .eq("company_id", companyId)
+    .eq("offer_id", offerId)
+    .eq("glide_row_id", requested)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new RequestValidationError(
+      "Secondary milestone ID is not active for the selected secondary pathway.",
+    );
+  }
+
+  return data;
+}
+
+async function assertSecondaryPathwaysEnabled(
+  supabase: SupabaseClient,
+  companyId: string,
+) {
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("enable_secondary_offers")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.enable_secondary_offers !== true) {
+    throw new RequestValidationError(
+      "Secondary Pathway must be enabled in company settings first.",
+    );
+  }
 }
 
 async function prepareCustomFieldUpdates(
@@ -649,6 +696,9 @@ Deno.serve(async (req) => {
       "csm_date_of_last_contact",
       "csm_date_of_next_contact",
       "offer_milestones_current_offer_id",
+      "secondary_offer_milestones_current_offer_id",
+      "secondary_offer_milestones_current_milestone_id",
+      "secondary_offer_milestones_current_milestone_change_date",
       "csm_team_member_id",
       "archived_at",
     ].join(", ");
@@ -743,14 +793,65 @@ Deno.serve(async (req) => {
       historyPayload.next_contact_at = clientUpdates.csm_date_of_next_contact;
     }
 
-    if (firstPresent(body, ["offer_id", "offerId"]) !== undefined) {
+    if (firstPresent(body, ["pathway_id", "pathwayId", "offer_id", "offerId"]) !== undefined) {
       const offer = await resolveOffer(
         supabase,
         company.id,
-        firstPresent(body, ["offer_id", "offerId"]),
+        firstPresent(body, ["pathway_id", "pathwayId", "offer_id", "offerId"]),
       );
       clientUpdates.offer_milestones_current_offer_id = offer?.glide_row_id ?? null;
       metadataUpdates.offer = offer;
+    }
+
+    const secondaryOfferValue = firstPresent(body, [
+      "secondary_pathway_id",
+      "secondaryPathwayId",
+      "secondary_offer_id",
+      "secondaryOfferId",
+      "secondary_pathway_offer_id",
+      "secondaryPathwayOfferId",
+    ]);
+    const secondaryMilestoneValue = firstPresent(body, [
+      "secondary_milestone_id",
+      "secondaryMilestoneId",
+      "secondary_pathway_milestone_id",
+      "secondaryPathwayMilestoneId",
+    ]);
+    const hasSecondaryOffer = Boolean(cleanText(secondaryOfferValue));
+    const hasSecondaryMilestone = Boolean(cleanText(secondaryMilestoneValue));
+    if (hasSecondaryOffer || hasSecondaryMilestone) {
+      if (hasSecondaryOffer !== hasSecondaryMilestone) {
+        throw new RequestValidationError(
+          "Secondary pathway requires both secondary_pathway_id and secondary_milestone_id.",
+        );
+      }
+      await assertSecondaryPathwaysEnabled(supabase, company.id);
+      const secondaryOffer = await resolveOffer(
+        supabase,
+        company.id,
+        secondaryOfferValue,
+      );
+      if (!secondaryOffer) {
+        throw new RequestValidationError("Choose a secondary pathway first.");
+      }
+      const secondaryMilestone = await resolveOfferMilestone(
+        supabase,
+        company.id,
+        secondaryOffer.glide_row_id,
+        secondaryMilestoneValue,
+      );
+      clientUpdates.secondary_offer_milestones_current_offer_id =
+        secondaryOffer.glide_row_id;
+      clientUpdates.secondary_offer_milestones_current_milestone_id =
+        secondaryMilestone?.glide_row_id ?? null;
+      clientUpdates.secondary_offer_milestones_current_milestone_change_date =
+        new Date().toISOString();
+      metadataUpdates.secondary_pathway = {
+        offer_id: secondaryOffer.glide_row_id,
+        offer_name: secondaryOffer.name,
+        milestone_id: secondaryMilestone?.glide_row_id ?? null,
+        milestone_name: secondaryMilestone?.name ?? null,
+      };
     }
 
     if (firstPresent(body, ["assigned_to", "assignedTo", "csm_email", "csmEmail"]) !== undefined) {

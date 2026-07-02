@@ -19,6 +19,10 @@ interface TeamMemberOption {
 interface OfferOption {
   id: string;
   name: string;
+  milestones: Array<{
+    id: string;
+    name: string;
+  }>;
 }
 
 type ResourceType = "guide" | "video" | "template";
@@ -409,7 +413,9 @@ function ParameterTable() {
     ["north_star", "Optional", "Client North Star."],
     ["mailing_address", "Optional", "Stored as webhook metadata for now."],
     ["assigned_to", "Optional", "Team member ID or email for the CSM assignment."],
-    ["offer_id", "Optional", "Offer ID to attach to the client journey."],
+    ["pathway_id", "Optional", "Pathway ID to attach to the primary client journey. `offer_id` is still accepted as a legacy alias."],
+    ["secondary_pathway_id", "Optional", "Secondary Pathway ID. Send with secondary_milestone_id when the client also needs a parallel pathway."],
+    ["secondary_milestone_id", "Optional", "Secondary Milestone ID that belongs to secondary_pathway_id."],
     ["contract_start_date", "Optional", "Contract start date."],
     ["contract_end_date", "Optional", "Contract end date."],
     ["contract_monthly_value", "Optional", "Monthly contract value."],
@@ -896,7 +902,9 @@ function ClientUpdateWebhookGuide({
     ["last_contact", "Optional", "Date or timestamp for Date of Last Contact."],
     ["next_contact", "Optional", "Date or timestamp for Date of Next Contact."],
     ["assigned_to", "Optional", "Active team member ID, legacy ID, or email."],
-    ["offer_id", "Optional", "Active offer ID for the selected company."],
+    ["pathway_id", "Optional", "Active Pathway ID for the selected company. `offer_id` is still accepted as a legacy alias."],
+    ["secondary_pathway_id", "Optional", "Secondary Pathway ID. Send with secondary_milestone_id when this update should set a secondary pathway."],
+    ["secondary_milestone_id", "Optional", "Secondary Milestone ID that belongs to secondary_pathway_id."],
     ["external_event_id", "Optional", "External event ID for duplicate protection."],
   ];
 
@@ -1381,7 +1389,9 @@ export function Resources() {
           north_star: "{{north_star}}",
           mailing_address: "{{mailing_address}}",
           assigned_to: "{{assigned_to}}",
-          offer_id: "{{offer_id}}",
+          pathway_id: "{{pathway_id}}",
+          secondary_pathway_id: "{{secondary_pathway_id}}",
+          secondary_milestone_id: "{{secondary_milestone_id}}",
           contract_start_date: "{{contract_start_date}}",
           contract_end_date: "{{contract_end_date}}",
           contract_monthly_value: "{{contract_monthly_value}}",
@@ -1452,6 +1462,9 @@ export function Resources() {
           client_email: "{{client_email}}",
           next_steps: "{{next_steps}}",
           next_contact: "{{next_contact}}",
+          pathway_id: "{{pathway_id}}",
+          secondary_pathway_id: "{{secondary_pathway_id}}",
+          secondary_milestone_id: "{{secondary_milestone_id}}",
           notes: "{{notes}}",
         },
         null,
@@ -1606,6 +1619,27 @@ export function Resources() {
 
         if (cancelled) return;
 
+        const appOfferRows = offersResult.data ?? [];
+        const appOfferIds = appOfferRows
+          .map((offer) => offer.glide_row_id)
+          .filter((id): id is string => Boolean(id));
+        const appMilestonesResult = appOfferIds.length
+          ? await supabase
+              .from("company_offer_milestones")
+              .select("glide_row_id, offer_id, name, position")
+              .in("offer_id", appOfferIds)
+              .eq("status", "active")
+              .order("position", { ascending: true, nullsFirst: false })
+          : { data: [], error: null };
+
+        if (cancelled) return;
+        if (appMilestonesResult.error) {
+          console.error(
+            "Failed to load app-owned pathway milestones:",
+            appMilestonesResult.error,
+          );
+        }
+
         setTeamMembers(
           (membersResult.data ?? [])
             .filter((member) => member.hide_from_csm_list !== true)
@@ -1617,9 +1651,15 @@ export function Resources() {
             })),
         );
         setOffers(
-          (offersResult.data ?? []).map((offer) => ({
+          appOfferRows.map((offer) => ({
             id: offer.glide_row_id,
-            name: offer.name ?? "Unnamed offer",
+            name: offer.name ?? "Unnamed pathway",
+            milestones: (appMilestonesResult.data ?? [])
+              .filter((milestone) => milestone.offer_id === offer.glide_row_id)
+              .map((milestone) => ({
+                id: milestone.glide_row_id,
+                name: milestone.name ?? "Unnamed milestone",
+              })),
           })),
         );
         setLoading(false);
@@ -1647,6 +1687,26 @@ export function Resources() {
 
       if (cancelled) return;
 
+      const mirrorOfferRows = offersResult.data ?? [];
+      const mirrorOfferIds = mirrorOfferRows
+        .map((offer) => offer.glide_row_id)
+        .filter((id): id is string => Boolean(id));
+      const mirrorMilestonesResult = mirrorOfferIds.length
+        ? await supabase
+            .from("backup_company_offer_milestones")
+            .select("glide_row_id, offer_id, name, order")
+            .in("offer_id", mirrorOfferIds)
+            .order("order", { ascending: true, nullsFirst: false })
+        : { data: [], error: null };
+
+      if (cancelled) return;
+      if (mirrorMilestonesResult.error) {
+        console.error(
+          "Failed to load mirrored pathway milestones:",
+          mirrorMilestonesResult.error,
+        );
+      }
+
       setCompany({
         id: effectiveCompanyId,
         legacy_glide_row_id: effectiveCompanyId,
@@ -1664,9 +1724,15 @@ export function Resources() {
           })),
       );
       setOffers(
-        (offersResult.data ?? []).map((offer) => ({
+        mirrorOfferRows.map((offer) => ({
           id: offer.glide_row_id,
-          name: offer.name ?? "Unnamed offer",
+          name: offer.name ?? "Unnamed pathway",
+          milestones: (mirrorMilestonesResult.data ?? [])
+            .filter((milestone) => milestone.offer_id === offer.glide_row_id)
+            .map((milestone) => ({
+              id: milestone.glide_row_id,
+              name: milestone.name ?? "Unnamed milestone",
+            })),
         })),
       );
       setLoading(false);
@@ -1803,10 +1869,12 @@ export function Resources() {
             </Section>
 
             <div className="grid gap-6 xl:grid-cols-2">
-              <Section title="Team Member IDs">
+              <Section title="Assignable CSM IDs">
                 <p className="mb-4 text-sm text-[#586273]">
                   Use one of these values for assigned_to, or pass the team member
-                  email instead.
+                  email instead. This list only shows active client-facing assignees;
+                  Admin Hub may show additional directors, support users, hidden
+                  members, or archived users that cannot be assigned by webhook.
                 </p>
                 {teamMembers.length === 0 ? (
                   <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4 text-sm text-[#6b7686]">
@@ -1833,29 +1901,56 @@ export function Resources() {
                 )}
               </Section>
 
-              <Section title="Offer IDs">
+              <Section title="Pathway and Milestone IDs">
                 <p className="mb-4 text-sm text-[#586273]">
-                  Use one of these values for offer_id when the new client should be
-                  created inside a specific journey.
+                  Use pathway_id for the primary journey. For a secondary pathway,
+                  send secondary_pathway_id plus a milestone ID from that same
+                  pathway as secondary_milestone_id.
                 </p>
                 {offers.length === 0 ? (
                   <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4 text-sm text-[#6b7686]">
-                    No active offers found yet.
+                    No active pathways found yet.
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {offers.map((offer) => (
                       <div
                         key={offer.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-3"
+                        className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-3"
                       >
-                        <div>
-                          <div className="font-semibold text-[#162b3e]">{offer.name}</div>
-                          <div className="mt-1 break-all text-xs text-[#586273]">
-                            {offer.id}
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <div className="font-semibold text-[#162b3e]">{offer.name}</div>
+                            <div className="mt-1 break-all text-xs text-[#586273]">
+                              Pathway ID: {offer.id}
+                            </div>
                           </div>
+                          <CopyButton value={offer.id} />
                         </div>
-                        <CopyButton value={offer.id} />
+                        {offer.milestones.length > 0 ? (
+                          <div className="mt-3 space-y-2 border-t border-[#e4e9f0] pt-3">
+                            {offer.milestones.map((milestone) => (
+                              <div
+                                key={milestone.id}
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-2"
+                              >
+                                <div>
+                                  <div className="text-sm font-medium text-[#162b3e]">
+                                    {milestone.name}
+                                  </div>
+                                  <div className="mt-1 break-all text-xs text-[#586273]">
+                                    Milestone ID: {milestone.id}
+                                  </div>
+                                </div>
+                                <CopyButton value={milestone.id} />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-3 border-t border-[#e4e9f0] pt-3 text-xs text-[#6b7686]">
+                            No active milestones configured for this pathway.
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>

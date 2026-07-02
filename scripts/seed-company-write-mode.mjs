@@ -6,6 +6,7 @@ loadDotEnv();
 const apply = process.argv.includes("--apply");
 const missingOnly = process.argv.includes("--missing-only");
 const includeArchived = process.argv.includes("--include-archived");
+const shellOnly = process.argv.includes("--shell-only");
 const { url, serviceRoleKey } = getSupabaseEnv();
 const supabase = createClient(url, serviceRoleKey, {
   auth: { persistSession: false },
@@ -611,6 +612,7 @@ async function main() {
       migrationStatus: migrationStatusArgument,
       missingOnly,
       includeArchived,
+      shellOnly,
     },
     company: {
       mirror: {
@@ -687,6 +689,7 @@ async function main() {
     .filter((client) => includeArchived || client.is_archived !== true)
     .map((client) => clientPayload(client, upsertedCompany))
     .filter((client) => !missingOnly || !existingClientIds.has(client.glide_row_id));
+  const clientPayloads = shellOnly ? [] : clients;
   const offers = sourceOffers
     .filter((offer) => offer.glide_row_id && offer.name)
     .map((offer) => offerPayload(offer, upsertedCompany));
@@ -697,28 +700,30 @@ async function main() {
   await upsertInChunks("company_members", members, {
     onConflict: "legacy_glide_row_id",
   });
-  await upsertInChunks("clients", clients, { onConflict: "glide_row_id" });
+  await upsertInChunks("clients", clientPayloads, { onConflict: "glide_row_id" });
 
-  const { data: appClientRows, error: appClientRowsError } = await supabase
-    .from("clients")
-    .select("id, glide_row_id")
-    .eq("company_id", upsertedCompany.id);
-  if (appClientRowsError) throw appClientRowsError;
-  const appClientByLegacyId = new Map(
-    (appClientRows ?? []).map((client) => [client.glide_row_id, client]),
-  );
-  const advocacyEvents = advocacyEventPayloads(
-    sourceClients.filter((client) => includeArchived || client.is_archived !== true),
-    upsertedCompany,
-    appClientByLegacyId,
-  );
-  await supabase
-    .from("client_advocacy_events")
-    .delete()
-    .eq("company_id", upsertedCompany.id)
-    .eq("source", "glide_migration");
-  if (advocacyEvents.length > 0) {
-    await upsertInChunks("client_advocacy_events", advocacyEvents, {});
+  if (!shellOnly) {
+    const { data: appClientRows, error: appClientRowsError } = await supabase
+      .from("clients")
+      .select("id, glide_row_id")
+      .eq("company_id", upsertedCompany.id);
+    if (appClientRowsError) throw appClientRowsError;
+    const appClientByLegacyId = new Map(
+      (appClientRows ?? []).map((client) => [client.glide_row_id, client]),
+    );
+    const advocacyEvents = advocacyEventPayloads(
+      sourceClients.filter((client) => includeArchived || client.is_archived !== true),
+      upsertedCompany,
+      appClientByLegacyId,
+    );
+    await supabase
+      .from("client_advocacy_events")
+      .delete()
+      .eq("company_id", upsertedCompany.id)
+      .eq("source", "glide_migration");
+    if (advocacyEvents.length > 0) {
+      await upsertInChunks("client_advocacy_events", advocacyEvents, {});
+    }
   }
 
   await upsertInChunks("company_offers", offers, { onConflict: "glide_row_id" });
@@ -762,10 +767,11 @@ async function main() {
     after_data: {
       migration_status: upsertedCompany.migration_status,
       members: members.length,
-      clients: clients.length,
+      clients: clientPayloads.length,
       offers: offers.length,
       milestones: milestones.length,
       missing_only: missingOnly,
+      shell_only: shellOnly,
     },
   });
   if (auditError) throw auditError;
@@ -777,7 +783,7 @@ async function main() {
         company: upsertedCompany,
         counts: {
           members: members.length,
-          clients: clients.length,
+          clients: clientPayloads.length,
           offers: offers.length,
           milestones: milestones.length,
           customFields: customFieldPayloads(upsertedCompany, sourceCompany).length,
