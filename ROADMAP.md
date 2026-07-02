@@ -53,6 +53,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[~]` `[qa]` 2026-06-20 Secondary pathway support is ready for Jay QA.
   - Company Settings > Feature gates can enable Secondary pathway; Client Detail > Pathways & Milestones can set or clear the secondary pathway/milestone and shows it as a separate summary. `adding-secondary-offers` is now the RetainOS "Adding secondary pathways" draft.
   - 2026-07-02 QA fix: Change Pathway & Milestones now skips unnecessary primary pathway writes when only secondary pathway changes, only calls secondary writes when secondary values changed, validates secondary milestone selection, and surfaces real Edge Function errors.
+  - 2026-07-02 QA fix 2: Applied the missing `client_history_events` event-type constraint for secondary pathway history writes and added an expandable Secondary Milestone Progress view on Client Detail. Awaiting Jay retest on set secondary pathway/milestone, clear, and expanded progress.
 - `[x]` Secondary assignee support QA passed.
   - Company Settings > Feature gates can enable Secondary assignee; + New Client and Client Detail > Edit Profile can set/clear the Secondary Assignee. Server validation requires an active visible team member and prevents using the same person as Primary CSM. `adding-secondary-assignee` is a draft RetainOS Help resource.
 - `[x]` Archetypes in client views QA passed.

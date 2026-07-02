@@ -434,3 +434,4 @@ For historical context:
 ## QA Closeout - 2026-07-02
 
 - Jay approved Archetypes, Secondary Assignee, and Offboarding actual-end-date/churn. Secondary Pathway remains in QA after a modal save fix: unchanged primary pathway writes are skipped, unchanged secondary values are skipped, secondary milestone selection is validated, and Edge Function errors now surface their real messages.
+- Secondary Pathway follow-up: applied `supabase/migrations/20260702100000_secondary_pathway_history_events.sql` so secondary pathway history events pass the DB constraint; `src/pages/ClientDetail.tsx` now has an expandable secondary milestone progress view. `npm run build` passed. Awaiting Jay retest before promoting in `ROADMAP.md`.

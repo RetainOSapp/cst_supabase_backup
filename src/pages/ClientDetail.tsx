@@ -5437,6 +5437,57 @@ function PathwaysSection({
     "secondary_offer_milestones_current_milestone_id",
     "offer_milestones_2nd_current_milestone_id",
   ]);
+  const hasSecondaryPathway =
+    isPresent(secondaryOfferValue) || isPresent(secondaryMilestoneValue);
+  const [secondaryExpanded, setSecondaryExpanded] = useState(false);
+  const secondaryOfferMilestones = offerMilestones
+    .filter((milestone) => {
+      if (!isPresent(secondaryOfferValue)) return false;
+      return String(milestone.offer_id) === String(secondaryOfferValue);
+    })
+    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+  const secondaryProgressByMilestoneId = new Map(
+    clientMilestones
+      .filter(
+        (milestone) =>
+          isPresent(milestone.milestone_id) &&
+          (!isPresent(milestone.offer_id) ||
+            !isPresent(secondaryOfferValue) ||
+            String(milestone.offer_id) === String(secondaryOfferValue)),
+      )
+      .map((milestone) => [String(milestone.milestone_id), milestone]),
+  );
+  const secondaryTimelineRows = secondaryOfferMilestones.map((milestone) => {
+    const milestoneId = milestone.glide_row_id ?? null;
+    const progress = milestoneId
+      ? secondaryProgressByMilestoneId.get(String(milestoneId)) ?? null
+      : null;
+    const isCurrent =
+      isPresent(milestoneId) &&
+      isPresent(secondaryMilestoneValue) &&
+      String(milestoneId) === String(secondaryMilestoneValue);
+    let status = "Not started";
+    if (isPresent(progress?.completion_date)) status = "Completed";
+    else if (isCurrent) status = "Current";
+    else if (isPresent(progress?.start_date)) status = "Started";
+    return { milestone, progress, isCurrent, status };
+  });
+  const secondaryCompletedConfiguredMilestones = secondaryOfferMilestones.filter(
+    (milestone) => {
+      const milestoneId = milestone.glide_row_id;
+      if (!isPresent(milestoneId)) return false;
+      return isPresent(
+        secondaryProgressByMilestoneId.get(String(milestoneId))?.completion_date,
+      );
+    },
+  ).length;
+  const secondaryProgressPercent =
+    secondaryOfferMilestones.length > 0
+      ? Math.round(
+          (secondaryCompletedConfiguredMilestones / secondaryOfferMilestones.length) *
+            100,
+        )
+      : null;
 
   return (
     <div className="space-y-5 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
@@ -5647,22 +5698,110 @@ function PathwaysSection({
 
       {secondaryPathwaysEnabled ? (
         <div className="rounded-lg border border-[#e4e9f0] bg-[#fbfcfe] p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
-            Secondary Pathway
-          </div>
-          {isPresent(secondaryOfferValue) || isPresent(secondaryMilestoneValue) ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[#586273]">
-              <span className="font-semibold text-[#162b3e]">
-                {displayValue(secondaryOfferValue, relationLookup)}
-              </span>
-              <span>/</span>
-              <span>{displayValue(secondaryMilestoneValue, relationLookup)}</span>
+          <button
+            type="button"
+            onClick={() => setSecondaryExpanded((current) => !current)}
+            className="flex w-full flex-col gap-3 text-left sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                Secondary Pathway
+              </div>
+              {hasSecondaryPathway ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[#586273]">
+                  <span className="font-semibold text-[#162b3e]">
+                    {displayValue(secondaryOfferValue, relationLookup)}
+                  </span>
+                  <span>/</span>
+                  <span>{displayValue(secondaryMilestoneValue, relationLookup)}</span>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-[#6c7684]">
+                  No secondary pathway configured.
+                </p>
+              )}
             </div>
-          ) : (
-            <p className="mt-2 text-sm text-[#6c7684]">
-              No secondary pathway configured.
-            </p>
-          )}
+            {hasSecondaryPathway ? (
+              <div className="flex items-center gap-3">
+                <span className="rounded-full border border-[#d6eafb] bg-white px-2.5 py-1 text-xs font-semibold text-[#2b79c4]">
+                  {secondaryProgressPercent === null
+                    ? "No progress map"
+                    : `${secondaryProgressPercent}% complete`}
+                </span>
+                <span className="text-xs font-semibold text-[#586273]">
+                  {secondaryExpanded ? "Hide progress" : "Show progress"}
+                </span>
+              </div>
+            ) : null}
+          </button>
+          {secondaryExpanded && hasSecondaryPathway ? (
+            <div className="mt-4 rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#586273]">
+                    Secondary Milestone Progress
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-[#162b3e]">
+                    {secondaryProgressPercent === null
+                      ? "No configured milestone map"
+                      : `${secondaryCompletedConfiguredMilestones}/${secondaryOfferMilestones.length} milestones complete`}
+                  </div>
+                </div>
+                <span className="text-xl font-semibold text-[#2b79c4]">
+                  {secondaryProgressPercent === null
+                    ? "--"
+                    : `${secondaryProgressPercent}%`}
+                </span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#dbeafe]">
+                <div
+                  className="h-full rounded-full bg-[#59abf0]"
+                  style={{ width: `${secondaryProgressPercent ?? 0}%` }}
+                />
+              </div>
+              <div className="mt-3 space-y-2">
+                {secondaryTimelineRows.length > 0 ? (
+                  secondaryTimelineRows.map(
+                    ({ milestone, progress, isCurrent, status }, index) => {
+                      const milestoneId =
+                        milestone.glide_row_id ?? progress?.milestone_id;
+                      return (
+                        <div
+                          key={String(milestoneId ?? `secondary-milestone-${index}`)}
+                          className={`rounded-md border bg-white px-3 py-3 text-sm ${
+                            isCurrent
+                              ? "border-indigo-200 ring-1 ring-indigo-100"
+                              : "border-gray-200"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <span className="font-medium text-gray-900">
+                                {displayValue(milestone.name)}
+                              </span>
+                              <div className="mt-1 text-xs text-gray-500">
+                                Start: {formatDate(progress?.start_date)} ·
+                                Completed: {formatDate(progress?.completion_date)}
+                              </div>
+                            </div>
+                            <span
+                              className={`w-fit rounded-full border px-2 py-0.5 text-xs font-medium ${milestoneStatusClasses(status)}`}
+                            >
+                              {status}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    },
+                  )
+                ) : (
+                  <div className="rounded-md border border-dashed border-gray-300 bg-white px-3 py-3 text-sm text-gray-600">
+                    No milestones are configured for this secondary pathway.
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
