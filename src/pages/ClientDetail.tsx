@@ -926,6 +926,7 @@ function CustomFieldEditorGrid({
   values,
   drafts,
   disabled,
+  collapsible = false,
   onChange,
 }: {
   client: ClientRow;
@@ -933,9 +934,11 @@ function CustomFieldEditorGrid({
   values: ClientCustomFieldValueRow[];
   drafts: CustomFieldDrafts;
   disabled: boolean;
+  collapsible?: boolean;
   onChange: (fieldId: string, value: string) => void;
 }) {
   const valueByFieldId = new Map(values.map((row) => [row.custom_field_id, row]));
+  const [expanded, setExpanded] = useState(false);
   const activeFields = fields
     .filter((field) => field.status !== "archived")
     .sort((a, b) => {
@@ -947,15 +950,54 @@ function CustomFieldEditorGrid({
 
   if (activeFields.length === 0) return null;
 
-  return (
-    <section className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
-      <div className="mb-4">
+  const visibleFields = !collapsible || expanded;
+  const filledFieldCount = activeFields.filter((field) => {
+    const value =
+      drafts[field.id] ??
+      customFieldInputValue(field, valueByFieldId.get(field.id), client);
+    return value.trim() !== "";
+  }).length;
+  const heading = (
+    <>
+      <div>
         <h3 className="text-sm font-semibold text-[#162b3e]">Custom fields</h3>
         <p className="mt-1 text-sm text-[#586273]">
           Update company-specific tracking fields for this client.
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {collapsible ? (
+        <div className="flex items-center gap-3">
+          <span className="rounded-full border border-[#d6eafb] bg-white px-2.5 py-1 text-xs font-semibold text-[#2b79c4]">
+            {filledFieldCount}/{activeFields.length} filled
+          </span>
+          <span className="text-xs font-semibold text-[#586273]">
+            {expanded ? "Hide fields" : "Show fields"}
+          </span>
+        </div>
+      ) : null}
+    </>
+  );
+
+  return (
+    <section className="rounded-lg border border-[#e4e9f0] bg-[#f8fafc] p-4">
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          className="flex w-full flex-col gap-3 text-left sm:flex-row sm:items-center sm:justify-between"
+        >
+          {heading}
+        </button>
+      ) : (
+        <div className="mb-4">{heading}</div>
+      )}
+      {visibleFields ? (
+        <div
+          className={`grid grid-cols-1 gap-4 md:grid-cols-2 ${
+            collapsible ? "mt-4" : ""
+          }`}
+        >
         {activeFields.map((field) => {
           const value =
             drafts[field.id] ??
@@ -1033,7 +1075,8 @@ function CustomFieldEditorGrid({
             </label>
           );
         })}
-      </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -2545,6 +2588,7 @@ function ClientOutcomesInlineEditor({
           values={customFieldValues}
           drafts={customFieldDrafts}
           disabled={!canEdit || saving}
+          collapsible
           onChange={(fieldId, value) =>
             setCustomFieldDrafts((current) => ({
               ...current,

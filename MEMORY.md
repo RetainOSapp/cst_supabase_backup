@@ -444,3 +444,10 @@ For historical context:
 - Daniel-call follow-up: updated `src/pages/Resources.tsx` Client Update Webhook guide so the copied request body is a safe minimal payload and optional payload examples are split into Profile fields and Secondary pathway. `npm run build` passed.
 - Moves Method access prep: Jay refreshed the Glide backup at `2026-07-02T16:26:17Z`; app-owned `company_members` was refreshed from `backup_company_team` for MM only. Inserted 11 rows, updated 6 archived/status changes, and final verification shows 100 app-owned team rows with 73 active users matching backup. No clients were touched.
 - Moves Method custom-field prep: seeded app-owned `company_custom_fields` for legacy Glide slots `customfield1..customfield7`: Gender, Age, Goals, Training Background, Injuries, Close Date, Program Name and Length. Live disposable-token QA against `zapier-create-client` confirmed `customfield6 = 2026-07-02` and `customfield7 = Inner Circle - 3 Months` are accepted and persisted; temporary test client and token were cleaned up.
+
+## Moves Method Loom Polish - 2026-07-02
+
+- Jay found two Loom polish issues before sharing access: Dashboard still surfaced user-facing Offer copy, and Client Detail custom fields were useful but too visually long once webhook-prefilled values existed.
+- Updated `src/pages/Dashboard.tsx`: Dashboard-visible filter/chart/drilldown copy now says Pathway / pathways instead of Offer / offers. Internal `offer_*` names remain because the schema and query contract still use those names.
+- Updated `src/pages/ClientDetail.tsx`: `CustomFieldEditorGrid` supports a collapsible mode. Client Detail > Outcomes now shows custom fields as an expandable section with a filled-field count; Quick Update and outcome modals remain unchanged.
+- `npm run build` passed with the existing Vite/Anthropic browser-externalization and chunk-size warnings.

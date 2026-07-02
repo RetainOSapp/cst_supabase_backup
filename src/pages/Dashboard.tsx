@@ -3713,7 +3713,7 @@ export function Dashboard() {
                   htmlFor="offer-filter"
                   className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1"
                 >
-                  Offer
+                  Pathway
                 </label>
                 <select
                   id="offer-filter"
@@ -3725,7 +3725,7 @@ export function Dashboard() {
                   className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
                 >
                   <option value="">
-                    {offersLoading ? "Loading offers..." : "All offers"}
+                    {offersLoading ? "Loading pathways..." : "All pathways"}
                   </option>
                   {offerOptions.map((offer) => (
                     <option key={offer.value} value={offer.value}>
@@ -4127,12 +4127,14 @@ export function Dashboard() {
               </ChartCard>
               <ChartCard
                 title={
-                  appliedFilters.offerId ? "Clients By Milestone" : "Clients By Offer"
+                  appliedFilters.offerId
+                    ? "Clients By Milestone"
+                    : "Clients By Pathway"
                 }
                 subtitle={
                   appliedFilters.offerId
-                    ? "Current milestone breakdown for the selected offer"
-                    : "Top current offers for filtered clients"
+                    ? "Current milestone breakdown for the selected pathway"
+                    : "Top current pathways for filtered clients"
                 }
               >
                 <BarChart
@@ -4143,7 +4145,7 @@ export function Dashboard() {
                           openChartDetail(
                             appliedFilters.offerId
                               ? "Clients By Milestone"
-                              : "Clients By Offer",
+                              : "Clients By Pathway",
                             item,
                             (client) => {
                               if (!appliedFilters.offerId) {

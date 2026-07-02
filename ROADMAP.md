@@ -447,6 +447,7 @@ Next session lock:
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
   - `[qa]` When an Offer filter is applied in Dashboard > Charts, the Clients By Offer chart switches to Clients By Milestone for that selected offer/pathway and keeps client-list drilldowns.
+  - 2026-07-02 Loom polish: dashboard-visible copy now uses Pathway for the filter, all-pathways option, chart title, subtitle, and drilldown title. Internal database/query names still use `offer` where that is the current schema contract.
   - 2026-06-17 readiness packet prepared in `DASHBOARD_FORMULA_VALIDATION.md` with current formulas, sources, weak spots, and migration-day checks. Full confidence still waits for Moves Method or another larger migrated company.
 - `[ ]` `[priority: medium]` Dashboard advanced filtering and sorting.
   - Capture Ben pilot feedback: dashboard views should eventually support more operational filtering/sorting directly inside the dashboard.
@@ -1765,6 +1766,7 @@ Use this section as the “what good looks like” checklist before migrating re
 - `[x]` Client profile supports company custom fields.
   - Values are editable under Client Detail > Outcomes.
   - Client Details tab intentionally does not show them for v1 because these are recurring update fields, not static profile metadata.
+  - 2026-07-02 Loom polish: Client Detail > Outcomes custom fields are collapsed behind an expandable section with filled-field count; Quick Update custom fields are unchanged.
 - `[x]` Client profile supports up to three email addresses for integration matching.
   - 2026-06-20 added primary + two alternate email slots on app-owned clients. Call Summary / Next Steps, Client Update Webhook, New Client Webhook, and Integration Review matching now use all three while keeping ambiguous matches in review.
 - `[ ]` Client profile supports call attendance tracking.
