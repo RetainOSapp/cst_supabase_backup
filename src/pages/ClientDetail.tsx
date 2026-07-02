@@ -115,6 +115,11 @@ type ClientMilestoneRow = Record<string, unknown> & {
   duration_days?: number | string | null;
   time_to_hit_days?: number | string | null;
 };
+type MilestoneActionKind =
+  | "start_milestone"
+  | "complete_milestone"
+  | "start_secondary_milestone"
+  | "complete_secondary_milestone";
 type OfferMilestoneRow = Record<string, unknown> & {
   glide_row_id?: string | null;
   offer_id?: string | null;
@@ -129,6 +134,20 @@ type CurrentPathwayContext = {
   milestoneId: string;
   progress: ClientMilestoneRow | null;
 };
+
+function isCompleteMilestoneAction(action: MilestoneActionKind) {
+  return (
+    action === "complete_milestone" ||
+    action === "complete_secondary_milestone"
+  );
+}
+
+function isSecondaryMilestoneAction(action: MilestoneActionKind) {
+  return (
+    action === "start_secondary_milestone" ||
+    action === "complete_secondary_milestone"
+  );
+}
 type ClientTaskRow = Record<string, unknown> & {
   glide_row_id?: string | null;
   company_id?: string | null;
@@ -1332,6 +1351,14 @@ function clientMilestoneSortTime(row: ClientMilestoneRow) {
     0
   );
 }
+function clientMilestoneLane(row: ClientMilestoneRow) {
+  const metadata = row.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return "primary";
+  }
+  const lane = (metadata as Record<string, unknown>).pathway_lane;
+  return lane === "secondary" ? "secondary" : "primary";
+}
 function deriveCurrentPathwayContext(
   client: ClientRow,
   clientMilestones: ClientMilestoneRow[],
@@ -1342,6 +1369,7 @@ function deriveCurrentPathwayContext(
       .filter(
         (milestone) =>
           isPresent(milestone.milestone_id) &&
+          clientMilestoneLane(milestone) !== "secondary" &&
           !isPresent(milestone.completion_date),
       )
       .slice()
@@ -1369,6 +1397,7 @@ function deriveCurrentPathwayContext(
     activeProgress ??
     clientMilestones.find(
       (milestone) =>
+        clientMilestoneLane(milestone) !== "secondary" &&
         String(milestone.offer_id ?? "") === String(offerId) &&
         String(milestone.milestone_id ?? "") === String(milestoneId),
     ) ??
@@ -3398,7 +3427,7 @@ function MilestoneActionModal({
   onSaved,
 }: {
   client: ClientRow;
-  action: "start_milestone" | "complete_milestone";
+  action: MilestoneActionKind;
   currentMilestoneName: string;
   offerMilestones: OfferMilestoneRow[];
   relationLookup: Map<string, string>;
@@ -3417,13 +3446,34 @@ function MilestoneActionModal({
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const isComplete = action === "complete_milestone";
+  const isComplete = isCompleteMilestoneAction(action);
+  const isSecondary = isSecondaryMilestoneAction(action);
   const currentOfferId =
     existingProgress?.offer_id ??
-    textInputValue(valueFrom(client, ["offer_milestones_current_offer_id"]));
+    textInputValue(
+      valueFrom(
+        client,
+        isSecondary
+          ? [
+              "secondary_offer_milestones_current_offer_id",
+              "offer_milestones_2nd_current_offer_id",
+            ]
+          : ["offer_milestones_current_offer_id"],
+      ),
+    );
   const currentMilestoneId =
     existingProgress?.milestone_id ??
-    textInputValue(valueFrom(client, ["offer_milestones_current_milestone_id"]));
+    textInputValue(
+      valueFrom(
+        client,
+        isSecondary
+          ? [
+              "secondary_offer_milestones_current_milestone_id",
+              "offer_milestones_2nd_current_milestone_id",
+            ]
+          : ["offer_milestones_current_milestone_id"],
+      ),
+    );
   const orderedMilestones = offerMilestones
     .filter((milestone) => String(milestone.offer_id ?? "") === String(currentOfferId))
     .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
@@ -3475,12 +3525,8 @@ function MilestoneActionModal({
         body: {
           action,
           clientLegacyId: client.glide_row_id,
-          offerId:
-            existingProgress?.offer_id ??
-            valueFrom(client, ["offer_milestones_current_offer_id"]),
-          milestoneId:
-            existingProgress?.milestone_id ??
-            valueFrom(client, ["offer_milestones_current_milestone_id"]),
+          offerId: currentOfferId,
+          milestoneId: currentMilestoneId,
           startDate,
           completionDate: isComplete ? completionDate : undefined,
           notes,
@@ -3508,7 +3554,7 @@ function MilestoneActionModal({
         const { data: startData, error: startError } =
           await supabase.functions.invoke("manage-client-milestone", {
             body: {
-              action: "start_milestone",
+              action: isSecondary ? "start_secondary_milestone" : "start_milestone",
               clientLegacyId: client.glide_row_id,
               offerId: currentOfferId,
               milestoneId: nextStartMilestoneId,
@@ -3557,7 +3603,13 @@ function MilestoneActionModal({
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">
-              {isComplete ? "Complete Milestone" : "Start Milestone"}
+              {isComplete
+                ? isSecondary
+                  ? "Complete Secondary Milestone"
+                  : "Complete Milestone"
+                : isSecondary
+                  ? "Start Secondary Milestone"
+                  : "Start Milestone"}
             </h2>
             <p className="mt-1 text-sm text-gray-500">
               {currentMilestoneName}
@@ -3578,7 +3630,7 @@ function MilestoneActionModal({
               <div className="grid gap-3 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 sm:grid-cols-2">
                 <div>
                   <div className="text-xs font-medium uppercase tracking-wider text-indigo-700">
-                    Completing
+                    {isSecondary ? "Completing Secondary" : "Completing"}
                   </div>
                   <div className="mt-1 text-sm font-semibold text-indigo-950">
                     {displayValue(
@@ -3617,7 +3669,7 @@ function MilestoneActionModal({
                     className="mt-0.5 h-4 w-4 rounded border-gray-300"
                   />
                   <span>
-                    Start another milestone after completing this one
+                    Start another {isSecondary ? "secondary " : ""}milestone after completing this one
                     <span className="mt-1 block text-xs font-normal text-gray-500">
                       Use the next milestone in line, or choose another active milestone.
                     </span>
@@ -3729,7 +3781,15 @@ function MilestoneActionModal({
               disabled={saving}
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
-              {saving ? "Saving..." : isComplete ? "Complete Milestone" : "Start Milestone"}
+              {saving
+                ? "Saving..."
+                : isComplete
+                  ? isSecondary
+                    ? "Complete Secondary Milestone"
+                    : "Complete Milestone"
+                  : isSecondary
+                    ? "Start Secondary Milestone"
+                    : "Start Milestone"}
             </button>
           </div>
         </form>
@@ -5134,6 +5194,8 @@ function PathwaysSection({
   canManagePathways,
   onStartMilestone,
   onCompleteMilestone,
+  onStartSecondaryMilestone,
+  onCompleteSecondaryMilestone,
   onChangePathway,
 }: {
   client: ClientRow;
@@ -5147,6 +5209,8 @@ function PathwaysSection({
   canManagePathways: boolean;
   onStartMilestone: (progress: ClientMilestoneRow | null) => void;
   onCompleteMilestone: (progress: ClientMilestoneRow | null) => void;
+  onStartSecondaryMilestone: (progress: ClientMilestoneRow | null) => void;
+  onCompleteSecondaryMilestone: (progress: ClientMilestoneRow | null) => void;
   onChangePathway: () => void;
 }) {
   const effectiveCurrent = deriveCurrentPathwayContext(
@@ -5446,16 +5510,38 @@ function PathwaysSection({
       return String(milestone.offer_id) === String(secondaryOfferValue);
     })
     .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
-  const secondaryProgressByMilestoneId = new Map(
-    clientMilestones
-      .filter(
-        (milestone) =>
-          isPresent(milestone.milestone_id) &&
-          (!isPresent(milestone.offer_id) ||
-            !isPresent(secondaryOfferValue) ||
-            String(milestone.offer_id) === String(secondaryOfferValue)),
-      )
-      .map((milestone) => [String(milestone.milestone_id), milestone]),
+  const secondaryProgressCandidates = clientMilestones.filter(
+    (milestone) =>
+      isPresent(milestone.milestone_id) &&
+      (!isPresent(milestone.offer_id) ||
+        !isPresent(secondaryOfferValue) ||
+        String(milestone.offer_id) === String(secondaryOfferValue)),
+  );
+  const secondaryProgressByMilestoneId = new Map<string, ClientMilestoneRow>();
+  for (const milestone of secondaryProgressCandidates) {
+    if (!isPresent(milestone.milestone_id)) continue;
+    const milestoneId = String(milestone.milestone_id);
+    const existing = secondaryProgressByMilestoneId.get(milestoneId);
+    if (!existing || clientMilestoneLane(milestone) === "secondary") {
+      secondaryProgressByMilestoneId.set(milestoneId, milestone);
+    }
+  }
+  const secondaryCurrentProgress = isPresent(secondaryMilestoneValue)
+    ? secondaryProgressByMilestoneId.get(String(secondaryMilestoneValue)) ??
+      ({
+        client_id: client.glide_row_id,
+        offer_id: String(secondaryOfferValue ?? ""),
+        milestone_id: String(secondaryMilestoneValue),
+        metadata: { pathway_lane: "secondary" },
+      } as ClientMilestoneRow)
+    : null;
+  const secondaryCanAdvance =
+    canAdvanceMilestones &&
+    isPresent(secondaryOfferValue) &&
+    isPresent(secondaryMilestoneValue);
+  const secondaryHasStarted = isPresent(secondaryCurrentProgress?.start_date);
+  const secondaryHasCompleted = isPresent(
+    secondaryCurrentProgress?.completion_date,
   );
   const secondaryTimelineRows = secondaryOfferMilestones.map((milestone) => {
     const milestoneId = milestone.glide_row_id ?? null;
@@ -5759,6 +5845,36 @@ function PathwaysSection({
                   style={{ width: `${secondaryProgressPercent ?? 0}%` }}
                 />
               </div>
+              {secondaryCanAdvance ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {!secondaryHasStarted ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onStartSecondaryMilestone(secondaryCurrentProgress)
+                      }
+                      className="retainos-button-secondary cursor-pointer px-3 py-2 text-sm"
+                    >
+                      Start Secondary Milestone
+                    </button>
+                  ) : null}
+                  {!secondaryHasCompleted ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onCompleteSecondaryMilestone(secondaryCurrentProgress)
+                      }
+                      className="retainos-button-primary cursor-pointer px-3 py-2 text-sm"
+                    >
+                      Complete Secondary Milestone
+                    </button>
+                  ) : (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                      Current secondary milestone completed
+                    </span>
+                  )}
+                </div>
+              ) : null}
               <div className="mt-3 space-y-2">
                 {secondaryTimelineRows.length > 0 ? (
                   secondaryTimelineRows.map(
@@ -6287,7 +6403,7 @@ export function ClientDetail() {
   const [archivingContractId, setArchivingContractId] = useState<string | null>(null);
   const [isAppOwnedClient, setIsAppOwnedClient] = useState(false);
   const [milestoneAction, setMilestoneAction] = useState<{
-    action: "start_milestone" | "complete_milestone";
+    action: MilestoneActionKind;
     progress: ClientMilestoneRow | null;
   } | null>(null);
   const [changingPathway, setChangingPathway] = useState(false);
@@ -6987,6 +7103,15 @@ export function ClientDetail() {
           }
           onCompleteMilestone={(progress) =>
             setMilestoneAction({ action: "complete_milestone", progress })
+          }
+          onStartSecondaryMilestone={(progress) =>
+            setMilestoneAction({ action: "start_secondary_milestone", progress })
+          }
+          onCompleteSecondaryMilestone={(progress) =>
+            setMilestoneAction({
+              action: "complete_secondary_milestone",
+              progress,
+            })
           }
           onChangePathway={() => setChangingPathway(true)}
         />
