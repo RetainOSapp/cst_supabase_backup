@@ -29,6 +29,7 @@ import {
 
 const PAGE_SIZE = 12;
 const NOTE_SEARCH_PAGE_SIZE = 12;
+const QUICK_UPDATE_CONTEXT_PREVIEW_LIMIT = 260;
 const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
 const UNASSIGNED_CSM_FILTER = "__unassigned";
 const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as const;
@@ -1227,6 +1228,28 @@ function sanitizeHtml(value: string) {
     .replace(/\son\w+=["'][^"']*["']/gi, "")
     .replace(/javascript:/gi, "");
 }
+function decodeBasicHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#039;/gi, "'");
+}
+function plainTextPreviewValue(value: unknown) {
+  const text = displayValue(value);
+  if (text === "--") return text;
+  return decodeBasicHtmlEntities(
+    text
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  );
+}
 function RichValue({ value }: { value: unknown }) {
   const text = displayValue(value);
   if (text === "--") return <>{text}</>;
@@ -1286,14 +1309,27 @@ function ReadOnlyField({
   display = "plain",
   lookup,
   tone = "slate",
+  truncateAt,
 }: {
   label: string;
   value: unknown;
   display?: "plain" | "rich" | "outcome";
   lookup?: Map<string, string>;
   tone?: "blue" | "green" | "amber" | "slate";
+  truncateAt?: number;
 }) {
+  const [showFullValue, setShowFullValue] = useState(false);
   const shownValue = lookup ? displayValue(value, lookup) : value;
+  const previewText = plainTextPreviewValue(shownValue);
+  const canTruncate =
+    display === "rich" &&
+    typeof truncateAt === "number" &&
+    truncateAt > 0 &&
+    previewText !== "--" &&
+    previewText.length > truncateAt;
+  const truncatedPreview = canTruncate
+    ? `${previewText.slice(0, truncateAt).trimEnd()}...`
+    : previewText;
   const toneClasses = {
     blue: "border-[#bfdbfe] bg-[#eff6ff]",
     green: "border-[#bbf7d0] bg-[#f0fdf4]",
@@ -1306,7 +1342,20 @@ function ReadOnlyField({
         {label}
       </div>
       <div className="mt-1.5 text-sm font-medium text-[#162b3e]">
-        {display === "rich" ? (
+        {display === "rich" && canTruncate ? (
+          <>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+              {truncatedPreview}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowFullValue(true)}
+              className="mt-2 text-xs font-semibold text-[#2b79c4] hover:text-[#162b3e] cursor-pointer"
+            >
+              Read more
+            </button>
+          </>
+        ) : display === "rich" ? (
           <RichValue value={shownValue} />
         ) : display === "outcome" ? (
           <OutcomePill value={value} />
@@ -1314,6 +1363,47 @@ function ReadOnlyField({
           displayValue(shownValue)
         )}
       </div>
+      {showFullValue ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label={`Close ${label} details`}
+            onClick={() => setShowFullValue(false)}
+            className="absolute inset-0 bg-[#0e1b29]/55 backdrop-blur-[2px] cursor-pointer"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`quick-update-${label.toLowerCase().replace(/\s+/g, "-")}-title`}
+            className="relative flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#dbe3ee] bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-[#e4e9f0] px-5 py-4">
+              <div>
+                <div className="text-[11px] font-semibold uppercase text-[#2b79c4]">
+                  Quick Update context
+                </div>
+                <h3
+                  id={`quick-update-${label.toLowerCase().replace(/\s+/g, "-")}-title`}
+                  className="mt-1 text-lg font-semibold text-[#162b3e]"
+                >
+                  {label}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFullValue(false)}
+                className="rounded-md p-1.5 text-[#98a2b3] hover:bg-[#f1f5f9] hover:text-[#162b3e] cursor-pointer"
+              >
+                <span className="sr-only">Close</span>
+                <span className="text-xl leading-none">x</span>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <RichValue value={shownValue} />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1950,12 +2040,14 @@ function QuickUpdateModal({
                 value={valueFrom(client, northStarColumns)}
                 display="rich"
                 tone="blue"
+                truncateAt={QUICK_UPDATE_CONTEXT_PREVIEW_LIMIT}
               />
               <ReadOnlyField
                 label="Next Steps"
                 value={valueFrom(client, nextStepsColumns)}
                 display="rich"
                 tone="green"
+                truncateAt={QUICK_UPDATE_CONTEXT_PREVIEW_LIMIT}
               />
               <ReadOnlyField
                 label="Date of Last Contact"

@@ -451,3 +451,9 @@ For historical context:
 - Updated `src/pages/Dashboard.tsx`: Dashboard-visible filter/chart/drilldown copy now says Pathway / pathways instead of Offer / offers. Internal `offer_*` names remain because the schema and query contract still use those names.
 - Updated `src/pages/ClientDetail.tsx`: `CustomFieldEditorGrid` supports a collapsible mode. Client Detail > Outcomes now shows custom fields as an expandable section with a filled-field count; Quick Update and outcome modals remain unchanged.
 - `npm run build` passed with the existing Vite/Anthropic browser-externalization and chunk-size warnings.
+
+## Quick Update Long Context Polish - 2026-07-02
+
+- Jay found Loom QA cases where automated North Star / Next Steps values could be very long and made Quick Update visually heavy.
+- Updated `src/pages/Clients.tsx`: Quick Update North Star and Next Steps context cards now preview the first 260 characters and show `Read more` when longer. The full value opens in a simple read-only modal using the existing rich-text renderer.
+- `npm run build` passed with the existing Vite/Anthropic browser-externalization and chunk-size warnings.

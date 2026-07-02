@@ -786,6 +786,7 @@ Use this section to connect feature work into operational flows. A feature is no
   - Call attendance remains future work.
   - Custom fields are treated as recurring update fields and are editable in Quick Update and Client Detail > Outcomes once definitions are enabled for a company.
   - 2026-06-20 resource audit: `how-to-make-a-quick-update` now documents the RetainOS interaction-log flow, including context cards, contact cadence, Success/Progress/Buy-In, custom fields, milestone completion/start-next, and the product decision that pathway/offer reassignment belongs in Client Detail > Pathways & Milestones.
+  - 2026-07-02 Loom polish: Quick Update context cards truncate long North Star / Next Steps automation text and open the full rich text in a simple read-only modal from `Read more`.
 - `[~]` `[polish]` Quick Update writes to client history/change log.
   - Pilot writes app-owned `client_history_events`.
 - `[~]` `[qa]` Global client note search across profiles.
