@@ -474,3 +474,10 @@ For historical context:
 - Updated `src/pages/SaasClientDetail.tsx`: Admin Hub > Pathways & Milestones usage counts now use the same active-client rule and include secondary pathway/milestone usage.
 - Deployed `manage-company-pathway` to Supabase project `zjauqflzxzsbpnivzsct`; `npm run build` passed. `ROADMAP.md` has a short Jay QA retest item for archiving unused MM pathways/milestones.
 - DO NOT COMMIT remains in force for unrelated local Beacon/package/Header dirty work.
+
+## Task Template Modal Polish - 2026-07-03
+
+- Jay confirmed the missing new Kickoff milestones were resolved by hard refresh, meaning Task Templates had stale settings data rather than missing Supabase rows.
+- Updated `src/pages/SaasClientDetail.tsx`: Task Templates modal now refreshes active app-owned pathways/milestones on open and shows refreshing labels while loading.
+- Added a Copy action to active task template cards; it opens an unsaved `Copy of ...` draft with the original trigger, assignment, due offset, priority, pathway, and milestone values for faster MM setup.
+- `npm run build` passed with existing Beacon/Anthropic browser-externalization and chunk-size warnings.

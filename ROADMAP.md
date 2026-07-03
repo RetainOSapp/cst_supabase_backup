@@ -827,6 +827,7 @@ Use this section to connect feature work into operational flows. A feature is no
 - `[x]` Task can be auto-created when a primary pathway milestone is completed.
   - V1 is configured from Company Settings > Task templates and intentionally excludes secondary pathway milestones.
   - 2026-07-03 Jay QA passed.
+  - 2026-07-03 follow-up: Task Templates modal refreshes pathway/milestone options when opened so newly created milestones appear without a hard refresh, and templates can be copied into a new unsaved draft.
 - `[ ]` `[priority: low]` Task status changes update related notifications and reporting.
   - Deferred until task usage becomes a higher pilot priority.
 - `[ ]` `[priority: low]` Overdue tasks are flagged and routed to the correct user.

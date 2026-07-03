@@ -2783,8 +2783,15 @@ function TaskTemplatesModal({
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const activeOffers = offers.filter((offer) => offer.status !== "archived");
-  const milestoneOptions = milestones
+  const [freshOffers, setFreshOffers] = useState<CompanyOfferRow[] | null>(null);
+  const [freshMilestones, setFreshMilestones] = useState<
+    CompanyOfferMilestoneRow[] | null
+  >(null);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const availableOffers = freshOffers ?? offers;
+  const availableMilestones = freshMilestones ?? milestones;
+  const activeOffers = availableOffers.filter((offer) => offer.status !== "archived");
+  const milestoneOptions = availableMilestones
     .filter(
       (milestone) =>
         milestone.status !== "archived" &&
@@ -2810,7 +2817,7 @@ function TaskTemplatesModal({
     activeOffers.map((offer) => [offer.glide_row_id, offer.name ?? "Unnamed pathway"]),
   );
   const milestoneNameById = new Map(
-    milestones.map((milestone) => [
+    availableMilestones.map((milestone) => [
       milestone.glide_row_id,
       milestone.name ?? "Unnamed milestone",
     ]),
@@ -2818,6 +2825,68 @@ function TaskTemplatesModal({
   const missingMilestoneTriggerFields =
     draft.trigger_type === "milestone_completed" &&
     (!draft.applies_to_offer_id || !draft.applies_to_milestone_id);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFreshPathwayOptions() {
+      setOptionsLoading(true);
+      const { data: appCompany, error: companyError } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("legacy_glide_row_id", companyLegacyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (companyError || !appCompany?.id) {
+        if (companyError) {
+          console.error("Failed to refresh task template pathways:", companyError);
+        }
+        setOptionsLoading(false);
+        return;
+      }
+
+      const [offersResult, milestonesResult] = await Promise.all([
+        supabase
+          .from("company_offers")
+          .select("glide_row_id, name, status")
+          .eq("company_id", appCompany.id)
+          .eq("status", "active")
+          .order("name", { ascending: true }),
+        supabase
+          .from("company_offer_milestones")
+          .select("glide_row_id, offer_id, name, position, status")
+          .eq("company_id", appCompany.id)
+          .eq("status", "active")
+          .order("position", { ascending: true }),
+      ]);
+
+      if (cancelled) return;
+      if (!offersResult.error) {
+        setFreshOffers((offersResult.data ?? []) as CompanyOfferRow[]);
+      } else {
+        console.error("Failed to refresh task template offers:", offersResult.error);
+      }
+      if (!milestonesResult.error) {
+        setFreshMilestones(
+          (milestonesResult.data ?? []) as CompanyOfferMilestoneRow[],
+        );
+      } else {
+        console.error(
+          "Failed to refresh task template milestones:",
+          milestonesResult.error,
+        );
+      }
+      setOptionsLoading(false);
+    }
+
+    void loadFreshPathwayOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [companyLegacyId]);
 
   function templateTriggerLabel(template: CompanyTaskTemplateRow) {
     if (template.trigger_type === "client_created") {
@@ -2857,6 +2926,29 @@ function TaskTemplatesModal({
       assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
       priority: template.priority ?? "",
       position: template.position ?? 0,
+    });
+    setError(null);
+  }
+
+  function copyTemplate(template: CompanyTaskTemplateRow) {
+    const { id: _id, archived_at: _archivedAt, ...copy } = template;
+    const nextPosition =
+      Math.max(
+        0,
+        ...templates.map((item) =>
+          typeof item.position === "number" ? item.position : 0,
+        ),
+      ) + 10;
+    setEditing(null);
+    setDraft({
+      ...copy,
+      name: `Copy of ${template.name}`,
+      description: template.description ?? "",
+      applies_to_offer_id: template.applies_to_offer_id ?? "",
+      applies_to_milestone_id: template.applies_to_milestone_id ?? "",
+      assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
+      priority: template.priority ?? "",
+      position: nextPosition,
     });
     setError(null);
   }
@@ -3000,6 +3092,13 @@ function TaskTemplatesModal({
                       </button>
                       <button
                         type="button"
+                        onClick={() => copyTemplate(template)}
+                        className="rounded-md border border-[#d0d5dd] px-3 py-1.5 text-xs font-semibold text-[#344054] hover:bg-[#f8fafc]"
+                      >
+                        Copy
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void archiveTemplate(template)}
                         className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
                       >
@@ -3108,7 +3207,9 @@ function TaskTemplatesModal({
                 >
                   <option value="">
                     {draft.trigger_type === "milestone_completed"
-                      ? "Choose pathway"
+                      ? optionsLoading
+                        ? "Refreshing pathways..."
+                        : "Choose pathway"
                       : "All pathways"}
                   </option>
                   {activeOffers.map((offer) => (
@@ -3133,9 +3234,11 @@ function TaskTemplatesModal({
                     className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
                   >
                     <option value="">
-                      {draft.applies_to_offer_id
-                        ? "Choose milestone"
-                        : "Choose pathway first"}
+                      {optionsLoading
+                        ? "Refreshing milestones..."
+                        : draft.applies_to_offer_id
+                          ? "Choose milestone"
+                          : "Choose pathway first"}
                     </option>
                     {milestoneOptions.map((milestone) => (
                       <option
