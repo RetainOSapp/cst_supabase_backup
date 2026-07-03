@@ -427,6 +427,7 @@ Next session lock:
   - 2026-06-20 QA follow-up deployed `manage-client-create` and `zapier-create-client` again so auto-created task names render `{client_name}` / `{client}` or append the client name by default. Tasks list view now groups by status and supports drag/drop like board view.
   - 2026-06-20 automation/recurring follow-up deployed `manage-client-task` and `manage-client-profile`: client CSM assignment claims open unassigned client tasks, and recurring tasks create the next occurrence when completed. Tasks board/list got soft status lane colors from the RetainOS palette.
   - 2026-06-20 custom reminder audit: RetainOS should model custom client reminders as client-linked tasks with due dates, not a separate CST-style reminder object. Optional later UX: Quick Update shortcut that creates a client-linked task/reminder.
+  - 2026-07-03 milestone-template V1: Task Templates can now use `When milestone is completed` for primary pathway milestones only. Admin selects Pathway + Milestone, due offset, assignment, priority, and status; `manage-client-milestone` creates matching tasks after primary milestone completion with duplicate protection. Awaiting Jay QA.
   - Remaining later gaps after this QA: comments, attachments, recurring rules, realtime, richer notifications.
 - `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
 - `[~]` `[qa]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
@@ -818,6 +819,8 @@ Use this section to connect feature work into operational flows. A feature is no
   - Current v1 creates from top-level Tasks with an optional client link; direct Client Detail create button is still future.
 - `[x]` Task can be assigned to team members with due date and priority/status.
 - `[x]` Task appears in the global Task Manager and client profile when linked to a client.
+- `[~]` `[qa]` Task can be auto-created when a primary pathway milestone is completed.
+  - V1 is configured from Company Settings > Task templates and intentionally excludes secondary pathway milestones.
 - `[ ]` `[priority: low]` Task status changes update related notifications and reporting.
   - Deferred until task usage becomes a higher pilot priority.
 - `[ ]` `[priority: low]` Overdue tasks are flagged and routed to the correct user.

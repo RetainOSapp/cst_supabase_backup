@@ -147,6 +147,211 @@ async function resolveActor(
   throw new Error("You do not have permission to manage milestones.");
 }
 
+function addDaysIso(value: string | null, days: number) {
+  const base = value ? new Date(value) : new Date();
+  if (Number.isNaN(base.getTime())) return new Date().toISOString();
+  base.setDate(base.getDate() + days);
+  return base.toISOString();
+}
+
+function renderTemplateText(
+  value: unknown,
+  context: {
+    clientName: string;
+    pathwayName: string;
+    milestoneName: string;
+    completionDate: string | null;
+  },
+) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  return text
+    .replaceAll("{{client_name}}", context.clientName)
+    .replaceAll("{client_name}", context.clientName)
+    .replaceAll("{{client}}", context.clientName)
+    .replaceAll("{client}", context.clientName)
+    .replaceAll("{{pathway_name}}", context.pathwayName)
+    .replaceAll("{pathway_name}", context.pathwayName)
+    .replaceAll("{{milestone_name}}", context.milestoneName)
+    .replaceAll("{milestone_name}", context.milestoneName)
+    .replaceAll("{{completion_date}}", context.completionDate ?? "")
+    .replaceAll("{completion_date}", context.completionDate ?? "");
+}
+
+function renderAutoTaskName(
+  template: Record<string, unknown>,
+  context: {
+    clientName: string;
+    pathwayName: string;
+    milestoneName: string;
+    completionDate: string | null;
+  },
+) {
+  const rendered = renderTemplateText(template.name, context);
+  if (!rendered || !context.clientName) return rendered;
+  if (rendered.toLowerCase().includes(context.clientName.toLowerCase())) {
+    return rendered;
+  }
+  return `${rendered} - ${context.clientName}`;
+}
+
+async function resolveTemplateAssignee(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  template: Record<string, unknown>,
+  client: Record<string, unknown>,
+) {
+  const assignToType = String(template.assign_to_type ?? "assigned_csm");
+  if (assignToType === "assigned_csm") {
+    return (client.csm_team_member_id as string | null | undefined) ?? null;
+  }
+  if (assignToType === "specific_member") {
+    return (template.assigned_member_legacy_id as string | null | undefined) ?? null;
+  }
+  if (assignToType === "unassigned") return null;
+  if (assignToType === "director" || assignToType === "support") {
+    const { data, error } = await supabase
+      .from("company_members")
+      .select("legacy_glide_row_id")
+      .eq("company_id", companyId)
+      .eq("role", assignToType)
+      .eq("status", "active")
+      .order("name", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return (data?.legacy_glide_row_id as string | null | undefined) ?? null;
+  }
+  return null;
+}
+
+async function createTasksFromMilestoneTemplates({
+  supabase,
+  company,
+  client,
+  actor,
+  offer,
+  milestone,
+  progress,
+  completionDate,
+}: {
+  supabase: ReturnType<typeof createClient>;
+  company: { id: string; legacy_glide_row_id: string | null };
+  client: Record<string, unknown>;
+  actor: {
+    role: string;
+    memberId: string | null;
+  };
+  offer: Record<string, unknown>;
+  milestone: Record<string, unknown>;
+  progress: Record<string, unknown> | null;
+  completionDate: string | null;
+}) {
+  const { data: templates, error } = await supabase
+    .from("company_task_templates")
+    .select("*")
+    .eq("company_id", company.id)
+    .eq("trigger_type", "milestone_completed")
+    .eq("is_enabled", true)
+    .eq("applies_to_offer_id", offer.glide_row_id)
+    .eq("applies_to_milestone_id", milestone.glide_row_id)
+    .is("archived_at", null)
+    .order("position", { ascending: true });
+  if (error) throw error;
+
+  const createdTasks: Record<string, unknown>[] = [];
+  const skippedTemplateIds: string[] = [];
+  const taskErrors: string[] = [];
+  const context = {
+    clientName: String(client.client_name ?? "").trim(),
+    pathwayName: String(offer.name ?? offer.glide_row_id ?? "").trim(),
+    milestoneName: String(milestone.name ?? milestone.glide_row_id ?? "").trim(),
+    completionDate,
+  };
+
+  for (const template of (templates ?? []) as Record<string, unknown>[]) {
+    try {
+      const templateId = String(template.id ?? "");
+      if (!templateId) continue;
+      const progressId =
+        typeof progress?.id === "string" ? progress.id : progress?.id ? String(progress.id) : "";
+      if (progressId) {
+        const { data: existingTask, error: duplicateError } = await supabase
+          .from("client_tasks")
+          .select("id")
+          .eq("company_id", company.id)
+          .eq("client_id", client.glide_row_id)
+          .contains("metadata", {
+            created_in: "milestone_completed_template",
+            task_template_id: templateId,
+            client_milestone_id: progressId,
+          })
+          .limit(1)
+          .maybeSingle();
+        if (duplicateError) throw duplicateError;
+        if (existingTask) {
+          skippedTemplateIds.push(templateId);
+          continue;
+        }
+      }
+
+      const assignedToId = await resolveTemplateAssignee(
+        supabase,
+        company.id,
+        template,
+        client,
+      );
+      const taskName = renderAutoTaskName(template, context);
+      if (!taskName) continue;
+      const dueOffsetDays = Number(template.due_offset_days ?? 0);
+      const taskDueDate = addDaysIso(
+        completionDate,
+        Number.isFinite(dueOffsetDays) ? dueOffsetDays : 0,
+      );
+      const { data: task, error: taskError } = await supabase
+        .from("client_tasks")
+        .insert({
+          company_id: company.id,
+          company_glide_row_id: company.legacy_glide_row_id,
+          glide_row_id: `task_${crypto.randomUUID()}`,
+          client_id: client.glide_row_id,
+          task_name: taskName,
+          task_description: renderTemplateText(template.description, context) || null,
+          task_due_date: taskDueDate,
+          task_last_updated_date: new Date().toISOString(),
+          start_date: new Date().toISOString(),
+          created_by_id: actor.memberId,
+          assigned_to_id: assignedToId,
+          priority: template.priority ?? null,
+          status_value: template.status_value ?? "todo",
+          metadata: {
+            created_in: "milestone_completed_template",
+            task_template_id: templateId,
+            task_template_name: template.name,
+            actor_role: actor.role,
+            pathway_lane: "primary",
+            trigger_offer_id: offer.glide_row_id,
+            trigger_offer_name: offer.name,
+            trigger_milestone_id: milestone.glide_row_id,
+            trigger_milestone_name: milestone.name,
+            trigger_completion_date: completionDate,
+            client_milestone_id: progressId || null,
+          },
+        })
+        .select("*")
+        .single();
+      if (taskError) throw taskError;
+      createdTasks.push(task);
+    } catch (templateError) {
+      taskErrors.push(
+        templateError instanceof Error ? templateError.message : "Task template failed.",
+      );
+    }
+  }
+
+  return { createdTasks, skippedTemplateIds, taskErrors };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -554,6 +759,23 @@ Deno.serve(async (req) => {
       (selectedMilestone.name as string | null) ?? requestedMilestoneId;
     const nextMilestoneName =
       (nextMilestone?.name as string | null | undefined) ?? null;
+    const templateTaskResult =
+      action === "complete_milestone"
+        ? await createTasksFromMilestoneTemplates({
+            supabase,
+            company: {
+              id: company.id,
+              legacy_glide_row_id:
+                (client.company_glide_row_id as string | null | undefined) ?? null,
+            },
+            client: updatedClient,
+            actor,
+            offer,
+            milestone: selectedMilestone,
+            progress: progressRow,
+            completionDate,
+          })
+        : { createdTasks: [], skippedTemplateIds: [], taskErrors: [] };
     const eventType =
       isStart
         ? "client_milestone_started"
@@ -602,6 +824,9 @@ Deno.serve(async (req) => {
           selected_milestone: selectedMilestone,
           next_milestone: nextMilestone,
           progress: progressRow,
+          created_template_tasks: templateTaskResult.createdTasks,
+          skipped_template_task_ids: templateTaskResult.skippedTemplateIds,
+          task_template_errors: templateTaskResult.taskErrors,
           before: client,
           after: updatedClient,
         },
@@ -638,6 +863,8 @@ Deno.serve(async (req) => {
         selected_offer_id: requestedOfferId,
         selected_milestone_id: requestedMilestoneId,
         next_milestone_id: nextMilestone?.glide_row_id ?? null,
+        created_template_task_count: templateTaskResult.createdTasks.length,
+        task_template_error_count: templateTaskResult.taskErrors.length,
       },
     });
 
@@ -653,6 +880,8 @@ Deno.serve(async (req) => {
         (Boolean(selectedMilestone.is_final_milestone) || !nextMilestone),
       durationDays,
       timeToHitDays,
+      createdTemplateTasks: templateTaskResult.createdTasks,
+      taskTemplateErrors: templateTaskResult.taskErrors,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

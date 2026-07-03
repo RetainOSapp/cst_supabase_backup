@@ -457,3 +457,12 @@ For historical context:
 - Jay found Loom QA cases where automated North Star / Next Steps values could be very long and made Quick Update visually heavy.
 - Updated `src/pages/Clients.tsx`: Quick Update North Star and Next Steps context cards now preview the first 260 characters and show `Read more` when longer. The full value opens in a simple read-only modal using the existing rich-text renderer.
 - `npm run build` passed with the existing Vite/Anthropic browser-externalization and chunk-size warnings.
+
+## Milestone-Completed Task Templates V1 - 2026-07-03
+
+- Built the Moves Method-requested task automation as a Task Templates trigger, not as a new customer webhook. Scope is primary pathway milestones only; secondary pathway milestones intentionally do not fire this V1.
+- Added/applied `supabase/migrations/20260703100000_task_templates_milestone_completed.sql`: `company_task_templates.trigger_type` now allows `milestone_completed`, and templates have `applies_to_milestone_id` plus an index for pathway/milestone matching.
+- Updated `src/pages/SaasClientDetail.tsx`: Company Settings > Task Templates now supports `When milestone is completed`, shows Pathway and filtered Milestone selectors, counts enabled milestone-trigger templates, and sends `appliesToMilestoneId`.
+- Updated/deployed `supabase/functions/manage-company-customization/index.ts`: validates milestone-completed templates against active company-owned primary pathways/milestones.
+- Updated/deployed `supabase/functions/manage-client-milestone/index.ts`: after primary `complete_milestone`, matching enabled templates create client-linked tasks due `completion date + due offset`. Metadata records template/pathway/milestone context and duplicate protection prevents re-creating tasks for the same template + client milestone progress row.
+- `npm run build` passed with existing Vite/Anthropic browser-externalization and chunk-size warnings. Awaiting Jay QA in MM/Admin Hub flow.

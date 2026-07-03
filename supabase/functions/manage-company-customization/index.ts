@@ -37,7 +37,11 @@ const CUSTOM_FIELD_TYPES = new Set([
 const CUSTOM_FIELD_ENTITY_TYPES = new Set(["client", "company_member", "contract"]);
 const CLIENT_VIEWS = new Set(["list", "card", "calendar"]);
 const CALENDAR_MODES = new Set(["month", "week", "day"]);
-const TASK_TEMPLATE_TRIGGERS = new Set(["manual", "client_created"]);
+const TASK_TEMPLATE_TRIGGERS = new Set([
+  "manual",
+  "client_created",
+  "milestone_completed",
+]);
 const TASK_TEMPLATE_ASSIGNEES = new Set([
   "assigned_csm",
   "director",
@@ -724,6 +728,33 @@ Deno.serve(async (req) => {
             return jsonResponse({ error: "Template offer is not active for this company." }, 400);
           }
         }
+        if (triggerType === "milestone_completed" && !appliesToOfferId) {
+          return jsonResponse({ error: "Choose a pathway for this milestone trigger." }, 400);
+        }
+
+        const appliesToMilestoneId =
+          triggerType === "milestone_completed"
+            ? nullableText(body.appliesToMilestoneId)
+            : null;
+        if (triggerType === "milestone_completed" && !appliesToMilestoneId) {
+          return jsonResponse({ error: "Choose a milestone for this trigger." }, 400);
+        }
+        if (appliesToMilestoneId) {
+          const { data: milestone, error: milestoneError } = await supabase
+            .from("company_offer_milestones")
+            .select("glide_row_id, offer_id, status")
+            .eq("company_id", company.id)
+            .eq("glide_row_id", appliesToMilestoneId)
+            .eq("offer_id", appliesToOfferId)
+            .maybeSingle();
+          if (milestoneError) throw milestoneError;
+          if (!milestone || milestone.status !== "active") {
+            return jsonResponse(
+              { error: "Template milestone is not active for the selected pathway." },
+              400,
+            );
+          }
+        }
 
         const payload = {
           company_id: company.id,
@@ -731,6 +762,7 @@ Deno.serve(async (req) => {
           description: nullableText(body.description),
           trigger_type: triggerType,
           applies_to_offer_id: appliesToOfferId,
+          applies_to_milestone_id: appliesToMilestoneId,
           assign_to_type: assignToType,
           assigned_member_legacy_id: assignedMemberLegacyId,
           due_offset_days: requiredBoundedInteger(body.dueOffsetDays, 0, 0, 365),

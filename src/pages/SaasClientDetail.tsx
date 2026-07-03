@@ -145,8 +145,9 @@ interface CompanyTaskTemplateRow {
   id?: string;
   name: string;
   description?: string | null;
-  trigger_type: "manual" | "client_created";
+  trigger_type: "manual" | "client_created" | "milestone_completed";
   applies_to_offer_id?: string | null;
+  applies_to_milestone_id?: string | null;
   assign_to_type: "assigned_csm" | "director" | "support" | "specific_member" | "unassigned";
   assigned_member_legacy_id?: string | null;
   due_offset_days: number;
@@ -2741,6 +2742,7 @@ function TaskTemplatesModal({
   companyLegacyId,
   templates,
   offers,
+  milestones,
   teamMembers,
   disabled,
   onClose,
@@ -2749,6 +2751,7 @@ function TaskTemplatesModal({
   companyLegacyId: string;
   templates: CompanyTaskTemplateRow[];
   offers: CompanyOfferRow[];
+  milestones: CompanyOfferMilestoneRow[];
   teamMembers: TeamRow[];
   disabled: boolean;
   onClose: () => void;
@@ -2763,6 +2766,7 @@ function TaskTemplatesModal({
     description: "",
     trigger_type: "client_created",
     applies_to_offer_id: "",
+    applies_to_milestone_id: "",
     assign_to_type: "assigned_csm",
     assigned_member_legacy_id: "",
     due_offset_days: 0,
@@ -2773,6 +2777,51 @@ function TaskTemplatesModal({
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeOffers = offers.filter((offer) => offer.status !== "archived");
+  const milestoneOptions = milestones
+    .filter(
+      (milestone) =>
+        milestone.status !== "archived" &&
+        milestone.offer_id === draft.applies_to_offer_id,
+    )
+    .sort((a, b) => {
+      const positionA =
+        typeof a.position === "number"
+          ? a.position
+          : typeof a.order === "number"
+            ? a.order
+            : 9999;
+      const positionB =
+        typeof b.position === "number"
+          ? b.position
+          : typeof b.order === "number"
+            ? b.order
+            : 9999;
+      if (positionA !== positionB) return positionA - positionB;
+      return (a.name ?? "").localeCompare(b.name ?? "");
+    });
+  const offerNameById = new Map(
+    activeOffers.map((offer) => [offer.glide_row_id, offer.name ?? "Unnamed pathway"]),
+  );
+  const milestoneNameById = new Map(
+    milestones.map((milestone) => [
+      milestone.glide_row_id,
+      milestone.name ?? "Unnamed milestone",
+    ]),
+  );
+  const missingMilestoneTriggerFields =
+    draft.trigger_type === "milestone_completed" &&
+    (!draft.applies_to_offer_id || !draft.applies_to_milestone_id);
+
+  function templateTriggerLabel(template: CompanyTaskTemplateRow) {
+    if (template.trigger_type === "client_created") {
+      return "Auto-create when a client is added";
+    }
+    if (template.trigger_type === "milestone_completed") {
+      return "Auto-create when a milestone is completed";
+    }
+    return "Preset available in New Task";
+  }
 
   function resetDraft() {
     setEditing(null);
@@ -2781,6 +2830,7 @@ function TaskTemplatesModal({
       description: "",
       trigger_type: "client_created",
       applies_to_offer_id: "",
+      applies_to_milestone_id: "",
       assign_to_type: "assigned_csm",
       assigned_member_legacy_id: "",
       due_offset_days: 0,
@@ -2797,6 +2847,7 @@ function TaskTemplatesModal({
       ...template,
       description: template.description ?? "",
       applies_to_offer_id: template.applies_to_offer_id ?? "",
+      applies_to_milestone_id: template.applies_to_milestone_id ?? "",
       assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
       priority: template.priority ?? "",
       position: template.position ?? 0,
@@ -2820,6 +2871,7 @@ function TaskTemplatesModal({
           description: draft.description,
           triggerType: draft.trigger_type,
           appliesToOfferId: draft.applies_to_offer_id || null,
+          appliesToMilestoneId: draft.applies_to_milestone_id || null,
           assignToType: draft.assign_to_type,
           assignedMemberLegacyId: draft.assigned_member_legacy_id || null,
           dueOffsetDays: draft.due_offset_days,
@@ -2907,12 +2959,20 @@ function TaskTemplatesModal({
                           {template.name}
                         </h4>
                         <p className="mt-1 text-xs text-[#667085]">
-                          {template.trigger_type === "client_created"
-                            ? "Auto-create when a client is added"
-                            : "Preset available in New Task"}{" "}
+                          {templateTriggerLabel(template)}{" "}
                           · due in {template.due_offset_days} day
                           {template.due_offset_days === 1 ? "" : "s"}
                         </p>
+                        {template.trigger_type === "milestone_completed" ? (
+                          <p className="mt-1 text-xs text-[#667085]">
+                            {offerNameById.get(template.applies_to_offer_id ?? "") ??
+                              "Unknown pathway"}{" "}
+                            /{" "}
+                            {milestoneNameById.get(
+                              template.applies_to_milestone_id ?? "",
+                            ) ?? "Unknown milestone"}
+                          </p>
+                        ) : null}
                       </div>
                       <span
                         className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
@@ -3003,14 +3063,31 @@ function TaskTemplatesModal({
                 disabled={disabled || saving}
                 options={[
                   { value: "client_created", label: "When client is created" },
+                  {
+                    value: "milestone_completed",
+                    label: "When milestone is completed",
+                  },
                   { value: "manual", label: "Preset in New Task modal" },
                 ]}
                 onChange={(value) =>
-                  setDraft((current) => ({ ...current, trigger_type: value }))
+                  setDraft((current) => ({
+                    ...current,
+                    trigger_type: value as CompanyTaskTemplateRow["trigger_type"],
+                    applies_to_offer_id:
+                      value === "milestone_completed"
+                        ? current.applies_to_offer_id
+                        : current.applies_to_offer_id,
+                    applies_to_milestone_id:
+                      value === "milestone_completed"
+                        ? current.applies_to_milestone_id
+                        : "",
+                  }))
                 }
               />
               <label className="block text-sm font-medium text-[#344054]">
-                Applies to offer
+                {draft.trigger_type === "milestone_completed"
+                  ? "Pathway"
+                  : "Applies to pathway"}
                 <select
                   disabled={disabled || saving}
                   value={draft.applies_to_offer_id ?? ""}
@@ -3018,18 +3095,53 @@ function TaskTemplatesModal({
                     setDraft((current) => ({
                       ...current,
                       applies_to_offer_id: event.target.value,
+                      applies_to_milestone_id: "",
                     }))
                   }
                   className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
                 >
-                  <option value="">All offers</option>
-                  {offers.map((offer) => (
+                  <option value="">
+                    {draft.trigger_type === "milestone_completed"
+                      ? "Choose pathway"
+                      : "All pathways"}
+                  </option>
+                  {activeOffers.map((offer) => (
                     <option key={offer.glide_row_id} value={offer.glide_row_id}>
-                      {offer.name ?? "Unnamed offer"}
+                      {offer.name ?? "Unnamed pathway"}
                     </option>
                   ))}
                 </select>
               </label>
+              {draft.trigger_type === "milestone_completed" ? (
+                <label className="block text-sm font-medium text-[#344054]">
+                  Milestone completed
+                  <select
+                    disabled={disabled || saving || !draft.applies_to_offer_id}
+                    value={draft.applies_to_milestone_id ?? ""}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        applies_to_milestone_id: event.target.value,
+                      }))
+                    }
+                    className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                  >
+                    <option value="">
+                      {draft.applies_to_offer_id
+                        ? "Choose milestone"
+                        : "Choose pathway first"}
+                    </option>
+                    {milestoneOptions.map((milestone) => (
+                      <option
+                        key={milestone.glide_row_id}
+                        value={milestone.glide_row_id}
+                      >
+                        {milestone.name ?? "Unnamed milestone"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <SettingsSelect
                 label="Assign to"
                 value={draft.assign_to_type}
@@ -3132,7 +3244,7 @@ function TaskTemplatesModal({
               </button>
               <button
                 type="submit"
-                disabled={disabled || saving}
+                disabled={disabled || saving || missingMilestoneTriggerFields}
                 className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 {saving ? "Saving..." : editing ? "Save template" : "Create template"}
@@ -3152,6 +3264,7 @@ function CompanySettingsSetup({
   notificationPreferences,
   taskTemplates,
   taskTemplateOffers,
+  taskTemplateMilestones,
   teamMembers,
   integrationEvents,
   integrationEventsLoading,
@@ -3168,6 +3281,7 @@ function CompanySettingsSetup({
   notificationPreferences: SettingsNotificationPreference[];
   taskTemplates: CompanyTaskTemplateRow[];
   taskTemplateOffers: CompanyOfferRow[];
+  taskTemplateMilestones: CompanyOfferMilestoneRow[];
   teamMembers: TeamRow[];
   integrationEvents: IntegrationIntakeEventRow[];
   integrationEventsLoading: boolean;
@@ -3580,7 +3694,7 @@ function CompanySettingsSetup({
             Manage task templates
           </button>
         </div>
-        <div className="grid gap-3 p-4 md:grid-cols-3">
+        <div className="grid gap-3 p-4 md:grid-cols-4">
           <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
               Templates
@@ -3599,6 +3713,20 @@ function CompanySettingsSetup({
                   (template) =>
                     template.is_enabled &&
                     template.trigger_type === "client_created",
+                ).length
+              }
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Milestone
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {
+                taskTemplates.filter(
+                  (template) =>
+                    template.is_enabled &&
+                    template.trigger_type === "milestone_completed",
                 ).length
               }
             </div>
@@ -3708,6 +3836,7 @@ function CompanySettingsSetup({
           companyLegacyId={companyLegacyId}
           templates={taskTemplates}
           offers={taskTemplateOffers}
+          milestones={taskTemplateMilestones}
           teamMembers={teamMembers}
           disabled={disabled}
           onClose={() => setTaskTemplateModalOpen(false)}
@@ -4239,6 +4368,9 @@ export function SaasClientDetail({
   );
   const [taskTemplates, setTaskTemplates] = useState<CompanyTaskTemplateRow[]>([]);
   const [taskTemplateOffers, setTaskTemplateOffers] = useState<CompanyOfferRow[]>([]);
+  const [taskTemplateMilestones, setTaskTemplateMilestones] = useState<
+    CompanyOfferMilestoneRow[]
+  >([]);
   const [integrationReviewLoading, setIntegrationReviewLoading] = useState(false);
   const [integrationTokensLoading, setIntegrationTokensLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
@@ -4638,6 +4770,7 @@ export function SaasClientDetail({
           integrationTokensResult,
           taskTemplatesResult,
           taskTemplateOffersResult,
+          taskTemplateMilestonesResult,
         ] = await Promise.all([
           supabase
             .from("company_settings")
@@ -4680,7 +4813,7 @@ export function SaasClientDetail({
           supabase
             .from("company_task_templates")
             .select(
-              "id, name, description, trigger_type, applies_to_offer_id, assign_to_type, assigned_member_legacy_id, due_offset_days, priority, status_value, is_enabled, position, metadata, archived_at",
+              "id, name, description, trigger_type, applies_to_offer_id, applies_to_milestone_id, assign_to_type, assigned_member_legacy_id, due_offset_days, priority, status_value, is_enabled, position, metadata, archived_at",
             )
             .eq("company_id", appCompany.id)
             .is("archived_at", null)
@@ -4692,6 +4825,12 @@ export function SaasClientDetail({
             .eq("company_id", appCompany.id)
             .eq("status", "active")
             .order("name", { ascending: true }),
+          supabase
+            .from("company_offer_milestones")
+            .select("glide_row_id, offer_id, name, position, status")
+            .eq("company_id", appCompany.id)
+            .eq("status", "active")
+            .order("position", { ascending: true }),
         ]);
         if (cancelled) return;
         if (!preferencesResult.error) {
@@ -4763,6 +4902,17 @@ export function SaasClientDetail({
           );
           setTaskTemplateOffers([]);
         }
+        if (!taskTemplateMilestonesResult.error) {
+          setTaskTemplateMilestones(
+            (taskTemplateMilestonesResult.data ?? []) as CompanyOfferMilestoneRow[],
+          );
+        } else {
+          console.error(
+            "Failed to load task template milestones:",
+            taskTemplateMilestonesResult.error,
+          );
+          setTaskTemplateMilestones([]);
+        }
         setIntegrationReviewLoading(false);
         setIntegrationTokensLoading(false);
         if (!settingsResult.error && settingsResult.data) {
@@ -4790,6 +4940,7 @@ export function SaasClientDetail({
       setIntegrationTokens([]);
       setTaskTemplates([]);
       setTaskTemplateOffers([]);
+      setTaskTemplateMilestones([]);
       setIntegrationReviewLoading(false);
       setIntegrationTokensLoading(false);
       setSettingsSource("mirror");
@@ -5195,6 +5346,7 @@ export function SaasClientDetail({
             notificationPreferences={notificationPreferences}
             taskTemplates={taskTemplates}
             taskTemplateOffers={taskTemplateOffers}
+            taskTemplateMilestones={taskTemplateMilestones}
             teamMembers={teamMembers}
             integrationEvents={integrationReviewEvents}
             integrationEventsLoading={integrationReviewLoading}
