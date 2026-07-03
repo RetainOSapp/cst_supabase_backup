@@ -282,6 +282,12 @@ function normalizeIntegrationClientStatus(value: string | null | undefined) {
     .replace(/[_\s]+/g, "-");
 }
 
+const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
+
+function isActiveClientStatus(value: string | null | undefined) {
+  return ACTIVE_CLIENT_STATUSES.has(normalizeIntegrationClientStatus(value));
+}
+
 function isMatchableIntegrationClient(client: IntegrationReviewClientOption) {
   const status = normalizeIntegrationClientStatus(client.program_status_value);
   return status !== "off-boarded" && status !== "offboarded";
@@ -4492,7 +4498,7 @@ export function SaasClientDetail({
           supabase
             .from("clients")
             .select(
-              "offer_milestones_current_offer_id, offer_milestones_current_milestone_id",
+              "program_status_value, offer_milestones_current_offer_id, offer_milestones_current_milestone_id, secondary_offer_milestones_current_offer_id, secondary_offer_milestones_current_milestone_id",
             )
             .eq("company_id", appCompany.id)
             .is("archived_at", null),
@@ -4502,19 +4508,33 @@ export function SaasClientDetail({
           const usageRows =
             !usageResult.error && usageResult.data
               ? (usageResult.data as {
+                  program_status_value?: string | null;
                   offer_milestones_current_offer_id?: string | null;
                   offer_milestones_current_milestone_id?: string | null;
+                  secondary_offer_milestones_current_offer_id?: string | null;
+                  secondary_offer_milestones_current_milestone_id?: string | null;
                 }[])
               : [];
           const nextUsageCounts: PathwayUsageCounts = { offers: {}, milestones: {} };
           for (const row of usageRows) {
-            const offerId = row.offer_milestones_current_offer_id;
-            const milestoneId = row.offer_milestones_current_milestone_id;
-            if (offerId) {
+            if (!isActiveClientStatus(row.program_status_value)) continue;
+            const offerIds = new Set(
+              [
+                row.offer_milestones_current_offer_id,
+                row.secondary_offer_milestones_current_offer_id,
+              ].filter(Boolean) as string[],
+            );
+            const milestoneIds = new Set(
+              [
+                row.offer_milestones_current_milestone_id,
+                row.secondary_offer_milestones_current_milestone_id,
+              ].filter(Boolean) as string[],
+            );
+            for (const offerId of offerIds) {
               nextUsageCounts.offers[offerId] =
                 (nextUsageCounts.offers[offerId] ?? 0) + 1;
             }
-            if (milestoneId) {
+            for (const milestoneId of milestoneIds) {
               nextUsageCounts.milestones[milestoneId] =
                 (nextUsageCounts.milestones[milestoneId] ?? 0) + 1;
             }

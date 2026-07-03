@@ -32,6 +32,41 @@ function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+const ACTIVE_CLIENT_STATUSES = ["front-end", "back-end"];
+
+async function loadAffectedActiveClients(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  fields: string[],
+  entityId: string,
+) {
+  const affected = new Map<string, Record<string, unknown>>();
+
+  for (const field of fields) {
+    const { data, error } = await supabase
+      .from("clients")
+      .select(
+        "id, glide_row_id, client_name, client_business, program_status_value",
+      )
+      .eq("company_id", companyId)
+      .eq(field, entityId)
+      .is("archived_at", null)
+      .in("program_status_value", ACTIVE_CLIENT_STATUSES)
+      .order("client_name", { ascending: true })
+      .range(0, 9999);
+    if (error) throw error;
+
+    for (const client of data ?? []) {
+      const key = String(client.id ?? client.glide_row_id ?? crypto.randomUUID());
+      affected.set(key, client);
+    }
+  }
+
+  return Array.from(affected.values()).sort((left, right) =>
+    cleanText(left.client_name).localeCompare(cleanText(right.client_name)),
+  );
+}
+
 function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
@@ -316,35 +351,32 @@ Deno.serve(async (req) => {
       beforeData = existing;
 
       if (action === "archive_offer" || action === "archive_milestone") {
-        const field =
+        const fields =
           action === "archive_offer"
-            ? "offer_milestones_current_offer_id"
-            : "offer_milestones_current_milestone_id";
-        const { count, error: usageError } = await supabase
-          .from("clients")
-          .select("id", { count: "exact", head: true })
-          .eq("company_id", company.id)
-          .eq(field, entityId)
-          .is("archived_at", null);
-        if (usageError) throw usageError;
-        if ((count ?? 0) > 0) {
-          const { data: affectedClients, error: sampleError } = await supabase
-            .from("clients")
-            .select("glide_row_id, client_name, client_business")
-            .eq("company_id", company.id)
-            .eq(field, entityId)
-            .is("archived_at", null)
-            .order("client_name", { ascending: true })
-            .limit(5);
-          if (sampleError) throw sampleError;
+            ? [
+                "offer_milestones_current_offer_id",
+                "secondary_offer_milestones_current_offer_id",
+              ]
+            : [
+                "offer_milestones_current_milestone_id",
+                "secondary_offer_milestones_current_milestone_id",
+              ];
+        const affectedClients = await loadAffectedActiveClients(
+          supabase,
+          company.id,
+          fields,
+          entityId,
+        );
+        const count = affectedClients.length;
+        if (count > 0) {
           return jsonResponse(
             {
-              error: `Move ${count} active client${count === 1 ? "" : "s"} off this ${
+              error: `Move ${count} active Front End/Back End client${count === 1 ? "" : "s"} off this ${
                 action === "archive_offer" ? "pathway" : "milestone"
               } before archiving it.`,
-              affectedCount: count ?? 0,
+              affectedCount: count,
               affectedEntity: action === "archive_offer" ? "pathway" : "milestone",
-              affectedClients: affectedClients ?? [],
+              affectedClients: affectedClients.slice(0, 5),
             },
             400,
           );

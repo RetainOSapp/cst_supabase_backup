@@ -466,3 +466,11 @@ For historical context:
 - Updated/deployed `supabase/functions/manage-company-customization/index.ts`: validates milestone-completed templates against active company-owned primary pathways/milestones.
 - Updated/deployed `supabase/functions/manage-client-milestone/index.ts`: after primary `complete_milestone`, matching enabled templates create client-linked tasks due `completion date + due offset`. Metadata records template/pathway/milestone context and duplicate protection prevents re-creating tasks for the same template + client milestone progress row.
 - `npm run build` passed with existing Vite/Anthropic browser-externalization and chunk-size warnings. Awaiting Jay QA in MM/Admin Hub flow.
+
+## MM Pathway Archive Cleanup - 2026-07-03
+
+- Jay QA passed milestone-completed task templates; `ROADMAP.md` promoted that task automation item to `[x]`.
+- Updated `supabase/functions/manage-company-pathway/index.ts`: archive blockers now count only active Front End / Back End clients and check both primary and secondary pathway/milestone fields before allowing archive.
+- Updated `src/pages/SaasClientDetail.tsx`: Admin Hub > Pathways & Milestones usage counts now use the same active-client rule and include secondary pathway/milestone usage.
+- Deployed `manage-company-pathway` to Supabase project `zjauqflzxzsbpnivzsct`; `npm run build` passed. `ROADMAP.md` has a short Jay QA retest item for archiving unused MM pathways/milestones.
+- DO NOT COMMIT remains in force for unrelated local Beacon/package/Header dirty work.
