@@ -6,7 +6,7 @@ import { supabase } from "../lib/supabase.ts";
 import { ComingSoonPanel } from "../components/ComingSoon.tsx";
 
 type ViewMode = "board" | "list";
-type StatusMode = "open" | "all" | "closed";
+type StatusMode = "open" | "all" | "closed" | "overdue" | "due-soon";
 type TaskStatus = "todo" | "in-progress" | "waiting" | "done" | "dismissed" | "archived";
 
 interface Company {
@@ -276,6 +276,7 @@ function readTasksCache() {
     return JSON.parse(raw) as {
       companyId?: string;
       csmId?: string;
+      clientId?: string;
       statusMode?: StatusMode;
       viewMode?: ViewMode;
       search?: string;
@@ -888,6 +889,9 @@ export function Tasks() {
       ? teamMemberId
       : searchParams.get("csmId") ?? cached?.csmId ?? "",
   );
+  const [clientFilterId, setClientFilterId] = useState(
+    searchParams.get("clientId") ?? cached?.clientId ?? "",
+  );
   const [statusMode, setStatusMode] = useState<StatusMode>(
     cached?.statusMode ?? "open",
   );
@@ -948,13 +952,29 @@ export function Tasks() {
   useEffect(() => {
     window.sessionStorage.setItem(
       TASKS_CACHE_KEY,
-      JSON.stringify({ companyId, csmId, statusMode, viewMode, search }),
+      JSON.stringify({
+        companyId,
+        csmId,
+        clientId: clientFilterId,
+        statusMode,
+        viewMode,
+        search,
+      }),
     );
     const next = new URLSearchParams();
     if (companyId) next.set("companyId", companyId);
     if (csmId) next.set("csmId", csmId);
+    if (clientFilterId) next.set("clientId", clientFilterId);
     setSearchParams(next, { replace: true });
-  }, [companyId, csmId, search, setSearchParams, statusMode, viewMode]);
+  }, [
+    clientFilterId,
+    companyId,
+    csmId,
+    search,
+    setSearchParams,
+    statusMode,
+    viewMode,
+  ]);
 
   useEffect(() => {
     if (!effectiveCompanyId || effectiveCompanyId === companyId) return;
@@ -1085,35 +1105,50 @@ export function Tasks() {
   useEffect(() => {
     if (!companyId) {
       setCompanyClients([]);
+      setClientFilterId("");
       return;
     }
     let cancelled = false;
     async function loadCompanyClients() {
-      const sourceTable = appTaskCompanyIds.has(companyId)
-        ? "clients"
-        : "backup_company_clients";
-      const { data, error } = await supabase
-        .from(sourceTable)
-        .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
-        .eq(
-          sourceTable === "clients" ? "company_glide_row_id" : "company_id",
-          companyId,
-        )
-        .order("client_name", { ascending: true, nullsFirst: false })
-        .limit(500);
+      const usesAppClients = appTaskCompanyIds.has(companyId);
+      const sourceTable = usesAppClients ? "clients" : "backup_company_clients";
+      const rows: ClientRow[] = [];
+      const pageSize = 1000;
+      for (let from = 0; ; from += pageSize) {
+        const query = supabase
+          .from(sourceTable)
+          .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
+          .eq(
+            sourceTable === "clients" ? "company_glide_row_id" : "company_id",
+            companyId,
+          )
+          .order("client_name", { ascending: true, nullsFirst: false });
+        const result = usesAppClients
+          ? await query.range(from, from + pageSize - 1)
+          : await query.limit(500);
+        if (cancelled) return;
+        if (result.error) {
+          console.error("Failed to load company clients:", result.error);
+          setCompanyClients([]);
+          return;
+        }
+        rows.push(...((result.data ?? []) as ClientRow[]));
+        if (!usesAppClients || !result.data || result.data.length < pageSize) break;
+      }
       if (cancelled) return;
-      if (error) {
-        console.error("Failed to load company clients:", error);
-        setCompanyClients([]);
-      } else {
-        setCompanyClients((data ?? []) as ClientRow[]);
+      setCompanyClients(rows);
+      if (
+        clientFilterId &&
+        !rows.some((client) => client.glide_row_id === clientFilterId)
+      ) {
+        setClientFilterId("");
       }
     }
     void loadCompanyClients();
     return () => {
       cancelled = true;
     };
-  }, [appTaskCompanyIds, companyId]);
+  }, [appTaskCompanyIds, clientFilterId, companyId]);
 
   useEffect(() => {
     if (!companyId || !appTaskCompanyIds.has(companyId)) {
@@ -1181,6 +1216,9 @@ export function Tasks() {
         } else if (csmId) {
           tasksQuery = tasksQuery.eq("assigned_to_id", csmId);
         }
+        if (clientFilterId) {
+          tasksQuery = tasksQuery.eq("client_id", clientFilterId);
+        }
         if (search.trim()) {
           const q = `%${search.trim()}%`;
           tasksQuery = tasksQuery.or(
@@ -1229,6 +1267,8 @@ export function Tasks() {
 
       if (statusMode === "open") rows = rows.filter((task) => !isClosedTask(task));
       if (statusMode === "closed") rows = rows.filter(isClosedTask);
+      if (statusMode === "overdue") rows = rows.filter(isOverdue);
+      if (statusMode === "due-soon") rows = rows.filter(isDueSoon);
       setTasks(rows);
 
       const clientIds = [
@@ -1273,7 +1313,15 @@ export function Tasks() {
     return () => {
       cancelled = true;
     };
-  }, [appTaskCompanyIds, assignedTeamMemberId, companyId, csmId, search, statusMode]);
+  }, [
+    appTaskCompanyIds,
+    assignedTeamMemberId,
+    clientFilterId,
+    companyId,
+    csmId,
+    search,
+    statusMode,
+  ]);
 
   const columns = useMemo(() => {
     const todo = tasks.filter((task) => taskStatusKey(task.status_value) === "todo");
@@ -1410,7 +1458,7 @@ export function Tasks() {
       </div>
 
       <div className="mb-5 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           {!capabilities.canViewOnlyAssignedClients && (
             <div>
               <label
@@ -1454,6 +1502,31 @@ export function Tasks() {
               <option value="open">Open tasks</option>
               <option value="all">All tasks</option>
               <option value="closed">Closed tasks</option>
+              <option value="overdue">Overdue</option>
+              <option value="due-soon">Due soon</option>
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="tasks-client"
+              className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500"
+            >
+              Client
+            </label>
+            <select
+              id="tasks-client"
+              value={clientFilterId}
+              onChange={(event) => setClientFilterId(event.target.value)}
+              disabled={!companyId || companyClients.length === 0}
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
+            >
+              <option value="">All clients</option>
+              {companyClients.map((client) => (
+                <option key={client.glide_row_id} value={client.glide_row_id}>
+                  {client.client_name ?? "Unnamed client"}
+                </option>
+              ))}
             </select>
           </div>
 
