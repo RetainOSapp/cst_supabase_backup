@@ -1149,40 +1149,64 @@ export function Tasks() {
       setLoadingTasks(true);
       setTasksError(null);
       const usesAppTasks = appTaskCompanyIds.has(companyId);
-      let tasksQuery = supabase
-        .from(usesAppTasks ? "client_tasks" : "backup_company_clients_tasks")
-        .select("*")
-        .eq(usesAppTasks ? "company_glide_row_id" : "company_id", companyId);
 
-      if (assignedTeamMemberId) {
-        tasksQuery = tasksQuery.eq("assigned_to_id", assignedTeamMemberId);
-      } else if (csmId) {
-        tasksQuery = tasksQuery.eq("assigned_to_id", csmId);
-      }
-      if (search.trim()) {
-        const q = `%${search.trim()}%`;
-        tasksQuery = tasksQuery.or(
-          `task_name.ilike.${q},task_description.ilike.${q}`,
-        );
-      }
-      tasksQuery = tasksQuery.order("task_due_date", {
-        ascending: true,
-        nullsFirst: false,
-      });
+      const buildTasksQuery = () => {
+        let tasksQuery = supabase
+          .from(usesAppTasks ? "client_tasks" : "backup_company_clients_tasks")
+          .select("*")
+          .eq(usesAppTasks ? "company_glide_row_id" : "company_id", companyId);
 
-      const tasksResult = await tasksQuery.limit(250);
-      if (cancelled) return;
-      if (tasksResult.error) {
-        setTasks([]);
-        setClientById(new Map());
-        setTasksError(
-          tasksResult.error?.message ?? "Failed to load tasks",
-        );
-        setLoadingTasks(false);
-        return;
+        if (assignedTeamMemberId) {
+          tasksQuery = tasksQuery.eq("assigned_to_id", assignedTeamMemberId);
+        } else if (csmId) {
+          tasksQuery = tasksQuery.eq("assigned_to_id", csmId);
+        }
+        if (search.trim()) {
+          const q = `%${search.trim()}%`;
+          tasksQuery = tasksQuery.or(
+            `task_name.ilike.${q},task_description.ilike.${q}`,
+          );
+        }
+        return tasksQuery.order("task_due_date", {
+          ascending: true,
+          nullsFirst: false,
+        });
+      };
+
+      let rows: TaskRow[] = [];
+      if (usesAppTasks) {
+        const pageSize = 1000;
+        for (let from = 0; ; from += pageSize) {
+          const tasksResult = await buildTasksQuery().range(from, from + pageSize - 1);
+          if (cancelled) return;
+          if (tasksResult.error) {
+            setTasks([]);
+            setClientById(new Map());
+            setTasksError(
+              tasksResult.error?.message ?? "Failed to load tasks",
+            );
+            setLoadingTasks(false);
+            return;
+          }
+          const pageRows = (tasksResult.data ?? []) as TaskRow[];
+          rows = [...rows, ...pageRows];
+          if (pageRows.length < pageSize) break;
+        }
+      } else {
+        const tasksResult = await buildTasksQuery().limit(250);
+        if (cancelled) return;
+        if (tasksResult.error) {
+          setTasks([]);
+          setClientById(new Map());
+          setTasksError(
+            tasksResult.error?.message ?? "Failed to load tasks",
+          );
+          setLoadingTasks(false);
+          return;
+        }
+        rows = (tasksResult.data ?? []) as TaskRow[];
       }
 
-      let rows = (tasksResult.data ?? []) as TaskRow[];
       if (statusMode === "open") rows = rows.filter((task) => !isClosedTask(task));
       if (statusMode === "closed") rows = rows.filter(isClosedTask);
       setTasks(rows);
@@ -1191,14 +1215,25 @@ export function Tasks() {
         ...new Set(rows.map((task) => task.client_id).filter(Boolean)),
       ] as string[];
       if (clientIds.length > 0) {
-        const clientsResult = await supabase
-          .from(usesAppTasks ? "clients" : "backup_company_clients")
-          .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
-          .in("glide_row_id", clientIds);
+        const clients: ClientRow[] = [];
+        const chunkSize = 150;
+        let clientLookupError: unknown = null;
+        for (let index = 0; index < clientIds.length; index += chunkSize) {
+          const chunk = clientIds.slice(index, index + chunkSize);
+          const clientsResult = await supabase
+            .from(usesAppTasks ? "clients" : "backup_company_clients")
+            .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
+            .in("glide_row_id", chunk);
+          if (cancelled) return;
+          if (clientsResult.error) {
+            clientLookupError = clientsResult.error;
+            break;
+          }
+          clients.push(...((clientsResult.data ?? []) as ClientRow[]));
+        }
         if (!cancelled) {
-          if (clientsResult.error)
-            console.error("Failed to load task clients:", clientsResult.error);
-          const clients = (clientsResult.data ?? []) as ClientRow[];
+          if (clientLookupError)
+            console.error("Failed to load task clients:", clientLookupError);
           setClientById(
             new Map(
               clients.map((client) => [
