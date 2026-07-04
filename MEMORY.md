@@ -572,3 +572,8 @@ For historical context:
 - Updated `src/components/dashboard/kpis/*`, `src/components/dashboard/kpis/KpiCardBase.tsx`, and `src/pages/Dashboard.tsx`: removed the SQL modal section and copy-SQL action, changed the modal subtitle to "How this card works", and replaced KPI descriptions with plain-language explanations that avoid database/table/field names.
 - Deleted `src/lib/dashboardKpiSql.ts` so raw KPI SQL is no longer part of the client dashboard code path.
 - Verification: `npm run build` passed with existing Beacon/Anthropic browser-externalization and chunk-size warnings. Roadmap has a focused `[qa]` retest item for the KPI info dialogs.
+
+## Git Push Workflow Note - 2026-07-04
+
+- GitHub/network DNS is often blocked in the default sandbox. When Jay explicitly asks to push, use the approved/escalated `git push` path directly instead of first trying a sandboxed push that predictably fails with DNS errors.
+- If Jay says not to push live, do not run `git push` at all; local commits are okay only when useful, and `main` may intentionally stay ahead of `origin/main`.
