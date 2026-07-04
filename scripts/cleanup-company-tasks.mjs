@@ -62,6 +62,33 @@ function isClosedTask(task) {
   );
 }
 
+function normalizedTaskName(task) {
+  return cleanText(task.task_name)?.toLowerCase().replace(/\s+/g, " ") ?? "";
+}
+
+function isOnboardingOrPostKickoffTask(task) {
+  const name = normalizedTaskName(task);
+  return (
+    /\bonboarding\b/.test(name) ||
+    /post\s*kick[-\s]*off/.test(name) ||
+    /post\s*kickoff/.test(name)
+  );
+}
+
+function isEightWeekDiagnosticTask(task) {
+  const name = normalizedTaskName(task);
+  return (
+    /8(?:th)?[-\s]*week/.test(name) ||
+    /8\s*week/.test(name) ||
+    /\bdiagnostic\b/.test(name)
+  );
+}
+
+function isPauseReturnTask(task) {
+  const name = normalizedTaskName(task);
+  return /\breengage\b/.test(name) || /\bunpause\b/.test(name);
+}
+
 function startOfLocalDay(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
@@ -169,6 +196,9 @@ function classifyTask(task, context) {
     (context.inactiveMemberIds.has(assigneeId) || !context.activeMemberIds.has(assigneeId));
   const clientMissing = Boolean(task.client_id) && !client;
   const clientOffboarded = client?.program_status_value === "off-boarded";
+  const clientPausedOrSuspended = ["paused", "suspended"].includes(
+    client?.program_status_value ?? "",
+  );
   const clientActive = ["front-end", "back-end"].includes(client?.program_status_value ?? "");
   const primaryCsmId = cleanText(client?.csm_team_member_id);
   const primaryCsmIsActive = Boolean(primaryCsmId) && context.activeMemberIds.has(primaryCsmId);
@@ -179,6 +209,26 @@ function classifyTask(task, context) {
   if (status === "todo" && days > 90) dismissReasons.push("todo_overdue_gt_90");
   if (clientOffboarded && days > 30) dismissReasons.push("offboarded_client_overdue_gt_30");
   if (clientMissing && days > 30) dismissReasons.push("missing_client_overdue_gt_30");
+  if (status === "todo" && clientOffboarded) {
+    dismissReasons.push("todo_offboarded_client_overdue");
+  }
+  if (status === "todo" && clientMissing) {
+    dismissReasons.push("todo_missing_client_overdue");
+  }
+  if (
+    status === "todo" &&
+    clientPausedOrSuspended &&
+    days > 30 &&
+    !isPauseReturnTask(task)
+  ) {
+    dismissReasons.push("todo_paused_suspended_overdue_gt_30");
+  }
+  if (status === "todo" && days > 45 && isOnboardingOrPostKickoffTask(task)) {
+    dismissReasons.push("todo_onboarding_post_kickoff_overdue_gt_45");
+  }
+  if (status === "todo" && days > 60 && isEightWeekDiagnosticTask(task)) {
+    dismissReasons.push("todo_8_week_diagnostic_overdue_gt_60");
+  }
 
   if (assignedToInactiveMember && days > 45) {
     dismissReasons.push("inactive_assignee_overdue_gt_45");
