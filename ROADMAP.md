@@ -586,6 +586,10 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
   - 2026-06-16 product polish renamed the Clients dropdown as a reminder bell, clarified that full operating review belongs in Daily Pulse, and tightened Company Settings copy around bell-only, Daily Pulse, and timing-rule controls.
   - 2026-06-16 Jay QA passed the V1 in-app reminder bell and Company Settings notification-control clarity. Email delivery, push, and full inbox/read-dismiss behavior remain later notification scope.
   - Email delivery and full inbox remain intentionally disabled until read/dismiss/counts and delivery preferences are QAed.
+- `[ ]` `[priority: medium]` CST-style operational alert review surface.
+  - Add a RetainOS equivalent of the old CST alert review modal/list: summarized alert groups, counts, and direct `View clients` actions.
+  - Candidate alert groups: new clients needing onboarding/CSM assignment, recently off-boarded clients, paused/suspended clients, MIA/quiet clients, overdue follow-up buckets, and high-priority task/reminder groups.
+  - Should work with company notification preferences and avoid noisy popups; likely best as a bell/inbox or Daily Pulse entry point with an optional review modal.
 - `[ ]` `[priority: medium]` Reporting PDF generation:
   - Semi-monthly churn-risk / renewals / RGAs PDF.
   - Weekly CSM Metrics PDF.
