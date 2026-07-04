@@ -1,21 +1,15 @@
-import {
-  type DashboardKpiSqlParams,
-  getActiveClientsSql,
-} from "../../../lib/dashboardKpiSql.ts";
 import { KpiCardBase } from "./KpiCardBase.tsx";
 
 interface ActiveClientsKpiProps {
   value: number | null;
   loading: boolean;
-  sqlParams: DashboardKpiSqlParams;
-  onOpenInfo: (title: string, description: string, sql: string) => void;
+  onOpenInfo: (title: string, description: string) => void;
   onOpenList?: () => void;
 }
 
 export function ActiveClientsKpi({
   value,
   loading,
-  sqlParams,
   onOpenInfo,
   onOpenList,
 }: ActiveClientsKpiProps) {
@@ -25,9 +19,8 @@ export function ActiveClientsKpi({
       value={value !== null ? value.toLocaleString() : "--"}
       description="clients in front end or back end"
       infoDescription={
-        "Counts clients from backup_company_clients after applying company, CSM, secondary assignee, client start date, and date range cutoff filters. Then limits to status values front-end or back-end. If Program is set to a different status, this count becomes 0."
+        "Shows clients currently marked as Front End or Back End after the selected dashboard filters are applied. Company, CSM, secondary assignee, pathway, program, client start date, and date range filters can all affect this number."
       }
-      infoSql={getActiveClientsSql(sqlParams)}
       onInfoClick={onOpenInfo}
       loading={loading}
       onClick={onOpenList}

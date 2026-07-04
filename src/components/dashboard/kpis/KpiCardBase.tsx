@@ -7,8 +7,7 @@ interface KpiCardBaseProps {
   /** When true, the description line shows a loading placeholder instead of text */
   descriptionLoading?: boolean;
   infoDescription: string;
-  infoSql: string;
-  onInfoClick: (title: string, description: string, sql: string) => void;
+  onInfoClick: (title: string, description: string) => void;
   loading?: boolean;
   onClick?: () => void;
 }
@@ -19,14 +18,13 @@ export function KpiCardBase({
   description,
   descriptionLoading,
   infoDescription,
-  infoSql,
   onInfoClick,
   loading,
   onClick,
 }: KpiCardBaseProps) {
   const handleInfoClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    onInfoClick(label, infoDescription, infoSql);
+    onInfoClick(label, infoDescription);
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {

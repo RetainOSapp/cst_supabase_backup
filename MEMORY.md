@@ -565,3 +565,10 @@ For historical context:
 - Root cause: the card path paged through all 4,486 MM app-owned clients, but the drilldown detail query used one Supabase range request and only received the first 1,000 rows in production. The first page happened to contain 70 current-summary renewal matches.
 - Updated `src/pages/Dashboard.tsx`: KPI detail drawers now page client rows in 1,000-row batches, related history/contract reads are chunked in 500-ID batches, and Active Clients Up For Renewal uses the current client contract summary set to match the Clients renewal filters. Read-only sanity count for July 4, 2026: current-summary active renewal window = 438.
 - Verification: `npm run build` passed with existing Beacon/Anthropic browser-externalization and chunk-size warnings.
+
+## Dashboard KPI Info Privacy Hotfix - 2026-07-04
+
+- Jay found Dashboard KPI info dialogs exposed raw SQL, company IDs, internal table names, and schema language to client-visible users.
+- Updated `src/components/dashboard/kpis/*`, `src/components/dashboard/kpis/KpiCardBase.tsx`, and `src/pages/Dashboard.tsx`: removed the SQL modal section and copy-SQL action, changed the modal subtitle to "How this card works", and replaced KPI descriptions with plain-language explanations that avoid database/table/field names.
+- Deleted `src/lib/dashboardKpiSql.ts` so raw KPI SQL is no longer part of the client dashboard code path.
+- Verification: `npm run build` passed with existing Beacon/Anthropic browser-externalization and chunk-size warnings. Roadmap has a focused `[qa]` retest item for the KPI info dialogs.

@@ -1,21 +1,15 @@
-import {
-  type DashboardKpiSqlParams,
-  getRetainedClientsSql,
-} from "../../../lib/dashboardKpiSql.ts";
 import { KpiCardBase } from "./KpiCardBase.tsx";
 
 interface RetainedClientsKpiProps {
   value: number | null;
   loading: boolean;
-  sqlParams: DashboardKpiSqlParams;
-  onOpenInfo: (title: string, description: string, sql: string) => void;
+  onOpenInfo: (title: string, description: string) => void;
   onOpenList?: () => void;
 }
 
 export function RetainedClientsKpi({
   value,
   loading,
-  sqlParams,
   onOpenInfo,
   onOpenList,
 }: RetainedClientsKpiProps) {
@@ -25,9 +19,8 @@ export function RetainedClientsKpi({
       value={value !== null ? value.toLocaleString() : "--"}
       description="renewed/extended/upgraded their contract with our business"
       infoDescription={
-        "Starts from the filtered clients query, then joins client history rows. Counts distinct clients with change_type_code = program-status, value = back-end, and original_value in front-end/back-end. If Date Range is set, history modified_date is filtered within that range."
+        "Shows clients with retention activity, such as renewing, extending, or upgrading. Dashboard filters and the selected date range determine which clients are included."
       }
-      infoSql={getRetainedClientsSql(sqlParams)}
       onInfoClick={onOpenInfo}
       loading={loading}
       onClick={onOpenList}

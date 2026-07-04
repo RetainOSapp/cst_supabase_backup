@@ -1,21 +1,15 @@
-import {
-  type DashboardKpiSqlParams,
-  getOffBoardedClientsSql,
-} from "../../../lib/dashboardKpiSql.ts";
 import { KpiCardBase } from "./KpiCardBase.tsx";
 
 interface OffBoardedClientsKpiProps {
   value: number | null;
   loading: boolean;
-  sqlParams: DashboardKpiSqlParams;
-  onOpenInfo: (title: string, description: string, sql: string) => void;
+  onOpenInfo: (title: string, description: string) => void;
   onOpenList?: () => void;
 }
 
 export function OffBoardedClientsKpi({
   value,
   loading,
-  sqlParams,
   onOpenInfo,
   onOpenList,
 }: OffBoardedClientsKpiProps) {
@@ -25,9 +19,8 @@ export function OffBoardedClientsKpi({
       value={value !== null ? value.toLocaleString() : "--"}
       description="clients offboarded"
       infoDescription={
-        "Starts from the filtered client query (company, CSM, secondary assignee, selected program, and Client Start Date onboarding window). Then keeps only status off-boarded and filters by the calculated off-boarded date inside the selected Date Range."
+        "Shows clients currently marked as Off-boarded after the selected dashboard filters are applied. When a dashboard date range is selected, this focuses on clients off-boarded in that period."
       }
-      infoSql={getOffBoardedClientsSql(sqlParams)}
       onInfoClick={onOpenInfo}
       loading={loading}
       onClick={onOpenList}

@@ -1,15 +1,10 @@
-import {
-  type DashboardKpiSqlParams,
-  getRetentionPercentageSql,
-} from "../../../lib/dashboardKpiSql.ts";
 import { KpiCardBase } from "./KpiCardBase.tsx";
 
 interface RetentionPercentageKpiProps {
   percentage: number | null;
   renewingClientsCount: number | null;
   loading: boolean;
-  sqlParams: DashboardKpiSqlParams;
-  onOpenInfo: (title: string, description: string, sql: string) => void;
+  onOpenInfo: (title: string, description: string) => void;
   onOpenList?: () => void;
 }
 
@@ -17,7 +12,6 @@ export function RetentionPercentageKpi({
   percentage,
   renewingClientsCount,
   loading,
-  sqlParams,
   onOpenInfo,
   onOpenList,
 }: RetentionPercentageKpiProps) {
@@ -34,9 +28,8 @@ export function RetentionPercentageKpi({
       description={description}
       descriptionLoading={loading}
       infoDescription={
-        "Retention percentage is retained clients divided by clients up for renewal. Clients up for renewal are those whose current contract end date or historical contract end date falls within the selected Date Range. When no Date Range is set, the denominator uses overdue through the next 30 days. It excludes churned, paused, and suspended clients."
+        "Shows retained clients as a percentage of clients up for renewal in the selected period. When no date range is selected, the renewal window defaults to overdue clients plus the next 30 days."
       }
-      infoSql={getRetentionPercentageSql(sqlParams)}
       onInfoClick={onOpenInfo}
       loading={loading}
       onClick={onOpenList}

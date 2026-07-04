@@ -81,6 +81,8 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-04 QA found Dashboard > Up For Renewal was effectively counting almost every active MM client when no Date Range was set. Fix built: default renewal KPI/drilldown window is overdue through next 30 days unless Jay sets an explicit Dashboard Date Range; Active Clients Up For Renewal uses the same current-contract filtering field as Clients. Expected MM default Up For Renewal is 438 on July 4, 2026.
   - 2026-07-04 follow-up polish: renewal KPI drilldown now shows Name, CSM, and Renewal Date, defaults to renewal-date sort, and lets Directors flip the renewal-date sort direction from the modal header.
   - 2026-07-04 QA catch: card showed 438 while the drilldown showed 70 because the drawer query only received the first 1,000 MM clients. The drawer now pages through all matching clients, chunks related history/contract reads, and uses the same current-summary renewal set as the card.
+- `[~]` `[qa]` Dashboard KPI info modal privacy retest.
+  - 2026-07-04 hotfix: KPI info dialogs no longer expose SQL, copy-SQL controls, company IDs, table names, or schema/field names. `src/lib/dashboardKpiSql.ts` was deleted from the client code path; KPI cards now show plain-language "How this card works" explanations only.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 

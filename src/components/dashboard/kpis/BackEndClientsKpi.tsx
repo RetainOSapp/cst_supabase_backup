@@ -1,21 +1,15 @@
-import {
-  type DashboardKpiSqlParams,
-  getBackEndClientsSql,
-} from "../../../lib/dashboardKpiSql.ts";
 import { KpiCardBase } from "./KpiCardBase.tsx";
 
 interface BackEndClientsKpiProps {
   value: number | null;
   loading: boolean;
-  sqlParams: DashboardKpiSqlParams;
-  onOpenInfo: (title: string, description: string, sql: string) => void;
+  onOpenInfo: (title: string, description: string) => void;
   onOpenList?: () => void;
 }
 
 export function BackEndClientsKpi({
   value,
   loading,
-  sqlParams,
   onOpenInfo,
   onOpenList,
 }: BackEndClientsKpiProps) {
@@ -25,9 +19,8 @@ export function BackEndClientsKpi({
       value={value !== null ? value.toLocaleString() : "--"}
       description="clients in back end"
       infoDescription={
-        "Counts clients from backup_company_clients after applying company, CSM, secondary assignee, client start date, and date range cutoff filters. Then limits to status value back-end."
+        "Shows clients currently marked as Back End after the selected dashboard filters are applied. This is the active group that has moved into the later part of the client journey."
       }
-      infoSql={getBackEndClientsSql(sqlParams)}
       onInfoClick={onOpenInfo}
       loading={loading}
       onClick={onOpenList}

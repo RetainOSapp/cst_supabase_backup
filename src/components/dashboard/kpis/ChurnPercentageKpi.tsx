@@ -1,15 +1,10 @@
-import {
-  type DashboardKpiSqlParams,
-  getChurnPercentageSql,
-} from "../../../lib/dashboardKpiSql.ts";
 import { KpiCardBase } from "./KpiCardBase.tsx";
 
 interface ChurnPercentageKpiProps {
   percentage: number | null;
   churnedClientsCount: number | null;
   loading: boolean;
-  sqlParams: DashboardKpiSqlParams;
-  onOpenInfo: (title: string, description: string, sql: string) => void;
+  onOpenInfo: (title: string, description: string) => void;
   onOpenList?: () => void;
 }
 
@@ -17,7 +12,6 @@ export function ChurnPercentageKpi({
   percentage,
   churnedClientsCount,
   loading,
-  sqlParams,
   onOpenInfo,
   onOpenList,
 }: ChurnPercentageKpiProps) {
@@ -34,9 +28,8 @@ export function ChurnPercentageKpi({
       description={description}
       descriptionLoading={loading}
       infoDescription={
-        "Starts from off-boarded clients, then marks churned clients where calculated off-boarded date is before calculated contractual end date. Percentage is churned clients divided by total clients (front-end + back-end + off-boarded) under the same filter context."
+        "Shows churned clients as a percentage of the active and off-boarded client base in the selected filter context. A client is treated as churned when they off-board before the expected contract or program end."
       }
-      infoSql={getChurnPercentageSql(sqlParams)}
       onInfoClick={onOpenInfo}
       loading={loading}
       onClick={onOpenList}

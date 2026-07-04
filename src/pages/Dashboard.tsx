@@ -19,7 +19,6 @@ import { RetentionPercentageKpi } from "../components/dashboard/kpis/RetentionPe
 import { UpForRenewalKpi } from "../components/dashboard/kpis/UpForRenewalKpi.tsx";
 import { ComingSoonModal, ComingSoonPanel } from "../components/ComingSoon.tsx";
 import { supabase } from "../lib/supabase.ts";
-import { type DashboardKpiSqlParams } from "../lib/dashboardKpiSql.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { advocacyDefinitions, type AdvocacyType } from "../lib/clientAdvocacy.ts";
 
@@ -1381,9 +1380,7 @@ export function Dashboard() {
   const [kpiInfoModal, setKpiInfoModal] = useState<{
     title: string;
     description: string;
-    sql: string;
   } | null>(null);
-  const [kpiInfoSqlCopied, setKpiInfoSqlCopied] = useState(false);
   const [chartData, setChartData] = useState<DashboardChartData>({
     programDistribution: [],
     buyInDistribution: [],
@@ -1651,14 +1648,12 @@ export function Dashboard() {
     setDetailRenewalSortDirection("asc");
   };
 
-  const openKpiInfoModal = (title: string, description: string, sql: string) => {
-    setKpiInfoModal({ title, description, sql });
-    setKpiInfoSqlCopied(false);
+  const openKpiInfoModal = (title: string, description: string) => {
+    setKpiInfoModal({ title, description });
   };
 
   const closeKpiInfoModal = () => {
     setKpiInfoModal(null);
-    setKpiInfoSqlCopied(false);
   };
 
   const openChartDetail = (
@@ -1671,17 +1666,6 @@ export function Dashboard() {
       title: `${title}: ${item.label}`,
       rows: chartClients.filter((client) => chartKey(getKey(client)) === item.key),
     });
-  };
-
-  const copyKpiSql = async () => {
-    if (!kpiInfoModal?.sql) return;
-    try {
-      await navigator.clipboard.writeText(kpiInfoModal.sql);
-      setKpiInfoSqlCopied(true);
-    } catch (error) {
-      console.error("Failed to copy KPI SQL:", error);
-      setKpiInfoSqlCopied(false);
-    }
   };
 
   const appliedShowSecondaryFilter =
@@ -1718,51 +1702,9 @@ export function Dashboard() {
     ],
   );
 
-  const kpiSqlParams = useMemo<DashboardKpiSqlParams>(
-    () => ({
-      companyId: appliedFilters.companyId,
-      csmId: appliedFilters.csmId,
-      secondaryAssigneeId: appliedShowSecondaryFilter
-        ? appliedFilters.secondaryAssigneeId
-        : "",
-      programValue:
-        appliedProgramValues.length === 1 ? appliedProgramValues[0] : "",
-      offerId: appliedFilters.offerId,
-      clientStartDateFrom: appliedFilters.clientStartDate.startDate,
-      clientStartDateTo: appliedFilters.clientStartDate.endDate,
-      dateRangeStart: appliedFilters.dateRange.startDate,
-      dateRangeEnd: appliedFilters.dateRange.endDate,
-    }),
-    [
-      appliedFilters.clientStartDate.endDate,
-      appliedFilters.clientStartDate.startDate,
-      appliedFilters.dateRange.startDate,
-      appliedFilters.dateRange.endDate,
-      appliedFilters.companyId,
-      appliedFilters.csmId,
-      appliedFilters.offerId,
-      appliedProgramValues,
-      appliedFilters.secondaryAssigneeId,
-      appliedShowSecondaryFilter,
-    ],
-  );
-
   const appliedRenewalDateRange = useMemo(
     () => renewalKpiDateRange(appliedFilters.dateRange),
     [appliedFilters.dateRange.endDate, appliedFilters.dateRange.startDate],
-  );
-
-  const renewalKpiSqlParams = useMemo<DashboardKpiSqlParams>(
-    () => ({
-      ...kpiSqlParams,
-      dateRangeStart: appliedRenewalDateRange.startDate,
-      dateRangeEnd: appliedRenewalDateRange.endDate,
-    }),
-    [
-      appliedRenewalDateRange.endDate,
-      appliedRenewalDateRange.startDate,
-      kpiSqlParams,
-    ],
   );
 
   const appliedReportKey = useMemo(
@@ -4072,7 +4014,6 @@ export function Dashboard() {
             <ActiveClientsKpi
               value={activeClients}
               loading={primaryKpiLoading}
-              sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4083,7 +4024,6 @@ export function Dashboard() {
             <FrontEndClientsKpi
               value={frontEndClients}
               loading={primaryKpiLoading}
-              sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4094,7 +4034,6 @@ export function Dashboard() {
             <BackEndClientsKpi
               value={backEndClients}
               loading={primaryKpiLoading}
-              sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4105,7 +4044,6 @@ export function Dashboard() {
             <OffBoardedClientsKpi
               value={offBoardedClients}
               loading={primaryKpiLoading}
-              sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4180,7 +4118,6 @@ export function Dashboard() {
             <RetainedClientsKpi
               value={retainedClients}
               loading={retentionKpiLoading}
-              sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4192,7 +4129,6 @@ export function Dashboard() {
               percentage={retentionPercentage}
               renewingClientsCount={renewingClientsCount}
               loading={retentionKpiLoading}
-              sqlParams={renewalKpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4203,7 +4139,6 @@ export function Dashboard() {
             <UpForRenewalKpi
               value={activeRenewingClients}
               loading={retentionKpiLoading}
-              sqlParams={renewalKpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4215,7 +4150,6 @@ export function Dashboard() {
               percentage={churnPercentage}
               churnedClientsCount={churnedClientsCount}
               loading={primaryKpiLoading}
-              sqlParams={kpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4787,7 +4721,7 @@ export function Dashboard() {
             <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">{kpiInfoModal.title}</h3>
-                <p className="mt-1 text-sm text-gray-500">Calculation details</p>
+                <p className="mt-1 text-sm text-gray-500">How this card works</p>
               </div>
               <button
                 type="button"
@@ -4804,27 +4738,10 @@ export function Dashboard() {
                 </svg>
               </button>
             </div>
-            <div className="px-5 py-4 space-y-4">
+            <div className="px-5 py-4">
               <p className="text-sm leading-6 text-gray-700 whitespace-pre-line">
                 {kpiInfoModal.description}
               </p>
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                    SQL Query
-                  </p>
-                  <button
-                    type="button"
-                    onClick={copyKpiSql}
-                    className="rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 cursor-pointer transition-colors"
-                  >
-                    {kpiInfoSqlCopied ? "Copied" : "Copy SQL"}
-                  </button>
-                </div>
-                <pre className="max-h-72 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-5 text-gray-800">
-                  <code>{kpiInfoModal.sql}</code>
-                </pre>
-              </div>
             </div>
           </div>
         </div>
