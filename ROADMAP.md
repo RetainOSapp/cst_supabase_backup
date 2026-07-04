@@ -482,6 +482,11 @@ Next session lock:
   - Canonical KPI UI integration v1 is wired for Dashboard KPI cards; remaining work is broader validation against Moves Method or another larger migrated-company dataset before marking shipped. Ethical Scaling has too few active clients to give strong formula/performance confidence.
   - Remaining gaps: charts/client drill-throughs still use client-row calculations; decide later whether those should move to canonical reporting views too.
   - 2026-06-17 validation packet is ready. Next action on migration day: compare Dashboard KPI cards, chart/drilldown totals, Clients list filters, contract/renewal spot checks, and CSM Reports denominators against the packet after final sync/backfill.
+- `[ ]` `[priority: high]` Full Dashboard formula review on Moves Method scale.
+  - Not urgent for migration-day launch, but high priority for the first post-cutover week now that MM has real app-owned scale.
+  - Review every Dashboard KPI, chart, drilldown, CSM workload/capacity count, retention/churn/renewal metric, and applied filter interaction against `DASHBOARD_FORMULA_VALIDATION.md`.
+  - Compare Dashboard totals against app-owned Supabase counts, Clients filters, CSM Reports denominators, and selected CST/read-only reference snapshots where useful.
+  - Outcome should be a short pass/fail punch list: formula correct, needs SQL/RPC hardening, needs UI copy clarification, or needs source-data cleanup.
 - `[x]` Client contact calendar.
   - V1 exists as a Calendar view on `/clients`, beside List and Cards.
   - Day, Week, and Month modes exist.
