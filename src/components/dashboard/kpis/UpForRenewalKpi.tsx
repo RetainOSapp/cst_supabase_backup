@@ -25,7 +25,7 @@ export function UpForRenewalKpi({
       value={value !== null ? value.toLocaleString() : "--"}
       description="active clients up for renewal"
       infoDescription={
-        "Starts from the clients up for renewal (any contract end date in the selected Date Range, excluding churned, paused, and suspended clients). Then limits to clients whose current program status is front-end or back-end, and removes anyone who has already been upgraded (clients counted in Retained Clients for the selected range). The remaining list is who you still need to talk to about renewing."
+        "Starts from clients with a current or historical contract end date in the selected Date Range. When no Date Range is set, the default renewal window is overdue through the next 30 days. It excludes churned, paused, and suspended clients, limits to Front End and Back End clients, and removes anyone already counted as retained for the same window."
       }
       infoSql={getUpForRenewalSql(sqlParams)}
       onInfoClick={onOpenInfo}

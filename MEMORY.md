@@ -549,3 +549,10 @@ For historical context:
 - Updated/deployed `supabase/functions/manage-client-contract/index.ts`: assigned CSM checks accept app-owned member IDs, delete is no longer SuperAdmin-only, create reuses the summary sync path, and summary sync only promotes active/open non-archived contracts.
 - Verification: `npm run build` passed; `manage-client-contract` deployed to Supabase project `zjauqflzxzsbpnivzsct`. `ROADMAP.md` has a focused `[qa]` retest item for create/edit/archive/delete and role permissions.
 - Jay retested and approved: edited contract value persisted after refresh, archiving removed contracts from Active, and archived contracts appeared correctly under Archived.
+
+## Moves Method Renewal KPI QA Fix - 2026-07-04
+
+- Jay's renewal QA found Dashboard > Up For Renewal showed 2,348 for MM with no Date Range, effectively nearly every active client, while Clients renewal windows showed much smaller overdue/next-30 counts.
+- Updated `src/pages/Dashboard.tsx` so renewal KPI calculations and drilldowns use overdue through next 30 days by default when no Dashboard Date Range is set; explicit Date Range still wins. Dashboard now uses `current_contract_end_date_for_filtering`, includes non-archived historical contract rows for overdue cases, and excludes archived app-owned contract rows by status/archived flag.
+- Updated KPI help copy in `src/components/dashboard/kpis/UpForRenewalKpi.tsx` and `RetentionPercentageKpi.tsx`.
+- Verification: `npm run build` passed. Read-only MM sanity count for July 4, 2026 expects default Up For Renewal around 451 after retained-client exclusion.

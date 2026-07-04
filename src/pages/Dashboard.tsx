@@ -286,6 +286,7 @@ type OfferKpiClientRow = Record<string, unknown> & {
   current_contract_start_date: string | null;
   current_contract_of_days: number | null;
   current_contract_end_date: string | null;
+  current_contract_end_date_for_filtering?: string | null;
 };
 
 interface OfferKpiHistoryRow {
@@ -918,6 +919,30 @@ function dayAfter(value: string) {
   return value ? new Date(`${value}T00:00:00.000Z`) : null;
 }
 
+function dateInputValueFromDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function renewalKpiDateRange(dateRange: MonthDateFilterState) {
+  if (dateRange.startDate || dateRange.endDate) {
+    return {
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
+      usesDefaultHorizon: false,
+    };
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return {
+    startDate: "",
+    endDate: dateInputValueFromDate(addDays(today, 30)),
+    usesDefaultHorizon: true,
+  };
+}
+
 function isInDateRange(value: unknown, startDate: string, endDate: string) {
   const date = dateFromValue(value);
   if (!date) return false;
@@ -1052,6 +1077,8 @@ function passesReportEndDate(client: OfferKpiClientRow, endDate: string) {
 }
 
 function calculatedContractEndDate(client: OfferKpiClientRow) {
+  const filteringEnd = dateFromValue(client.current_contract_end_date_for_filtering);
+  if (filteringEnd) return filteringEnd;
   const explicitEnd = dateFromValue(client.current_contract_end_date);
   if (explicitEnd) return explicitEnd;
   const start = dateFromValue(
@@ -1681,6 +1708,24 @@ export function Dashboard() {
     ],
   );
 
+  const appliedRenewalDateRange = useMemo(
+    () => renewalKpiDateRange(appliedFilters.dateRange),
+    [appliedFilters.dateRange.endDate, appliedFilters.dateRange.startDate],
+  );
+
+  const renewalKpiSqlParams = useMemo<DashboardKpiSqlParams>(
+    () => ({
+      ...kpiSqlParams,
+      dateRangeStart: appliedRenewalDateRange.startDate,
+      dateRangeEnd: appliedRenewalDateRange.endDate,
+    }),
+    [
+      appliedRenewalDateRange.endDate,
+      appliedRenewalDateRange.startDate,
+      kpiSqlParams,
+    ],
+  );
+
   const appliedReportKey = useMemo(
     () =>
       JSON.stringify({
@@ -2062,6 +2107,7 @@ export function Dashboard() {
         "current_contract_start_date",
         "current_contract_of_days",
         "current_contract_end_date",
+        "current_contract_end_date_for_filtering",
       ].join(", ");
 
       const buildClientRowsQuery = (from: number, to: number) => {
@@ -2191,6 +2237,7 @@ export function Dashboard() {
         return;
       }
 
+      const renewalDateRange = appliedRenewalDateRange;
       const appHistoryQuery = appliedUsesAppClients
         ? supabase
             .from("client_history_events")
@@ -2199,15 +2246,15 @@ export function Dashboard() {
             .in("event_type", ["client_status_changed", "client_retention_recorded"])
             .gte(
               "created_at",
-              appliedFilters.dateRange.startDate
-                ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+              renewalDateRange.startDate
+                ? `${renewalDateRange.startDate}T00:00:00.000Z`
                 : "0001-01-01T00:00:00.000Z",
             )
             .lt(
               "created_at",
-              appliedFilters.dateRange.endDate
+              renewalDateRange.endDate
                 ? addDays(
-                    new Date(`${appliedFilters.dateRange.endDate}T00:00:00.000Z`),
+                    new Date(`${renewalDateRange.endDate}T00:00:00.000Z`),
                     1,
                   ).toISOString()
                 : "9999-12-31T00:00:00.000Z",
@@ -2219,6 +2266,7 @@ export function Dashboard() {
             .select("client_id, end_date")
             .in("client_id", clientIds)
             .is("archived_at", null)
+            .or("status.is.null,status.neq.archived")
             .not("end_date", "is", null)
         : Promise.resolve({ data: [], error: null });
 
@@ -2238,14 +2286,17 @@ export function Dashboard() {
           .in("original_value", ["front-end", "back-end"])
           .gte(
             "modified_date",
-            appliedFilters.dateRange.startDate
-              ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+            renewalDateRange.startDate
+              ? `${renewalDateRange.startDate}T00:00:00.000Z`
               : "0001-01-01T00:00:00.000Z",
           )
           .lt(
             "modified_date",
-            appliedFilters.dateRange.endDate
-              ? addDays(new Date(`${appliedFilters.dateRange.endDate}T00:00:00.000Z`), 1).toISOString()
+            renewalDateRange.endDate
+              ? addDays(
+                  new Date(`${renewalDateRange.endDate}T00:00:00.000Z`),
+                  1,
+                ).toISOString()
               : "9999-12-31T00:00:00.000Z",
           ),
         appContractsQuery,
@@ -2296,7 +2347,14 @@ export function Dashboard() {
         if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
         if (churnedIds.has(client.glide_row_id)) return;
         const contractEnd = calculatedContractEndDate(client);
-        if (contractEnd && isInDateRange(contractEnd, appliedFilters.dateRange.startDate, appliedFilters.dateRange.endDate)) {
+        if (
+          contractEnd &&
+          isInDateRange(
+            contractEnd,
+            renewalDateRange.startDate,
+            renewalDateRange.endDate,
+          )
+        ) {
           renewingIds.add(client.glide_row_id);
         }
       });
@@ -2311,7 +2369,13 @@ export function Dashboard() {
         if (!client) return;
         if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
         if (churnedIds.has(contract.client_id)) return;
-        if (isInDateRange(contract.end_date, appliedFilters.dateRange.startDate, appliedFilters.dateRange.endDate)) {
+        if (
+          isInDateRange(
+            contract.end_date,
+            renewalDateRange.startDate,
+            renewalDateRange.endDate,
+          )
+        ) {
           renewingIds.add(contract.client_id);
         }
       });
@@ -2477,6 +2541,8 @@ export function Dashboard() {
     appliedFilters.csmId,
     appliedFilters.dateRange.endDate,
     appliedFilters.dateRange.startDate,
+    appliedRenewalDateRange.endDate,
+    appliedRenewalDateRange.startDate,
     appliedFilters.offerId,
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
@@ -2622,6 +2688,8 @@ export function Dashboard() {
     appliedFilters.csmId,
     appliedFilters.dateRange.endDate,
     appliedFilters.dateRange.startDate,
+    appliedRenewalDateRange.endDate,
+    appliedRenewalDateRange.startDate,
     appliedFilters.offerId,
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
@@ -2973,6 +3041,7 @@ export function Dashboard() {
             "current_contract_start_date",
             "current_contract_of_days",
             "current_contract_end_date",
+            "current_contract_end_date_for_filtering",
           ].join(", "),
         )
         .eq(companyColumn, appliedFilters.companyId)
@@ -3042,6 +3111,11 @@ export function Dashboard() {
       let retainedIds = new Set<string>();
       let renewingIds = new Set<string>();
       let churnedIds = new Set<string>();
+      const detailRenewalDateRange = ["renewing", "active-renewing"].includes(
+        detailKey,
+      )
+        ? appliedRenewalDateRange
+        : appliedFilters.dateRange;
 
       if (
         ["retained", "renewing", "active-renewing", "churned"].includes(
@@ -3060,16 +3134,16 @@ export function Dashboard() {
               ])
               .gte(
                 "created_at",
-                appliedFilters.dateRange.startDate
-                  ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+                detailRenewalDateRange.startDate
+                  ? `${detailRenewalDateRange.startDate}T00:00:00.000Z`
                   : "0001-01-01T00:00:00.000Z",
               )
               .lt(
                 "created_at",
-                appliedFilters.dateRange.endDate
+                detailRenewalDateRange.endDate
                   ? addDays(
                       new Date(
-                        `${appliedFilters.dateRange.endDate}T00:00:00.000Z`,
+                        `${detailRenewalDateRange.endDate}T00:00:00.000Z`,
                       ),
                       1,
                     ).toISOString()
@@ -3082,6 +3156,7 @@ export function Dashboard() {
               .select("client_id, end_date")
               .in("client_id", clientIds)
               .is("archived_at", null)
+              .or("status.is.null,status.neq.archived")
               .not("end_date", "is", null)
           : Promise.resolve({ data: [], error: null });
 
@@ -3101,16 +3176,16 @@ export function Dashboard() {
             .in("original_value", ["front-end", "back-end"])
             .gte(
               "modified_date",
-              appliedFilters.dateRange.startDate
-                ? `${appliedFilters.dateRange.startDate}T00:00:00.000Z`
+              detailRenewalDateRange.startDate
+                ? `${detailRenewalDateRange.startDate}T00:00:00.000Z`
                 : "0001-01-01T00:00:00.000Z",
             )
             .lt(
               "modified_date",
-              appliedFilters.dateRange.endDate
+              detailRenewalDateRange.endDate
                 ? addDays(
                     new Date(
-                      `${appliedFilters.dateRange.endDate}T00:00:00.000Z`,
+                      `${detailRenewalDateRange.endDate}T00:00:00.000Z`,
                     ),
                     1,
                   ).toISOString()
@@ -3179,8 +3254,8 @@ export function Dashboard() {
             contractEnd &&
             isInDateRange(
               contractEnd,
-              appliedFilters.dateRange.startDate,
-              appliedFilters.dateRange.endDate,
+              detailRenewalDateRange.startDate,
+              detailRenewalDateRange.endDate,
             )
           ) {
             renewingIds.add(client.glide_row_id);
@@ -3200,8 +3275,8 @@ export function Dashboard() {
           if (
             isInDateRange(
               contract.end_date,
-              appliedFilters.dateRange.startDate,
-              appliedFilters.dateRange.endDate,
+              detailRenewalDateRange.startDate,
+              detailRenewalDateRange.endDate,
             )
           ) {
             renewingIds.add(contract.client_id);
@@ -3989,7 +4064,7 @@ export function Dashboard() {
               percentage={retentionPercentage}
               renewingClientsCount={renewingClientsCount}
               loading={retentionKpiLoading}
-              sqlParams={kpiSqlParams}
+              sqlParams={renewalKpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns
@@ -4000,7 +4075,7 @@ export function Dashboard() {
             <UpForRenewalKpi
               value={activeRenewingClients}
               loading={retentionKpiLoading}
-              sqlParams={kpiSqlParams}
+              sqlParams={renewalKpiSqlParams}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
                 canUseDashboardDrilldowns

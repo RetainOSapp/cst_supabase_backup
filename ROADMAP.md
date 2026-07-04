@@ -77,6 +77,8 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Moves Method Phase 4 contract management retest passed.
   - 2026-07-04 fix deployed: Director, Support, and assigned CSMs can create/edit/archive/delete app-owned contract rows for clients they can manage; CSM assignment checks accept app-owned member IDs; contract rows ending today remain Active; and client current-contract summary sync only promotes active/open non-archived contract rows so expired old contracts do not reappear as current after archive/edit.
   - 2026-07-04 Jay QA passed: editing contract value persisted after refresh, archiving removed contracts from Active, and archived contracts appeared correctly under Archived.
+- `[~]` `[qa]` Moves Method renewal KPI retest.
+  - 2026-07-04 QA found Dashboard > Up For Renewal was effectively counting almost every active MM client when no Date Range was set. Fix built: default renewal KPI/drilldown window is overdue through next 30 days unless Jay sets an explicit Dashboard Date Range; it uses the same current-contract filtering field as Clients and includes non-archived historical contract ends for overdue cases. Expected MM default Up For Renewal is about 451 on July 4, 2026.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -458,6 +460,7 @@ Next session lock:
   - Performance follow-up v1 completed on 2026-06-06: Overview avoids hidden chart/upkeep loads and Charts lazy-loads heavier datasets by active tab.
   - App-owned offboarded, retention, and renewal/up-for-renewal formulas were hardened against Ethical Scaling pilot data sources.
   - Retention now includes `client_retention_recorded` events for same-program renewals.
+  - 2026-07-04 Moves Method QA fix: Up For Renewal no longer treats "no Dashboard Date Range" as unbounded all-time renewal coverage. Default is overdue through next 30 days; explicit Date Range still wins.
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
   - `[qa]` When an Offer filter is applied in Dashboard > Charts, the Clients By Offer chart switches to Clients By Milestone for that selected offer/pathway and keeps client-list drilldowns.
@@ -487,6 +490,7 @@ Next session lock:
   - Review every Dashboard KPI, chart, drilldown, CSM workload/capacity count, retention/churn/renewal metric, and applied filter interaction against `DASHBOARD_FORMULA_VALIDATION.md`.
   - Compare Dashboard totals against app-owned Supabase counts, Clients filters, CSM Reports denominators, and selected CST/read-only reference snapshots where useful.
   - Outcome should be a short pass/fail punch list: formula correct, needs SQL/RPC hardening, needs UI copy clarification, or needs source-data cleanup.
+  - 2026-07-04 first MM finding: renewal KPI default range was too broad and has a focused QA retest queued. Continue remaining KPI/chart formula review after that retest.
 - `[x]` Client contact calendar.
   - V1 exists as a Calendar view on `/clients`, beside List and Cards.
   - Day, Week, and Month modes exist.

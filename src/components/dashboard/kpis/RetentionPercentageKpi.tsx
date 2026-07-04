@@ -34,7 +34,7 @@ export function RetentionPercentageKpi({
       description={description}
       descriptionLoading={loading}
       infoDescription={
-        "Retention percentage is retained clients divided by clients up for renewal. Clients up for renewal are those whose current contract end date (calculated) or any past contract end date falls within the selected Date Range (or any end date when no range is set), excluding clients who are currently churned and those whose program status is paused or suspended."
+        "Retention percentage is retained clients divided by clients up for renewal. Clients up for renewal are those whose current contract end date or historical contract end date falls within the selected Date Range. When no Date Range is set, the denominator uses overdue through the next 30 days. It excludes churned, paused, and suspended clients."
       }
       infoSql={getRetentionPercentageSql(sqlParams)}
       onInfoClick={onOpenInfo}
