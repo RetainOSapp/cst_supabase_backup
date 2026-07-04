@@ -3390,7 +3390,7 @@ export function Clients() {
         supabase
           .from("companies")
           .select(
-            "legacy_glide_row_id, migration_status, enable_secondary_assignee, enable_archetypes",
+            "legacy_glide_row_id, name, migration_status, enable_secondary_assignee, enable_archetypes",
           )
           .in("migration_status", ["pilot", "migrated"]),
       ]);
@@ -3421,6 +3421,21 @@ export function Clients() {
               enable_secondary_assignee: appSettings.enable_secondary_assignee,
               enable_archetypes: appSettings.enable_archetypes,
             };
+      });
+      const existingCompanyIds = new Set(
+        rows.map((company) => company.glide_row_id),
+      );
+      (appCompaniesResult.data ?? []).forEach((company) => {
+        const legacyId = company.legacy_glide_row_id;
+        if (typeof legacyId !== "string" || legacyId === "") return;
+        if (existingCompanyIds.has(legacyId)) return;
+        rows.push({
+          glide_row_id: legacyId,
+          name: company.name ?? null,
+          enable_secondary_assignee:
+            company.enable_secondary_assignee === true,
+          enable_archetypes: company.enable_archetypes === true,
+        });
       });
       if (!canUseCompanySwitcher && effectiveCompanyId) {
         rows = rows.filter((company) => company.glide_row_id === effectiveCompanyId);

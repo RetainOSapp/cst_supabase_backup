@@ -31,6 +31,7 @@ const SECONDARY_ASSIGNEE_QUERY_KEY = "secondaryAssigneeId";
 const PROGRAM_QUERY_KEY = "program";
 const OFFER_QUERY_KEY = "offerId";
 const DETAIL_PAGE_SIZE = 25;
+const DASHBOARD_QUERY_PAGE_SIZE = 1000;
 const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
 const PROFILE_UPKEEP_FRESHNESS_DAYS = 14;
 const MILESTONE_MISMATCH_KEY = "milestone-mismatch";
@@ -83,6 +84,27 @@ interface CanonicalKpiCountsRow
   suspended_clients: number | null;
 }
 
+async function fetchPagedDashboardRows<T>(
+  buildQuery: (
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: T[] | null; error: unknown | null }>,
+) {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += DASHBOARD_QUERY_PAGE_SIZE) {
+    const to = from + DASHBOARD_QUERY_PAGE_SIZE - 1;
+    const { data, error } = await buildQuery(from, to);
+    if (error) return { data: rows, error };
+
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < DASHBOARD_QUERY_PAGE_SIZE) break;
+  }
+
+  return { data: rows, error: null };
+}
+
 interface Company {
   glide_row_id: string;
   name: string | null;
@@ -94,6 +116,8 @@ interface Company {
 interface AppCompany {
   id: string;
   legacy_glide_row_id: string | null;
+  name?: string | null;
+  enable_secondary_assignee?: boolean | null;
   migration_status: string | null;
 }
 
@@ -1707,14 +1731,34 @@ export function Dashboard() {
         query,
         supabase
           .from("companies")
-          .select("id, legacy_glide_row_id, migration_status"),
+          .select("id, legacy_glide_row_id, name, migration_status, enable_secondary_assignee"),
       ]);
 
       if (backupResult.error) {
         console.error("Failed to load companies:", backupResult.error);
         setCompanies([]);
       } else {
-        setCompanies((backupResult.data ?? []) as Company[]);
+        const rows = [...((backupResult.data ?? []) as Company[])];
+        const existingCompanyIds = new Set(
+          rows.map((company) => company.glide_row_id),
+        );
+        ((appResult.data ?? []) as AppCompany[]).forEach((company) => {
+          if (!company.legacy_glide_row_id) return;
+          if (existingCompanyIds.has(company.legacy_glide_row_id)) return;
+          rows.push({
+            glide_row_id: company.legacy_glide_row_id,
+            name: company.name ?? null,
+            enable_secondary_assignee:
+              company.enable_secondary_assignee ?? null,
+            program_paused_override: null,
+            program_suspended_override: null,
+          });
+        });
+        setCompanies(
+          rows.sort((left, right) =>
+            (left.name ?? "").localeCompare(right.name ?? ""),
+          ),
+        );
       }
 
       if (appResult.error) {
@@ -2003,70 +2047,80 @@ export function Dashboard() {
       const companyColumn = appliedUsesAppClients
         ? "company_glide_row_id"
         : "company_id";
-      let clientsQuery = supabase
-        .from(clientSourceTable)
-        .select(
-          [
-            "glide_row_id",
-            "client_name",
-            "client_image",
-            ...(appliedUsesAppClients ? ["company_glide_row_id"] : []),
-            "csm_team_member_id",
-            "csm_secondary_assignee_id",
-            "program_status_value",
+      const clientSelect = [
+        "glide_row_id",
+        "client_name",
+        "client_image",
+        ...(appliedUsesAppClients ? ["company_glide_row_id"] : []),
+        "csm_team_member_id",
+        "csm_secondary_assignee_id",
+        "program_status_value",
+        "offer_milestones_current_offer_id",
+        "client_age_date_onboarded",
+        "client_age_date_offboarded",
+        "client_age_date_offboarded_for_filtering",
+        "current_contract_start_date",
+        "current_contract_of_days",
+        "current_contract_end_date",
+      ].join(", ");
+
+      const buildClientRowsQuery = (from: number, to: number) => {
+        let query = supabase
+          .from(clientSourceTable)
+          .select(clientSelect)
+          .eq(companyColumn, appliedFilters.companyId)
+          .range(from, to);
+
+        if (appliedFilters.offerId) {
+          query = query.eq(
             "offer_milestones_current_offer_id",
+            appliedFilters.offerId,
+          );
+        }
+        if (assignedTeamMemberId) {
+          query = query.or(
+            `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+          );
+        } else if (appliedFilters.csmId) {
+          query = query.eq("csm_team_member_id", appliedFilters.csmId);
+        }
+        if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+          query = query.eq(
+            "csm_secondary_assignee_id",
+            appliedFilters.secondaryAssigneeId,
+          );
+        }
+        if (appliedProgramValues.length === 1) {
+          query = query.eq("program_status_value", appliedProgramValues[0]);
+        } else if (appliedProgramValues.length > 1) {
+          query = query.in("program_status_value", appliedProgramValues);
+        }
+        if (appliedFilters.clientStartDate.startDate) {
+          query = query.gte(
             "client_age_date_onboarded",
-            "client_age_date_offboarded",
-            "client_age_date_offboarded_for_filtering",
-            "current_contract_start_date",
-            "current_contract_of_days",
-            "current_contract_end_date",
-          ].join(", "),
-        )
-        .eq(companyColumn, appliedFilters.companyId)
-        .range(0, 4999);
+            `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
+          );
+        }
+        if (appliedFilters.clientStartDate.endDate) {
+          query = query.lt(
+            "client_age_date_onboarded",
+            addDays(
+              new Date(`${appliedFilters.clientStartDate.endDate}T00:00:00.000Z`),
+              1,
+            ).toISOString(),
+          );
+        }
 
-      if (appliedFilters.offerId) {
-        clientsQuery = clientsQuery.eq(
-          "offer_milestones_current_offer_id",
-          appliedFilters.offerId,
-        );
-      }
-      if (assignedTeamMemberId) {
-        clientsQuery = clientsQuery.or(
-          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
-        );
-      } else if (appliedFilters.csmId) {
-        clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
-      }
-      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
-        clientsQuery = clientsQuery.eq(
-          "csm_secondary_assignee_id",
-          appliedFilters.secondaryAssigneeId,
-        );
-      }
-      if (appliedProgramValues.length === 1) {
-        clientsQuery = clientsQuery.eq("program_status_value", appliedProgramValues[0]);
-      } else if (appliedProgramValues.length > 1) {
-        clientsQuery = clientsQuery.in("program_status_value", appliedProgramValues);
-      }
-      if (appliedFilters.clientStartDate.startDate) {
-        clientsQuery = clientsQuery.gte(
-          "client_age_date_onboarded",
-          `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
-        );
-      }
-      if (appliedFilters.clientStartDate.endDate) {
-        clientsQuery = clientsQuery.lt(
-          "client_age_date_onboarded",
-          addDays(
-            new Date(`${appliedFilters.clientStartDate.endDate}T00:00:00.000Z`),
-            1,
-          ).toISOString(),
-        );
-      }
+        return query;
+      };
 
-      const { data: clientRows, error: clientsError } = await clientsQuery;
+      const { data: clientRows, error: clientsError } =
+        await fetchPagedDashboardRows<OfferKpiClientRow>((from, to) =>
+          buildClientRowsQuery(from, to) as unknown as PromiseLike<{
+            data: OfferKpiClientRow[] | null;
+            error: unknown | null;
+          }>,
+        );
       if (cancelled) return;
 
       if (clientsError) {
@@ -2392,9 +2446,8 @@ export function Dashboard() {
 
     void (async () => {
       const shouldUseCanonicalKpis =
-        appliedUsesAppClients ||
-        Boolean(appliedFilters.offerId) ||
-        appliedProgramValues.length > 1;
+        !appliedUsesAppClients &&
+        (Boolean(appliedFilters.offerId) || appliedProgramValues.length > 1);
 
       if (shouldUseCanonicalKpis) {
         const loadedCanonical = await loadCanonicalKpis();

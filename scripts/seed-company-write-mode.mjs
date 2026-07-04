@@ -7,6 +7,8 @@ const apply = process.argv.includes("--apply");
 const missingOnly = process.argv.includes("--missing-only");
 const includeArchived = process.argv.includes("--include-archived");
 const shellOnly = process.argv.includes("--shell-only");
+const preserveCompanyConfig = process.argv.includes("--preserve-company-config");
+const skipClientCustomFields = process.argv.includes("--skip-client-custom-fields");
 const { url, serviceRoleKey } = getSupabaseEnv();
 const supabase = createClient(url, serviceRoleKey, {
   auth: { persistSession: false },
@@ -435,6 +437,59 @@ function customFieldPayloads(company, sourceCompany) {
   }).filter(Boolean);
 }
 
+function customFieldSourceKeys(field) {
+  const primaryKey = cleanText(field.source_key) ?? cleanText(field.key);
+  if (!primaryKey) return [];
+  const keys = [primaryKey];
+  const legacySlotMatch = primaryKey.match(/^customfield(\d+)$/);
+  if (legacySlotMatch) {
+    keys.push(`custom_fields_${legacySlotMatch[1]}_value`);
+  }
+  return [...new Set(keys)];
+}
+
+function customFieldValuePayloads(sourceClients, company, appClientByLegacyId, fields) {
+  const activeFields = fields.filter((field) => field.status !== "archived");
+  return sourceClients.flatMap((source) => {
+    const appClient = appClientByLegacyId.get(source.glide_row_id);
+    if (!appClient) return [];
+    return activeFields
+      .map((field) => {
+        const keys = customFieldSourceKeys(field);
+        const key = keys.find((candidate) => cleanText(source[candidate]));
+        if (!key) return null;
+        const value = cleanText(source[key]);
+        if (!value) return null;
+        return {
+          company_id: company.id,
+          client_id: appClient.glide_row_id,
+          custom_field_id: field.id,
+          field_key: field.key,
+          value_text: value,
+          value_json: null,
+          source_table: "backup_company_clients",
+          source_key: key,
+          metadata: {
+            migration_seed: true,
+            seeded_by: "seed-company-write-mode",
+          },
+        };
+      })
+      .filter(Boolean);
+  });
+}
+
+async function loadActiveCompanyCustomFields(companyId) {
+  const { data, error } = await supabase
+    .from("company_custom_fields")
+    .select("id, key, source_key, status")
+    .eq("company_id", companyId)
+    .eq("entity_type", "client")
+    .eq("status", "active");
+  if (error) throw error;
+  return data ?? [];
+}
+
 function defaultOutcomePayloads(company) {
   const defaults = [
     ["success", "yes", "Yes", 10, 2],
@@ -613,6 +668,8 @@ async function main() {
       missingOnly,
       includeArchived,
       shellOnly,
+      preserveCompanyConfig,
+      skipClientCustomFields,
     },
     company: {
       mirror: {
@@ -664,12 +721,30 @@ async function main() {
     });
   }
 
-  const { data: upsertedCompany, error: companyError } = await supabase
-    .from("companies")
-    .upsert(companyPayload(sourceCompany), { onConflict: "legacy_glide_row_id" })
-    .select("id, legacy_glide_row_id, name, migration_status, enable_secondary_assignee, enable_call_ai_for_csms")
-    .single();
-  if (companyError) throw companyError;
+  let upsertedCompany;
+  if (preserveCompanyConfig) {
+    if (!existingCompanyResult.data?.id) {
+      fail("--preserve-company-config requires an existing app-owned company shell.", {
+        legacyId,
+      });
+    }
+    const { data, error } = await supabase
+      .from("companies")
+      .update({ status: "active", archived_at: null })
+      .eq("id", existingCompanyResult.data.id)
+      .select("id, legacy_glide_row_id, name, migration_status, enable_secondary_assignee, enable_call_ai_for_csms")
+      .single();
+    if (error) throw error;
+    upsertedCompany = data;
+  } else {
+    const { data, error } = await supabase
+      .from("companies")
+      .upsert(companyPayload(sourceCompany), { onConflict: "legacy_glide_row_id" })
+      .select("id, legacy_glide_row_id, name, migration_status, enable_secondary_assignee, enable_call_ai_for_csms")
+      .single();
+    if (error) throw error;
+    upsertedCompany = data;
+  }
 
   const existingClientRows = missingOnly
     ? await supabase
@@ -697,9 +772,11 @@ async function main() {
     .filter((milestone) => milestone.glide_row_id && milestone.name)
     .map((milestone) => milestonePayload(milestone, upsertedCompany));
 
-  await upsertInChunks("company_members", members, {
-    onConflict: "legacy_glide_row_id",
-  });
+  if (!preserveCompanyConfig) {
+    await upsertInChunks("company_members", members, {
+      onConflict: "legacy_glide_row_id",
+    });
+  }
   await upsertInChunks("clients", clientPayloads, { onConflict: "glide_row_id" });
 
   if (!shellOnly) {
@@ -724,36 +801,56 @@ async function main() {
     if (advocacyEvents.length > 0) {
       await upsertInChunks("client_advocacy_events", advocacyEvents, {});
     }
+    if (!skipClientCustomFields) {
+      const appCustomFields = await loadActiveCompanyCustomFields(upsertedCompany.id);
+      const customFieldValues = customFieldValuePayloads(
+        sourceClients.filter((client) => includeArchived || client.is_archived !== true),
+        upsertedCompany,
+        appClientByLegacyId,
+        appCustomFields,
+      );
+      await supabase
+        .from("client_custom_field_values")
+        .delete()
+        .eq("company_id", upsertedCompany.id);
+      if (customFieldValues.length > 0) {
+        await upsertInChunks("client_custom_field_values", customFieldValues, {
+          onConflict: "company_id,client_id,custom_field_id",
+        });
+      }
+    }
   }
 
-  await upsertInChunks("company_offers", offers, { onConflict: "glide_row_id" });
-  await upsertInChunks("company_offer_milestones", milestones, {
-    onConflict: "glide_row_id",
-  });
-
-  await supabase
-    .from("company_settings")
-    .upsert(settingPayload(upsertedCompany, sourceCompany), {
-      onConflict: "company_id",
+  if (!preserveCompanyConfig) {
+    await upsertInChunks("company_offers", offers, { onConflict: "glide_row_id" });
+    await upsertInChunks("company_offer_milestones", milestones, {
+      onConflict: "glide_row_id",
     });
-  await upsertInChunks("company_custom_fields", customFieldPayloads(upsertedCompany, sourceCompany), {
-    onConflict: "company_id,key",
-  });
-  await upsertInChunks("company_outcome_definitions", defaultOutcomePayloads(upsertedCompany), {
-    onConflict: "company_id,outcome_type,value",
-  });
-  await upsertInChunks("company_churn_reasons", defaultChurnReasonPayloads(upsertedCompany), {
-    onConflict: "company_id,value",
-  });
-  await insertMissingNotificationPreferences(
-    upsertedCompany,
-    diagnosticNotificationPayloads(upsertedCompany),
-  );
-  const { error: notificationSeedError } = await supabase.rpc(
-    "seed_default_notification_preferences",
-    { p_company_id: upsertedCompany.id },
-  );
-  if (notificationSeedError) throw notificationSeedError;
+
+    await supabase
+      .from("company_settings")
+      .upsert(settingPayload(upsertedCompany, sourceCompany), {
+        onConflict: "company_id",
+      });
+    await upsertInChunks("company_custom_fields", customFieldPayloads(upsertedCompany, sourceCompany), {
+      onConflict: "company_id,key",
+    });
+    await upsertInChunks("company_outcome_definitions", defaultOutcomePayloads(upsertedCompany), {
+      onConflict: "company_id,outcome_type,value",
+    });
+    await upsertInChunks("company_churn_reasons", defaultChurnReasonPayloads(upsertedCompany), {
+      onConflict: "company_id,value",
+    });
+    await insertMissingNotificationPreferences(
+      upsertedCompany,
+      diagnosticNotificationPayloads(upsertedCompany),
+    );
+    const { error: notificationSeedError } = await supabase.rpc(
+      "seed_default_notification_preferences",
+      { p_company_id: upsertedCompany.id },
+    );
+    if (notificationSeedError) throw notificationSeedError;
+  }
 
   const { error: auditError } = await supabase.from("app_audit_events").insert({
     company_id: upsertedCompany.id,
@@ -772,6 +869,8 @@ async function main() {
       milestones: milestones.length,
       missing_only: missingOnly,
       shell_only: shellOnly,
+      preserve_company_config: preserveCompanyConfig,
+      skip_client_custom_fields: skipClientCustomFields,
     },
   });
   if (auditError) throw auditError;
@@ -787,6 +886,8 @@ async function main() {
           offers: offers.length,
           milestones: milestones.length,
           customFields: customFieldPayloads(upsertedCompany, sourceCompany).length,
+          preservedCompanyConfig: preserveCompanyConfig,
+          skippedClientCustomFields: skipClientCustomFields,
         },
       },
       null,

@@ -12,6 +12,9 @@ const apply = process.argv.includes("--apply");
 const includeArchived = process.argv.includes("--include-archived");
 const includePausedSuspended = process.argv.includes("--include-paused-suspended");
 const includeSummaryContracts = !process.argv.includes("--no-summary-contracts");
+const includeCurrentSummaryForExistingContracts = process.argv.includes(
+  "--include-current-summary-for-existing-contracts",
+);
 
 function readArg(name) {
   return process.argv.find((argument) => argument.startsWith(`--${name}=`))
@@ -209,27 +212,56 @@ async function insertInChunks(table, payloads) {
   }
 }
 
+async function queryAll(label, queryBuilder, pageSize = 1000) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+    const { data, error } = await queryBuilder().range(from, to);
+    if (error) throw new Error(`${label}: ${error.message}`);
+    rows.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function fetchContractsForClientIds(clientIds) {
+  const rows = [];
+  const chunkSize = 100;
+  for (let index = 0; index < clientIds.length; index += chunkSize) {
+    const chunk = clientIds.slice(index, index + chunkSize);
+    const chunkRows = await queryAll("backup client contracts", () =>
+      supabase
+        .from("backup_company_clients_contracts")
+        .select("*")
+        .in("client_id", chunk),
+    );
+    rows.push(...chunkRows);
+  }
+  return rows;
+}
+
 async function main() {
   const company = await resolveCompany();
 
-  const { data: appClients, error: appClientsError } = await supabase
-    .from("clients")
-    .select(`
-      glide_row_id,
-      client_name,
-      program_status_value,
-      client_age_date_onboarded,
-      current_contract_start_date,
-      current_contract_of_days,
-      current_contract_end_date,
-      current_contract_end_date_for_filtering,
-      current_contract_monthly_value,
-      current_contract_reference_link,
-      current_contract_notes,
-      current_contract_auto_renew
-    `)
-    .eq("company_id", company.id);
-  if (appClientsError) throw appClientsError;
+  const appClients = await queryAll("app clients", () =>
+    supabase
+      .from("clients")
+      .select(`
+        glide_row_id,
+        client_name,
+        program_status_value,
+        client_age_date_onboarded,
+        current_contract_start_date,
+        current_contract_of_days,
+        current_contract_end_date,
+        current_contract_end_date_for_filtering,
+        current_contract_monthly_value,
+        current_contract_reference_link,
+        current_contract_notes,
+        current_contract_auto_renew
+      `)
+      .eq("company_id", company.id),
+  );
 
   const clientIds = (appClients ?? []).map((client) => client.glide_row_id).filter(Boolean);
   const scopedClientIds = new Set(
@@ -248,29 +280,24 @@ async function main() {
   );
 
   const [
-    sourceContractsResult,
+    sourceContracts,
     existingContractsResult,
   ] = clientIds.length > 0
     ? await Promise.all([
-        supabase
-          .from("backup_company_clients_contracts")
-          .select("*")
-          .in("client_id", clientIds),
-        supabase
-          .from("client_contracts")
-          .select("glide_row_id, client_id, archived_at")
-          .eq("company_id", company.id),
+        fetchContractsForClientIds(clientIds),
+        queryAll("existing app contracts", () =>
+          supabase
+            .from("client_contracts")
+            .select("glide_row_id, client_id, archived_at")
+            .eq("company_id", company.id),
+        ),
       ])
     : [
-        { data: [], error: null },
-        { data: [], error: null },
+        [],
+        [],
       ];
 
-  for (const result of [sourceContractsResult, existingContractsResult]) {
-    if (result.error) throw result.error;
-  }
-
-  const existingContracts = existingContractsResult.data ?? [];
+  const existingContracts = existingContractsResult ?? [];
   const existingContractIds = new Set(
     existingContracts.map((contract) => contract.glide_row_id).filter(Boolean),
   );
@@ -281,7 +308,7 @@ async function main() {
       .filter(Boolean),
   );
 
-  const mirrorPayloads = (sourceContractsResult.data ?? [])
+  const mirrorPayloads = sourceContracts
     .filter((contract) => contract.glide_row_id && scopedClientIds.has(contract.client_id))
     .filter((contract) => !existingContractIds.has(contract.glide_row_id))
     .map((contract) => contractPayloadFromMirror(contract, company));
@@ -293,7 +320,11 @@ async function main() {
   const summaryPayloads = includeSummaryContracts
     ? (appClients ?? [])
         .filter((client) => scopedClientIds.has(client.glide_row_id))
-        .filter((client) => !clientIdsWithExistingAppContract.has(client.glide_row_id))
+        .filter(
+          (client) =>
+            includeCurrentSummaryForExistingContracts ||
+            !clientIdsWithExistingAppContract.has(client.glide_row_id),
+        )
         .map((client) => summaryContractPayload(client, company))
         .filter(Boolean)
         .filter((contract) => !existingContractIds.has(contract.glide_row_id))
@@ -313,11 +344,12 @@ async function main() {
     options: {
       includePausedSuspended,
       includeSummaryContracts,
+      includeCurrentSummaryForExistingContracts,
     },
     counts: {
-      appClients: appClients?.length ?? 0,
+      appClients: appClients.length,
       scopedClients: scopedClientIds.size,
-      mirroredContractsInCompany: sourceContractsResult.data?.length ?? 0,
+      mirroredContractsInCompany: sourceContracts.length,
       existingAppContracts: existingContracts.length,
       mirrorContractsToBackfill: mirrorPayloads.length,
       currentSummaryContractsToBackfill: summaryPayloads.length,
@@ -367,6 +399,8 @@ async function main() {
       current_summary_contracts: summaryPayloads.length,
       include_archived: includeArchived,
       include_summary_contracts: includeSummaryContracts,
+      include_current_summary_for_existing_contracts:
+        includeCurrentSummaryForExistingContracts,
     },
   });
   if (auditError) throw auditError;

@@ -63,6 +63,31 @@ function fail(message, details = undefined) {
   process.exit(1);
 }
 
+async function queryAll(label, queryBuilder, pageSize = 1000) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+    const { data, error } = await queryBuilder().range(from, to);
+    if (error) throw new Error(`${label}: ${error.message}`);
+    rows.push(...(data ?? []));
+    if (!data || data.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function queryInChunks(label, table, clientIds) {
+  const rows = [];
+  const chunkSize = 100;
+  for (let index = 0; index < clientIds.length; index += chunkSize) {
+    const chunk = clientIds.slice(index, index + chunkSize);
+    const chunkRows = await queryAll(label, () =>
+      supabase.from(table).select("*").in("client_id", chunk),
+    );
+    rows.push(...chunkRows);
+  }
+  return rows;
+}
+
 async function resolveCompany() {
   if (!companyArgument && !companyIdArgument && !legacyCompanyIdArgument) {
     fail("Company selector is required for this generic backfill script.", {
@@ -155,15 +180,16 @@ function milestonePayload(source, company, resolvedOfferId) {
 async function main() {
   const company = await resolveCompany();
 
-  const { data: appClients, error: appClientsError } = await supabase
-    .from("clients")
-    .select("glide_row_id, client_name, program_status_value")
-    .eq("company_id", company.id);
-  if (appClientsError) throw appClientsError;
+  const appClients = await queryAll("app clients", () =>
+    supabase
+      .from("clients")
+      .select("glide_row_id, client_name, program_status_value")
+      .eq("company_id", company.id),
+  );
 
-  const clientIds = (appClients ?? []).map((client) => client.glide_row_id).filter(Boolean);
+  const clientIds = appClients.map((client) => client.glide_row_id).filter(Boolean);
   const activeClientIds = new Set(
-    (appClients ?? [])
+    appClients
       .filter((client) =>
         includeArchived ||
         ["front-end", "back-end", "paused", "suspended"].includes(
@@ -174,72 +200,62 @@ async function main() {
   );
 
   const [
-    sourceContractsResult,
-    existingContractsResult,
-    sourceMilestonesResult,
-    existingMilestonesResult,
-    appOfferMilestonesResult,
+    sourceContracts,
+    existingContracts,
+    sourceMilestones,
+    existingMilestones,
+    appOfferMilestones,
   ] = clientIds.length > 0
     ? await Promise.all([
-        supabase
-          .from("backup_company_clients_contracts")
-          .select("*")
-          .in("client_id", clientIds),
-        supabase
-          .from("client_contracts")
-          .select("glide_row_id")
-          .eq("company_id", company.id),
-        supabase
-          .from("backup_company_clients_milestones")
-          .select("*")
-          .in("client_id", clientIds),
-        supabase
-          .from("client_milestones")
-          .select("glide_row_id, client_id, milestone_id, archived_at")
-          .eq("company_id", company.id),
-        supabase
-          .from("company_offer_milestones")
-          .select("glide_row_id, offer_id")
-          .eq("company_id", company.id),
+        queryInChunks("backup client contracts", "backup_company_clients_contracts", clientIds),
+        queryAll("existing app contracts", () =>
+          supabase
+            .from("client_contracts")
+            .select("glide_row_id")
+            .eq("company_id", company.id),
+        ),
+        queryInChunks("backup client milestones", "backup_company_clients_milestones", clientIds),
+        queryAll("existing app milestones", () =>
+          supabase
+            .from("client_milestones")
+            .select("glide_row_id, client_id, milestone_id, archived_at")
+            .eq("company_id", company.id),
+        ),
+        queryAll("app offer milestones", () =>
+          supabase
+            .from("company_offer_milestones")
+            .select("glide_row_id, offer_id")
+            .eq("company_id", company.id),
+        ),
       ])
     : [
-        { data: [], error: null },
-        { data: [], error: null },
-        { data: [], error: null },
-        { data: [], error: null },
-        { data: [], error: null },
+        [],
+        [],
+        [],
+        [],
+        [],
       ];
 
-  for (const result of [
-    sourceContractsResult,
-    existingContractsResult,
-    sourceMilestonesResult,
-    existingMilestonesResult,
-    appOfferMilestonesResult,
-  ]) {
-    if (result.error) throw result.error;
-  }
-
   const existingContractIds = new Set(
-    (existingContractsResult.data ?? []).map((contract) => contract.glide_row_id),
+    existingContracts.map((contract) => contract.glide_row_id),
   );
   const existingMilestoneIds = new Set(
-    (existingMilestonesResult.data ?? []).map((milestone) => milestone.glide_row_id),
+    existingMilestones.map((milestone) => milestone.glide_row_id),
   );
   const existingActiveMilestoneKeys = new Set(
-    (existingMilestonesResult.data ?? [])
+    existingMilestones
       .filter((milestone) => !milestone.archived_at)
       .filter((milestone) => milestone.client_id && milestone.milestone_id)
       .map((milestone) => `${milestone.client_id}::${milestone.milestone_id}`),
   );
   const offerIdByMilestoneId = new Map(
-    (appOfferMilestonesResult.data ?? []).map((milestone) => [
+    appOfferMilestones.map((milestone) => [
       milestone.glide_row_id,
       milestone.offer_id,
     ]),
   );
 
-  const contractPayloads = (sourceContractsResult.data ?? [])
+  const contractPayloads = sourceContracts
     .filter((contract) => contract.glide_row_id && activeClientIds.has(contract.client_id))
     .filter((contract) => !existingContractIds.has(contract.glide_row_id))
     .map((contract) => contractPayload(contract, company));
@@ -249,7 +265,7 @@ async function main() {
   const duplicateActiveMilestoneSkips = [];
   const milestoneCandidates = [];
 
-  for (const milestone of sourceMilestonesResult.data ?? []) {
+  for (const milestone of sourceMilestones) {
     if (!milestone.glide_row_id || !activeClientIds.has(milestone.client_id)) continue;
     if (existingMilestoneIds.has(milestone.glide_row_id)) continue;
 

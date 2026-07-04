@@ -956,14 +956,34 @@ export function Tasks() {
         query,
         supabase
           .from("companies")
-          .select("legacy_glide_row_id, migration_status")
+          .select("legacy_glide_row_id, name, migration_status")
           .in("migration_status", ["pilot", "migrated"]),
       ]);
       const { data, error } = backupCompaniesResult;
       if (error) console.error("Failed to load companies:", error);
       if (appCompaniesResult.error)
         console.error("Failed to load app companies:", appCompaniesResult.error);
-      setCompanies((data ?? []) as Company[]);
+      let rows = [...((data ?? []) as Company[])];
+      const existingCompanyIds = new Set(
+        rows.map((company) => company.glide_row_id),
+      );
+      (appCompaniesResult.data ?? []).forEach((company) => {
+        const legacyId = company.legacy_glide_row_id;
+        if (typeof legacyId !== "string" || legacyId === "") return;
+        if (existingCompanyIds.has(legacyId)) return;
+        rows.push({
+          glide_row_id: legacyId,
+          name: company.name ?? null,
+        });
+      });
+      if (!canUseCompanySwitcher && effectiveCompanyId) {
+        rows = rows.filter((company) => company.glide_row_id === effectiveCompanyId);
+      }
+      setCompanies(
+        rows.sort((left, right) =>
+          (left.name ?? "").localeCompare(right.name ?? ""),
+        ),
+      );
       setAppTaskCompanyIds(
         new Set(
           (appCompaniesResult.data ?? [])

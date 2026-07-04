@@ -59,13 +59,14 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-03 Jay QA passed: primary pathway milestone completion can auto-create matching template tasks.
 - `[~]` `[qa]` MM pathway/archive cleanup retest.
   - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule. Jay should retest archiving an unused MM pathway and an unused MM milestone.
-- `[~]` `[qa]` Moves Method webhook setup dry run.
+- `[x]` Moves Method webhook setup dry run.
   - 2026-07-02 readiness patch deployed: `zapier-create-client` accepts canonical `pathway_id`, optional `secondary_pathway_id` + `secondary_milestone_id`, and legacy `offer_id` / `secondary_offer_id` aliases. `webhook-update-client` accepts the same fields for a conditional second Zapier step. Both validate active app-owned company pathways/milestones and require Secondary Pathway to be enabled.
   - 2026-07-02 internal QA: Moves Method was seeded as an app-owned pilot shell only (`companies.id = 21586391-9a84-4072-9ae6-20436b27bea9`, legacy `wd7vy0vaQK2hgB3IRqy17w`) with 89 members, 16 pathways, 33 milestones, and zero migrated clients. Secondary Pathway and New Client Webhook settings are enabled.
   - 2026-07-02 internal webhook dry run passed with disposable tokens that were revoked afterward: `zapier-create-client` created a test client, `webhook-update-client` added secondary pathway/milestone, and `ingest-client-call-summary` wrote Next Steps/Last Contact. Remaining QA is Jay/Daniel Zapier setup with fresh MM tokens created in Admin Hub.
   - 2026-07-02 Daniel-call docs fix: Client Update Webhook Resource now shows a safe minimal request body plus separate optional payload examples for profile-field updates and secondary-pathway updates, so copied JSON does not imply every optional field should be sent.
   - 2026-07-02 access prep: after Jay refreshed the Glide backup, app-owned MM team rows were synced to match `backup_company_team` without touching clients. Final count is 100 app-owned team rows, 73 active users, and no active backup/app-owned deltas.
   - 2026-07-02 Daniel-call custom-field fix: seeded MM app-owned custom field definitions for legacy Glide slots `customfield1..customfield7` (Gender, Age, Goals, Training Background, Injuries, Close Date, Program Name and Length). Disposable-token live QA confirmed `zapier-create-client` accepts Daniel's `customfield6` / `customfield7` payload and writes `client_custom_field_values`.
+  - 2026-07-04 cutover: Moves Method webhook resources/tokens were validated during migration prep; active app-owned tokens exist for client create, client update, and call-summary next steps. Remaining work is operational customer Zap maintenance, not RetainOS setup.
 - `[x]` Secondary assignee support QA passed.
   - Company Settings > Feature gates can enable Secondary assignee; + New Client and Client Detail > Edit Profile can set/clear the Secondary Assignee. Server validation requires an active visible team member and prevents using the same person as Primary CSM. `adding-secondary-assignee` is a draft RetainOS Help resource.
 - `[x]` Archetypes in client views QA passed.
@@ -362,7 +363,7 @@ Next session lock:
   - 2026-06-17 product decision: no long parallel-write window. Jay owns a high-touch final sync/cutover, then the customer stops using Glide.
 - `[x]` Moves Method migration-readiness pass.
   - Dedicated checklist: `MOVES_METHOD_MIGRATION_READINESS.md`.
-  - Default stance: Moves Method remains CST mirror-backed/read-only until Jay and Ben explicitly approve write-mode migration.
+  - 2026-07-04 cutover: Moves Method was promoted to app-owned write-mode with `migration_status = 'migrated'` after Jay approved migration QA. CST mirror/history remains read-only reference only.
   - Migration rule: build and validate the migration runway now; do not trigger the paid Glide/CST sync or app-owned migration until Jay explicitly calls final cutover day.
   - Read-only snapshot command: `npm run migration:readiness:moves`.
   - Validate roster counts, CSM assignments, offer/milestone coverage, contract/renewal confidence, dashboard load speed, CSM Reports caveats, Daily Pulse, Resources, and Client Detail.
@@ -567,9 +568,10 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
 - `[ ]` `[priority: medium]` Reporting PDF generation:
   - Semi-monthly churn-risk / renewals / RGAs PDF.
   - Weekly CSM Metrics PDF.
-- `[ ]` `[priority: high]` Final migration validation with pilot company.
+- `[x]` Final migration validation with pilot company.
   - 2026-06-18 Moves preflight: current mirror snapshot still has 4,143 clients, 2,338 active clients, 6 active unassigned clients, and 9 active invalid CSM assignments; offer/milestone config remains complete and all active clients have renewal/filtering dates.
   - 2026-06-18 migration tooling: added a generic dry-runnable company write-mode seed script for company, team, clients, offers, milestones, settings defaults, custom fields, outcome/churn defaults, and notification preferences. It is not applied; use only after final paid sync and Jay approval.
+  - 2026-07-04 Moves Method final cutover completed: fresh CST sync validated, shadow app-owned rows wiped, 4,485 app-owned clients imported, company config preserved, 2,764 app-owned contract rows created, 56 client milestone rows imported, 7,570 historical tasks imported into app-owned `client_tasks`, old CST history kept read-only/mirror-only, and company promoted to `migration_status = 'migrated'`. Jay accepted 5 active unassigned clients and 10 active archived-primary-CSM assignments as manual post-migration cleanup. Contract source rule: current CST client summary is RetainOS current contract; CST history/contract rows are reference/history unless manually corrected.
 - `[x]` Jay-led final sync and no-turning-back cutover plan.
   - 2026-06-17 product decision: do not plan for a long DIY parallel run. Jay owns the high-touch customer cutover; once the final migration is approved, customers stop using Glide and RetainOS becomes source of truth.
 - `[x]` Post-cutover rollback/emergency support plan.

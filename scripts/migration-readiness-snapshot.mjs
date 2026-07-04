@@ -318,8 +318,8 @@ async function main() {
 
   const blockers = [];
   const warnings = [
-    "This snapshot reads the current Supabase CST mirror only. It does not trigger a Glide sync.",
-    "Final migration confidence requires a fresh paid Glide sync on cutover day.",
+    "This snapshot reads the current Supabase CST mirror only. It does not trigger a CST sync.",
+    "Final migration confidence requires a fresh paid CST sync on cutover day.",
   ];
   if (appCompanyRows.length === 0) {
     warnings.push("No app-owned company row exists yet. This is expected before write-mode migration.");
@@ -403,7 +403,7 @@ async function main() {
           blockers,
           warnings,
           notes: [
-            "Write migration remains intentionally blocked until Jay triggers the final Glide sync and approves app-owned backfill/cutover.",
+            "Write migration remains intentionally blocked until Jay triggers the final CST sync and approves app-owned backfill/cutover.",
           ],
         },
       },
