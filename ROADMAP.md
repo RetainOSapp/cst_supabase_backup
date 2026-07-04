@@ -125,6 +125,10 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
 
 - `[~]` `[mixed]` Finalize app-owned database structure and migration/backfill plan.
   - Working plan: `SUPABASE_WRITE_PLAN.md`.
+- `[ ]` `[priority: medium]` Decide long-term legacy CST/Glide ID vs Supabase UUID strategy.
+  - Current migrated data intentionally preserves legacy row IDs such as `glide_row_id`, `company_glide_row_id`, `client_id`, `assigned_to_id`, and pathway/milestone IDs so migrated records, webhook payloads, CST history references, and rollback/debugging stay traceable during cutover.
+  - Medium-term architecture question: decide whether RetainOS should keep legacy IDs as external-reference fields indefinitely, or eventually migrate internal relationships fully onto Supabase UUID foreign keys with legacy IDs only as audit/import metadata.
+  - Evaluate after Moves Method stabilizes: task/client/member joins, webhook contracts, reporting performance, RLS simplicity, support/debug workflows, and migration cost/risk.
 - `[~]` `[mixed]` Define RLS/server-side authorization for all write paths.
 - `[~]` `[mixed]` Start write mode through controlled Edge Functions for first flows, then add direct RLS-backed writes only after policies are proven.
 - `[x]` Use Ethical Scaling as the first internal controlled pilot company.
