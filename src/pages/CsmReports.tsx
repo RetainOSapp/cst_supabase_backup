@@ -10,6 +10,7 @@ type SortField = "client" | "csm" | "status" | "updated";
 type SortDirection = "asc" | "desc";
 
 const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
+const HISTORY_CLIENT_ID_CHUNK_SIZE = 250;
 
 interface AppCompany {
   id: string;
@@ -217,6 +218,14 @@ function isActiveClient(client: ClientRow) {
 
 function sortText(value: string | null | undefined) {
   return (value ?? "").trim().toLowerCase();
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function calculateProfileUpkeep(
@@ -768,52 +777,59 @@ export function CsmReports() {
     const historyEndDate =
       reportEndDate > upkeepEndDate ? reportEndDate : upkeepEndDate;
     if (appCompany && clientIds.length > 0) {
-      const { data: historyData, error: historyError } = await supabase
-        .from("client_history_events")
-        .select(
-          [
-            "id",
-            "legacy_client_glide_row_id",
-            "actor_member_id",
-            "event_type",
-            "title",
-            "summary",
-            "notes",
-            "next_steps",
-            "last_contact_at",
-            "next_contact_at",
-            "progress_status",
-            "buy_in_status",
-            "created_at",
-          ].join(", "),
-        )
-        .eq("company_id", appCompany.id)
-        .in("legacy_client_glide_row_id", clientIds)
-        .gte("created_at", historyStartDate.toISOString())
-        .lte("created_at", historyEndDate.toISOString())
-        .order("created_at", { ascending: false });
+      for (const clientIdChunk of chunkArray(clientIds, HISTORY_CLIENT_ID_CHUNK_SIZE)) {
+        const { data: historyData, error: historyError } = await supabase
+          .from("client_history_events")
+          .select(
+            [
+              "id",
+              "legacy_client_glide_row_id",
+              "actor_member_id",
+              "event_type",
+              "title",
+              "summary",
+              "notes",
+              "next_steps",
+              "last_contact_at",
+              "next_contact_at",
+              "progress_status",
+              "buy_in_status",
+              "created_at",
+            ].join(", "),
+          )
+          .eq("company_id", appCompany.id)
+          .in("legacy_client_glide_row_id", clientIdChunk)
+          .gte("created_at", historyStartDate.toISOString())
+          .lte("created_at", historyEndDate.toISOString())
+          .order("created_at", { ascending: false });
 
-      if (historyError) {
-        setError(historyError.message);
-      } else {
-        historyRows = (historyData ?? []) as unknown as HistoryEventRow[];
+        if (historyError) {
+          setError(historyError.message);
+          break;
+        }
+        historyRows.push(...((historyData ?? []) as unknown as HistoryEventRow[]));
       }
     } else if (clientIds.length > 0) {
-      const { data: mirrorHistoryData, error: mirrorHistoryError } = await supabase
-        .from("backup_company_clients_history")
-        .select("client_id, change_type_code, value, original_value, modified_date")
-        .in("client_id", clientIds)
-        .gte("modified_date", historyStartDate.toISOString())
-        .lte("modified_date", historyEndDate.toISOString())
-        .order("modified_date", { ascending: false })
-        .limit(5000);
+      const mirrorRows: MirrorHistoryRow[] = [];
+      for (const clientIdChunk of chunkArray(clientIds, HISTORY_CLIENT_ID_CHUNK_SIZE)) {
+        const { data: mirrorHistoryData, error: mirrorHistoryError } = await supabase
+          .from("backup_company_clients_history")
+          .select("client_id, change_type_code, value, original_value, modified_date")
+          .in("client_id", clientIdChunk)
+          .gte("modified_date", historyStartDate.toISOString())
+          .lte("modified_date", historyEndDate.toISOString())
+          .order("modified_date", { ascending: false })
+          .limit(5000);
 
-      if (mirrorHistoryError) {
-        console.error("Failed to load mirror CSM report history:", mirrorHistoryError);
-      } else {
-        historyRows = ((mirrorHistoryData ?? []) as MirrorHistoryRow[])
-          .filter((row) => row.client_id && row.modified_date)
-          .map((row, index) => ({
+        if (mirrorHistoryError) {
+          console.error("Failed to load mirror CSM report history:", mirrorHistoryError);
+          break;
+        }
+        mirrorRows.push(...((mirrorHistoryData ?? []) as MirrorHistoryRow[]));
+      }
+      historyRows = mirrorRows
+        .filter((row) => row.client_id && row.modified_date)
+        .map((row, index) => ({
             id: `mirror-${row.client_id}-${row.modified_date}-${index}`,
             legacy_client_glide_row_id: row.client_id as string,
             actor_member_id: null,
@@ -828,7 +844,6 @@ export function CsmReports() {
             notes: null,
             created_at: row.modified_date,
           }));
-      }
     }
 
     const latest = new Map<string, HistoryEventRow>();

@@ -322,12 +322,28 @@ function inviteErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Invite email could not be sent.";
 }
 
+function retainOsAppUrl() {
+  const configuredUrl =
+    (import.meta.env.VITE_RETAINOS_APP_URL as string | undefined) ??
+    (import.meta.env.VITE_APP_URL as string | undefined);
+  if (configuredUrl?.trim()) return configuredUrl.trim().replace(/\/$/, "");
+
+  const isLocalHost =
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1";
+  return isLocalHost ? "https://app.retainos.ai" : window.location.origin;
+}
+
+function retainOsLoginUrl() {
+  return `${retainOsAppUrl()}/login`;
+}
+
 async function sendRetainOsLoginEmail(email: string) {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail || !normalizedEmail.includes("@")) {
     throw new Error("This team member does not have a valid email.");
   }
-  const loginUrl = `${window.location.origin}/login`;
+  const loginUrl = retainOsLoginUrl();
 
   const { data: prepareData, error: prepareError } = await supabase.functions.invoke(
     "prepare-login",
@@ -579,7 +595,9 @@ function NewTeamMemberModal({
       return;
     }
 
-    const invite = data?.invite as { sent?: boolean; error?: string } | undefined;
+    const invite = data?.invite as
+      | { sent?: boolean; error?: string; loginUrl?: string }
+      | undefined;
     if (isEditing) {
       onSaved("Team member updated.");
       return;
@@ -587,7 +605,7 @@ function NewTeamMemberModal({
 
     if (invite?.sent) {
       onSaved(
-        `Team member added. Invite sent to ${email.trim().toLowerCase()}. They can log in at ${window.location.origin}/login.`,
+        `Team member added. Invite sent to ${email.trim().toLowerCase()}. They can log in at ${invite.loginUrl ?? retainOsLoginUrl()}.`,
       );
       return;
     }
@@ -5166,10 +5184,12 @@ export function SaasClientDetail({
       return;
     }
 
-    const invite = data?.invite as { sent?: boolean; error?: string } | undefined;
+    const invite = data?.invite as
+      | { sent?: boolean; error?: string; loginUrl?: string }
+      | undefined;
     if (invite?.sent) {
       setTeamActionSuccess(
-        `Invite sent to ${member.email ?? "team member"}. They can log in at ${window.location.origin}/login.`,
+        `Invite sent to ${member.email ?? "team member"}. They can log in at ${invite.loginUrl ?? retainOsLoginUrl()}.`,
       );
       return;
     }

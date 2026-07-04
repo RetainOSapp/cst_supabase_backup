@@ -14,6 +14,12 @@ const RESOURCE_TYPES = new Set(["guide", "video", "template"]);
 const STATUSES = new Set(["draft", "published", "archived"]);
 const RESOURCE_SCOPES = new Set(["retainos_help", "company"]);
 
+interface ResourceActor {
+  id: string;
+  role: "super_admin" | "director";
+  companyLegacyIds: Set<string>;
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -59,7 +65,7 @@ function optionalInteger(value: unknown) {
   return Number.isFinite(number) ? Math.round(number) : 0;
 }
 
-async function assertSuperAdmin(
+async function resolveActor(
   supabase: ReturnType<typeof createClient>,
   token: string,
 ) {
@@ -74,10 +80,83 @@ async function assertSuperAdmin(
   );
   const email = normalizeEmail(userData.user.email);
   if (!superAdminEmails.has(email)) {
-    throw new Error("Only Super Admins can manage resources.");
+    const { data: memberships, error: membershipError } = await supabase
+      .from("company_members")
+      .select("company_id, role, status")
+      .ilike("email", email)
+      .eq("status", "active")
+      .eq("role", "director");
+
+    if (membershipError) throw membershipError;
+
+    const companyIds = [
+      ...new Set(
+        (memberships ?? [])
+          .map((membership) => membership.company_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+
+    if (companyIds.length === 0) {
+      throw new Error("Only Super Admins and Directors can manage resources.");
+    }
+
+    const { data: companies, error: companyError } = await supabase
+      .from("companies")
+      .select("id, legacy_glide_row_id")
+      .in("id", companyIds);
+
+    if (companyError) throw companyError;
+
+    const companyLegacyIds = new Set(
+      (companies ?? [])
+        .map((company) => company.legacy_glide_row_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    if (companyLegacyIds.size === 0) {
+      throw new Error("Director access is missing a company workspace.");
+    }
+
+    return {
+      id: userData.user.id,
+      role: "director",
+      companyLegacyIds,
+    } satisfies ResourceActor;
   }
 
-  return userData.user;
+  return {
+    id: userData.user.id,
+    role: "super_admin",
+    companyLegacyIds: new Set<string>(),
+  } satisfies ResourceActor;
+}
+
+function assertCanManageResourceScope(
+  actor: ResourceActor,
+  scope: string,
+  companyLegacyId: string,
+) {
+  if (actor.role === "super_admin") return;
+  if (scope !== "company") {
+    throw new Error("Directors can only manage company resources.");
+  }
+  if (!companyLegacyId || !actor.companyLegacyIds.has(companyLegacyId)) {
+    throw new Error("Directors can only manage resources for their company.");
+  }
+}
+
+function assertCanManageExistingResource(
+  actor: ResourceActor,
+  resource: { scope?: string | null; company_legacy_id?: string | null } | null,
+) {
+  if (actor.role === "super_admin") return;
+  if (!resource) throw new Error("Resource not found.");
+  assertCanManageResourceScope(
+    actor,
+    resource.scope ?? "retainos_help",
+    resource.company_legacy_id ?? "",
+  );
 }
 
 Deno.serve(async (req) => {
@@ -103,7 +182,7 @@ Deno.serve(async (req) => {
     const token = getBearerToken(req);
     if (!token) return jsonResponse({ error: "Missing authorization." }, 401);
 
-    const actor = await assertSuperAdmin(supabase, token);
+    const actor = await resolveActor(supabase, token);
     const body = await req.json().catch(() => ({}));
     const action = cleanText(body.action);
     if (!ACTIONS.has(action)) {
@@ -115,6 +194,14 @@ Deno.serve(async (req) => {
 
     if (action === "archive_resource") {
       if (!resourceId) return jsonResponse({ error: "Missing resource id." }, 400);
+
+      const { data: beforeData, error: beforeError } = await supabase
+        .from("resources")
+        .select("id, title, scope, company_legacy_id")
+        .eq("id", resourceId)
+        .maybeSingle();
+      if (beforeError) throw beforeError;
+      assertCanManageExistingResource(actor, beforeData);
 
       const { data, error } = await supabase
         .from("resources")
@@ -152,6 +239,7 @@ Deno.serve(async (req) => {
     if (scope === "company" && !companyLegacyId) {
       return jsonResponse({ error: "Choose a company for company resources." }, 400);
     }
+    assertCanManageResourceScope(actor, scope, companyLegacyId);
 
     const payload = {
       slug,
@@ -198,6 +286,14 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("id", resourceId)
       .maybeSingle();
+    assertCanManageExistingResource(actor, beforeData);
+    if (
+      actor.role === "director" &&
+      beforeData?.company_legacy_id &&
+      beforeData.company_legacy_id !== companyLegacyId
+    ) {
+      throw new Error("Directors cannot move resources between companies.");
+    }
 
     const { data, error } = await supabase
       .from("resources")

@@ -230,12 +230,12 @@ function toLoomEmbedUrl(value?: string | null) {
 
 function ResourceCard({
   resource,
-  isSuperAdmin,
+  canEditResource,
   onEdit,
   onOpen,
 }: {
   resource: ResourceRow;
-  isSuperAdmin: boolean;
+  canEditResource: boolean;
   onEdit: (resource: ResourceRow) => void;
   onOpen: (resource: ResourceRow) => void;
 }) {
@@ -278,7 +278,7 @@ function ResourceCard({
       >
         {isReady ? "View resource" : "Preview draft"}
       </button>
-      {isSuperAdmin && (
+      {canEditResource && (
         <button
           type="button"
           onClick={() => onEdit(resource)}
@@ -1154,12 +1154,14 @@ function ResourceEditModal({
   resource,
   companyLegacyId,
   defaultScope = "retainos_help",
+  canManageRetainOsHelp,
   onClose,
   onSaved,
 }: {
   resource: ResourceRow | null;
   companyLegacyId: string;
   defaultScope?: ResourceScope;
+  canManageRetainOsHelp: boolean;
   onClose: () => void;
   onSaved: (resource: ResourceRow) => void;
 }) {
@@ -1305,11 +1307,13 @@ function ResourceEditModal({
             </span>
             <select
               value={scope}
-              disabled={Boolean(resource?.is_dynamic)}
+              disabled={Boolean(resource?.is_dynamic) || !canManageRetainOsHelp}
               onChange={(event) => setScope(event.target.value as ResourceScope)}
               className="retainos-focus w-full rounded-lg border border-[#d8dee8] px-3 py-2 text-sm disabled:bg-[#f7f9fc] disabled:text-[#6b7686]"
             >
-              <option value="retainos_help">RetainOS Help</option>
+              {canManageRetainOsHelp ? (
+                <option value="retainos_help">RetainOS Help</option>
+              ) : null}
               <option value="company">Company Resources for selected company</option>
             </select>
             {resource?.is_dynamic ? (
@@ -1445,6 +1449,23 @@ export function Resources() {
         );
   const visibleResources =
     activeLibrary === "company" ? companyResources : filteredRetainOsHelpResources;
+  const canManageRetainOsHelp = isSuperAdmin;
+  const canCreateCompanyResources = isSuperAdmin || role === "director";
+  const canCreateVisibleResource = canManageRetainOsHelp || canCreateCompanyResources;
+  const defaultResourceScope =
+    activeLibrary === "retainos_help" && canManageRetainOsHelp
+      ? "retainos_help"
+      : "company";
+
+  function canEditResource(resource: ResourceRow) {
+    if (isSuperAdmin) return true;
+    return (
+      role === "director" &&
+      !resource.is_dynamic &&
+      resourceScope(resource) === "company" &&
+      resource.company_legacy_id === effectiveCompanyId
+    );
+  }
 
   const bodyTemplate = useMemo(
     () =>
@@ -1856,7 +1877,7 @@ export function Resources() {
               {selectedResource.description}
             </p>
           </div>
-          {isSuperAdmin && (
+          {canEditResource(selectedResource) && (
             <button
               type="button"
               onClick={() => setEditingResource(selectedResource)}
@@ -2089,7 +2110,8 @@ export function Resources() {
           <ResourceEditModal
             resource={editingResource}
             companyLegacyId={effectiveCompanyId}
-            defaultScope={activeLibrary}
+            defaultScope={resourceScope(editingResource)}
+            canManageRetainOsHelp={canManageRetainOsHelp}
             onClose={() => setEditingResource(null)}
             onSaved={handleResourceSaved}
           />
@@ -2118,13 +2140,18 @@ export function Resources() {
           <span className="rounded-full border border-[#d6eafb] bg-[#eaf4fe] px-4 py-2 text-xs font-semibold text-[#2b79c4]">
             {company?.name ?? "Company"}{loading ? " loading..." : ""}
           </span>
-          {isSuperAdmin && (
+          {canCreateVisibleResource && (
             <button
               type="button"
-              onClick={() => setIsCreatingResource(true)}
+              onClick={() => {
+                if (!canManageRetainOsHelp) setActiveLibrary("company");
+                setIsCreatingResource(true);
+              }}
               className="retainos-focus rounded-full bg-[#162b3e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1e3a52]"
             >
-              + New resource
+              {activeLibrary === "retainos_help" && canManageRetainOsHelp
+                ? "+ New RetainOS resource"
+                : "+ New company resource"}
             </button>
           )}
         </div>
@@ -2189,7 +2216,7 @@ export function Resources() {
           <ResourceCard
             key={resource.id}
             resource={resource}
-            isSuperAdmin={isSuperAdmin}
+            canEditResource={canEditResource(resource)}
             onEdit={setEditingResource}
             onOpen={(item) => setSelectedResourceId(item.id)}
           />
@@ -2210,7 +2237,8 @@ export function Resources() {
         <ResourceEditModal
           resource={editingResource}
           companyLegacyId={effectiveCompanyId}
-          defaultScope={activeLibrary}
+          defaultScope={defaultResourceScope}
+          canManageRetainOsHelp={canManageRetainOsHelp}
           onClose={() => {
             setEditingResource(null);
             setIsCreatingResource(false);

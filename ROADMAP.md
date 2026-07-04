@@ -549,6 +549,7 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
   - 2026-06-20 `20260620175000_update_multiple_client_emails_resource.sql` refreshes `managing-multiple-email-addresses-per-client` after adding Email 2 / Email 3 and integration matching support.
   - 2026-06-20 `20260620181000_update_secondary_offers_resource.sql` upserts `adding-secondary-offers` as "Adding secondary pathways" after adding the RetainOS company-gated secondary pathway/milestone feature.
   - 2026-06-21 `20260621101000_update_archetypes_client_views_resource.sql` refreshes `archetypes-in-client-views` after adding the company-gated Clients List/Card archetype display.
+  - 2026-07-04 Moves Method role QA caught that Directors could view company resource drafts but could not create/edit company-owned resources. Frontend now exposes company-resource create/edit to Directors, RetainOS Help remains SuperAdmin-only, and `manage-resource` was deployed with server-side Director-only-company-resource authorization. Awaiting Jay retest.
 - `[~]` `[polish]` `[priority: medium]` Resource list/search/categorization.
   - First categorization pass is the RetainOS Help vs Company Resources library split.
   - 2026-06-16 Resources page now keeps the two top-level libraries and adds RetainOS Help subcategory pills: All, Setup & Onboarding, Working with Clients, Using the Dashboard, and Automations.
@@ -1870,6 +1871,7 @@ Use this section as the “what good looks like” checklist before migrating re
   - Code audit source: `src/lib/accountContext.tsx`, route/nav gating, major pages, and `supabase/functions/manage-*` authorization paths.
   - 2026-06-17 Jay decisions applied: Viewer Dashboard is read-only with client drilldowns/search disabled; Support stays operational-only; integration review/tokens exclude Support; RetainOS Help drafts are SuperAdmin-only; Company Resource drafts are visible to Directors.
   - 2026-06-17 implementation passed `npm run build`; `manage-integration-review` was deployed after narrowing server-side access to SuperAdmin/Director.
+  - 2026-07-04 Moves Method Director QA catch: invite copy used localhost during local QA, CSM Reports returned Bad Request at MM scale, and Director company-resource create/edit was missing. Patched invite login URL copy, chunked CSM Reports history reads, and deployed Director company-resource management. Awaiting Jay retest before treating MM role QA as launch-passed.
 - `[x]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
 - `[x]` Final cutover plan exists for:
   - Data backfill.
