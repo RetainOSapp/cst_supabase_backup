@@ -108,6 +108,20 @@ function assignedDisplayName(
   return teamMemberNameById.get(String(assignedToId)) ?? "Former team member";
 }
 
+async function functionErrorMessage(error: unknown, fallback: string) {
+  const context = (error as { context?: Response } | null)?.context;
+  if (context) {
+    try {
+      const body = (await context.clone().json()) as { error?: unknown };
+      if (typeof body.error === "string" && body.error.trim()) return body.error;
+    } catch {
+      // Fall back to the SDK message below.
+    }
+  }
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
+
 function getInitials(name: string | null | undefined) {
   if (!name) return "--";
   return (
@@ -614,7 +628,7 @@ function NewTaskModal({
     setSaving(false);
 
     if (error) {
-      setSaveError(error.message);
+      setSaveError(await functionErrorMessage(error, "Failed to save task"));
       return;
     }
     if (data?.error) {
@@ -1298,7 +1312,11 @@ export function Tasks() {
     });
     setMovingTaskId(null);
     if (error || data?.error) {
-      setTasksError(error?.message ?? data?.error ?? "Failed to update task");
+      setTasksError(
+        data?.error ??
+          (error ? await functionErrorMessage(error, "Failed to update task") : null) ??
+          "Failed to update task",
+      );
       return null;
     }
     if (!data?.task) return null;

@@ -244,8 +244,10 @@ Deno.serve(async (req) => {
           : nullableText(body.assignedToId);
       const assignedToId =
         actor.role === "csm" ? actor.legacyMemberId : requestedAssigneeId;
+      const isChangingAssignee =
+        body.assignedToId !== undefined || actor.role === "csm";
 
-      if (assignedToId) {
+      if (isChangingAssignee && assignedToId) {
         const { data: member, error: memberError } = await supabase
           .from("company_members")
           .select("legacy_glide_row_id, status")
