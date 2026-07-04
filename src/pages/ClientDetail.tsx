@@ -374,6 +374,7 @@ const nextStepsFieldCandidates =
   programFields.find(([label]) => label === "Next Steps")?.[1] ?? [
     "next_steps_value",
   ];
+const CLIENT_DETAIL_RICH_PREVIEW_LIMIT = 320;
 const lastContactFieldCandidates = [
   "csm_date_of_last_contact",
   "last_contact",
@@ -1276,6 +1277,28 @@ function sanitizeHtml(value: string) {
     .replace(/\son\w+=["'][^"']*["']/gi, "")
     .replace(/javascript:/gi, "");
 }
+function decodeBasicHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#039;/gi, "'");
+}
+function plainTextPreviewValue(value: unknown) {
+  const text = displayValue(value);
+  if (text === "--") return text;
+  return decodeBasicHtmlEntities(
+    text
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  );
+}
 function RichValue({ value }: { value: unknown }) {
   const text = displayValue(value);
   if (text === "--") return <>{text}</>;
@@ -1290,6 +1313,81 @@ function RichValue({ value }: { value: unknown }) {
       className="max-w-none text-sm leading-relaxed text-gray-800 [&_a]:text-indigo-600 [&_a]:underline [&_br]:leading-6 [&_li]:ml-4 [&_li]:list-disc [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-2 [&_strong]:font-semibold [&_ul]:ml-4"
       dangerouslySetInnerHTML={{ __html: html }}
     />
+  );
+}
+function RichPreviewValue({
+  label,
+  value,
+  previewLimit = CLIENT_DETAIL_RICH_PREVIEW_LIMIT,
+}: {
+  label: string;
+  value: unknown;
+  previewLimit?: number;
+}) {
+  const [showFullValue, setShowFullValue] = useState(false);
+  const previewText = plainTextPreviewValue(value);
+  const canTruncate =
+    previewText !== "--" &&
+    previewLimit > 0 &&
+    previewText.length > previewLimit;
+  const truncatedPreview = canTruncate
+    ? `${previewText.slice(0, previewLimit).trimEnd()}...`
+    : previewText;
+  const titleId = `client-detail-${label.toLowerCase().replace(/\s+/g, "-")}-details`;
+
+  if (!canTruncate) return <RichValue value={value} />;
+
+  return (
+    <>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">
+        {truncatedPreview}
+      </p>
+      <button
+        type="button"
+        onClick={() => setShowFullValue(true)}
+        className="mt-2 text-xs font-semibold text-[#2b79c4] hover:text-[#162b3e] cursor-pointer"
+      >
+        Read more
+      </button>
+      {showFullValue ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label={`Close ${label} details`}
+            onClick={() => setShowFullValue(false)}
+            className="absolute inset-0 bg-[#0e1b29]/55 backdrop-blur-[2px] cursor-pointer"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            className="relative flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[#dbe3ee] bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-[#e4e9f0] px-5 py-4">
+              <div>
+                <div className="text-[11px] font-semibold uppercase text-[#2b79c4]">
+                  Client detail context
+                </div>
+                <h3 id={titleId} className="mt-1 text-lg font-semibold text-[#162b3e]">
+                  {label}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFullValue(false)}
+                className="rounded-md p-1.5 text-[#98a2b3] hover:bg-[#f1f5f9] hover:text-[#162b3e] cursor-pointer"
+              >
+                <span className="sr-only">Close</span>
+                <span className="text-xl leading-none">x</span>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <RichValue value={value} />
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 function OutcomePill({ value }: { value: unknown }) {
@@ -4512,9 +4610,16 @@ function FieldGrid({
             ) : isOutcomeField(label) ? (
               <OutcomePill value={valueFrom(client, candidates)} />
             ) : isRichField(label) ? (
-              <RichValue
-                value={displayValue(valueFrom(client, candidates), relationLookup)}
-              />
+              label === "Next Steps" ? (
+                <RichPreviewValue
+                  label={label}
+                  value={displayValue(valueFrom(client, candidates), relationLookup)}
+                />
+              ) : (
+                <RichValue
+                  value={displayValue(valueFrom(client, candidates), relationLookup)}
+                />
+              )
             ) : (
               displayValue(valueFrom(client, candidates), relationLookup)
             )}

@@ -534,3 +534,10 @@ For historical context:
 - Jay completed Support role QA successfully: Support can see approved company-wide operational views, cannot see/use integrations or token management, and does not have SuperAdmin/company switcher access.
 - CSM role QA found temp app-owned CSMs could see assigned clients/tasks but CSM write functions still authorized only against `legacy_glide_row_id`, causing a non-2xx on quick edits for app-owned-only members. Patched/deployed `manage-client-profile`, `manage-client-quick-update`, `manage-client-task`, `manage-client-status`, `manage-client-offboard`, and `manage-client-milestone` so CSM assignment checks accept either `legacy_glide_row_id` or app-owned `company_members.id`. Awaiting Jay retest of CSM quick edits.
 - Jay retested CSM quick edits after the Edge Function deploy and confirmed they work. Moves Method role QA is now passed for Director, CSM, and Support.
+
+## Moves Method Client Detail QA Polish - 2026-07-04
+
+- Jay paused the Phase 4 Client Detail QA row because long MM automation Next Steps made the Program tab visually heavy, and some clients appeared to show `0` in a Program-related section.
+- Read-only MM app-owned data check found Program text fields migrated: `next_steps_value` present on 3,626 clients, `north_star_value` on 2,555, `client_general_info` on 663; no literal `0` values were found in those Program text fields or current contract-day fields. A wider client-row sample found expected `0` values only in advocacy count fields. Need a specific client name/screenshot if Jay still sees `0` in Program.
+- Updated `src/pages/ClientDetail.tsx`: Client Detail > Program > Next Steps now previews long rich text and opens the full value in a read-only `Read more` modal, matching the Quick Update long-context pattern.
+- Verification: `npm run build` passed. Awaiting Jay live retest after frontend deploy.

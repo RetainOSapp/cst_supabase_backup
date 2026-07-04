@@ -1031,6 +1031,7 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[~]` `[qa]` Edit Next Steps/contact directly from Client Detail > Program.
   - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.
   - 2026-06-20 QA fix: modal passes `companyLegacyId`; History tab added Contract / Last Contact / Next Steps / Health Scores pills and search.
+  - 2026-07-04 Moves Method Phase 4 QA polish: Client Detail > Program > Next Steps now truncates long rich text and opens the full value in a read-only `Read more` modal, matching Quick Update. Broad MM readback found no literal `0` in Program text/current contract-day fields; if Jay still sees `0`, capture a specific client example.
   - 2026-06-20 final polish: modal now also edits Date of Last Contact and Date of Next Contact.
 - `[~]` `[qa]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
 - `[ ]` Create, assign, and update client tasks.
