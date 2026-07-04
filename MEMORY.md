@@ -556,3 +556,4 @@ For historical context:
 - Updated `src/pages/Dashboard.tsx` so renewal KPI calculations and drilldowns use overdue through next 30 days by default when no Dashboard Date Range is set; explicit Date Range still wins. Dashboard now uses `current_contract_end_date_for_filtering`, includes non-archived historical contract rows for overdue cases, and excludes archived app-owned contract rows by status/archived flag.
 - Updated KPI help copy in `src/components/dashboard/kpis/UpForRenewalKpi.tsx` and `RetentionPercentageKpi.tsx`.
 - Verification: `npm run build` passed. Read-only MM sanity count for July 4, 2026 expects default Up For Renewal around 451 after retained-client exclusion.
+- Follow-up polish: Dashboard renewal KPI drilldown now includes Renewal Date, defaults to renewal-date sort, and lets the header toggle ascending/descending sort.

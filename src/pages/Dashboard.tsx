@@ -163,6 +163,7 @@ interface ClientRow {
   client_name: string | null;
   client_image: string | null;
   csm_team_member_id: string | null;
+  renewal_date?: string | null;
 }
 
 interface ChartDatum {
@@ -926,6 +927,16 @@ function dateInputValueFromDate(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatDisplayDate(value: unknown) {
+  const date = dateFromValue(value);
+  if (!date) return "--";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
 function renewalKpiDateRange(dateRange: MonthDateFilterState) {
   if (dateRange.startDate || dateRange.endDate) {
     return {
@@ -1343,6 +1354,8 @@ export function Dashboard() {
   const [activeDetailKey, setActiveDetailKey] = useState<KpiDetailKey | null>(null);
   const [detailSearch, setDetailSearch] = useState("");
   const [detailPage, setDetailPage] = useState(1);
+  const [detailRenewalSortDirection, setDetailRenewalSortDirection] =
+    useState<"asc" | "desc">("asc");
   const [detailRows, setDetailRows] = useState<ClientRow[]>([]);
   const [detailTotalCount, setDetailTotalCount] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1598,18 +1611,25 @@ export function Dashboard() {
   const detailPageCount = Math.max(1, Math.ceil(detailTotalCount / DETAIL_PAGE_SIZE));
   const detailStart = detailTotalCount === 0 ? 0 : (detailPage - 1) * DETAIL_PAGE_SIZE + 1;
   const detailEnd = Math.min(detailPage * DETAIL_PAGE_SIZE, detailTotalCount);
+  const detailShowsRenewalDate =
+    activeDetailKey === "renewing" || activeDetailKey === "active-renewing";
+  const detailGridClass = detailShowsRenewalDate
+    ? "grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.85fr)_minmax(7.5rem,0.65fr)] gap-4"
+    : "grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4";
 
   const openDetailDrawer = (key: KpiDetailKey) => {
     if (!canUseDashboardDrilldowns) return;
     setActiveDetailKey(key);
     setDetailSearch("");
     setDetailPage(1);
+    setDetailRenewalSortDirection("asc");
   };
 
   const closeDetailDrawer = () => {
     setActiveDetailKey(null);
     setDetailSearch("");
     setDetailPage(1);
+    setDetailRenewalSortDirection("asc");
   };
 
   const openKpiInfoModal = (title: string, description: string, sql: string) => {
@@ -3111,11 +3131,20 @@ export function Dashboard() {
       let retainedIds = new Set<string>();
       let renewingIds = new Set<string>();
       let churnedIds = new Set<string>();
+      const renewalDateByClientId = new Map<string, string>();
       const detailRenewalDateRange = ["renewing", "active-renewing"].includes(
         detailKey,
       )
         ? appliedRenewalDateRange
         : appliedFilters.dateRange;
+      const recordRenewalDate = (clientId: string, value: unknown) => {
+        const candidate = dateFromValue(value);
+        if (!candidate) return;
+        const existing = dateFromValue(renewalDateByClientId.get(clientId));
+        if (!existing || candidate > existing) {
+          renewalDateByClientId.set(clientId, candidate.toISOString());
+        }
+      };
 
       if (
         ["retained", "renewing", "active-renewing", "churned"].includes(
@@ -3259,6 +3288,7 @@ export function Dashboard() {
             )
           ) {
             renewingIds.add(client.glide_row_id);
+            recordRenewalDate(client.glide_row_id, contractEnd);
           }
         });
 
@@ -3280,6 +3310,7 @@ export function Dashboard() {
             )
           ) {
             renewingIds.add(contract.client_id);
+            recordRenewalDate(contract.client_id, contract.end_date);
           }
         });
       }
@@ -3321,9 +3352,22 @@ export function Dashboard() {
         );
       }
 
-      rows = rows.sort((a, b) =>
-        String(a.client_name ?? "").localeCompare(String(b.client_name ?? "")),
-      );
+      rows = rows.sort((a, b) => {
+        if (detailKey === "renewing" || detailKey === "active-renewing") {
+          const aDate = dateFromValue(renewalDateByClientId.get(a.glide_row_id));
+          const bDate = dateFromValue(renewalDateByClientId.get(b.glide_row_id));
+          if (aDate && bDate && aDate.getTime() !== bDate.getTime()) {
+            return detailRenewalSortDirection === "asc"
+              ? aDate.getTime() - bDate.getTime()
+              : bDate.getTime() - aDate.getTime();
+          }
+          if (aDate && !bDate) return detailRenewalSortDirection === "asc" ? -1 : 1;
+          if (!aDate && bDate) return detailRenewalSortDirection === "asc" ? 1 : -1;
+        }
+        return String(a.client_name ?? "").localeCompare(
+          String(b.client_name ?? ""),
+        );
+      });
       const totalCount = rows.length;
       const start = (detailPage - 1) * DETAIL_PAGE_SIZE;
       const pageRows = rows.slice(start, start + DETAIL_PAGE_SIZE);
@@ -3333,6 +3377,7 @@ export function Dashboard() {
           client_name: row.client_name,
           client_image: row.client_image,
           csm_team_member_id: row.csm_team_member_id,
+          renewal_date: renewalDateByClientId.get(row.glide_row_id) ?? null,
         })),
       );
       setDetailTotalCount(totalCount);
@@ -3361,6 +3406,7 @@ export function Dashboard() {
     appliedUsesAppClients,
     assignedTeamMemberId,
     detailPage,
+    detailRenewalSortDirection,
     detailSearch,
   ]);
 
@@ -4431,9 +4477,26 @@ export function Dashboard() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-              <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4 border-b border-gray-200 px-1 pb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <div className={`${detailGridClass} border-b border-gray-200 px-1 pb-3 text-xs font-semibold uppercase tracking-wider text-gray-500`}>
                 <span>Name</span>
                 <span>CSM</span>
+                {detailShowsRenewalDate ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailRenewalSortDirection((direction) =>
+                        direction === "asc" ? "desc" : "asc",
+                      );
+                      setDetailPage(1);
+                    }}
+                    className="flex items-center gap-1 text-left font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-900 cursor-pointer"
+                  >
+                    <span>Renewal Date</span>
+                    <span aria-hidden="true">
+                      {detailRenewalSortDirection === "asc" ? "↑" : "↓"}
+                    </span>
+                  </button>
+                ) : null}
               </div>
 
               {detailLoading ? (
@@ -4441,10 +4504,13 @@ export function Dashboard() {
                   {Array.from({ length: 8 }).map((_, index) => (
                     <div
                       key={index}
-                      className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4 border-b border-gray-100 py-3"
+                      className={`${detailGridClass} border-b border-gray-100 py-3`}
                     >
                       <div className="h-10 rounded-lg bg-gray-100 animate-pulse" />
                       <div className="h-10 rounded-lg bg-gray-100 animate-pulse" />
+                      {detailShowsRenewalDate ? (
+                        <div className="h-10 rounded-lg bg-gray-100 animate-pulse" />
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -4457,7 +4523,7 @@ export function Dashboard() {
                   {detailRows.map((client) => (
                     <div
                       key={client.glide_row_id}
-                      className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4 border-b border-gray-100 py-3"
+                      className={`${detailGridClass} border-b border-gray-100 py-3`}
                     >
                       <Link
                         to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
@@ -4491,6 +4557,11 @@ export function Dashboard() {
                             "Unassigned"}
                         </span>
                       </div>
+                      {detailShowsRenewalDate ? (
+                        <div className="flex items-center text-sm font-medium text-gray-800">
+                          {formatDisplayDate(client.renewal_date)}
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
