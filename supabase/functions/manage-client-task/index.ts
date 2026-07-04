@@ -125,6 +125,22 @@ async function resolveActor(
   throw new Error("You do not have permission to manage tasks.");
 }
 
+function actorAssignmentIds(actor: {
+  memberId: string | null;
+  legacyMemberId: string | null;
+}) {
+  return [actor.legacyMemberId, actor.memberId].filter(
+    (id): id is string => Boolean(id),
+  );
+}
+
+function actorPrimaryAssignmentId(actor: {
+  memberId: string | null;
+  legacyMemberId: string | null;
+}) {
+  return actor.legacyMemberId ?? actor.memberId;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -199,10 +215,10 @@ Deno.serve(async (req) => {
       if (!existingTask) return jsonResponse({ error: "Task not found." }, 404);
 
       if (actor.role === "csm") {
+        const assignmentIds = actorAssignmentIds(actor);
         const actorOwnsTask =
-          actor.legacyMemberId &&
-          (existingTask.assigned_to_id === actor.legacyMemberId ||
-            existingTask.created_by_id === actor.legacyMemberId);
+          assignmentIds.includes(existingTask.assigned_to_id ?? "") ||
+          assignmentIds.includes(existingTask.created_by_id ?? "");
         if (!actorOwnsTask) {
           return jsonResponse(
             { error: "CSMs can update assigned or created tasks only." },
@@ -225,10 +241,10 @@ Deno.serve(async (req) => {
         if (clientError) throw clientError;
         if (!client) return jsonResponse({ error: "Linked client not found." }, 400);
         if (actor.role === "csm") {
+          const assignmentIds = actorAssignmentIds(actor);
           const isAssigned =
-            actor.legacyMemberId &&
-            (client.csm_team_member_id === actor.legacyMemberId ||
-              client.csm_secondary_assignee_id === actor.legacyMemberId);
+            assignmentIds.includes(client.csm_team_member_id ?? "") ||
+            assignmentIds.includes(client.csm_secondary_assignee_id ?? "");
           if (!isAssigned) {
             return jsonResponse(
               { error: "CSMs can link tasks to assigned clients only." },
@@ -243,16 +259,16 @@ Deno.serve(async (req) => {
           ? existingTask.assigned_to_id
           : nullableText(body.assignedToId);
       const assignedToId =
-        actor.role === "csm" ? actor.legacyMemberId : requestedAssigneeId;
+        actor.role === "csm" ? actorPrimaryAssignmentId(actor) : requestedAssigneeId;
       const isChangingAssignee =
         body.assignedToId !== undefined || actor.role === "csm";
 
       if (isChangingAssignee && assignedToId) {
         const { data: member, error: memberError } = await supabase
           .from("company_members")
-          .select("legacy_glide_row_id, status")
+          .select("id, legacy_glide_row_id, status")
           .eq("company_id", company.id)
-          .eq("legacy_glide_row_id", assignedToId)
+          .or(`id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`)
           .maybeSingle();
         if (memberError) throw memberError;
         if (!member || member.status !== "active") {
@@ -364,7 +380,7 @@ Deno.serve(async (req) => {
               task_last_updated_date: now,
               start_date: now,
               recurring_is_recurring: true,
-              created_by_id: actor.legacyMemberId,
+              created_by_id: actorPrimaryAssignmentId(actor),
               assigned_to_id: task.assigned_to_id,
               priority: task.priority,
               status_value: "todo",
@@ -431,7 +447,7 @@ Deno.serve(async (req) => {
     const clientId = nullableText(body.clientId);
     const requestedAssigneeId = nullableText(body.assignedToId);
     const assignedToId =
-      actor.role === "csm" ? actor.legacyMemberId : requestedAssigneeId;
+      actor.role === "csm" ? actorPrimaryAssignmentId(actor) : requestedAssigneeId;
 
     if (actor.role === "csm" && !assignedToId) {
       return jsonResponse(
@@ -450,10 +466,10 @@ Deno.serve(async (req) => {
       if (clientError) throw clientError;
       if (!client) return jsonResponse({ error: "Linked client not found." }, 400);
       if (actor.role === "csm") {
+        const assignmentIds = actorAssignmentIds(actor);
         const isAssigned =
-          actor.legacyMemberId &&
-          (client.csm_team_member_id === actor.legacyMemberId ||
-            client.csm_secondary_assignee_id === actor.legacyMemberId);
+          assignmentIds.includes(client.csm_team_member_id ?? "") ||
+          assignmentIds.includes(client.csm_secondary_assignee_id ?? "");
         if (!isAssigned) {
           return jsonResponse(
             { error: "CSMs can create tasks for assigned clients only." },
@@ -466,9 +482,9 @@ Deno.serve(async (req) => {
     if (assignedToId) {
       const { data: member, error: memberError } = await supabase
         .from("company_members")
-        .select("legacy_glide_row_id, status")
+        .select("id, legacy_glide_row_id, status")
         .eq("company_id", company.id)
-        .eq("legacy_glide_row_id", assignedToId)
+        .or(`id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`)
         .maybeSingle();
       if (memberError) throw memberError;
       if (!member || member.status !== "active") {
@@ -489,7 +505,7 @@ Deno.serve(async (req) => {
       task_last_updated_date: now,
       start_date: now,
       recurring_is_recurring: Boolean(body.recurringIsRecurring),
-      created_by_id: actor.legacyMemberId,
+      created_by_id: actorPrimaryAssignmentId(actor),
       assigned_to_id: assignedToId,
       priority: nullableText(body.priority),
       status_value: normalizeStatus(body.statusValue) ?? "todo",

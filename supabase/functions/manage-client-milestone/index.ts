@@ -147,6 +147,15 @@ async function resolveActor(
   throw new Error("You do not have permission to manage milestones.");
 }
 
+function actorAssignmentIds(actor: {
+  memberId: string | null;
+  legacyMemberId: string | null;
+}) {
+  return [actor.legacyMemberId, actor.memberId].filter(
+    (id): id is string => Boolean(id),
+  );
+}
+
 function addDaysIso(value: string | null, days: number) {
   const base = value ? new Date(value) : new Date();
   if (Number.isNaN(base.getTime())) return new Date().toISOString();
@@ -432,10 +441,10 @@ Deno.serve(async (req) => {
     const actor = await resolveActor(supabase, userEmail, company.id);
 
     if (actor.role === "csm") {
+      const assignmentIds = actorAssignmentIds(actor);
       const isAssigned =
-        actor.legacyMemberId &&
-        (client.csm_team_member_id === actor.legacyMemberId ||
-          client.csm_secondary_assignee_id === actor.legacyMemberId);
+        assignmentIds.includes(client.csm_team_member_id ?? "") ||
+        assignmentIds.includes(client.csm_secondary_assignee_id ?? "");
       if (!isAssigned) {
         return jsonResponse(
           { error: "CSMs can update assigned client milestones only." },

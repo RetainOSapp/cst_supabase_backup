@@ -262,6 +262,15 @@ async function resolveActor(
   throw new Error("You do not have permission to quick update this client.");
 }
 
+function actorAssignmentIds(actor: {
+  memberId: string | null;
+  legacyMemberId: string | null;
+}) {
+  return [actor.legacyMemberId, actor.memberId].filter(
+    (id): id is string => Boolean(id),
+  );
+}
+
 async function refreshAdvocacySummary(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
@@ -391,11 +400,10 @@ Deno.serve(async (req) => {
     if (!client) return jsonResponse({ error: "Client not found." }, 404);
 
     if (actor.role === "csm") {
-      const legacyMemberId = actor.legacyMemberId;
+      const assignmentIds = actorAssignmentIds(actor);
       const isAssigned =
-        legacyMemberId &&
-        (client.csm_team_member_id === legacyMemberId ||
-          client.csm_secondary_assignee_id === legacyMemberId);
+        assignmentIds.includes(client.csm_team_member_id ?? "") ||
+        assignmentIds.includes(client.csm_secondary_assignee_id ?? "");
       if (!isAssigned) {
         return jsonResponse(
           { error: "CSMs can quick update assigned clients only." },

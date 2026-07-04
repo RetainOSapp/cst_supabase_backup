@@ -1872,6 +1872,7 @@ Use this section as the “what good looks like” checklist before migrating re
   - 2026-06-17 Jay decisions applied: Viewer Dashboard is read-only with client drilldowns/search disabled; Support stays operational-only; integration review/tokens exclude Support; RetainOS Help drafts are SuperAdmin-only; Company Resource drafts are visible to Directors.
   - 2026-06-17 implementation passed `npm run build`; `manage-integration-review` was deployed after narrowing server-side access to SuperAdmin/Director.
   - 2026-07-04 Moves Method Director QA catch: invite copy used localhost during local QA, CSM Reports returned Bad Request at MM scale, and Director company-resource create/edit was missing. Patched invite login URL copy, chunked CSM Reports history reads, and deployed Director company-resource management. Awaiting Jay retest before treating MM role QA as launch-passed.
+  - 2026-07-04 Moves Method CSM QA catch: temp app-owned CSMs with no legacy CST member ID could see assigned clients/tasks but could not write quick edits because Edge Functions checked only `legacy_glide_row_id`. Deployed client write function patches so CSM authorization accepts either legacy member ID or app-owned member UUID. Awaiting Jay retest.
 - `[x]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
 - `[x]` Final cutover plan exists for:
   - Data backfill.

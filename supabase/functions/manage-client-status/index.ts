@@ -128,6 +128,15 @@ async function resolveActor(
   throw new Error("You do not have permission to change this client status.");
 }
 
+function actorAssignmentIds(actor: {
+  memberId: string | null;
+  legacyMemberId: string | null;
+}) {
+  return [actor.legacyMemberId, actor.memberId].filter(
+    (id): id is string => Boolean(id),
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -226,11 +235,10 @@ Deno.serve(async (req) => {
     const actor = await resolveActor(supabase, userEmail, company.id);
 
     if (actor.role === "csm") {
-      const legacyMemberId = actor.legacyMemberId;
+      const assignmentIds = actorAssignmentIds(actor);
       const isAssigned =
-        legacyMemberId &&
-        (client.csm_team_member_id === legacyMemberId ||
-          client.csm_secondary_assignee_id === legacyMemberId);
+        assignmentIds.includes(client.csm_team_member_id ?? "") ||
+        assignmentIds.includes(client.csm_secondary_assignee_id ?? "");
       if (!isAssigned) {
         return jsonResponse(
           { error: "CSMs can change assigned client statuses only." },
