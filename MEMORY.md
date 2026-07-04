@@ -577,3 +577,12 @@ For historical context:
 
 - GitHub/network DNS is often blocked in the default sandbox. When Jay explicitly asks to push, use the approved/escalated `git push` path directly instead of first trying a sandboxed push that predictably fails with DNS errors.
 - If Jay says not to push live, do not run `git push` at all; local commits are okay only when useful, and `main` may intentionally stay ahead of `origin/main`.
+
+## Moves Method Launch Handoff Checkpoint - 2026-07-04
+
+- Jay completed final Phase 4 QA gates for Moves Method: pathway progression on the QA client completed both milestones and showed 100%; Bye Bye Panic confirmed mirror fallback still loads; MM app-owned writes persisted on real clients, including off-boarded clients; and Dashboard KPI info modal privacy retest passed after SQL/schema removal.
+- Dashboard renewal KPI retest passed functionally after the full-client drilldown fix; remaining note is performance polish for the full-scale renewal drawer, not a launch blocker.
+- Read-only MM drift audit: app-owned clients = 4,486, CST mirror snapshot clients = 4,485, and the only app-owned-only row is `MM Role QA Client - Delete` / `jay+mm-role-qa-client@ethicalscaling.com`.
+- Webhook/token handoff check: MM has one active non-expiring token each for `client_create`, `client_update`, and `call_summary_next_steps`. Client create/update tokens show Daniel/MM Zapier usage on 2026-07-03; call-summary next steps processed and matched Janet Post on 2026-07-04.
+- Latest-client screenshot audit: all 30 CST-visible latest clients Jay sent were found in MM app-owned RetainOS data. Practical newest normal synced client marker is Cheryl Rieger (`cheryl.rieger13@gmail.com`, onboarded 2026-07-03T23:08:35.402Z); Emily Ward exists too but is future-dated to 2026-08-01.
+- No app code changes in this checkpoint. Existing intentionally dirty local Beacon/package/Header files remain uncommitted.

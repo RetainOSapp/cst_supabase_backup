@@ -67,6 +67,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-02 access prep: after Jay refreshed the Glide backup, app-owned MM team rows were synced to match `backup_company_team` without touching clients. Final count is 100 app-owned team rows, 73 active users, and no active backup/app-owned deltas.
   - 2026-07-02 Daniel-call custom-field fix: seeded MM app-owned custom field definitions for legacy Glide slots `customfield1..customfield7` (Gender, Age, Goals, Training Background, Injuries, Close Date, Program Name and Length). Disposable-token live QA confirmed `zapier-create-client` accepts Daniel's `customfield6` / `customfield7` payload and writes `client_custom_field_values`.
   - 2026-07-04 cutover: Moves Method webhook resources/tokens were validated during migration prep; active app-owned tokens exist for client create, client update, and call-summary next steps. Remaining work is operational customer Zap maintenance, not RetainOS setup.
+  - 2026-07-04 final handoff check: MM has one active non-expiring token for `client_create`, `client_update`, and `call_summary_next_steps`; client create/update tokens were last used by Daniel/MM Zapier on 2026-07-03, and call-summary next steps processed/matched Janet Post on 2026-07-04.
 - `[x]` Secondary assignee support QA passed.
   - Company Settings > Feature gates can enable Secondary assignee; + New Client and Client Detail > Edit Profile can set/clear the Secondary Assignee. Server validation requires an active visible team member and prevents using the same person as Primary CSM. `adding-secondary-assignee` is a draft RetainOS Help resource.
 - `[x]` Archetypes in client views QA passed.
@@ -77,12 +78,15 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Moves Method Phase 4 contract management retest passed.
   - 2026-07-04 fix deployed: Director, Support, and assigned CSMs can create/edit/archive/delete app-owned contract rows for clients they can manage; CSM assignment checks accept app-owned member IDs; contract rows ending today remain Active; and client current-contract summary sync only promotes active/open non-archived contract rows so expired old contracts do not reappear as current after archive/edit.
   - 2026-07-04 Jay QA passed: editing contract value persisted after refresh, archiving removed contracts from Active, and archived contracts appeared correctly under Archived.
-- `[~]` `[qa]` Moves Method renewal KPI retest.
+- `[x]` Moves Method renewal KPI retest passed.
   - 2026-07-04 QA found Dashboard > Up For Renewal was effectively counting almost every active MM client when no Date Range was set. Fix built: default renewal KPI/drilldown window is overdue through next 30 days unless Jay sets an explicit Dashboard Date Range; Active Clients Up For Renewal uses the same current-contract filtering field as Clients. Expected MM default Up For Renewal is 438 on July 4, 2026.
   - 2026-07-04 follow-up polish: renewal KPI drilldown now shows Name, CSM, and Renewal Date, defaults to renewal-date sort, and lets Directors flip the renewal-date sort direction from the modal header.
   - 2026-07-04 QA catch: card showed 438 while the drilldown showed 70 because the drawer query only received the first 1,000 MM clients. The drawer now pages through all matching clients, chunks related history/contract reads, and uses the same current-summary renewal set as the card.
-- `[~]` `[qa]` Dashboard KPI info modal privacy retest.
+  - 2026-07-04 Jay retest passed: drilldown now loads the right numbers. Remaining follow-up is performance optimization for the full-scale drawer load, not a launch blocker.
+- `[x]` Dashboard KPI info modal privacy retest passed.
   - 2026-07-04 hotfix: KPI info dialogs no longer expose SQL, copy-SQL controls, company IDs, table names, or schema/field names. `src/lib/dashboardKpiSql.ts` was deleted from the client code path; KPI cards now show plain-language "How this card works" explanations only.
+- `[x]` Moves Method Phase 4 launch QA handoff passed.
+  - 2026-07-04 Jay QA passed: QA client pathway progression completed both milestones and reached 100%; Bye Bye Panic still loads through mirror fallback; MM writes persist on real app-owned clients; MM app-owned count drift is only the retained QA client; all 30 latest CST screenshot clients were found in RetainOS app-owned data.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
