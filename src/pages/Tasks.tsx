@@ -299,19 +299,19 @@ function TaskCard({
       onDragStart={canManage ? onDragStart : undefined}
       onDragEnd={canManage ? onDragEnd : undefined}
       onClick={onClick}
-      className={`relative rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:border-indigo-200 hover:shadow-md ${canManage ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+      className={`relative rounded-lg border border-gray-200 bg-white p-3.5 shadow-sm transition hover:border-indigo-200 hover:shadow-md ${canManage ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
     >
       {isMoving ? (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/75">
           <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-indigo-600" />
         </div>
       ) : null}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-gray-900">
+          <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-gray-900">
             {displayValue(task.task_name)}
           </h3>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <span
               className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusClasses(task.status_value)}`}
             >
@@ -349,12 +349,12 @@ function TaskCard({
       </div>
 
       {isPresent(task.task_description) && (
-        <p className="mt-3 whitespace-pre-line text-sm leading-6 text-gray-700">
+        <p className="mt-2 line-clamp-2 text-sm leading-5 text-gray-600">
           {task.task_description}
         </p>
       )}
 
-      <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-gray-500">
+      <div className="mt-3 grid grid-cols-2 gap-2 rounded-md border border-gray-100 bg-gray-50/70 px-2.5 py-2 text-xs text-gray-500">
         <div>
           <div className="uppercase tracking-wider">Due</div>
           <div className="mt-0.5 font-medium text-gray-800">
@@ -369,7 +369,7 @@ function TaskCard({
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-gray-100 pt-3">
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-2.5">
         <Link
           to={client ? `/clients/${encodeURIComponent(client.glide_row_id)}` : "#"}
           onClick={(event) => event.stopPropagation()}
