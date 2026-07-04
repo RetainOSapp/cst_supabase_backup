@@ -86,7 +86,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Dashboard KPI info modal privacy retest passed.
   - 2026-07-04 hotfix: KPI info dialogs no longer expose SQL, copy-SQL controls, company IDs, table names, or schema/field names. `src/lib/dashboardKpiSql.ts` was deleted from the client code path; KPI cards now show plain-language "How this card works" explanations only.
 - `[x]` Moves Method Phase 4 launch QA handoff passed.
-  - 2026-07-04 Jay QA passed: QA client pathway progression completed both milestones and reached 100%; Bye Bye Panic still loads through mirror fallback; MM writes persist on real app-owned clients; MM app-owned count drift is only the retained QA client; all 30 latest CST screenshot clients were found in RetainOS app-owned data.
+  - 2026-07-04 Jay QA passed: QA client pathway progression completed both milestones and reached 100%; Bye Bye Panic still loads through mirror fallback; MM writes persist on real app-owned clients; all 30 latest CST screenshot clients were found in RetainOS app-owned data. Temporary role-QA users/client were deleted after QA, and MM app-owned clients now match the CST mirror snapshot at 4,485 / 4,485.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 

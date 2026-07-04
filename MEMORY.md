@@ -586,3 +586,11 @@ For historical context:
 - Webhook/token handoff check: MM has one active non-expiring token each for `client_create`, `client_update`, and `call_summary_next_steps`. Client create/update tokens show Daniel/MM Zapier usage on 2026-07-03; call-summary next steps processed and matched Janet Post on 2026-07-04.
 - Latest-client screenshot audit: all 30 CST-visible latest clients Jay sent were found in MM app-owned RetainOS data. Practical newest normal synced client marker is Cheryl Rieger (`cheryl.rieger13@gmail.com`, onboarded 2026-07-03T23:08:35.402Z); Emily Ward exists too but is future-dated to 2026-08-01.
 - No app code changes in this checkpoint. Existing intentionally dirty local Beacon/package/Header files remain uncommitted.
+
+## Moves Method Role QA Cleanup - 2026-07-04
+
+- Deleted the temporary MM QA auth users `jay+mm-director-qa@ethicalscaling.com`, `jay+mm-csm-qa@ethicalscaling.com`, and `jay+mm-support-qa@ethicalscaling.com`, plus their `company_members` rows.
+- Deleted the temporary client `MM Role QA Client - Delete` / `jay+mm-role-qa-client@ethicalscaling.com` (`clients.glide_row_id = role_qa_client_f26aea9c-2d04-4b09-a768-f4fd509e532c`) and its associated QA-only rows: 2 tasks, 13 client history events, 2 client milestones, 2 client contracts, and temp-created audit rows.
+- Verification after cleanup: temp auth matches = 0, temp `company_members` = 0, temp client = 0, temp task/history/milestone/contract/audit rows = 0.
+- MM app-owned clients now match the CST mirror snapshot again at 4,485 / 4,485. Paged status verification: `front-end` 2,037, `back-end` 337, `paused` 118, `suspended` 83, `off-boarded` 1,910.
+- No app code changes in this cleanup. Existing intentionally dirty local Beacon/package/Header files remain uncommitted.
