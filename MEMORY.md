@@ -558,3 +558,10 @@ For historical context:
 - Verification: `npm run build` passed. Read-only MM sanity count for July 4, 2026 expects default Up For Renewal around 451 after retained-client exclusion.
 - Follow-up polish: Dashboard renewal KPI drilldown now includes Renewal Date, defaults to renewal-date sort, and lets the header toggle ascending/descending sort.
 - QA catch: card showed 438 while drilldown showed 70 because the drawer still subtracted broad retained-history clients. Aligned Up For Renewal card and drawer on active clients due in the renewal window; retained history remains for Retention Percentage only.
+
+## Moves Method Renewal Drilldown Count Fix - 2026-07-04
+
+- Jay still saw Dashboard > Active Clients Up For Renewal card at 438 while the drilldown modal showed 70 results after repeated refreshes.
+- Root cause: the card path paged through all 4,486 MM app-owned clients, but the drilldown detail query used one Supabase range request and only received the first 1,000 rows in production. The first page happened to contain 70 current-summary renewal matches.
+- Updated `src/pages/Dashboard.tsx`: KPI detail drawers now page client rows in 1,000-row batches, related history/contract reads are chunked in 500-ID batches, and Active Clients Up For Renewal uses the current client contract summary set to match the Clients renewal filters. Read-only sanity count for July 4, 2026: current-summary active renewal window = 438.
+- Verification: `npm run build` passed with existing Beacon/Anthropic browser-externalization and chunk-size warnings.

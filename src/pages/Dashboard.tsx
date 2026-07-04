@@ -32,6 +32,7 @@ const PROGRAM_QUERY_KEY = "program";
 const OFFER_QUERY_KEY = "offerId";
 const DETAIL_PAGE_SIZE = 25;
 const DASHBOARD_QUERY_PAGE_SIZE = 1000;
+const DASHBOARD_IN_FILTER_CHUNK_SIZE = 500;
 const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
 const PROFILE_UPKEEP_FRESHNESS_DAYS = 14;
 const MILESTONE_MISMATCH_KEY = "milestone-mismatch";
@@ -100,6 +101,24 @@ async function fetchPagedDashboardRows<T>(
     const page = data ?? [];
     rows.push(...page);
     if (page.length < DASHBOARD_QUERY_PAGE_SIZE) break;
+  }
+
+  return { data: rows, error: null };
+}
+
+async function fetchDashboardRowsInChunks<T>(
+  ids: string[],
+  buildQuery: (
+    chunk: string[],
+  ) => PromiseLike<{ data: T[] | null; error: unknown | null }>,
+) {
+  const rows: T[] = [];
+
+  for (let index = 0; index < ids.length; index += DASHBOARD_IN_FILTER_CHUNK_SIZE) {
+    const chunk = ids.slice(index, index + DASHBOARD_IN_FILTER_CHUNK_SIZE);
+    const { data, error } = await buildQuery(chunk);
+    if (error) return { data: rows, error };
+    rows.push(...(data ?? []));
   }
 
   return { data: rows, error: null };
@@ -2259,36 +2278,78 @@ export function Dashboard() {
 
       const renewalDateRange = appliedRenewalDateRange;
       const appHistoryQuery = appliedUsesAppClients
-        ? supabase
-            .from("client_history_events")
-            .select("legacy_client_glide_row_id, event_type, payload")
-            .in("legacy_client_glide_row_id", clientIds)
-            .in("event_type", ["client_status_changed", "client_retention_recorded"])
+        ? fetchDashboardRowsInChunks<AppKpiHistoryRow>(clientIds, (chunk) =>
+            supabase
+              .from("client_history_events")
+              .select("legacy_client_glide_row_id, event_type, payload")
+              .in("legacy_client_glide_row_id", chunk)
+              .in("event_type", [
+                "client_status_changed",
+                "client_retention_recorded",
+              ])
+              .gte(
+                "created_at",
+                renewalDateRange.startDate
+                  ? `${renewalDateRange.startDate}T00:00:00.000Z`
+                  : "0001-01-01T00:00:00.000Z",
+              )
+              .lt(
+                "created_at",
+                renewalDateRange.endDate
+                  ? addDays(
+                      new Date(`${renewalDateRange.endDate}T00:00:00.000Z`),
+                      1,
+                    ).toISOString()
+                  : "9999-12-31T00:00:00.000Z",
+              ),
+          )
+        : Promise.resolve({ data: [], error: null });
+      const appContractsQuery = appliedUsesAppClients
+        ? fetchDashboardRowsInChunks<OfferKpiContractRow>(clientIds, (chunk) =>
+            supabase
+              .from("client_contracts")
+              .select("client_id, end_date")
+              .in("client_id", chunk)
+              .is("archived_at", null)
+              .or("status.is.null,status.neq.archived")
+              .not("end_date", "is", null),
+          )
+        : Promise.resolve({ data: [], error: null });
+      const legacyHistoryQuery = fetchDashboardRowsInChunks<OfferKpiHistoryRow>(
+        clientIds,
+        (chunk) =>
+          supabase
+            .from("backup_company_clients_history")
+            .select("client_id")
+            .in("client_id", chunk)
+            .eq("change_type_code", "program-status")
+            .in("value", ["front-end", "back-end"])
+            .in("original_value", ["front-end", "back-end"])
             .gte(
-              "created_at",
+              "modified_date",
               renewalDateRange.startDate
                 ? `${renewalDateRange.startDate}T00:00:00.000Z`
                 : "0001-01-01T00:00:00.000Z",
             )
             .lt(
-              "created_at",
+              "modified_date",
               renewalDateRange.endDate
                 ? addDays(
                     new Date(`${renewalDateRange.endDate}T00:00:00.000Z`),
                     1,
                   ).toISOString()
                 : "9999-12-31T00:00:00.000Z",
-            )
-        : Promise.resolve({ data: [], error: null });
-      const appContractsQuery = appliedUsesAppClients
-        ? supabase
-            .from("client_contracts")
+            ),
+      );
+      const legacyContractsQuery = fetchDashboardRowsInChunks<OfferKpiContractRow>(
+        clientIds,
+        (chunk) =>
+          supabase
+            .from("backup_company_clients_contracts")
             .select("client_id, end_date")
-            .in("client_id", clientIds)
-            .is("archived_at", null)
-            .or("status.is.null,status.neq.archived")
-            .not("end_date", "is", null)
-        : Promise.resolve({ data: [], error: null });
+            .in("client_id", chunk)
+            .not("end_date", "is", null),
+      );
 
       const [
         appHistoryResult,
@@ -2297,34 +2358,9 @@ export function Dashboard() {
         legacyContractsResult,
       ] = await Promise.all([
         appHistoryQuery,
-        supabase
-          .from("backup_company_clients_history")
-          .select("client_id")
-          .in("client_id", clientIds)
-          .eq("change_type_code", "program-status")
-          .in("value", ["front-end", "back-end"])
-          .in("original_value", ["front-end", "back-end"])
-          .gte(
-            "modified_date",
-            renewalDateRange.startDate
-              ? `${renewalDateRange.startDate}T00:00:00.000Z`
-              : "0001-01-01T00:00:00.000Z",
-          )
-          .lt(
-            "modified_date",
-            renewalDateRange.endDate
-              ? addDays(
-                  new Date(`${renewalDateRange.endDate}T00:00:00.000Z`),
-                  1,
-                ).toISOString()
-              : "9999-12-31T00:00:00.000Z",
-          ),
+        legacyHistoryQuery,
         appContractsQuery,
-        supabase
-          .from("backup_company_clients_contracts")
-          .select("client_id, end_date")
-          .in("client_id", clientIds)
-          .not("end_date", "is", null),
+        legacyContractsQuery,
       ]);
 
       if (cancelled) return;
@@ -2362,6 +2398,7 @@ export function Dashboard() {
           .forEach((id) => retainedIds.add(id));
       const churnedIds = new Set(churned.map((client) => client.glide_row_id));
       const renewingIds = new Set<string>();
+      const currentSummaryRenewingIds = new Set<string>();
 
       reportClients.forEach((client) => {
         if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
@@ -2376,6 +2413,7 @@ export function Dashboard() {
           )
         ) {
           renewingIds.add(client.glide_row_id);
+          currentSummaryRenewingIds.add(client.glide_row_id);
         }
       });
 
@@ -2408,7 +2446,7 @@ export function Dashboard() {
           : Math.round((retainedIds.size / renewingIds.size) * 100),
       );
       setActiveRenewingClients(
-        [...renewingIds].filter((id) => {
+        [...currentSummaryRenewingIds].filter((id) => {
           const client = clientById.get(id);
           return (
             client &&
@@ -3042,71 +3080,81 @@ export function Dashboard() {
       const companyColumn = appliedUsesAppClients
         ? "company_glide_row_id"
         : "company_id";
-      let clientsQuery = supabase
-        .from(clientSourceTable)
-        .select(
-          [
-            "glide_row_id",
-            "client_name",
-            "client_image",
-            ...(appliedUsesAppClients ? ["company_glide_row_id"] : []),
-            "csm_team_member_id",
-            "csm_secondary_assignee_id",
-            "program_status_value",
+      const clientSelect = [
+        "glide_row_id",
+        "client_name",
+        "client_image",
+        ...(appliedUsesAppClients ? ["company_glide_row_id"] : []),
+        "csm_team_member_id",
+        "csm_secondary_assignee_id",
+        "program_status_value",
+        "offer_milestones_current_offer_id",
+        "client_age_date_onboarded",
+        "client_age_date_offboarded",
+        "client_age_date_offboarded_for_filtering",
+        "current_contract_start_date",
+        "current_contract_of_days",
+        "current_contract_end_date",
+        "current_contract_end_date_for_filtering",
+      ].join(", ");
+
+      const buildDetailClientRowsQuery = (from: number, to: number) => {
+        let query = supabase
+          .from(clientSourceTable)
+          .select(clientSelect)
+          .eq(companyColumn, appliedFilters.companyId)
+          .range(from, to);
+
+        if (appliedFilters.offerId) {
+          query = query.eq(
             "offer_milestones_current_offer_id",
+            appliedFilters.offerId,
+          );
+        }
+        if (assignedTeamMemberId) {
+          query = query.or(
+            `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+          );
+        } else if (appliedFilters.csmId) {
+          query = query.eq("csm_team_member_id", appliedFilters.csmId);
+        }
+        if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+          query = query.eq(
+            "csm_secondary_assignee_id",
+            appliedFilters.secondaryAssigneeId,
+          );
+        }
+        if (appliedProgramValues.length === 1) {
+          query = query.eq("program_status_value", appliedProgramValues[0]);
+        } else if (appliedProgramValues.length > 1) {
+          query = query.in("program_status_value", appliedProgramValues);
+        }
+        if (appliedFilters.clientStartDate.startDate) {
+          query = query.gte(
             "client_age_date_onboarded",
-            "client_age_date_offboarded",
-            "client_age_date_offboarded_for_filtering",
-            "current_contract_start_date",
-            "current_contract_of_days",
-            "current_contract_end_date",
-            "current_contract_end_date_for_filtering",
-          ].join(", "),
-        )
-        .eq(companyColumn, appliedFilters.companyId)
-        .range(0, 4999);
+            `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
+          );
+        }
+        if (appliedFilters.clientStartDate.endDate) {
+          query = query.lt(
+            "client_age_date_onboarded",
+            addDays(
+              new Date(`${appliedFilters.clientStartDate.endDate}T00:00:00.000Z`),
+              1,
+            ).toISOString(),
+          );
+        }
 
-      if (appliedFilters.offerId) {
-        clientsQuery = clientsQuery.eq(
-          "offer_milestones_current_offer_id",
-          appliedFilters.offerId,
-        );
-      }
-      if (assignedTeamMemberId) {
-        clientsQuery = clientsQuery.or(
-          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
-        );
-      } else if (appliedFilters.csmId) {
-        clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
-      }
-      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
-        clientsQuery = clientsQuery.eq(
-          "csm_secondary_assignee_id",
-          appliedFilters.secondaryAssigneeId,
-        );
-      }
-      if (appliedProgramValues.length === 1) {
-        clientsQuery = clientsQuery.eq("program_status_value", appliedProgramValues[0]);
-      } else if (appliedProgramValues.length > 1) {
-        clientsQuery = clientsQuery.in("program_status_value", appliedProgramValues);
-      }
-      if (appliedFilters.clientStartDate.startDate) {
-        clientsQuery = clientsQuery.gte(
-          "client_age_date_onboarded",
-          `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
-        );
-      }
-      if (appliedFilters.clientStartDate.endDate) {
-        clientsQuery = clientsQuery.lt(
-          "client_age_date_onboarded",
-          addDays(
-            new Date(`${appliedFilters.clientStartDate.endDate}T00:00:00.000Z`),
-            1,
-          ).toISOString(),
-        );
-      }
+        return query;
+      };
 
-      const { data: clientRows, error: clientsError } = await clientsQuery;
+      const { data: clientRows, error: clientsError } =
+        await fetchPagedDashboardRows<OfferKpiClientRow>((from, to) =>
+          buildDetailClientRowsQuery(from, to) as unknown as PromiseLike<{
+            data: OfferKpiClientRow[] | null;
+            error: unknown | null;
+          }>,
+        );
       if (cancelled) return;
 
       if (clientsError) {
@@ -3129,6 +3177,7 @@ export function Dashboard() {
       );
       let retainedIds = new Set<string>();
       let renewingIds = new Set<string>();
+      let currentSummaryRenewingIds = new Set<string>();
       let churnedIds = new Set<string>();
       const renewalDateByClientId = new Map<string, string>();
       const detailRenewalDateRange = ["renewing", "active-renewing"].includes(
@@ -3145,6 +3194,26 @@ export function Dashboard() {
         }
       };
 
+      if (detailKey === "renewing" || detailKey === "active-renewing") {
+        currentSummaryRenewingIds = new Set<string>();
+        reportClients.forEach((client) => {
+          if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+          const contractEnd = calculatedContractEndDate(client);
+          if (
+            contractEnd &&
+            isInDateRange(
+              contractEnd,
+              detailRenewalDateRange.startDate,
+              detailRenewalDateRange.endDate,
+            )
+          ) {
+            currentSummaryRenewingIds.add(client.glide_row_id);
+            recordRenewalDate(client.glide_row_id, contractEnd);
+          }
+        });
+        renewingIds = new Set(currentSummaryRenewingIds);
+      }
+
       if (
         ["retained", "renewing", "active-renewing", "churned"].includes(
           detailKey,
@@ -3152,22 +3221,63 @@ export function Dashboard() {
         clientIds.length > 0
       ) {
         const appHistoryQuery = appliedUsesAppClients
-          ? supabase
-              .from("client_history_events")
-              .select("legacy_client_glide_row_id, event_type, payload")
-              .in("legacy_client_glide_row_id", clientIds)
-              .in("event_type", [
-                "client_status_changed",
-                "client_retention_recorded",
-              ])
+          ? fetchDashboardRowsInChunks<AppKpiHistoryRow>(clientIds, (chunk) =>
+              supabase
+                .from("client_history_events")
+                .select("legacy_client_glide_row_id, event_type, payload")
+                .in("legacy_client_glide_row_id", chunk)
+                .in("event_type", [
+                  "client_status_changed",
+                  "client_retention_recorded",
+                ])
+                .gte(
+                  "created_at",
+                  detailRenewalDateRange.startDate
+                    ? `${detailRenewalDateRange.startDate}T00:00:00.000Z`
+                    : "0001-01-01T00:00:00.000Z",
+                )
+                .lt(
+                  "created_at",
+                  detailRenewalDateRange.endDate
+                    ? addDays(
+                        new Date(
+                          `${detailRenewalDateRange.endDate}T00:00:00.000Z`,
+                        ),
+                        1,
+                      ).toISOString()
+                    : "9999-12-31T00:00:00.000Z",
+                ),
+            )
+          : Promise.resolve({ data: [], error: null });
+        const appContractsQuery = appliedUsesAppClients
+          ? fetchDashboardRowsInChunks<OfferKpiContractRow>(clientIds, (chunk) =>
+              supabase
+                .from("client_contracts")
+                .select("client_id, end_date")
+                .in("client_id", chunk)
+                .is("archived_at", null)
+                .or("status.is.null,status.neq.archived")
+                .not("end_date", "is", null),
+            )
+          : Promise.resolve({ data: [], error: null });
+        const legacyHistoryQuery = fetchDashboardRowsInChunks<OfferKpiHistoryRow>(
+          clientIds,
+          (chunk) =>
+            supabase
+              .from("backup_company_clients_history")
+              .select("client_id")
+              .in("client_id", chunk)
+              .eq("change_type_code", "program-status")
+              .in("value", ["front-end", "back-end"])
+              .in("original_value", ["front-end", "back-end"])
               .gte(
-                "created_at",
+                "modified_date",
                 detailRenewalDateRange.startDate
                   ? `${detailRenewalDateRange.startDate}T00:00:00.000Z`
                   : "0001-01-01T00:00:00.000Z",
               )
               .lt(
-                "created_at",
+                "modified_date",
                 detailRenewalDateRange.endDate
                   ? addDays(
                       new Date(
@@ -3176,17 +3286,17 @@ export function Dashboard() {
                       1,
                     ).toISOString()
                   : "9999-12-31T00:00:00.000Z",
-              )
-          : Promise.resolve({ data: [], error: null });
-        const appContractsQuery = appliedUsesAppClients
-          ? supabase
-              .from("client_contracts")
+              ),
+        );
+        const legacyContractsQuery = fetchDashboardRowsInChunks<OfferKpiContractRow>(
+          clientIds,
+          (chunk) =>
+            supabase
+              .from("backup_company_clients_contracts")
               .select("client_id, end_date")
-              .in("client_id", clientIds)
-              .is("archived_at", null)
-              .or("status.is.null,status.neq.archived")
-              .not("end_date", "is", null)
-          : Promise.resolve({ data: [], error: null });
+              .in("client_id", chunk)
+              .not("end_date", "is", null),
+        );
 
         const [
           appHistoryResult,
@@ -3195,36 +3305,9 @@ export function Dashboard() {
           legacyContractsResult,
         ] = await Promise.all([
           appHistoryQuery,
-          supabase
-            .from("backup_company_clients_history")
-            .select("client_id")
-            .in("client_id", clientIds)
-            .eq("change_type_code", "program-status")
-            .in("value", ["front-end", "back-end"])
-            .in("original_value", ["front-end", "back-end"])
-            .gte(
-              "modified_date",
-              detailRenewalDateRange.startDate
-                ? `${detailRenewalDateRange.startDate}T00:00:00.000Z`
-                : "0001-01-01T00:00:00.000Z",
-            )
-            .lt(
-              "modified_date",
-              detailRenewalDateRange.endDate
-                ? addDays(
-                    new Date(
-                      `${detailRenewalDateRange.endDate}T00:00:00.000Z`,
-                    ),
-                    1,
-                  ).toISOString()
-                : "9999-12-31T00:00:00.000Z",
-            ),
+          legacyHistoryQuery,
           appContractsQuery,
-          supabase
-            .from("backup_company_clients_contracts")
-            .select("client_id, end_date")
-            .in("client_id", clientIds)
-            .not("end_date", "is", null),
+          legacyContractsQuery,
         ]);
 
         if (cancelled) return;
@@ -3274,6 +3357,7 @@ export function Dashboard() {
         );
 
         renewingIds = new Set<string>();
+        currentSummaryRenewingIds.forEach((id) => renewingIds.add(id));
         reportClients.forEach((client) => {
           if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
           if (churnedIds.has(client.glide_row_id)) return;
@@ -3336,7 +3420,7 @@ export function Dashboard() {
         if (detailKey === "renewing") return renewingIds.has(client.glide_row_id);
         if (detailKey === "active-renewing") {
           return (
-            renewingIds.has(client.glide_row_id) &&
+            currentSummaryRenewingIds.has(client.glide_row_id) &&
             ["front-end", "back-end"].includes(client.program_status_value ?? "")
           );
         }
