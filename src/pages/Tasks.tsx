@@ -15,6 +15,7 @@ interface Company {
 }
 
 interface TeamMember {
+  app_member_id?: string | null;
   glide_row_id: string;
   name: string | null;
   is_archived: boolean | null;
@@ -97,6 +98,14 @@ function formatDate(value: unknown) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function assignedDisplayName(
+  assignedToId: string | null | undefined,
+  teamMemberNameById: Map<string, string>,
+) {
+  if (!isPresent(assignedToId)) return "Unassigned";
+  return teamMemberNameById.get(String(assignedToId)) ?? "Former team member";
 }
 
 function getInitials(name: string | null | undefined) {
@@ -281,9 +290,7 @@ function TaskCard({
   onDragStart: (event: DragEvent<HTMLElement>) => void;
   onDragEnd: (event: DragEvent<HTMLElement>) => void;
 }) {
-  const assignedTo = task.assigned_to_id
-    ? (teamMemberNameById.get(task.assigned_to_id) ?? task.assigned_to_id)
-    : "Unassigned";
+  const assignedTo = assignedDisplayName(task.assigned_to_id, teamMemberNameById);
   const dueSignal = dueBadge(task);
 
   return (
@@ -494,10 +501,7 @@ function TaskListTable({
                   </div>
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
-                  {task.assigned_to_id
-                    ? (teamMemberNameById.get(task.assigned_to_id) ??
-                      task.assigned_to_id)
-                    : "Unassigned"}
+                  {assignedDisplayName(task.assigned_to_id, teamMemberNameById)}
                 </td>
               </tr>
             );
@@ -915,13 +919,15 @@ export function Tasks() {
   );
 
   const teamMemberNameById = useMemo(
-    () =>
-      new Map(
-        teamMembers.map((member) => [
-          member.glide_row_id,
-          member.name ?? "Unassigned",
-        ]),
-      ),
+    () => {
+      const entries: Array<[string, string]> = [];
+      teamMembers.forEach((member) => {
+        const label = member.name ?? "Former team member";
+        if (member.glide_row_id) entries.push([member.glide_row_id, label]);
+        if (member.app_member_id) entries.push([member.app_member_id, label]);
+      });
+      return new Map(entries);
+    },
     [teamMembers],
   );
 
@@ -1018,7 +1024,6 @@ export function Tasks() {
             .from("company_members")
             .select("id, legacy_glide_row_id, name, status, hide_from_csm_list")
             .eq("company_id", appCompany.id)
-            .eq("status", "active")
             .order("name", { ascending: true });
           if (cancelled) return;
           if (error) console.error("Failed to load app team members:", error);
@@ -1029,6 +1034,7 @@ export function Tasks() {
             status: string | null;
             hide_from_csm_list: boolean | null;
           }>).map((member) => ({
+            app_member_id: member.id,
             glide_row_id: member.legacy_glide_row_id ?? member.id,
             name: member.name,
             is_archived: member.status === "archived",
