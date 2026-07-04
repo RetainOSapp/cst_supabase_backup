@@ -74,8 +74,9 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` 2026-06-21 Advocacy tracking QA passed.
   - Quick Update and Client Detail > Outcomes now track Review, Testimonial, Referral, and Renewal / Upsell asks and received events with repeat counts and optional notes. Dashboard > Overview has Advocacy & Growth cards for asked, received, and ratio by current filters. Ethical Scaling app-owned data was backfilled from legacy Glide fields.
   - Jay QA: testimonial save worked from Client Detail, Quick Update layout was corrected to show Pathway progress before Advocacy & Growth, and Dashboard Overview advocacy filters worked.
-- `[~]` `[qa]` Moves Method Phase 4 contract management retest.
+- `[x]` Moves Method Phase 4 contract management retest passed.
   - 2026-07-04 fix deployed: Director, Support, and assigned CSMs can create/edit/archive/delete app-owned contract rows for clients they can manage; CSM assignment checks accept app-owned member IDs; contract rows ending today remain Active; and client current-contract summary sync only promotes active/open non-archived contract rows so expired old contracts do not reappear as current after archive/edit.
+  - 2026-07-04 Jay QA passed: editing contract value persisted after refresh, archiving removed contracts from Active, and archived contracts appeared correctly under Archived.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -1042,9 +1043,9 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[~]` `[qa]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
 - `[ ]` Create, assign, and update client tasks.
 - `[ ]` View archived tasks in client context.
-- `[~]` `[qa]` Create / update contracts for client.
+- `[x]` Create / update contracts for client.
   - Create/edit/archive/delete are covered by the Client Contracts/Renewals V1 flow for app-owned pilot/migrated clients.
-  - 2026-07-04 Moves Method QA caught edit/archive/current-summary confusion. Fix deployed; Jay should retest create, edit monthly value, archive, delete, and role permissions before promoting back to `[x]`.
+  - 2026-07-04 Moves Method QA caught edit/archive/current-summary confusion. Fix deployed and Jay QA passed: edited values persisted, Active excludes archived contracts, and Archived shows the archived rows.
 - `[ ]` Delete Forever client for SuperAdmin and Director.
 
 ### Call AI

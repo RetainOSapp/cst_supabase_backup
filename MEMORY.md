@@ -548,3 +548,4 @@ For historical context:
 - Updated `src/pages/ClientDetail.tsx`: app-owned contract rows are source-tagged, same-day end dates stay Active, CST mirror labels no longer say Glide, and delete uses the same manage-contract permission as create/edit/archive.
 - Updated/deployed `supabase/functions/manage-client-contract/index.ts`: assigned CSM checks accept app-owned member IDs, delete is no longer SuperAdmin-only, create reuses the summary sync path, and summary sync only promotes active/open non-archived contracts.
 - Verification: `npm run build` passed; `manage-client-contract` deployed to Supabase project `zjauqflzxzsbpnivzsct`. `ROADMAP.md` has a focused `[qa]` retest item for create/edit/archive/delete and role permissions.
+- Jay retested and approved: edited contract value persisted after refresh, archiving removed contracts from Active, and archived contracts appeared correctly under Archived.
