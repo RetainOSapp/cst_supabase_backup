@@ -96,23 +96,80 @@ function calculateEndDate(startDate: string | null, contractDays: number | null)
   return start.toISOString();
 }
 
+function dateKey(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function isContractCurrent(contract: Record<string, unknown>) {
+  if (contract.archived_at) return false;
+  if (String(contract.status ?? "").toLowerCase() === "archived") return false;
+  const endDate =
+    typeof contract.end_date === "string"
+      ? contract.end_date
+      : calculateEndDate(
+          typeof contract.start_date === "string" ? contract.start_date : null,
+          typeof contract.contract_days === "number"
+            ? contract.contract_days
+            : Number.isFinite(Number(contract.contract_days))
+              ? Number(contract.contract_days)
+              : null,
+        );
+  const endKey = dateKey(endDate);
+  if (!endKey) return true;
+  return endKey >= new Date().toISOString().slice(0, 10);
+}
+
+function contractSortValue(contract: Record<string, unknown>) {
+  const endDate =
+    typeof contract.end_date === "string"
+      ? contract.end_date
+      : calculateEndDate(
+          typeof contract.start_date === "string" ? contract.start_date : null,
+          typeof contract.contract_days === "number"
+            ? contract.contract_days
+            : Number.isFinite(Number(contract.contract_days))
+              ? Number(contract.contract_days)
+              : null,
+        );
+  const parsedEnd = endDate ? new Date(endDate).getTime() : Number.MAX_SAFE_INTEGER;
+  const parsedCreated =
+    typeof contract.created_at === "string"
+      ? new Date(contract.created_at).getTime()
+      : 0;
+  return {
+    end: Number.isNaN(parsedEnd) ? Number.MAX_SAFE_INTEGER : parsedEnd,
+    created: Number.isNaN(parsedCreated) ? 0 : parsedCreated,
+  };
+}
+
 async function syncClientContractSummary(
   supabase: ReturnType<typeof createClient>,
   clientId: string,
   clientLegacyId: string,
 ) {
-  const { data: latestContract, error: latestError } = await supabase
+  const { data: contractRows, error: latestError } = await supabase
     .from("client_contracts")
     .select("*")
     .eq("client_id", clientLegacyId)
     .is("archived_at", null)
-    .neq("status", "archived")
+    .or("status.is.null,status.neq.archived")
     .order("end_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(100);
 
   if (latestError) throw latestError;
+
+  const [latestContract = null] = (contractRows ?? [])
+    .filter((contract) => isContractCurrent(contract))
+    .sort((a, b) => {
+      const aValue = contractSortValue(a);
+      const bValue = contractSortValue(b);
+      if (bValue.end !== aValue.end) return bValue.end - aValue.end;
+      return bValue.created - aValue.created;
+    });
 
   const latestContractEndDate =
     latestContract?.end_date ??
@@ -185,6 +242,12 @@ async function resolveActor(
   }
 
   throw new Error("You do not have permission to manage contracts.");
+}
+
+function actorAssignmentIds(actor: Awaited<ReturnType<typeof resolveActor>>) {
+  return [actor.legacyMemberId, actor.memberId].filter(
+    (value): value is string => typeof value === "string" && value.trim() !== "",
+  );
 }
 
 Deno.serve(async (req) => {
@@ -268,10 +331,12 @@ Deno.serve(async (req) => {
     const actor = await resolveActor(supabase, userEmail, company.id);
 
     if (actor.role === "csm") {
-      const isAssigned =
-        actor.legacyMemberId &&
-        (client.csm_team_member_id === actor.legacyMemberId ||
-          client.csm_secondary_assignee_id === actor.legacyMemberId);
+      const assignmentIds = actorAssignmentIds(actor);
+      const isAssigned = assignmentIds.some(
+        (assignmentId) =>
+          client.csm_team_member_id === assignmentId ||
+          client.csm_secondary_assignee_id === assignmentId,
+      );
       if (!isAssigned) {
         return jsonResponse(
           { error: "CSMs can manage contracts for assigned clients only." },
@@ -284,13 +349,6 @@ Deno.serve(async (req) => {
 
     if (action !== "create" && !contractId) {
       return jsonResponse({ error: "Missing contract id." }, 400);
-    }
-
-    if (action === "delete" && actor.role !== "super_admin") {
-      return jsonResponse(
-        { error: "Only SuperAdmins can delete contracts." },
-        403,
-      );
     }
 
     const startDate = normalizeDate(body.startDate);
@@ -461,7 +519,7 @@ Deno.serve(async (req) => {
           event_type: "contract_archived",
           source: "contract_delete",
           title: `Contract deleted for ${client.client_name ?? "client"}`,
-          summary: "SuperAdmin deleted an app-owned contract row.",
+          summary: "Deleted an app-owned contract row.",
           notes: nullableText(body.notes),
           payload: {
             actor_role: actor.role,
@@ -651,16 +709,7 @@ Deno.serve(async (req) => {
 
     if (contractError) throw contractError;
 
-    const clientUpdatePayload: Record<string, unknown> = {
-      current_contract_start_date: startDate,
-      current_contract_of_days: contractDays,
-      current_contract_end_date: effectiveEndDate,
-      current_contract_end_date_for_filtering: effectiveEndDate,
-      current_contract_monthly_value: monthlyValue,
-      current_contract_reference_link: nullableText(body.referenceLink),
-      current_contract_notes: nullableText(body.notes),
-      current_contract_auto_renew: body.autoRenew === true,
-    };
+    const clientUpdatePayload: Record<string, unknown> = {};
 
     if (retentionType !== "none" && nextProgramStatus) {
       clientUpdatePayload.program_status_value = nextProgramStatus;
@@ -677,14 +726,20 @@ Deno.serve(async (req) => {
       clientUpdatePayload.outcomes_success_date = new Date().toISOString();
     }
 
-    const { data: updatedClient, error: updateClientError } = await supabase
-      .from("clients")
-      .update(clientUpdatePayload)
-      .eq("id", client.id)
-      .select("*")
-      .single();
+    if (Object.keys(clientUpdatePayload).length > 0) {
+      const { error: updateClientError } = await supabase
+        .from("clients")
+        .update(clientUpdatePayload)
+        .eq("id", client.id);
 
-    if (updateClientError) throw updateClientError;
+      if (updateClientError) throw updateClientError;
+    }
+
+    const { updatedClient } = await syncClientContractSummary(
+      supabase,
+      client.id,
+      clientLegacyId,
+    );
 
     const { data: event, error: historyError } = await supabase
       .from("client_history_events")

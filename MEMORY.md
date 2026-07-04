@@ -541,3 +541,10 @@ For historical context:
 - Read-only MM app-owned data check found Program text fields migrated: `next_steps_value` present on 3,626 clients, `north_star_value` on 2,555, `client_general_info` on 663; no literal `0` values were found in those Program text fields or current contract-day fields. A wider client-row sample found expected `0` values only in advocacy count fields. Need a specific client name/screenshot if Jay still sees `0` in Program.
 - Updated `src/pages/ClientDetail.tsx`: Client Detail > Program > Next Steps now previews long rich text and opens the full value in a read-only `Read more` modal, matching the Quick Update long-context pattern.
 - Verification: `npm run build` passed. Awaiting Jay live retest after frontend deploy.
+
+## Moves Method Contract QA Fix - 2026-07-04
+
+- Jay's Phase 4 contract QA found edit/archive/current-summary confusion and confirmed CSM/Support should manage contracts for clients they can manage.
+- Updated `src/pages/ClientDetail.tsx`: app-owned contract rows are source-tagged, same-day end dates stay Active, CST mirror labels no longer say Glide, and delete uses the same manage-contract permission as create/edit/archive.
+- Updated/deployed `supabase/functions/manage-client-contract/index.ts`: assigned CSM checks accept app-owned member IDs, delete is no longer SuperAdmin-only, create reuses the summary sync path, and summary sync only promotes active/open non-archived contracts.
+- Verification: `npm run build` passed; `manage-client-contract` deployed to Supabase project `zjauqflzxzsbpnivzsct`. `ROADMAP.md` has a focused `[qa]` retest item for create/edit/archive/delete and role permissions.

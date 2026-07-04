@@ -88,6 +88,7 @@ type ContractRow = Record<string, unknown> & {
   last_modified_by?: string | null;
 };
 type ContractFilter = "active" | "old" | "archived" | "all";
+const CONTRACT_SOURCE_KEY = "__retainos_contract_source";
 const contractTypeOptions = [
   { value: "standard", label: "Standard" },
   { value: "renewal", label: "Renewal" },
@@ -709,8 +710,10 @@ function renewalDateConfidence(contract: Record<string, unknown>) {
 
 function contractSourceLabel(contract: Record<string, unknown>) {
   if (isCurrentSummaryContract(contract)) return "Client current summary";
+  if (contract[CONTRACT_SOURCE_KEY] === "app") return "RetainOS contract history";
+  if (contract[CONTRACT_SOURCE_KEY] === "mirror") return "CST mirror history";
   if (typeof contract.id === "string") return "RetainOS contract history";
-  return "Glide mirror history";
+  return "CST mirror history";
 }
 
 function isCurrentSummaryContract(contract: Record<string, unknown>) {
@@ -732,7 +735,7 @@ function getContractStatus(contract: Record<string, unknown>) {
   if (!isPresent(end)) return "Open";
   const endDate = new Date(String(end));
   if (Number.isNaN(endDate.getTime())) return "Open";
-  return endDate.getTime() >= Date.now() ? "Active" : "Expired";
+  return (daysUntilDate(end) ?? 0) >= 0 ? "Active" : "Expired";
 }
 
 function contractMatchesFilter(
@@ -747,11 +750,18 @@ function contractMatchesFilter(
 }
 
 function isAppOwnedContract(contract: Record<string, unknown>) {
+  if (contract[CONTRACT_SOURCE_KEY] === "mirror") return false;
+  if (contract[CONTRACT_SOURCE_KEY] === "app") return true;
   return (
     typeof contract.id === "string" &&
     typeof contract.glide_row_id === "string" &&
-    contract.glide_row_id.startsWith("contract_")
+    typeof contract.client_id === "string" &&
+    typeof contract.company_id === "string"
   );
+}
+
+function withContractSource(contract: ContractRow, source: "app" | "mirror") {
+  return { ...contract, [CONTRACT_SOURCE_KEY]: source };
 }
 
 function getContractTypeValue(contract: Record<string, unknown>) {
@@ -6513,8 +6523,7 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
 }
 export function ClientDetail() {
   const { clientId } = useParams<{ clientId: string }>();
-  const { capabilities, effectiveCompanyId, isSuperAdmin, teamMemberId } =
-    useAccountContext();
+  const { capabilities, effectiveCompanyId, teamMemberId } = useAccountContext();
   const [client, setClient] = useState<ClientRow | null>(null);
   const [contracts, setContracts] = useState<ContractRow[]>([]);
   const [offers, setOffers] = useState<OfferRow[]>([]);
@@ -6824,8 +6833,12 @@ export function ClientDetail() {
           console.error("Failed to load company churn reasons:", churnReasonsResult.error);
         }
         setContracts([
-          ...((appContractRows ?? []) as ContractRow[]),
-          ...((contractRows ?? []) as ContractRow[]),
+          ...((appContractRows ?? []) as ContractRow[]).map((contract) =>
+            withContractSource(contract, "app"),
+          ),
+          ...((contractRows ?? []) as ContractRow[]).map((contract) =>
+            withContractSource(contract, "mirror"),
+          ),
         ]);
         setProgramChoices((choices ?? []) as ProgramChoice[]);
         setChurnReasons(
@@ -7010,7 +7023,7 @@ export function ClientDetail() {
     !capabilities.canViewOnlyAssignedClients;
   const canChangeStatus = canEditProfile;
   const canCreateContract = canEditProfile;
-  const canDeleteContract = canEditProfile && isSuperAdmin;
+  const canDeleteContract = canEditProfile;
   function applyCustomFieldChanges(changes: CustomFieldChange[]) {
     if (changes.length === 0) return;
     setCustomFieldValues((current) => {
@@ -7064,7 +7077,7 @@ export function ClientDetail() {
       setClient(mapAppClientRow(data.client as Record<string, unknown>));
     }
     if (data?.contract) {
-      const archived = data.contract as ContractRow;
+      const archived = withContractSource(data.contract as ContractRow, "app");
       setContracts((current) =>
         current.map((row) =>
           row.glide_row_id === archived.glide_row_id ? archived : row,
@@ -7381,10 +7394,11 @@ export function ClientDetail() {
           onSaved={(updatedClient, event, updatedContract) => {
             setClient(updatedClient);
             if (updatedContract) {
+              const appContract = withContractSource(updatedContract, "app");
               setContracts((current) => [
-                updatedContract,
+                appContract,
                 ...current.filter(
-                  (contract) => contract.glide_row_id !== updatedContract.glide_row_id,
+                  (contract) => contract.glide_row_id !== appContract.glide_row_id,
                 ),
               ]);
             }
@@ -7399,8 +7413,9 @@ export function ClientDetail() {
           client={client}
           onClose={() => setCreatingContract(false)}
           onSaved={(contract, updatedClient, event, retentionEvent) => {
+            const appContract = withContractSource(contract, "app");
             setClient(updatedClient);
-            setContracts((current) => [contract, ...current]);
+            setContracts((current) => [appContract, ...current]);
             if (event || retentionEvent) {
               setHistoryEvents((current) =>
                 [retentionEvent, event, ...current]
@@ -7417,10 +7432,11 @@ export function ClientDetail() {
           contract={editingContract}
           onClose={() => setEditingContract(null)}
           onSaved={(contract, updatedClient, event) => {
+            const appContract = withContractSource(contract, "app");
             setClient(updatedClient);
             setContracts((current) => [
-              contract,
-              ...current.filter((row) => row.glide_row_id !== contract.glide_row_id),
+              appContract,
+              ...current.filter((row) => row.glide_row_id !== appContract.glide_row_id),
             ]);
             if (event) {
               setHistoryEvents((current) => [event, ...current].slice(0, 25));

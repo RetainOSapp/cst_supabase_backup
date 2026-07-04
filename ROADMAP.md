@@ -74,6 +74,8 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` 2026-06-21 Advocacy tracking QA passed.
   - Quick Update and Client Detail > Outcomes now track Review, Testimonial, Referral, and Renewal / Upsell asks and received events with repeat counts and optional notes. Dashboard > Overview has Advocacy & Growth cards for asked, received, and ratio by current filters. Ethical Scaling app-owned data was backfilled from legacy Glide fields.
   - Jay QA: testimonial save worked from Client Detail, Quick Update layout was corrected to show Pathway progress before Advocacy & Growth, and Dashboard Overview advocacy filters worked.
+- `[~]` `[qa]` Moves Method Phase 4 contract management retest.
+  - 2026-07-04 fix deployed: Director, Support, and assigned CSMs can create/edit/archive/delete app-owned contract rows for clients they can manage; CSM assignment checks accept app-owned member IDs; contract rows ending today remain Active; and client current-contract summary sync only promotes active/open non-archived contract rows so expired old contracts do not reappear as current after archive/edit.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
@@ -237,9 +239,9 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-21 General Information added as app-owned `client_general_info`, editable from Client Detail > Edit Profile and mapped from legacy CST `client_general_info` during migration/backfill. Resource refreshed as `Using General Information on a client profile`.
 - `[x]` CRUD client contracts V1.
   - New Contract v1 is enabled for app-owned pilot/migrated clients through `manage-client-contract`.
-  - Creates/edits/archives app-owned `client_contracts`, updates the app-owned client current contract summary, and writes history/audit events.
-  - 2026-06-15 local closeout adds Contract tab filters for Active, Old, Archived, and All; keeps the current contract summary visually separate from linked contract history; and adds SuperAdmin-only delete for app-owned contract rows.
-  - SuperAdmin delete logs client history/audit using the existing `contract_archived` event type with `source = contract_delete` before removing the row. Directors/Support/CSMs cannot delete in V1.
+  - Creates/edits/archives/deletes app-owned `client_contracts`, updates the app-owned client current contract summary, and writes history/audit events.
+  - 2026-06-15 local closeout adds Contract tab filters for Active, Old, Archived, and All; keeps the current contract summary visually separate from linked contract history.
+  - 2026-07-04 Moves Method launch QA update: Director, Support, and assigned CSMs can manage contract rows for accessible clients; client current-contract summary sync now ignores archived/expired old rows.
   - Contract renewal prompt v1 is live for active clients whose contract ends within 30 days.
   - New Contract can record a same-program renewal or Front End to Back End upsell through `client_retention_recorded` history.
   - Renewal/upsell can optionally mark Success on the client outcome.
@@ -1040,8 +1042,9 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[~]` `[qa]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
 - `[ ]` Create, assign, and update client tasks.
 - `[ ]` View archived tasks in client context.
-- `[x]` Create / update contracts for client.
-  - Create/edit/archive/delete are covered by the closed Client Contracts/Renewals V1 flow for app-owned pilot/migrated clients.
+- `[~]` `[qa]` Create / update contracts for client.
+  - Create/edit/archive/delete are covered by the Client Contracts/Renewals V1 flow for app-owned pilot/migrated clients.
+  - 2026-07-04 Moves Method QA caught edit/archive/current-summary confusion. Fix deployed; Jay should retest create, edit monthly value, archive, delete, and role permissions before promoting back to `[x]`.
 - `[ ]` Delete Forever client for SuperAdmin and Director.
 
 ### Call AI
