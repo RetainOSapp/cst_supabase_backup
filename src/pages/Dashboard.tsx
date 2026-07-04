@@ -2412,8 +2412,7 @@ export function Dashboard() {
           const client = clientById.get(id);
           return (
             client &&
-            ["front-end", "back-end"].includes(client.program_status_value ?? "") &&
-            !retainedIds.has(id)
+            ["front-end", "back-end"].includes(client.program_status_value ?? "")
           );
         }).length,
       );
@@ -3338,8 +3337,7 @@ export function Dashboard() {
         if (detailKey === "active-renewing") {
           return (
             renewingIds.has(client.glide_row_id) &&
-            ["front-end", "back-end"].includes(client.program_status_value ?? "") &&
-            !retainedIds.has(client.glide_row_id)
+            ["front-end", "back-end"].includes(client.program_status_value ?? "")
           );
         }
         return false;

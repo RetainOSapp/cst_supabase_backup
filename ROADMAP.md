@@ -80,6 +80,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[~]` `[qa]` Moves Method renewal KPI retest.
   - 2026-07-04 QA found Dashboard > Up For Renewal was effectively counting almost every active MM client when no Date Range was set. Fix built: default renewal KPI/drilldown window is overdue through next 30 days unless Jay sets an explicit Dashboard Date Range; it uses the same current-contract filtering field as Clients and includes non-archived historical contract ends for overdue cases. Expected MM default Up For Renewal is about 451 on July 4, 2026.
   - 2026-07-04 follow-up polish: renewal KPI drilldown now shows Name, CSM, and Renewal Date, defaults to renewal-date sort, and lets Directors flip the renewal-date sort direction from the modal header.
+  - 2026-07-04 QA catch: card showed 438 while the drilldown showed 70 because the drawer still subtracted retained-history clients. Up For Renewal now uses active clients due in the renewal window as the shared card/drawer definition; retained history remains for Retention Percentage.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 

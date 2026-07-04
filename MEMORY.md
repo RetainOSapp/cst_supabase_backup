@@ -557,3 +557,4 @@ For historical context:
 - Updated KPI help copy in `src/components/dashboard/kpis/UpForRenewalKpi.tsx` and `RetentionPercentageKpi.tsx`.
 - Verification: `npm run build` passed. Read-only MM sanity count for July 4, 2026 expects default Up For Renewal around 451 after retained-client exclusion.
 - Follow-up polish: Dashboard renewal KPI drilldown now includes Renewal Date, defaults to renewal-date sort, and lets the header toggle ascending/descending sort.
+- QA catch: card showed 438 while drilldown showed 70 because the drawer still subtracted broad retained-history clients. Aligned Up For Renewal card and drawer on active clients due in the renewal window; retained history remains for Retention Percentage only.
