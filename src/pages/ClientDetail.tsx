@@ -4093,12 +4093,8 @@ function PathwayChangeModal({
       secondaryOfferId !== initialSecondaryOfferValue ||
       secondaryMilestoneId !== initialSecondaryMilestoneValue;
     if (!secondaryChanged) return true;
-    if (secondaryOfferId && !secondaryMilestoneId) {
-      setSaveError("Choose a secondary milestone first.");
-      return false;
-    }
     const action =
-      secondaryOfferId && secondaryMilestoneId
+      secondaryOfferId
         ? "set_secondary_pathway"
         : hadSecondaryPathway
           ? "clear_secondary_pathway"
@@ -4506,7 +4502,11 @@ function PathwayChangeModal({
                       disabled={saving || !secondaryOfferId}
                       className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
                     >
-                      <option value="">Choose milestone</option>
+                      <option value="">
+                        {secondaryOfferId && secondaryMilestonesForOffer.length === 0
+                          ? "No milestones for this pathway"
+                          : "Choose milestone"}
+                      </option>
                       {secondaryMilestonesForOffer.map((milestone) => (
                         <option
                           key={milestone.glide_row_id ?? milestone.name ?? "milestone"}

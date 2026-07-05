@@ -72,18 +72,18 @@ function daysBetween(startIso: string | null, endIso: string | null) {
   );
 }
 
-function titleForAction(action: string, milestoneName: string) {
-  if (action === "start_milestone") return `Milestone started: ${milestoneName}`;
+function titleForAction(action: string, targetName: string) {
+  if (action === "start_milestone") return `Milestone started: ${targetName}`;
   if (action === "complete_milestone")
-    return `Milestone completed: ${milestoneName}`;
+    return `Milestone completed: ${targetName}`;
   if (action === "start_secondary_milestone")
-    return `Secondary milestone started: ${milestoneName}`;
+    return `Secondary milestone started: ${targetName}`;
   if (action === "complete_secondary_milestone")
-    return `Secondary milestone completed: ${milestoneName}`;
+    return `Secondary milestone completed: ${targetName}`;
   if (action === "set_secondary_pathway")
-    return `Secondary pathway changed: ${milestoneName}`;
+    return `Secondary pathway changed: ${targetName}`;
   if (action === "clear_secondary_pathway") return "Secondary pathway cleared";
-  return `Pathway changed: ${milestoneName}`;
+  return `Pathway changed: ${targetName}`;
 }
 
 function isStartAction(action: string) {
@@ -583,7 +583,7 @@ Deno.serve(async (req) => {
     if (!requestedOfferId) {
       return jsonResponse({ error: "Choose a pathway first." }, 400);
     }
-    if (!requestedMilestoneId) {
+    if (!requestedMilestoneId && action !== "set_secondary_pathway") {
       return jsonResponse({ error: "Choose a milestone first." }, 400);
     }
 
@@ -614,19 +614,23 @@ Deno.serve(async (req) => {
     if (milestonesError) throw milestonesError;
 
     const milestones = (offerMilestones ?? []) as Record<string, unknown>[];
-    const selectedIndex = milestones.findIndex(
-      (milestone) => milestone.glide_row_id === requestedMilestoneId,
-    );
+    const selectedIndex = requestedMilestoneId
+      ? milestones.findIndex(
+          (milestone) => milestone.glide_row_id === requestedMilestoneId,
+        )
+      : -1;
 
-    if (selectedIndex < 0) {
+    if (requestedMilestoneId && selectedIndex < 0) {
       return jsonResponse(
         { error: "That milestone does not belong to the selected pathway." },
         400,
       );
     }
 
-    const selectedMilestone = milestones[selectedIndex];
-    const nextMilestone = isComplete ? milestones[selectedIndex + 1] : null;
+    const selectedMilestone =
+      selectedIndex >= 0 ? milestones[selectedIndex] : null;
+    const nextMilestone =
+      isComplete && selectedIndex >= 0 ? milestones[selectedIndex + 1] : null;
     const startDate = normalizeDate(body.startDate, isStart ? now : undefined);
     const completionDate = normalizeDate(
       body.completionDate,
@@ -700,7 +704,7 @@ Deno.serve(async (req) => {
         pathway_lane: isSecondaryMilestone ? "secondary" : "primary",
         created_or_updated_in: "retainos_milestone_write_pilot",
         mirrored_offer_name: offer.name,
-        mirrored_milestone_name: selectedMilestone.name,
+        mirrored_milestone_name: selectedMilestone?.name ?? null,
       },
     };
 
@@ -730,7 +734,7 @@ Deno.serve(async (req) => {
     } else if (action === "set_secondary_pathway") {
       clientUpdate.secondary_offer_milestones_current_offer_id = requestedOfferId;
       clientUpdate.secondary_offer_milestones_current_milestone_id =
-        requestedMilestoneId;
+        requestedMilestoneId || null;
       clientUpdate.secondary_offer_milestones_current_milestone_change_date = now;
     } else if (action === "start_milestone") {
       clientUpdate.offer_milestones_current_offer_id = requestedOfferId;
@@ -765,7 +769,11 @@ Deno.serve(async (req) => {
     if (updateError) throw updateError;
 
     const selectedMilestoneName =
-      (selectedMilestone.name as string | null) ?? requestedMilestoneId;
+      selectedMilestone
+        ? (selectedMilestone.name as string | null) ?? requestedMilestoneId
+        : "";
+    const pathwayTargetName =
+      selectedMilestoneName ? `${offer.name} / ${selectedMilestoneName}` : offer.name;
     const nextMilestoneName =
       (nextMilestone?.name as string | null | undefined) ?? null;
     const templateTaskResult =
@@ -796,7 +804,7 @@ Deno.serve(async (req) => {
     const laneLabel = isSecondaryMilestone ? "secondary " : "";
     const summaryParts = [
       action === "set_secondary_pathway"
-        ? `Changed secondary pathway to ${offer.name} / ${selectedMilestoneName}.`
+        ? `Changed secondary pathway to ${pathwayTargetName}.`
         : action === "set_pathway"
         ? `Changed pathway to ${offer.name} / ${selectedMilestoneName}.`
         : isStart
@@ -822,7 +830,10 @@ Deno.serve(async (req) => {
         actor_member_id: actor.memberId,
         event_type: eventType,
         source: "client_milestone",
-        title: titleForAction(action, selectedMilestoneName),
+        title: titleForAction(
+          action,
+          action === "set_secondary_pathway" ? pathwayTargetName : selectedMilestoneName,
+        ),
         summary: summaryParts.join(" "),
         notes: nullableText(body.notes),
         payload: {
@@ -870,7 +881,7 @@ Deno.serve(async (req) => {
         pathway_lane: isSecondaryMilestone ? "secondary" : "primary",
         client_id: updatedClient.id,
         selected_offer_id: requestedOfferId,
-        selected_milestone_id: requestedMilestoneId,
+        selected_milestone_id: requestedMilestoneId || null,
         next_milestone_id: nextMilestone?.glide_row_id ?? null,
         created_template_task_count: templateTaskResult.createdTasks.length,
         task_template_error_count: templateTaskResult.taskErrors.length,

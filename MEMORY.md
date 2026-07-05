@@ -603,3 +603,10 @@ For historical context:
 - Updated `src/pages/Resources.tsx` client update webhook resource copy/body example so secondary milestone is documented as optional for pathways with no milestones.
 - Deployed `webhook-update-client` to Supabase project `zjauqflzxzsbpnivzsct` with `--no-verify-jwt`. Verification: `npm run build` passed in the hotfix worktree; live webhook call with a temporary token applied AA Bundle to Stacie Rigney (`faithworks8@gmail.com`) with no milestone; temporary token was deleted afterward.
 - Remaining manual cleanup after verification: Daniela Chiaramonte, Elizabeth Stenger, Judie Myers, Lucie Marie Guilbert, Michael Garcia, and Sandy Dawson still had blank secondary pathway fields at the last readback.
+
+## Moves Method Secondary Pathway Manual UI Hotfix - 2026-07-05
+
+- Jay found Client Detail > Change Pathway & Milestones still blocked manual AA Bundle assignment with "Choose a secondary milestone first."
+- Updated `src/pages/ClientDetail.tsx`: the secondary pathway modal now allows saving a secondary pathway without a milestone and shows "No milestones for this pathway" when the selected pathway has no milestones.
+- Updated/deployed `supabase/functions/manage-client-milestone/index.ts`: `set_secondary_pathway` now accepts a blank milestone, writes `secondary_offer_milestones_current_offer_id`, leaves `secondary_offer_milestones_current_milestone_id = null`, and records clean history/audit text using the pathway name. Primary pathway, start milestone, and complete milestone actions still require a milestone.
+- Verification: `npm run build` passed in the hotfix worktree. Deployed `manage-client-milestone` to Supabase project `zjauqflzxzsbpnivzsct`. No temporary QA users were created.
