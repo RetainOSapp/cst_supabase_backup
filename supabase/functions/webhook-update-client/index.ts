@@ -820,9 +820,9 @@ Deno.serve(async (req) => {
     const hasSecondaryOffer = Boolean(cleanText(secondaryOfferValue));
     const hasSecondaryMilestone = Boolean(cleanText(secondaryMilestoneValue));
     if (hasSecondaryOffer || hasSecondaryMilestone) {
-      if (hasSecondaryOffer !== hasSecondaryMilestone) {
+      if (!hasSecondaryOffer) {
         throw new RequestValidationError(
-          "Secondary pathway requires both secondary_pathway_id and secondary_milestone_id.",
+          "Secondary milestone requires secondary_pathway_id.",
         );
       }
       await assertSecondaryPathwaysEnabled(supabase, company.id);
@@ -834,12 +834,14 @@ Deno.serve(async (req) => {
       if (!secondaryOffer) {
         throw new RequestValidationError("Choose a secondary pathway first.");
       }
-      const secondaryMilestone = await resolveOfferMilestone(
-        supabase,
-        company.id,
-        secondaryOffer.glide_row_id,
-        secondaryMilestoneValue,
-      );
+      const secondaryMilestone = hasSecondaryMilestone
+        ? await resolveOfferMilestone(
+            supabase,
+            company.id,
+            secondaryOffer.glide_row_id,
+            secondaryMilestoneValue,
+          )
+        : null;
       clientUpdates.secondary_offer_milestones_current_offer_id =
         secondaryOffer.glide_row_id;
       clientUpdates.secondary_offer_milestones_current_milestone_id =

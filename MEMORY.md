@@ -594,3 +594,12 @@ For historical context:
 - Verification after cleanup: temp auth matches = 0, temp `company_members` = 0, temp client = 0, temp task/history/milestone/contract/audit rows = 0.
 - MM app-owned clients now match the CST mirror snapshot again at 4,485 / 4,485. Paged status verification: `front-end` 2,037, `back-end` 337, `paused` 118, `suspended` 83, `off-boarded` 1,910.
 - No app code changes in this cleanup. Existing intentionally dirty local Beacon/package/Header files remain uncommitted.
+
+## Moves Method Secondary Pathway Webhook Hotfix - 2026-07-05
+
+- Jay/Daniel found MM's client update Zap failed for AA Bundle because AA Bundle has no milestones and `webhook-update-client` required `secondary_pathway_id` plus `secondary_milestone_id`.
+- Used a separate clean hotfix worktree from `origin/main` so the dirty local `security-phase-0` project was not touched.
+- Updated `supabase/functions/webhook-update-client/index.ts`: `secondary_pathway_id` can now be sent without `secondary_milestone_id`; milestone validation only runs when a milestone is provided; sending a milestone without a pathway still returns a validation error.
+- Updated `src/pages/Resources.tsx` client update webhook resource copy/body example so secondary milestone is documented as optional for pathways with no milestones.
+- Deployed `webhook-update-client` to Supabase project `zjauqflzxzsbpnivzsct` with `--no-verify-jwt`. Verification: `npm run build` passed in the hotfix worktree; live webhook call with a temporary token applied AA Bundle to Stacie Rigney (`faithworks8@gmail.com`) with no milestone; temporary token was deleted afterward.
+- Remaining manual cleanup after verification: Daniela Chiaramonte, Elizabeth Stenger, Judie Myers, Lucie Marie Guilbert, Michael Garcia, and Sandy Dawson still had blank secondary pathway fields at the last readback.

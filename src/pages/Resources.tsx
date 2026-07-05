@@ -904,8 +904,8 @@ function ClientUpdateWebhookGuide({
     ["next_contact", "Optional", "Date or timestamp for Date of Next Contact."],
     ["assigned_to", "Optional", "Active team member ID, legacy ID, or email."],
     ["pathway_id", "Optional", "Active Pathway ID for the selected company. `offer_id` is still accepted as a legacy alias."],
-    ["secondary_pathway_id", "Optional", "Secondary Pathway ID. Send with secondary_milestone_id when this update should set a secondary pathway."],
-    ["secondary_milestone_id", "Optional", "Secondary Milestone ID that belongs to secondary_pathway_id."],
+    ["secondary_pathway_id", "Optional", "Secondary Pathway ID. May be sent on its own for pathways with no milestones."],
+    ["secondary_milestone_id", "Optional", "Secondary Milestone ID that belongs to secondary_pathway_id. Only send when the selected secondary pathway has a milestone to start."],
     ["custom_fields", "Optional", "Object or array of active RetainOS custom field keys/IDs and values to update on the client."],
     ["external_event_id", "Optional", "External event ID for duplicate protection."],
   ];
@@ -934,7 +934,6 @@ function ClientUpdateWebhookGuide({
       external_event_id: "{{external_event_id}}",
       client_email: "{{client_email}}",
       secondary_pathway_id: "{{secondary_pathway_id}}",
-      secondary_milestone_id: "{{secondary_milestone_id}}",
       notes: "{{notes}}",
     },
     null,
@@ -1990,8 +1989,8 @@ export function Resources() {
               <Section title="Pathway and Milestone IDs">
                 <p className="mb-4 text-sm text-[#586273]">
                   Use pathway_id for the primary journey. For a secondary pathway,
-                  send secondary_pathway_id plus a milestone ID from that same
-                  pathway as secondary_milestone_id.
+                  send secondary_pathway_id. Add secondary_milestone_id only when
+                  the selected secondary pathway has a milestone to start.
                 </p>
                 {offers.length === 0 ? (
                   <div className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc] p-4 text-sm text-[#6b7686]">
