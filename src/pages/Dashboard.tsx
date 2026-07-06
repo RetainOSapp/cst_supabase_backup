@@ -4158,7 +4158,7 @@ export function Dashboard() {
 
               <MonthDateRangeFilter
                 label="Date Range"
-                helpText="Used as the reporting window for retained/offboarded/churn activity and as the renewal window for renewal cards."
+                helpText="Window for retained/offb/churn/renewal."
                 futureMonthCount={FUTURE_MONTH_OPTIONS_COUNT}
                 state={pendingFilters.dateRange}
                 onChange={setPendingDateRange}
