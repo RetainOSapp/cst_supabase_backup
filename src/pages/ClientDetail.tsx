@@ -6419,6 +6419,7 @@ function mapLegacyHistoryRow(row: Record<string, unknown>): ClientHistoryEventRo
     created_at: createdAt,
     metadata: {
       imported_from: "backup_company_clients_history",
+      source_row_id: typeof row.glide_row_id === "string" ? row.glide_row_id : null,
       change_type_code: changeType,
       modified_by: modifiedBy,
       call_ai_id: callAiId,
@@ -6431,6 +6432,12 @@ function historyTimestamp(event: ClientHistoryEventRow) {
   const value = event.created_at ?? "";
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : 0;
+}
+
+function sortHistoryEvents(events: ClientHistoryEventRow[]) {
+  return [...events].sort(
+    (left, right) => historyTimestamp(right) - historyTimestamp(left),
+  );
 }
 
 type HistoryFilter =
@@ -6501,14 +6508,89 @@ function historyEventMatchesSearch(event: ClientHistoryEventRow, query: string) 
     .includes(text);
 }
 
-function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
+function historyActionSource(event: ClientHistoryEventRow) {
+  return event.source === "cst_mirror" ? "cst" : "retainos";
+}
+
+function historyActionEventId(event: ClientHistoryEventRow) {
+  if (event.source !== "cst_mirror") return event.id;
+  const sourceRowId = event.metadata?.source_row_id;
+  return typeof sourceRowId === "string"
+    ? sourceRowId
+    : event.id.replace(/^legacy:/, "");
+}
+
+function HistorySection({
+  events,
+  canManageHistory,
+  onChangeDate,
+  onDelete,
+}: {
+  events: ClientHistoryEventRow[];
+  canManageHistory: boolean;
+  onChangeDate: (event: ClientHistoryEventRow, eventDate: string) => Promise<void>;
+  onDelete: (event: ClientHistoryEventRow) => Promise<void>;
+}) {
   const [activeFilter, setActiveFilter] = useState<HistoryFilter>("all");
   const [search, setSearch] = useState("");
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [editingEvent, setEditingEvent] = useState<ClientHistoryEventRow | null>(null);
+  const [deletingEvent, setDeletingEvent] = useState<ClientHistoryEventRow | null>(null);
+  const [historyDate, setHistoryDate] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
   const visibleEvents = events.filter(
     (event) =>
       historyEventMatchesFilter(event, activeFilter) &&
       historyEventMatchesSearch(event, search),
   );
+
+  function openDateEditor(event: ClientHistoryEventRow) {
+    setMenuOpenId(null);
+    setActionError(null);
+    setEditingEvent(event);
+    setHistoryDate(dateTimeInputValue(event.created_at));
+  }
+
+  function openDeleteConfirm(event: ClientHistoryEventRow) {
+    setMenuOpenId(null);
+    setActionError(null);
+    setDeletingEvent(event);
+  }
+
+  async function submitDateChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingEvent || actionLoading) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await onChangeDate(editingEvent, historyDate);
+      setEditingEvent(null);
+      setHistoryDate("");
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Could not change history date.",
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deletingEvent || actionLoading) return;
+    setActionLoading(true);
+    setActionError(null);
+    try {
+      await onDelete(deletingEvent);
+      setDeletingEvent(null);
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Could not delete history entry.",
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  }
 
   if (events.length === 0) {
     return (
@@ -6568,7 +6650,7 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
         return (
           <article
             key={event.id}
-            className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
+            className="relative rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
           >
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -6588,7 +6670,7 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
                   </p>
                 ) : null}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-start gap-2">
                 <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
                   {isLegacyHistory ? "CST history" : "RetainOS history"}
                 </span>
@@ -6596,6 +6678,40 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
                   <span className="w-fit rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
                     {sourceLabel}
                   </span>
+                ) : null}
+                {canManageHistory ? (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMenuOpenId((current) =>
+                          current === event.id ? null : event.id,
+                        )
+                      }
+                      className="rounded-md border border-gray-200 bg-white px-2 py-1 text-sm font-semibold text-gray-500 hover:border-[#59abf0] hover:text-[#2b79c4]"
+                      aria-label="History actions"
+                    >
+                      ...
+                    </button>
+                    {menuOpenId === event.id ? (
+                      <div className="absolute right-0 z-20 mt-2 w-44 rounded-lg border border-gray-200 bg-white py-2 shadow-lg">
+                        <button
+                          type="button"
+                          onClick={() => openDateEditor(event)}
+                          className="block w-full px-4 py-2 text-left text-sm font-medium text-[#162b3e] hover:bg-[#f3f7fb]"
+                        >
+                          Change date
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openDeleteConfirm(event)}
+                          className="block w-full px-4 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50"
+                        >
+                          Delete history entry
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -6643,6 +6759,100 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
           </article>
         );
       })}
+
+      {editingEvent ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#162b3e]/40 p-4">
+          <form
+            onSubmit={submitDateChange}
+            className="w-full max-w-md rounded-lg bg-white shadow-xl"
+          >
+            <div className="border-b border-gray-200 px-5 py-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Change History Date
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                This changes where the entry appears in client history.
+              </p>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <label className="block text-sm font-semibold text-[#586273]">
+                History date
+                <input
+                  type="datetime-local"
+                  value={historyDate}
+                  onChange={(event) => setHistoryDate(event.target.value)}
+                  className="mt-1 block w-full rounded-md border border-[#cbd2dc] px-3 py-2 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-1 focus:ring-[#59abf0]"
+                  required
+                />
+              </label>
+              {actionError ? (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {actionError}
+                </div>
+              ) : null}
+            </div>
+            <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingEvent(null);
+                  setActionError(null);
+                }}
+                className="rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={actionLoading}
+                className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2b79c4] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {actionLoading ? "Saving..." : "Save date"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {deletingEvent ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#162b3e]/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
+            <div className="border-b border-gray-200 px-5 py-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Delete History Entry?
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                This permanently removes the visible history entry. RetainOS keeps an internal audit record.
+              </p>
+            </div>
+            {actionError ? (
+              <div className="mx-5 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {actionError}
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-3 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeletingEvent(null);
+                  setActionError(null);
+                }}
+                className="rounded-md border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDelete()}
+                disabled={actionLoading}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {actionLoading ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -7020,14 +7230,12 @@ export function ClientDetail() {
           ...((taskRows ?? []) as ClientTaskRow[]),
         ]);
         setHistoryEvents(
-          [
+          sortHistoryEvents([
             ...((historyRows ?? []) as ClientHistoryEventRow[]),
             ...((legacyHistoryRows ?? []) as Record<string, unknown>[]).map(
               mapLegacyHistoryRow,
             ),
-          ]
-            .sort((left, right) => historyTimestamp(right) - historyTimestamp(left))
-            .slice(0, 160),
+          ]).slice(0, 160),
         );
         setCustomFields(
           customFieldsResult.error
@@ -7165,6 +7373,7 @@ export function ClientDetail() {
   const canChangeStatus = canEditProfile;
   const canCreateContract = canEditProfile;
   const canDeleteContract = canEditProfile;
+  const canManageHistory = canEditProfile;
   function applyCustomFieldChanges(changes: CustomFieldChange[]) {
     if (changes.length === 0) return;
     setCustomFieldValues((current) => {
@@ -7190,6 +7399,70 @@ export function ClientDetail() {
       }
       return next;
     });
+  }
+  async function changeHistoryDate(
+    event: ClientHistoryEventRow,
+    eventDate: string,
+  ) {
+    if (!client) throw new Error("Client not loaded.");
+    const companyLegacyId =
+      typeof client.company_glide_row_id === "string" && client.company_glide_row_id
+        ? client.company_glide_row_id
+        : typeof client.company_id === "string"
+          ? client.company_id
+          : "";
+    if (!companyLegacyId) throw new Error("Missing company id.");
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-history",
+      {
+        body: {
+          action: "update_date",
+          source: historyActionSource(event),
+          companyLegacyId,
+          clientLegacyId: client.glide_row_id,
+          eventId: historyActionEventId(event),
+          eventDate,
+        },
+      },
+    );
+    if (error || data?.error) {
+      throw new Error(data?.error ?? error?.message ?? "Could not change history date.");
+    }
+    const nextEvent =
+      historyActionSource(event) === "cst"
+        ? mapLegacyHistoryRow(data.event as Record<string, unknown>)
+        : (data.event as ClientHistoryEventRow);
+    setHistoryEvents((current) =>
+      sortHistoryEvents(
+        current.map((row) => (row.id === event.id ? nextEvent : row)),
+      ).slice(0, 160),
+    );
+  }
+  async function deleteHistoryEvent(event: ClientHistoryEventRow) {
+    if (!client) throw new Error("Client not loaded.");
+    const companyLegacyId =
+      typeof client.company_glide_row_id === "string" && client.company_glide_row_id
+        ? client.company_glide_row_id
+        : typeof client.company_id === "string"
+          ? client.company_id
+          : "";
+    if (!companyLegacyId) throw new Error("Missing company id.");
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-history",
+      {
+        body: {
+          action: "delete",
+          source: historyActionSource(event),
+          companyLegacyId,
+          clientLegacyId: client.glide_row_id,
+          eventId: historyActionEventId(event),
+        },
+      },
+    );
+    if (error || data?.error) {
+      throw new Error(data?.error ?? error?.message ?? "Could not delete history entry.");
+    }
+    setHistoryEvents((current) => current.filter((row) => row.id !== event.id));
   }
   async function archiveContract(contract: ContractRow) {
     if (!client || !contract.glide_row_id || archivingContractId) return;
@@ -7227,7 +7500,10 @@ export function ClientDetail() {
     }
     if (data?.event) {
       setHistoryEvents((current) =>
-        [data.event as ClientHistoryEventRow, ...current].slice(0, 25),
+        sortHistoryEvents([data.event as ClientHistoryEventRow, ...current]).slice(
+          0,
+          160,
+        ),
       );
     }
   }
@@ -7378,7 +7654,12 @@ export function ClientDetail() {
       {activeTab === "tasks" ? (
         <TasksSection tasks={tasks} teamMemberNameById={teamMemberNameById} />
       ) : activeTab === "history" ? (
-        <HistorySection events={historyEvents} />
+        <HistorySection
+          events={historyEvents}
+          canManageHistory={canManageHistory}
+          onChangeDate={changeHistoryDate}
+          onDelete={deleteHistoryEvent}
+        />
       ) : activeTab === "contract" ? (
         <ContractSection
           client={client}

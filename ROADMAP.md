@@ -352,6 +352,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
 - `[~]` `[polish]` Client history/change log.
   - Client Detail now has a pilot `History` tab for RetainOS Quick Update events.
   - 2026-07-06 MM launch hotfix: Client Detail > History now merges legacy CST `backup_company_clients_history` rows with RetainOS app-owned history events, so migrated clients can see previous Next Steps / call-history context from the CST mirror. Added a Calls filter, CST history badge, clickable links, and long-entry Read more expansion.
+  - 2026-07-06 MM follow-up: Client Detail > History now has controlled row actions for Change date and Delete history entry across RetainOS app-owned history and imported CST mirror rows. Server-side role/assignment checks and app audit events are wired through `manage-client-history`; awaiting Jay QA before promoting this slice.
 
 ### Phase 3: Operations, QC Reporting, And Migration Readiness
 

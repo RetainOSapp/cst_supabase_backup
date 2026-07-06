@@ -644,3 +644,11 @@ For historical context:
 - Updated `src/pages/ClientDetail.tsx`: History now loads up to 100 app-owned RetainOS events plus up to 100 legacy CST mirror rows for the same client, maps CST rows into the same timeline, sorts newest-first, and labels them as CST history / Imported from CST.
 - Added a Calls filter, kept the Next Steps filter, rendered long history values through the existing rich preview/read-more modal, converted raw `<br>` text into readable content, and made plain Fathom/recording URLs clickable.
 - Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; the symlink was removed before commit. No Edge Function deploy required; this is a frontend/history read-path hotfix.
+
+## Moves Method History Edit/Delete Hotfix - 2026-07-06
+
+- Ben/Jay requested CST-style history cleanup controls so a mistaken client action can be corrected from Client Detail > History.
+- Updated `src/pages/ClientDetail.tsx`: each manageable history entry now has row actions for Change date and Delete history entry, with a date modal and delete confirmation. The actions work for both app-owned RetainOS history and imported CST mirror history rows.
+- Added/deployed `supabase/functions/manage-client-history/index.ts`: role-gated history management for pilot/migrated companies. SuperAdmin/Director/Support can manage company-visible client history; CSMs can manage assigned-client history only. Deletes/updates write `app_audit_events` before/after data for accountability.
+- Product note: deleting/changing a history row changes the visible history timeline only; it does not automatically roll back the client's current profile/program fields.
+- Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; `manage-client-history` deployed to Supabase project `zjauqflzxzsbpnivzsct`. Awaiting Jay live QA.
