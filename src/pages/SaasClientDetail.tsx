@@ -3811,7 +3811,6 @@ function CompanySettingsSetup({
   teamMembers,
   integrationEvents,
   integrationEventsLoading,
-  integrationClients,
   integrationTokens,
   integrationTokensLoading,
   canManageTokens,
@@ -3829,7 +3828,6 @@ function CompanySettingsSetup({
   teamMembers: TeamRow[];
   integrationEvents: IntegrationIntakeEventRow[];
   integrationEventsLoading: boolean;
-  integrationClients: IntegrationReviewClientOption[];
   integrationTokens: IntegrationTokenRow[];
   integrationTokensLoading: boolean;
   canManageTokens: boolean;
@@ -3846,6 +3844,18 @@ function CompanySettingsSetup({
   const [taskTemplateModalOpen, setTaskTemplateModalOpen] = useState(false);
   const [contractTemplateModalOpen, setContractTemplateModalOpen] = useState(false);
   const [eventClientSelections, setEventClientSelections] = useState<
+    Record<string, string>
+  >({});
+  const [eventClientSearches, setEventClientSearches] = useState<
+    Record<string, string>
+  >({});
+  const [eventClientOptions, setEventClientOptions] = useState<
+    Record<string, IntegrationReviewClientOption[]>
+  >({});
+  const [eventClientSearchLoading, setEventClientSearchLoading] = useState<
+    Record<string, boolean>
+  >({});
+  const [eventClientSearchMessages, setEventClientSearchMessages] = useState<
     Record<string, string>
   >({});
   const [reviewAction, setReviewAction] = useState<string | null>(null);
@@ -3971,6 +3981,77 @@ function CompanySettingsSetup({
       return next;
     });
     onReload();
+  }
+
+  function integrationClientLabel(client: IntegrationReviewClientOption) {
+    const label =
+      client.client_name ||
+      client.client_business ||
+      client.client_email ||
+      client.id;
+    const detail = [
+      client.client_email,
+      client.program_status_value ? client.program_status_value : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return detail ? `${label} — ${detail}` : label;
+  }
+
+  function integrationSearchTerm(value: string) {
+    return value.trim().replace(/[,%]/g, " ");
+  }
+
+  async function handleIntegrationClientSearch(eventId: string) {
+    const query = integrationSearchTerm(eventClientSearches[eventId] ?? "");
+    if (query.length < 2) {
+      setEventClientOptions((current) => ({ ...current, [eventId]: [] }));
+      setEventClientSearchMessages((current) => ({
+        ...current,
+        [eventId]: "Type at least 2 characters to search clients.",
+      }));
+      return;
+    }
+
+    setEventClientSearchLoading((current) => ({ ...current, [eventId]: true }));
+    setEventClientSearchMessages((current) => ({ ...current, [eventId]: "" }));
+
+    const pattern = `%${query}%`;
+    const { data, error: searchError } = await supabase
+      .from("clients")
+      .select(
+        "id, glide_row_id, client_name, client_business, client_email, program_status_value",
+      )
+      .eq("company_glide_row_id", companyLegacyId)
+      .is("archived_at", null)
+      .or(
+        `client_name.ilike.${pattern},client_email.ilike.${pattern},client_business.ilike.${pattern}`,
+      )
+      .order("client_name", { ascending: true })
+      .limit(20);
+
+    setEventClientSearchLoading((current) => ({ ...current, [eventId]: false }));
+
+    if (searchError) {
+      setEventClientOptions((current) => ({ ...current, [eventId]: [] }));
+      setEventClientSearchMessages((current) => ({
+        ...current,
+        [eventId]: searchError.message,
+      }));
+      return;
+    }
+
+    const options = ((data ?? []) as IntegrationReviewClientOption[]).filter(
+      isMatchableIntegrationClient,
+    );
+    setEventClientOptions((current) => ({ ...current, [eventId]: options }));
+    setEventClientSearchMessages((current) => ({
+      ...current,
+      [eventId]:
+        options.length > 0
+          ? `${options.length} result${options.length === 1 ? "" : "s"} found.`
+          : "No clients found. Try a different name or email.",
+    }));
   }
 
   async function handleIntegrationTokenAction(
@@ -4557,25 +4638,12 @@ function CompanySettingsSetup({
               ]);
               const selectedClientId = eventClientSelections[event.id] ?? "";
               const actionBusy = reviewAction?.startsWith(`${event.id}:`) ?? false;
-              const clientOptions = integrationClients.map((client) => {
-                const label =
-                  client.client_name ||
-                  client.client_business ||
-                  client.client_email ||
-                  client.id;
-                const detail = [
-                  client.client_email,
-                  client.program_status_value
-                    ? client.program_status_value
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
-                return {
-                  value: client.id,
-                  label: detail ? `${label} — ${detail}` : label,
-                };
-              });
+              const clientSearch = eventClientSearches[event.id] ?? "";
+              const clientOptions = eventClientOptions[event.id] ?? [];
+              const clientSearchLoading =
+                eventClientSearchLoading[event.id] === true;
+              const clientSearchMessage =
+                eventClientSearchMessages[event.id] ?? "";
               return (
                 <article key={event.id} className="px-5 py-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -4643,29 +4711,71 @@ function CompanySettingsSetup({
                     <div className="mt-4 rounded-lg border border-[#e4e9f0] bg-[#fbfcfe] p-3">
                       <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-end">
                         <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
-                          Match to client
+                          Search client
+                          <div className="mt-1 flex gap-2">
+                            <input
+                              type="search"
+                              value={clientSearch}
+                              disabled={actionBusy || clientSearchLoading}
+                              placeholder="Type name or email"
+                              onChange={(inputEvent) => {
+                                const value = inputEvent.target.value;
+                                setEventClientSearches((current) => ({
+                                  ...current,
+                                  [event.id]: value,
+                                }));
+                                setEventClientSelections((current) => {
+                                  const next = { ...current };
+                                  delete next[event.id];
+                                  return next;
+                                });
+                              }}
+                              onKeyDown={(keyEvent) => {
+                                if (keyEvent.key === "Enter") {
+                                  keyEvent.preventDefault();
+                                  void handleIntegrationClientSearch(event.id);
+                                }
+                              }}
+                              className="block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                            />
+                            <button
+                              type="button"
+                              disabled={actionBusy || clientSearchLoading}
+                              onClick={() =>
+                                void handleIntegrationClientSearch(event.id)
+                              }
+                              className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {clientSearchLoading ? "Searching..." : "Search"}
+                            </button>
+                          </div>
                           <select
                             value={selectedClientId}
-                            disabled={actionBusy}
+                            disabled={actionBusy || clientSearchLoading}
                             onChange={(selectEvent) =>
                               setEventClientSelections((current) => ({
                                 ...current,
                                 [event.id]: selectEvent.target.value,
                               }))
                             }
-                            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                            className="mt-2 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
                           >
                             <option value="">
                               {clientOptions.length > 0
-                                ? "Choose an active client..."
-                                : "No active clients found"}
+                                ? "Choose from search results..."
+                                : "Search first"}
                             </option>
-                            {clientOptions.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
+                            {clientOptions.map((client) => (
+                              <option key={client.id} value={client.id}>
+                                {integrationClientLabel(client)}
                               </option>
                             ))}
                           </select>
+                          {clientSearchMessage ? (
+                            <p className="mt-1 text-xs normal-case tracking-normal text-[#667085]">
+                              {clientSearchMessage}
+                            </p>
+                          ) : null}
                         </label>
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -5016,9 +5126,6 @@ export function SaasClientDetail({
   >(mergeNotificationPreferences(null));
   const [integrationReviewEvents, setIntegrationReviewEvents] = useState<
     IntegrationIntakeEventRow[]
-  >([]);
-  const [integrationReviewClients, setIntegrationReviewClients] = useState<
-    IntegrationReviewClientOption[]
   >([]);
   const [integrationTokens, setIntegrationTokens] = useState<IntegrationTokenRow[]>(
     [],
@@ -5440,7 +5547,6 @@ export function SaasClientDetail({
           settingsResult,
           preferencesResult,
           integrationResult,
-          integrationClientsResult,
           integrationTokensResult,
           taskTemplatesResult,
           contractTemplatesResult,
@@ -5469,14 +5575,6 @@ export function SaasClientDetail({
             .in("status", ["needs_review", "failed"])
             .order("created_at", { ascending: false })
             .limit(12),
-          supabase
-            .from("clients")
-            .select(
-              "id, glide_row_id, client_name, client_business, client_email, program_status_value",
-            )
-            .eq("company_id", appCompany.id)
-            .is("archived_at", null)
-            .order("client_name", { ascending: true }),
           isSuperAdmin
             ? supabase.functions.invoke("manage-integration-token", {
                 body: {
@@ -5540,19 +5638,6 @@ export function SaasClientDetail({
             integrationResult.error,
           );
           setIntegrationReviewEvents([]);
-        }
-        if (!integrationClientsResult.error) {
-          setIntegrationReviewClients(
-            (
-              (integrationClientsResult.data ?? []) as IntegrationReviewClientOption[]
-            ).filter(isMatchableIntegrationClient),
-          );
-        } else {
-          console.error(
-            "Failed to load integration review clients:",
-            integrationClientsResult.error,
-          );
-          setIntegrationReviewClients([]);
         }
         if (!integrationTokensResult.error && integrationTokensResult.data?.tokens) {
           setIntegrationTokens(
@@ -5631,7 +5716,6 @@ export function SaasClientDetail({
       setCompanySettings(defaultCompanySettings(company));
       setNotificationPreferences(mergeNotificationPreferences(null));
       setIntegrationReviewEvents([]);
-      setIntegrationReviewClients([]);
       setIntegrationTokens([]);
       setTaskTemplates([]);
       setContractTemplates([]);
@@ -6049,7 +6133,6 @@ export function SaasClientDetail({
             teamMembers={teamMembers}
             integrationEvents={integrationReviewEvents}
             integrationEventsLoading={integrationReviewLoading}
-            integrationClients={integrationReviewClients}
             integrationTokens={integrationTokens}
             integrationTokensLoading={integrationTokensLoading}
             canManageTokens={isSuperAdmin && settingsSource === "app_owned"}
