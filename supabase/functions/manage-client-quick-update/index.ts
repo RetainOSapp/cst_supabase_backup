@@ -17,6 +17,7 @@ const ADVOCACY_TYPES = new Set([
   "renewal_upsell",
 ]);
 const ADVOCACY_ACTIONS = new Set(["asked", "received"]);
+const CALL_ATTENDANCE_STATUSES = new Set(["attended", "missed"]);
 const ADVOCACY_PREFIXES: Record<string, string> = {
   review: "advocacy_review",
   testimonial: "advocacy_testimonial",
@@ -105,6 +106,15 @@ function parseAdvocacyEvents(value: unknown) {
         notes: cleanText(row.notes) || null,
       };
     });
+}
+
+function parseCallAttendance(value: unknown) {
+  const status = cleanText(value);
+  if (!status) return null;
+  if (!CALL_ATTENDANCE_STATUSES.has(status)) {
+    throw new Error("Choose attended or missed for call attendance.");
+  }
+  return status;
 }
 
 function parseCustomFieldValue(field: Record<string, unknown>, value: unknown) {
@@ -436,7 +446,7 @@ Deno.serve(async (req) => {
     }
 
     const hasNextSteps = hasOwn(body, "nextSteps");
-    const hasLastContactAt = hasOwn(body, "lastContactAt");
+    let hasLastContactAt = hasOwn(body, "lastContactAt");
     const hasNextContactAt = hasOwn(body, "nextContactAt");
     const hasSuccessStatus = hasOwn(body, "successStatus");
     const hasProgressStatus = hasOwn(body, "progressStatus");
@@ -445,9 +455,14 @@ Deno.serve(async (req) => {
 
     const nextSteps = hasNextSteps ? cleanText(body.nextSteps) : "";
     const notes = cleanText(body.notes);
-    const lastContactAt = hasLastContactAt
+    const callAttendanceStatus = parseCallAttendance(body.callAttendance);
+    let lastContactAt = hasLastContactAt
       ? parseDateTime(body.lastContactAt)
       : null;
+    if (callAttendanceStatus === "attended" && !hasLastContactAt) {
+      hasLastContactAt = true;
+      lastContactAt = new Date().toISOString();
+    }
     let nextContactAt = hasNextContactAt
       ? parseDateTime(body.nextContactAt)
       : null;
@@ -489,6 +504,7 @@ Deno.serve(async (req) => {
       !hasSuccessStatus &&
       !hasProgressStatus &&
       !hasBuyInStatus &&
+      !callAttendanceStatus &&
       advocacyEvents.length === 0 &&
       customFieldUpdates.changes.length === 0
     ) {
@@ -520,6 +536,7 @@ Deno.serve(async (req) => {
         contact_touch: isContactTouch,
         custom_fields: customFieldUpdates.changes,
         advocacy_events: advocacyEvents,
+        call_attendance: callAttendanceStatus,
       },
     };
 
@@ -559,6 +576,38 @@ Deno.serve(async (req) => {
         .select("*");
       if (advocacyError) throw advocacyError;
       insertedAdvocacyEvents = (advocacyRows ?? []) as Record<string, unknown>[];
+    }
+
+    let insertedCallAttendanceEvent: Record<string, unknown> | null = null;
+    if (callAttendanceStatus) {
+      const occurredAt =
+        callAttendanceStatus === "attended"
+          ? lastContactAt ?? new Date().toISOString()
+          : new Date().toISOString();
+      const { data: callAttendanceRow, error: callAttendanceError } = await supabase
+        .from("client_call_attendance_events")
+        .insert({
+          company_id: company.id,
+          client_id: client.id,
+          client_legacy_id: clientLegacyId,
+          company_legacy_id: company.legacy_glide_row_id,
+          attendance_status: callAttendanceStatus,
+          occurred_at: occurredAt,
+          source: "quick_update",
+          notes: notes || null,
+          actor_member_id: actor.memberId,
+          actor_member_legacy_id: actor.legacyMemberId,
+          actor_auth_user_id: userData.user.id,
+          history_event_id: event.id,
+          metadata: {
+            actor_role: actor.role,
+            contact_touch: isContactTouch,
+          },
+        })
+        .select("*")
+        .single();
+      if (callAttendanceError) throw callAttendanceError;
+      insertedCallAttendanceEvent = callAttendanceRow as Record<string, unknown>;
     }
 
     const advocacySummaryUpdates =
@@ -639,6 +688,7 @@ Deno.serve(async (req) => {
         updated_client: updatedClient,
         custom_fields: customFieldUpdates.changes,
         advocacy_events: insertedAdvocacyEvents,
+        call_attendance_event: insertedCallAttendanceEvent,
       },
     });
 
@@ -648,6 +698,7 @@ Deno.serve(async (req) => {
       client: updatedClient,
       customFields: customFieldUpdates.changes,
       advocacyEvents: insertedAdvocacyEvents,
+      callAttendanceEvent: insertedCallAttendanceEvent,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

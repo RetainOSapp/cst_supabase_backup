@@ -600,6 +600,31 @@ Deno.serve(async (req) => {
       .single();
     if (historyError) throw historyError;
 
+    const { data: callAttendanceEvent, error: callAttendanceError } = await supabase
+      .from("client_call_attendance_events")
+      .insert({
+        company_id: company.id,
+        client_id: client.id,
+        client_legacy_id: client.glide_row_id,
+        company_legacy_id: company.legacy_glide_row_id,
+        attendance_status: "attended",
+        occurred_at: startedAt ?? new Date().toISOString(),
+        source: provider,
+        notes: summary,
+        history_event_id: historyEvent.id,
+        integration_intake_event_id: intakeEvent.id,
+        metadata: {
+          provider,
+          external_event_id: externalEventId,
+          client_email: matchedEmail,
+          submitted_client_emails: clientEmails,
+          auto_recorded_from: "call_summary_ingest",
+        },
+      })
+      .select("*")
+      .single();
+    if (callAttendanceError) throw callAttendanceError;
+
     const { data: processedEvent, error: processedError } = await supabase
       .from("integration_intake_events")
       .update({
@@ -613,6 +638,7 @@ Deno.serve(async (req) => {
         metadata: {
           ...(intakeEvent.metadata ?? {}),
           history_event_id: historyEvent.id,
+          call_attendance_event_id: callAttendanceEvent.id,
           previous_next_steps: previousNextSteps,
           previous_last_contact_at: previousLastContact,
           previous_next_contact_at: previousNextContact,
@@ -645,6 +671,7 @@ Deno.serve(async (req) => {
       metadata: {
         integration_intake_event_id: processedEvent.id,
         history_event_id: historyEvent.id,
+        call_attendance_event_id: callAttendanceEvent.id,
         provider,
         external_event_id: externalEventId,
       },
@@ -654,6 +681,7 @@ Deno.serve(async (req) => {
       ok: true,
       event: processedEvent,
       historyEvent,
+      callAttendanceEvent,
       client: updatedClient,
     });
   } catch (error) {

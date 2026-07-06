@@ -1068,7 +1068,8 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
   - 2026-07-06 MM launch hotfix: Clients list/card now have a one-click contacted button that writes Date of Last Contact through `manage-client-quick-update`; Company Settings has a Contact cadence automation toggle to set Date of Next Contact X days after the contacted action. Awaiting Jay QA on live MM.
   - 2026-07-06 follow-up: the contacted button now uses the app blue treatment, manual Quick Update / Client Detail contact edits omit untouched date fields so the automation can apply safely, and Fathom/call-summary ingestion plus integration-review apply paths also set Date of Next Contact when the company automation is enabled.
   - 2026-07-06 Vince feedback: one-click contacted now patches the visible roster row and triggers the Clients list reload token so sorted/filtered lists update without a hard refresh; List/Card views now support 12, 25, 50, or 100 rows per page, plus numbered pagination with ellipses for jumping directly across large rosters.
-- `[ ]` Track call attendance.
+- `[~]` `[qa]` Track call attendance.
+  - 2026-07-06 MM launch build: added app-owned `client_call_attendance_events`, Attended/Missed controls and counts in Quick Update plus Client Detail > Program > Update Next Steps/Contact, and automatic Attended events when call-summary/next-steps ingestion matches a client. Awaiting Jay/MM QA on manual attended, manual missed, and next matched Fathom call.
 - `[~]` `[qa]` Edit Next Steps/contact directly from Client Detail > Program.
   - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.
   - 2026-06-20 QA fix: modal passes `companyLegacyId`; History tab added Contract / Last Contact / Next Steps / Health Scores pills and search.
@@ -1361,7 +1362,8 @@ The current Glide model starts with Companies. Companies own team members, group
   - `manage-client-offboard` is legacy unless intentionally revived.
 - `[~]` `[polish]` Client update history view.
   - Pilot view reads `client_history_events`; full Glide-style audit/change log is still future work.
-- `[ ]` Track call attendance.
+- `[~]` `[qa]` Track call attendance.
+  - 2026-07-06 MM launch build: call attendance now writes app-owned attended/missed events from Quick Update and Client Detail > Program, with Fathom-matched call summaries auto-recorded as attended. Awaiting Jay/MM QA before closure.
 - `[~]` `[polish]` Task create/edit/complete/dismiss flows.
   - 2026-06-18 local Tasks V1.5 pass adds edit/complete/reopen/dismiss/archive/status-drag behavior for app-owned companies.
   - Needs `manage-client-task` deploy and Jay QA before closure.

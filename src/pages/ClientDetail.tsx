@@ -50,6 +50,11 @@ type OutcomeChoiceSets = {
   progress: OutcomeChoice[];
   buyIn: OutcomeChoice[];
 };
+type CallAttendanceStatus = "attended" | "missed";
+type CallAttendanceCounts = {
+  attended: number;
+  missed: number;
+};
 type OutcomeChoiceRow = {
   success_value?: string | null;
   success_display?: string | null;
@@ -1496,6 +1501,94 @@ function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
 }
 
+async function loadCallAttendanceCounts(
+  companyLegacyId: string,
+  clientLegacyId: string,
+) {
+  if (!companyLegacyId || !clientLegacyId) {
+    return { attended: 0, missed: 0 };
+  }
+  const { data, error } = await supabase
+    .from("client_call_attendance_events")
+    .select("attendance_status")
+    .eq("company_legacy_id", companyLegacyId)
+    .eq("client_legacy_id", clientLegacyId);
+  if (error) throw error;
+  return ((data ?? []) as Array<{ attendance_status?: string | null }>).reduce(
+    (counts, row) => {
+      if (row.attendance_status === "attended") counts.attended += 1;
+      if (row.attendance_status === "missed") counts.missed += 1;
+      return counts;
+    },
+    { attended: 0, missed: 0 },
+  );
+}
+
+function CallAttendanceControls({
+  counts,
+  value,
+  disabled,
+  onChange,
+}: {
+  counts: CallAttendanceCounts;
+  value: CallAttendanceStatus | "";
+  disabled: boolean;
+  onChange: (value: CallAttendanceStatus | "") => void;
+}) {
+  const options: Array<{
+    value: CallAttendanceStatus;
+    label: string;
+    className: string;
+  }> = [
+    {
+      value: "attended",
+      label: "Attended",
+      className:
+        "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+    },
+    {
+      value: "missed",
+      label: "Missed",
+      className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
+    },
+  ];
+  return (
+    <section className="rounded-md border border-gray-200 bg-gray-50 px-3.5 py-3 sm:col-span-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
+            Calls
+          </div>
+          <p className="mt-1 text-sm font-medium text-gray-900">
+            {counts.attended.toLocaleString()} attended |{" "}
+            {counts.missed.toLocaleString()} missed
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {options.map((option) => {
+            const selected = value === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange(selected ? "" : option.value)}
+                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer ${
+                  selected
+                    ? option.className
+                    : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function milestoneSortValue(milestone: OfferMilestoneRow) {
   const order = Number(milestone.order);
   return Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER;
@@ -2119,10 +2212,38 @@ function ClientNextStepsModal({
   const [nextContactAt, setNextContactAt] = useState(
     dateInputValue(valueFrom(client, nextContactFieldCandidates)),
   );
+  const [callAttendanceCounts, setCallAttendanceCounts] =
+    useState<CallAttendanceCounts>({ attended: 0, missed: 0 });
+  const [callAttendance, setCallAttendance] = useState<CallAttendanceStatus | "">(
+    "",
+  );
   const [lastContactTouched, setLastContactTouched] = useState(false);
   const [nextContactTouched, setNextContactTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const companyLegacyId = client.company_glide_row_id ?? client.company_id ?? "";
+
+  useEffect(() => {
+    let cancelled = false;
+    loadCallAttendanceCounts(companyLegacyId, client.glide_row_id)
+      .then((counts) => {
+        if (!cancelled) setCallAttendanceCounts(counts);
+      })
+      .catch((error) => {
+        console.error("Failed to load call attendance counts", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyLegacyId, client.glide_row_id]);
+
+  function handleCallAttendanceChange(value: CallAttendanceStatus | "") {
+    setCallAttendance(value);
+    if (value === "attended" && !lastContactTouched) {
+      setLastContactTouched(true);
+      setLastContactAt(dateTimeInputValue(new Date().toISOString()));
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -2134,11 +2255,12 @@ function ClientNextStepsModal({
       "manage-client-quick-update",
       {
         body: {
-          companyLegacyId: client.company_glide_row_id ?? client.company_id,
+          companyLegacyId,
           clientLegacyId: client.glide_row_id,
           nextSteps,
           ...(lastContactTouched ? { lastContactAt } : {}),
           ...(nextContactTouched ? { nextContactAt } : {}),
+          ...(callAttendance ? { callAttendance } : {}),
         },
       },
     );
@@ -2154,6 +2276,14 @@ function ClientNextStepsModal({
       return;
     }
     if (data?.client) {
+      if (data?.callAttendanceEvent && callAttendance) {
+        const savedAttendance = callAttendance;
+        setCallAttendanceCounts((current) => ({
+          ...current,
+          [savedAttendance]: current[savedAttendance] + 1,
+        }));
+        setCallAttendance("");
+      }
       onSaved(
         mapAppClientRow(data.client as Record<string, unknown>),
         (data.event as ClientHistoryEventRow | undefined) ?? null,
@@ -2232,6 +2362,12 @@ function ClientNextStepsModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 disabled:bg-gray-50"
               />
             </label>
+            <CallAttendanceControls
+              counts={callAttendanceCounts}
+              value={callAttendance}
+              disabled={saving}
+              onChange={handleCallAttendanceChange}
+            />
             {saveError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:col-span-2">
                 {saveError}
@@ -2250,7 +2386,10 @@ function ClientNextStepsModal({
               type="submit"
               disabled={
                 saving ||
-                (!nextSteps.trim() && !lastContactTouched && !nextContactTouched)
+                (!nextSteps.trim() &&
+                  !lastContactTouched &&
+                  !nextContactTouched &&
+                  !callAttendance)
               }
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >

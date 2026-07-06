@@ -160,6 +160,11 @@ interface NoteSearchResult {
   matched_text: string | null;
   total_count: number | null;
 }
+type CallAttendanceStatus = "attended" | "missed";
+type CallAttendanceCounts = {
+  attended: number;
+  missed: number;
+};
 interface ClientFilters {
   companyId: string;
   csmId: string;
@@ -1434,6 +1439,95 @@ function ReadOnlyField({
     </div>
   );
 }
+
+async function loadCallAttendanceCounts(
+  companyLegacyId: string,
+  clientLegacyId: string,
+) {
+  if (!companyLegacyId || !clientLegacyId) {
+    return { attended: 0, missed: 0 };
+  }
+  const { data, error } = await supabase
+    .from("client_call_attendance_events")
+    .select("attendance_status")
+    .eq("company_legacy_id", companyLegacyId)
+    .eq("client_legacy_id", clientLegacyId);
+  if (error) throw error;
+  return ((data ?? []) as Array<{ attendance_status?: string | null }>).reduce(
+    (counts, row) => {
+      if (row.attendance_status === "attended") counts.attended += 1;
+      if (row.attendance_status === "missed") counts.missed += 1;
+      return counts;
+    },
+    { attended: 0, missed: 0 },
+  );
+}
+
+function CallAttendanceControls({
+  counts,
+  value,
+  disabled,
+  onChange,
+}: {
+  counts: CallAttendanceCounts;
+  value: CallAttendanceStatus | "";
+  disabled: boolean;
+  onChange: (value: CallAttendanceStatus | "") => void;
+}) {
+  const options: Array<{
+    value: CallAttendanceStatus;
+    label: string;
+    className: string;
+  }> = [
+    {
+      value: "attended",
+      label: "Attended",
+      className:
+        "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+    },
+    {
+      value: "missed",
+      label: "Missed",
+      className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
+    },
+  ];
+  return (
+    <section className="rounded-md border border-[#dbe3ee] bg-[#f8fafc] px-3.5 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-[11px] font-semibold uppercase text-[#586273]">
+            Calls
+          </div>
+          <p className="mt-1 text-sm font-medium text-[#162b3e]">
+            {counts.attended.toLocaleString()} attended |{" "}
+            {counts.missed.toLocaleString()} missed
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {options.map((option) => {
+            const selected = value === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange(selected ? "" : option.value)}
+                className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer ${
+                  selected
+                    ? option.className
+                    : "border-[#cbd2dc] bg-white text-[#586273] hover:bg-[#f7f9fc] hover:text-[#162b3e]"
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function OutcomeSelect({
   label,
   value,
@@ -1517,6 +1611,11 @@ function QuickUpdateModal({
   const [customFieldDrafts, setCustomFieldDrafts] = useState<CustomFieldDrafts>({});
   const [advocacyDrafts, setAdvocacyDrafts] = useState(emptyAdvocacyDrafts);
   const [notes, setNotes] = useState("");
+  const [callAttendanceCounts, setCallAttendanceCounts] =
+    useState<CallAttendanceCounts>({ attended: 0, missed: 0 });
+  const [callAttendance, setCallAttendance] = useState<CallAttendanceStatus | "">(
+    "",
+  );
   const [currentOfferName, setCurrentOfferName] = useState("");
   const [currentMilestoneName, setCurrentMilestoneName] = useState("");
   const [currentOfferMilestones, setCurrentOfferMilestones] = useState<
@@ -1538,6 +1637,33 @@ function QuickUpdateModal({
       ? client.offer_milestones_current_milestone_id
       : "",
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCounts() {
+      try {
+        const counts = await loadCallAttendanceCounts(
+          companyLegacyId,
+          client.glide_row_id,
+        );
+        if (!cancelled) setCallAttendanceCounts(counts);
+      } catch (error) {
+        console.error("Failed to load call attendance counts:", error);
+      }
+    }
+    void loadCounts();
+    return () => {
+      cancelled = true;
+    };
+  }, [client.glide_row_id, companyLegacyId]);
+
+  function handleCallAttendanceChange(value: CallAttendanceStatus | "") {
+    setCallAttendance(value);
+    if (value === "attended" && !lastContactTouched) {
+      setLastContactTouched(true);
+      setLastContactAt(toDateTimeInputValue(new Date().toISOString()));
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1887,6 +2013,7 @@ function QuickUpdateModal({
             value: customFieldDrafts[field.id] ?? "",
           })),
           advocacyEvents: buildAdvocacyEventDrafts(advocacyDrafts),
+          ...(callAttendance ? { callAttendance } : {}),
           notes,
         },
       },
@@ -1910,6 +2037,14 @@ function QuickUpdateModal({
     applyCustomFieldChanges(customFieldChanges);
     if (data?.client) {
       onClientUpdated(mapAppClientRow(data.client as Record<string, unknown>));
+    }
+    if (data?.callAttendanceEvent && callAttendance) {
+      const savedAttendance = callAttendance;
+      setCallAttendanceCounts((current) => ({
+        ...current,
+        [savedAttendance]: current[savedAttendance] + 1,
+      }));
+      setCallAttendance("");
     }
     setNotes("");
     setAdvocacyDrafts(emptyAdvocacyDrafts());
@@ -2078,6 +2213,8 @@ function QuickUpdateModal({
                 tone="green"
                 truncateAt={QUICK_UPDATE_CONTEXT_PREVIEW_LIMIT}
               />
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <ReadOnlyField
                 label="Date of Last Contact"
                 value={formatDate(valueFrom(client, lastContactColumns))}
@@ -2088,29 +2225,35 @@ function QuickUpdateModal({
                 value={formatDate(valueFrom(client, nextContactColumns))}
                 tone="amber"
               />
+              <CallAttendanceControls
+                counts={callAttendanceCounts}
+                value={callAttendance}
+                disabled={!isPilotCompany || saving}
+                onChange={handleCallAttendanceChange}
+              />
             </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="retainos-field-label">Next Steps</span>
-              <textarea
-                disabled={!isPilotCompany || saving}
-                value={nextSteps}
-                onChange={(event) => setNextSteps(event.target.value)}
-                rows={4}
-                className="retainos-input"
-              />
-            </label>
-            <label className="block">
-              <span className="retainos-field-label">Notes</span>
-              <textarea
-                disabled={!isPilotCompany || saving}
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                rows={4}
-                placeholder="Add context from the client interaction"
-                className="retainos-input"
-              />
-            </label>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="retainos-field-label">Next Steps</span>
+                <textarea
+                  disabled={!isPilotCompany || saving}
+                  value={nextSteps}
+                  onChange={(event) => setNextSteps(event.target.value)}
+                  rows={4}
+                  className="retainos-input"
+                />
+              </label>
+              <label className="block">
+                <span className="retainos-field-label">Notes</span>
+                <textarea
+                  disabled={!isPilotCompany || saving}
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  rows={4}
+                  placeholder="Add context from the client interaction"
+                  className="retainos-input"
+                />
+              </label>
             <label className="block">
               <span className="retainos-field-label">Date of Last Contact</span>
               <input
