@@ -48,6 +48,7 @@ interface ClientRow {
   client_image: string | null;
   program_status_value: string | null;
   csm_team_member_id?: string | null;
+  csm_secondary_assignee_id?: string | null;
   isMirrorFallback?: boolean;
 }
 
@@ -1256,11 +1257,11 @@ export function Tasks() {
       const rows: ClientRow[] = [];
       const pageSize = 1000;
       for (let from = 0; ; from += pageSize) {
-        const query = supabase
+        let query = supabase
           .from(sourceTable)
           .select(
             usesAppClients
-              ? "id, glide_row_id, client_name, client_image, program_status_value, csm_team_member_id"
+              ? "id, glide_row_id, client_name, client_image, program_status_value, csm_team_member_id, csm_secondary_assignee_id"
               : "glide_row_id, client_name, client_image, program_status_value, csm_team_member_id",
           )
           .eq(
@@ -1268,6 +1269,15 @@ export function Tasks() {
             companyId,
           )
           .order("client_name", { ascending: true, nullsFirst: false });
+        if (assignedTeamMemberId) {
+          if (usesAppClients) {
+            query = query.or(
+              `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+            );
+          } else {
+            query = query.eq("csm_team_member_id", assignedTeamMemberId);
+          }
+        }
         const result = usesAppClients
           ? await query.range(from, from + pageSize - 1)
           : await query.limit(500);
