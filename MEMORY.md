@@ -652,3 +652,11 @@ For historical context:
 - Added/deployed `supabase/functions/manage-client-history/index.ts`: role-gated history management for pilot/migrated companies. SuperAdmin/Director/Support can manage company-visible client history; CSMs can manage assigned-client history only. Deletes/updates write `app_audit_events` before/after data for accountability.
 - Product note: deleting/changing a history row changes the visible history timeline only; it does not automatically roll back the client's current profile/program fields.
 - Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; `manage-client-history` deployed to Supabase project `zjauqflzxzsbpnivzsct`. Awaiting Jay live QA.
+
+## Moves Method Legacy Health History Visibility Hotfix - 2026-07-06
+
+- Jay QA passed History date/delete controls and flagged that migrated CST Health Scores history was still not visible like Calls and Next Steps.
+- Updated `src/pages/ClientDetail.tsx`: legacy CST history rows whose `change_type_code` references Success, Progress, Buy In, health, or outcomes now classify into the Health Scores filter and show the historical score value in the matching score column when possible.
+- Increased Client Detail history loading from 100 app-owned / 100 CST rows to 200 app-owned / 500 CST rows and removed the combined 160-row cap so older CST health-score events are not hidden behind high-volume Fathom/Next Steps history.
+- Audit clarification: history edit/delete audit lives in internal `app_audit_events`; there is no user-facing audit log page yet.
+- Verification: `npm run build` passed in the hotfix worktree. No Edge Function deploy required.

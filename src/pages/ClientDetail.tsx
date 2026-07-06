@@ -6371,13 +6371,18 @@ function getHistorySourceLabel(event: ClientHistoryEventRow) {
 }
 
 function legacyHistoryTitle(changeType: string) {
+  const normalized = changeType.replace(/_/g, "-").toLowerCase();
+  const compact = normalized.replace(/[\s-]+/g, "");
   if (changeType === "next-steps") return "Previous Next Steps";
   if (changeType === "call-tracker") return "Call / Communication";
   if (changeType === "contract") return "Contract history";
-  if (changeType.includes("success")) return "Success update";
-  if (changeType.includes("progress")) return "Progress update";
-  if (changeType.includes("buy-in")) return "Buy In update";
-  if (changeType.includes("program")) return "Program update";
+  if (normalized.includes("success")) return "Success update";
+  if (normalized.includes("progress")) return "Progress update";
+  if (compact.includes("buyin")) return "Buy In update";
+  if (normalized.includes("health") || normalized.includes("outcome")) {
+    return "Health score update";
+  }
+  if (normalized.includes("program")) return "Program update";
   return "CST history";
 }
 
@@ -6385,11 +6390,24 @@ function normalizeLegacyHistoryValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function legacyHistoryHealthField(changeType: string) {
+  const normalized = changeType.replace(/_/g, "-").toLowerCase();
+  const compact = normalized.replace(/[\s-]+/g, "");
+  if (normalized.includes("success")) return "success";
+  if (normalized.includes("progress")) return "progress";
+  if (compact.includes("buyin")) return "buy_in";
+  if (normalized.includes("health") || normalized.includes("outcome")) {
+    return "health";
+  }
+  return null;
+}
+
 function mapLegacyHistoryRow(row: Record<string, unknown>): ClientHistoryEventRow {
   const changeType = String(row.change_type_code ?? "legacy").trim();
   const value = normalizeLegacyHistoryValue(row.value);
   const isNextSteps = changeType === "next-steps";
   const isCall = changeType === "call-tracker";
+  const healthField = legacyHistoryHealthField(changeType);
   const createdAt =
     typeof row.modified_date === "string"
       ? row.modified_date
@@ -6416,11 +6434,15 @@ function mapLegacyHistoryRow(row: Record<string, unknown>): ClientHistoryEventRo
     next_steps: isNextSteps ? value || null : null,
     notes: !isNextSteps && !isCall ? normalizeLegacyHistoryValue(row.context) || null : null,
     last_contact_at: isCall ? createdAt : null,
+    success_status: healthField === "success" ? value || null : null,
+    progress_status: healthField === "progress" ? value || null : null,
+    buy_in_status: healthField === "buy_in" ? value || null : null,
     created_at: createdAt,
     metadata: {
       imported_from: "backup_company_clients_history",
       source_row_id: typeof row.glide_row_id === "string" ? row.glide_row_id : null,
       change_type_code: changeType,
+      health_field: healthField,
       modified_by: modifiedBy,
       call_ai_id: callAiId,
       original_value: row.original_value ?? null,
@@ -6483,7 +6505,16 @@ function historyEventMatchesFilter(event: ClientHistoryEventRow, filter: History
     return Boolean(event.next_steps) || haystack.includes("next steps");
   }
   if (filter === "health") {
-    return Boolean(event.success_status || event.progress_status || event.buy_in_status);
+    const metadata = event.metadata ?? {};
+    const legacyChangeType =
+      typeof metadata.change_type_code === "string"
+        ? metadata.change_type_code
+        : "";
+    return (
+      Boolean(event.success_status || event.progress_status || event.buy_in_status) ||
+      Boolean(metadata.health_field) ||
+      legacyHistoryHealthField(legacyChangeType) !== null
+    );
   }
   return true;
 }
@@ -7111,13 +7142,13 @@ export function ClientDetail() {
           .select("*")
           .eq("legacy_client_glide_row_id", nextClient.glide_row_id)
           .order("created_at", { ascending: false })
-          .limit(100),
+          .limit(200),
         supabase
           .from("backup_company_clients_history")
           .select("*")
           .eq("client_id", nextClient.glide_row_id)
           .order("modified_date", { ascending: false, nullsFirst: false })
-          .limit(100),
+          .limit(500),
         appPathwayCompany?.id
           ? supabase
               .from("company_custom_fields")
@@ -7235,7 +7266,7 @@ export function ClientDetail() {
             ...((legacyHistoryRows ?? []) as Record<string, unknown>[]).map(
               mapLegacyHistoryRow,
             ),
-          ]).slice(0, 160),
+          ]),
         );
         setCustomFields(
           customFieldsResult.error
@@ -7435,7 +7466,7 @@ export function ClientDetail() {
     setHistoryEvents((current) =>
       sortHistoryEvents(
         current.map((row) => (row.id === event.id ? nextEvent : row)),
-      ).slice(0, 160),
+      ),
     );
   }
   async function deleteHistoryEvent(event: ClientHistoryEventRow) {
@@ -7500,10 +7531,7 @@ export function ClientDetail() {
     }
     if (data?.event) {
       setHistoryEvents((current) =>
-        sortHistoryEvents([data.event as ClientHistoryEventRow, ...current]).slice(
-          0,
-          160,
-        ),
+        sortHistoryEvents([data.event as ClientHistoryEventRow, ...current]),
       );
     }
   }
