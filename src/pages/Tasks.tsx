@@ -42,6 +42,7 @@ type TaskRow = Record<string, unknown> & {
 };
 
 interface ClientRow {
+  id?: string | null;
   glide_row_id: string;
   client_name: string | null;
   client_image: string | null;
@@ -132,6 +133,23 @@ function getInitials(name: string | null | undefined) {
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? "")
       .join("") || "--"
+  );
+}
+
+function addClientToLookup(map: Map<string, ClientRow>, client: ClientRow) {
+  if (client.glide_row_id) map.set(client.glide_row_id, client);
+  if (client.id) map.set(client.id, client);
+}
+
+function buildClientLookup(clients: ClientRow[]) {
+  const map = new Map<string, ClientRow>();
+  clients.forEach((client) => addClientToLookup(map, client));
+  return map;
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
   );
 }
 
@@ -547,9 +565,17 @@ function NewTaskModal({
   onSaved: (task: TaskRow) => void;
 }) {
   const isEditing = Boolean(task);
+  const initialClient = task?.client_id
+    ? clients.find(
+        (client) =>
+          client.glide_row_id === task.client_id || client.id === task.client_id,
+      )
+    : null;
   const [taskName, setTaskName] = useState(task?.task_name ?? "");
   const [taskDescription, setTaskDescription] = useState(task?.task_description ?? "");
-  const [clientId, setClientId] = useState(task?.client_id ?? "");
+  const [clientId, setClientId] = useState(
+    initialClient?.glide_row_id ?? task?.client_id ?? "",
+  );
   const [assignedToId, setAssignedToId] = useState(
     task?.assigned_to_id ?? assignedTeamMemberId,
   );
@@ -1117,7 +1143,11 @@ export function Tasks() {
       for (let from = 0; ; from += pageSize) {
         const query = supabase
           .from(sourceTable)
-          .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
+          .select(
+            usesAppClients
+              ? "id, glide_row_id, client_name, client_image, program_status_value, csm_team_member_id"
+              : "glide_row_id, client_name, client_image, program_status_value, csm_team_member_id",
+          )
           .eq(
             sourceTable === "clients" ? "company_glide_row_id" : "company_id",
             companyId,
@@ -1132,7 +1162,7 @@ export function Tasks() {
           setCompanyClients([]);
           return;
         }
-        rows.push(...((result.data ?? []) as ClientRow[]));
+        rows.push(...(((result.data ?? []) as unknown) as ClientRow[]));
         if (!usesAppClients || !result.data || result.data.length < pageSize) break;
       }
       if (cancelled) return;
@@ -1217,7 +1247,16 @@ export function Tasks() {
           tasksQuery = tasksQuery.eq("assigned_to_id", csmId);
         }
         if (clientFilterId) {
-          tasksQuery = tasksQuery.eq("client_id", clientFilterId);
+          const selectedClient = companyClients.find(
+            (client) => client.glide_row_id === clientFilterId,
+          );
+          if (usesAppTasks && selectedClient?.id) {
+            tasksQuery = tasksQuery.or(
+              `client_id.eq.${clientFilterId},client_id.eq.${selectedClient.id}`,
+            );
+          } else {
+            tasksQuery = tasksQuery.eq("client_id", clientFilterId);
+          }
         }
         if (search.trim()) {
           const q = `%${search.trim()}%`;
@@ -1280,28 +1319,42 @@ export function Tasks() {
         let clientLookupError: unknown = null;
         for (let index = 0; index < clientIds.length; index += chunkSize) {
           const chunk = clientIds.slice(index, index + chunkSize);
+          const clientSelect = usesAppTasks
+            ? "id, glide_row_id, client_name, client_image, program_status_value, csm_team_member_id"
+            : "glide_row_id, client_name, client_image, program_status_value, csm_team_member_id";
           const clientsResult = await supabase
             .from(usesAppTasks ? "clients" : "backup_company_clients")
-            .select("glide_row_id, client_name, client_image, program_status_value, csm_team_member_id")
+            .select(clientSelect)
             .in("glide_row_id", chunk);
           if (cancelled) return;
           if (clientsResult.error) {
             clientLookupError = clientsResult.error;
             break;
           }
-          clients.push(...((clientsResult.data ?? []) as ClientRow[]));
+          clients.push(...(((clientsResult.data ?? []) as unknown) as ClientRow[]));
+
+          if (usesAppTasks) {
+            const uuidIds = chunk.filter(isUuid);
+            if (uuidIds.length > 0) {
+              const clientsByUuidResult = await supabase
+                .from("clients")
+                .select(clientSelect)
+                .in("id", uuidIds);
+              if (cancelled) return;
+              if (clientsByUuidResult.error) {
+                clientLookupError = clientsByUuidResult.error;
+                break;
+              }
+              clients.push(
+                ...(((clientsByUuidResult.data ?? []) as unknown) as ClientRow[]),
+              );
+            }
+          }
         }
         if (!cancelled) {
           if (clientLookupError)
             console.error("Failed to load task clients:", clientLookupError);
-          setClientById(
-            new Map(
-              clients.map((client) => [
-                client.glide_row_id,
-                client,
-              ]),
-            ),
-          );
+          setClientById(buildClientLookup(clients));
         }
       } else {
         setClientById(new Map());
@@ -1317,6 +1370,7 @@ export function Tasks() {
     appTaskCompanyIds,
     assignedTeamMemberId,
     clientFilterId,
+    companyClients,
     companyId,
     csmId,
     search,
@@ -1749,12 +1803,12 @@ export function Tasks() {
             setTasks((current) => [task, ...current]);
             if (task.client_id && !clientById.has(task.client_id)) {
               const client = companyClients.find(
-                (row) => row.glide_row_id === task.client_id,
+                (row) => row.glide_row_id === task.client_id || row.id === task.client_id,
               );
               if (client) {
                 setClientById((current) => {
                   const next = new Map(current);
-                  next.set(client.glide_row_id, client);
+                  addClientToLookup(next, client);
                   return next;
                 });
               }
