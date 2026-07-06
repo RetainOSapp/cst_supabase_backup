@@ -27,6 +27,7 @@ import {
 } from "../lib/clientAdvocacy.ts";
 
 const MONTH_OPTIONS_COUNT = 25;
+const FUTURE_MONTH_OPTIONS_COUNT = 12;
 
 const COMPANY_QUERY_KEY = "companyId";
 const CSM_QUERY_KEY = "csmId";
@@ -392,10 +393,15 @@ function formatMonthLabel(monthKey: string) {
   });
 }
 
-function listMonthOptionsDescending() {
+function listMonthOptionsDescending(futureMonthCount = 0) {
   const out: { value: string; label: string }[] = [];
   const now = new Date();
-  for (let i = 0; i < MONTH_OPTIONS_COUNT; i++) {
+  for (let i = futureMonthCount; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const key = getMonthKeyFromDate(d);
+    out.push({ value: key, label: formatMonthLabel(key) });
+  }
+  for (let i = 1; i < MONTH_OPTIONS_COUNT; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const key = getMonthKeyFromDate(d);
     out.push({ value: key, label: formatMonthLabel(key) });
@@ -477,14 +483,25 @@ function chartKey(value: string | null | undefined) {
 
 interface MonthDateRangeFilterProps {
   label: string;
+  helpText?: string;
+  futureMonthCount?: number;
   state: MonthDateFilterState;
   onChange: Dispatch<SetStateAction<MonthDateFilterState>>;
 }
 
-function MonthDateRangeFilter({ label, state, onChange }: MonthDateRangeFilterProps) {
+function MonthDateRangeFilter({
+  label,
+  helpText,
+  futureMonthCount = 0,
+  state,
+  onChange,
+}: MonthDateRangeFilterProps) {
   const baseId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
-  const monthOptions = useMemo(() => listMonthOptionsDescending(), []);
+  const monthOptions = useMemo(
+    () => listMonthOptionsDescending(futureMonthCount),
+    [futureMonthCount],
+  );
 
   const filteredMonths = useMemo(() => {
     const q = state.search.trim().toLowerCase();
@@ -533,6 +550,9 @@ function MonthDateRangeFilter({ label, state, onChange }: MonthDateRangeFilterPr
       >
         {label}
       </label>
+      {helpText ? (
+        <p className="mb-1.5 text-xs leading-snug text-gray-500">{helpText}</p>
+      ) : null}
 
       {!state.editingCustom && (
         <div className="flex items-center gap-1">
@@ -4138,11 +4158,14 @@ export function Dashboard() {
 
               <MonthDateRangeFilter
                 label="Date Range"
+                helpText="Used as the reporting window for retained/offboarded/churn activity and as the renewal window for renewal cards."
+                futureMonthCount={FUTURE_MONTH_OPTIONS_COUNT}
                 state={pendingFilters.dateRange}
                 onChange={setPendingDateRange}
               />
               <MonthDateRangeFilter
                 label="Client Start Date"
+                helpText="Filters clients by onboarding/start date."
                 state={pendingFilters.clientStartDate}
                 onChange={setPendingClientStartDate}
               />
