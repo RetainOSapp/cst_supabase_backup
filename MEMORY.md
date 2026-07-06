@@ -610,3 +610,10 @@ For historical context:
 - Updated `src/pages/ClientDetail.tsx`: the secondary pathway modal now allows saving a secondary pathway without a milestone and shows "No milestones for this pathway" when the selected pathway has no milestones.
 - Updated/deployed `supabase/functions/manage-client-milestone/index.ts`: `set_secondary_pathway` now accepts a blank milestone, writes `secondary_offer_milestones_current_offer_id`, leaves `secondary_offer_milestones_current_milestone_id = null`, and records clean history/audit text using the pathway name. Primary pathway, start milestone, and complete milestone actions still require a milestone.
 - Verification: `npm run build` passed in the hotfix worktree. Deployed `manage-client-milestone` to Supabase project `zjauqflzxzsbpnivzsct`. No temporary QA users were created.
+
+## Moves Method Task Dismissal Hotfix - 2026-07-06
+
+- Adam Zomparelli reported that dragging tasks from To Do to Dismissed on the MM Tasks board returned "Unexpected error."
+- Root cause: `manage-client-task` revalidated linked clients on every CSM task update and validated assignees with `id.eq.<assignedToId>` even when the task used a legacy Glide member id. Imported MM tasks can be CSM-owned while pointing at legacy-only client ids; the UUID comparison could throw before the status update.
+- Updated/deployed `supabase/functions/manage-client-task/index.ts`: CSM-owned task updates only revalidate the linked client when the user changes the task's client link, and assignee lookup only compares against `company_members.id` when the supplied id is actually a UUID. Legacy member ids use `legacy_glide_row_id`.
+- Verification: `npm run build` passed in the hotfix worktree. Live smoke test created a temporary MM CSM auth user/member and temporary task assigned to that CSM with a legacy-only client id; the deployed function moved it to `dismissed` successfully. Cleanup verification found 0 temp auth users, members, tasks, history rows, or audit rows.

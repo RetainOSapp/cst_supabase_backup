@@ -62,6 +62,12 @@ function normalizeDate(value: unknown) {
   return date.toISOString();
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 function addDaysIso(value: unknown, days: number) {
   const date = value ? new Date(String(value)) : new Date();
   if (Number.isNaN(date.getTime())) return null;
@@ -231,7 +237,9 @@ Deno.serve(async (req) => {
         body.clientId === undefined
           ? existingTask.client_id
           : nullableText(body.clientId);
-      if (nextClientId) {
+      // Imported tasks can point at legacy client ids that are not app-owned yet.
+      // Re-validate client assignment only when the user changes the client link.
+      if (body.clientId !== undefined && nextClientId) {
         const { data: client, error: clientError } = await supabase
           .from("clients")
           .select("glide_row_id, company_id, csm_team_member_id, csm_secondary_assignee_id")
@@ -264,12 +272,17 @@ Deno.serve(async (req) => {
         body.assignedToId !== undefined || actor.role === "csm";
 
       if (isChangingAssignee && assignedToId) {
-        const { data: member, error: memberError } = await supabase
+        let memberQuery = supabase
           .from("company_members")
           .select("id, legacy_glide_row_id, status")
-          .eq("company_id", company.id)
-          .or(`id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`)
-          .maybeSingle();
+          .eq("company_id", company.id);
+        memberQuery = isUuid(assignedToId)
+          ? memberQuery.or(
+              `id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`,
+            )
+          : memberQuery.eq("legacy_glide_row_id", assignedToId);
+        const { data: member, error: memberError } =
+          await memberQuery.maybeSingle();
         if (memberError) throw memberError;
         if (!member || member.status !== "active") {
           return jsonResponse({ error: "Assigned team member is not active." }, 400);
@@ -480,12 +493,17 @@ Deno.serve(async (req) => {
     }
 
     if (assignedToId) {
-      const { data: member, error: memberError } = await supabase
+      let memberQuery = supabase
         .from("company_members")
         .select("id, legacy_glide_row_id, status")
-        .eq("company_id", company.id)
-        .or(`id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`)
-        .maybeSingle();
+        .eq("company_id", company.id);
+      memberQuery = isUuid(assignedToId)
+        ? memberQuery.or(
+            `id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`,
+          )
+        : memberQuery.eq("legacy_glide_row_id", assignedToId);
+      const { data: member, error: memberError } =
+        await memberQuery.maybeSingle();
       if (memberError) throw memberError;
       if (!member || member.status !== "active") {
         return jsonResponse({ error: "Assigned team member is not active." }, 400);
