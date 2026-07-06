@@ -3008,6 +3008,109 @@ function ViewButton({
     </button>
   );
 }
+
+function paginationItems(page: number, totalPages: number) {
+  const safePage = Math.min(Math.max(page, 1), Math.max(totalPages, 1));
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set<number>([1, totalPages]);
+  for (
+    let candidate = Math.max(2, safePage - 1);
+    candidate <= Math.min(totalPages - 1, safePage + 1);
+    candidate += 1
+  ) {
+    pages.add(candidate);
+  }
+  if (safePage <= 3) {
+    pages.add(2);
+    pages.add(3);
+    pages.add(4);
+  }
+  if (safePage >= totalPages - 2) {
+    pages.add(totalPages - 3);
+    pages.add(totalPages - 2);
+    pages.add(totalPages - 1);
+  }
+
+  const sortedPages = [...pages]
+    .filter((item) => item >= 1 && item <= totalPages)
+    .sort((left, right) => left - right);
+  const items: Array<number | "ellipsis"> = [];
+  sortedPages.forEach((item) => {
+    const previous = items[items.length - 1];
+    if (typeof previous === "number" && item - previous > 1) {
+      items.push("ellipsis");
+    }
+    items.push(item);
+  });
+  return items;
+}
+
+function PaginationControls({
+  page,
+  totalPages,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const items = paginationItems(page, totalPages);
+  return (
+    <nav
+      aria-label="Pagination"
+      className="flex flex-wrap items-center justify-end gap-2"
+    >
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.max(1, page - 1))}
+        disabled={page === 1}
+        className="min-h-10 rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+      >
+        Previous
+      </button>
+      <div className="flex flex-wrap items-center gap-1">
+        {items.map((item, index) =>
+          item === "ellipsis" ? (
+            <span
+              key={`ellipsis-${index}`}
+              className="flex h-10 min-w-8 items-center justify-center px-1 text-sm font-semibold text-[#98a2b3]"
+              aria-hidden="true"
+            >
+              ...
+            </span>
+          ) : (
+            <button
+              key={item}
+              type="button"
+              onClick={() => onPageChange(item)}
+              aria-current={item === page ? "page" : undefined}
+              className={`h-10 min-w-10 rounded-md border px-3 text-sm font-semibold transition-colors cursor-pointer ${
+                item === page
+                  ? "border-[#59abf0] bg-[#eaf4fe] text-[#2b79c4] shadow-sm"
+                  : "border-[#cbd2dc] bg-white text-[#586273] hover:bg-[#f7f9fc] hover:text-[#162b3e]"
+              }`}
+            >
+              {item}
+            </button>
+          ),
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+        disabled={page >= totalPages}
+        className="min-h-10 rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+      >
+        Next
+      </button>
+    </nav>
+  );
+}
+
 function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -5202,29 +5305,11 @@ export function Clients() {
               <p className="text-sm text-[#586273]">
                 Showing {pageStart}-{pageEnd} of {totalClients.toLocaleString()}
               </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                  disabled={page === 1}
-                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                >
-                  Previous
-                </button>
-                <span className="text-sm text-gray-600">
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPage((prev) => Math.min(totalPages, prev + 1))
-                  }
-                  disabled={page >= totalPages}
-                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                >
-                  Next
-                </button>
-              </div>
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                onPageChange={setPage}
+              />
             </div>
           )}
         </div>
@@ -5704,27 +5789,11 @@ function NoteSearchPanel({
           <p className="text-sm text-[#586273]">
             Showing {pageStart}-{pageEnd} of {total.toLocaleString()}
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onPageChange(Math.max(1, page - 1))}
-              disabled={page === 1}
-              className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-            >
-              Previous
-            </button>
-            <span className="text-sm text-gray-600">
-              Page {page} of {totalPages}
-            </span>
-            <button
-              type="button"
-              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-              disabled={page >= totalPages}
-              className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-medium text-[#586273] transition-colors hover:bg-[#f7f9fc] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
-          </div>
+          <PaginationControls
+            page={page}
+            totalPages={totalPages}
+            onPageChange={onPageChange}
+          />
         </div>
       ) : null}
     </div>
