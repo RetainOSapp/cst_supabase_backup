@@ -20,7 +20,11 @@ import { UpForRenewalKpi } from "../components/dashboard/kpis/UpForRenewalKpi.ts
 import { ComingSoonModal, ComingSoonPanel } from "../components/ComingSoon.tsx";
 import { supabase } from "../lib/supabase.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
-import { advocacyDefinitions, type AdvocacyType } from "../lib/clientAdvocacy.ts";
+import {
+  advocacyDefinitions,
+  type AdvocacyAction,
+  type AdvocacyType,
+} from "../lib/clientAdvocacy.ts";
 
 const MONTH_OPTIONS_COUNT = 25;
 
@@ -38,6 +42,8 @@ const MILESTONE_MISMATCH_KEY = "milestone-mismatch";
 
 type DashboardTab = "overview" | "charts" | "ai";
 
+type AdvocacyDetailKey = `advocacy:${AdvocacyType}:${AdvocacyAction}`;
+
 type KpiDetailKey =
   | "active"
   | "front-end"
@@ -46,7 +52,8 @@ type KpiDetailKey =
   | "retained"
   | "churned"
   | "renewing"
-  | "active-renewing";
+  | "active-renewing"
+  | AdvocacyDetailKey;
 
 interface DashboardRpcFilterParams {
   p_company_id: string;
@@ -212,6 +219,12 @@ interface AdvocacyMetric {
   label: string;
   asked: number;
   received: number;
+}
+
+interface AdvocacyDetail {
+  type: AdvocacyType;
+  action: AdvocacyAction;
+  label: string;
 }
 
 interface TtvMetric {
@@ -909,6 +922,26 @@ function countByOrdered<T>(
 
 function chartTotal(data: ChartDatum[]) {
   return data.reduce((sum, item) => sum + item.value, 0);
+}
+
+function advocacyDetailKey(type: AdvocacyType, action: AdvocacyAction): AdvocacyDetailKey {
+  return `advocacy:${type}:${action}`;
+}
+
+function parseAdvocacyDetailKey(key: KpiDetailKey | null): AdvocacyDetail | null {
+  if (!key?.startsWith("advocacy:")) return null;
+  const [, rawType, rawAction] = key.split(":");
+  const definition = advocacyDefinitions.find(
+    (item) => item.type === rawType,
+  );
+  const action =
+    rawAction === "asked" || rawAction === "received" ? rawAction : null;
+  if (!definition || !action) return null;
+  return {
+    type: definition.type,
+    action,
+    label: definition.label,
+  };
 }
 
 function dateFromValue(value: unknown) {
@@ -1613,6 +1646,12 @@ export function Dashboard() {
   );
 
   const detailTitle = useMemo(() => {
+    const advocacyDetail = parseAdvocacyDetailKey(activeDetailKey);
+    if (advocacyDetail) {
+      return `${advocacyDetail.label} ${
+        advocacyDetail.action === "asked" ? "Asked" : "Received"
+      }`;
+    }
     if (activeDetailKey === "active") return "Active Clients";
     if (activeDetailKey === "front-end") return "Front-end Clients";
     if (activeDetailKey === "back-end") return "Back-end Clients";
@@ -3117,6 +3156,92 @@ export function Dashboard() {
       const clientById = new Map(
         reportClients.map((client) => [client.glide_row_id, client]),
       );
+
+      const advocacyDetail = parseAdvocacyDetailKey(detailKey);
+      if (advocacyDetail) {
+        const appCompany = appCompanyByLegacyId.get(appliedFilters.companyId);
+        if (!appCompany?.id) {
+          setDetailRows([]);
+          setDetailTotalCount(0);
+          setDetailLoading(false);
+          return;
+        }
+
+        let eventQuery = supabase
+          .from("client_advocacy_events")
+          .select("client_legacy_id")
+          .eq("company_id", appCompany.id)
+          .eq("advocacy_type", advocacyDetail.type)
+          .eq("action", advocacyDetail.action);
+
+        const eventCsmId = assignedTeamMemberId || appliedFilters.csmId;
+        if (eventCsmId) {
+          eventQuery = eventQuery.eq("csm_team_member_id", eventCsmId);
+        }
+        if (appliedFilters.dateRange.startDate) {
+          eventQuery = eventQuery.gte(
+            "occurred_at",
+            `${appliedFilters.dateRange.startDate}T00:00:00.000Z`,
+          );
+        }
+        if (appliedFilters.dateRange.endDate) {
+          eventQuery = eventQuery.lt(
+            "occurred_at",
+            addDays(
+              new Date(`${appliedFilters.dateRange.endDate}T00:00:00.000Z`),
+              1,
+            ).toISOString(),
+          );
+        }
+
+        const { data: advocacyEvents, error: advocacyError } = await eventQuery
+          .range(0, 4999);
+        if (cancelled) return;
+        if (advocacyError) {
+          console.error("Failed to load advocacy KPI detail rows:", advocacyError);
+          setDetailRows([]);
+          setDetailTotalCount(0);
+          setDetailLoading(false);
+          return;
+        }
+
+        const advocacyClientIds = new Set(
+          ((advocacyEvents ?? []) as { client_legacy_id?: string | null }[])
+            .map((event) => event.client_legacy_id)
+            .filter((id): id is string => Boolean(id)),
+        );
+        let rows = reportClients.filter((client) =>
+          advocacyClientIds.has(client.glide_row_id),
+        );
+
+        const search = detailSearch.trim().toLowerCase();
+        if (search) {
+          rows = rows.filter((client) =>
+            String(client.client_name ?? "").toLowerCase().includes(search),
+          );
+        }
+
+        rows = rows.sort((a, b) =>
+          String(a.client_name ?? "").localeCompare(String(b.client_name ?? "")),
+        );
+
+        const totalCount = rows.length;
+        const start = (detailPage - 1) * DETAIL_PAGE_SIZE;
+        const pageRows = rows.slice(start, start + DETAIL_PAGE_SIZE);
+        setDetailRows(
+          pageRows.map((row) => ({
+            glide_row_id: row.glide_row_id,
+            client_name: row.client_name,
+            client_image: row.client_image,
+            csm_team_member_id: row.csm_team_member_id,
+            renewal_date: null,
+          })),
+        );
+        setDetailTotalCount(totalCount);
+        setDetailLoading(false);
+        return;
+      }
+
       let retainedIds = new Set<string>();
       let renewingIds = new Set<string>();
       let currentSummaryRenewingIds = new Set<string>();
@@ -3425,6 +3550,7 @@ export function Dashboard() {
     appliedFilters.offerId,
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
+    appCompanyByLegacyId,
     appliedProgramValues,
     appliedShowSecondaryFilter,
     appliedUsesAppClients,
@@ -4170,13 +4296,24 @@ export function Dashboard() {
                 metric.asked > 0
                   ? Math.round((metric.received / metric.asked) * 100)
                   : null;
+              const canOpenReceived =
+                canUseDashboardDrilldowns && !advocacyLoading && metric.received > 0;
+              const canOpenAsked =
+                canUseDashboardDrilldowns && !advocacyLoading && metric.asked > 0;
               return (
                 <div
                   key={metric.type}
                   className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <button
+                      type="button"
+                      disabled={!canOpenReceived}
+                      onClick={() =>
+                        openDetailDrawer(advocacyDetailKey(metric.type, "received"))
+                      }
+                      className="min-w-0 rounded-md text-left transition enabled:cursor-pointer enabled:hover:text-indigo-700 disabled:cursor-default"
+                    >
                       <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                         {metric.label}
                       </div>
@@ -4186,20 +4323,27 @@ export function Dashboard() {
                       <div className="mt-1 text-sm text-gray-500">
                         received
                       </div>
-                    </div>
+                    </button>
                     <div className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">
                       {conversion === null ? "--" : `${conversion}%`}
                     </div>
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                    <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
+                    <button
+                      type="button"
+                      disabled={!canOpenAsked}
+                      onClick={() =>
+                        openDetailDrawer(advocacyDetailKey(metric.type, "asked"))
+                      }
+                      className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-left transition enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 disabled:cursor-default"
+                    >
                       <div className="text-xs uppercase tracking-wider text-gray-500">
                         Asked
                       </div>
                       <div className="mt-1 font-semibold text-gray-900">
                         {advocacyLoading ? "..." : metric.asked}
                       </div>
-                    </div>
+                    </button>
                     <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2">
                       <div className="text-xs uppercase tracking-wider text-gray-500">
                         Ratio
