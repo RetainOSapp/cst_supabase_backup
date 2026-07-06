@@ -483,6 +483,7 @@ Next session lock:
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
   - `[qa]` When an Offer filter is applied in Dashboard > Charts, the Clients By Offer chart switches to Clients By Milestone for that selected offer/pathway and keeps client-list drilldowns.
   - 2026-07-02 Loom polish: dashboard-visible copy now uses Pathway for the filter, all-pathways option, chart title, subtitle, and drilldown title. Internal database/query names still use `offer` where that is the current schema contract.
+  - 2026-07-06 MM launch follow-up: Churn Reason chart added to Dashboard > Charts using app-owned churn reason definitions where available, with clickable client drilldown. MM legacy CST churn codes were one-time normalized into Ben's app-owned reason values.
   - 2026-06-17 readiness packet prepared in `DASHBOARD_FORMULA_VALIDATION.md` with current formulas, sources, weak spots, and migration-day checks. Full confidence still waits for Moves Method or another larger migrated company.
 - `[ ]` `[priority: medium]` Dashboard advanced filtering and sorting.
   - Capture Ben pilot feedback: dashboard views should eventually support more operational filtering/sorting directly inside the dashboard.
@@ -1745,7 +1746,7 @@ This phase should happen after core wiring/write-mode foundations are stable. Us
   - Avg. Time to Success chart.
   - Updated vs. Non-Updated Profiles chart.
   - CSM Workload & Capacity chart.
-  - Churn Reason chart.
+  - Churn Reason chart. `[qa]` 2026-07-06 implemented for app-owned/mirror chart data with app-owned label lookup and client drill-through.
   - Renewal Opportunities chart.
   - Offboarding by CSM chart.
 - `[~]` `[polish]` Client screens high-fidelity pass.

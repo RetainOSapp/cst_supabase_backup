@@ -201,6 +201,7 @@ interface DashboardChartData {
   programDistribution: ChartDatum[];
   buyInDistribution: ChartDatum[];
   progressDistribution: ChartDatum[];
+  churnReasonDistribution: ChartDatum[];
   clientsByJourney: ChartDatum[];
   journeyMilestoneIds: string[];
   tasksByStatus: ChartDatum[];
@@ -254,6 +255,7 @@ type ChartClientRow = Record<string, unknown> & {
   offer_milestones_current_milestone_change_date?: string | null;
   outcomes_progress_date?: string | null;
   outcomes_buy_in_date?: string | null;
+  churn_reason_value?: string | null;
   offer_milestones_current_offer_id: string | null;
   csm_team_member_id: string | null;
   csm_secondary_assignee_id?: string | null;
@@ -1418,6 +1420,7 @@ export function Dashboard() {
     programDistribution: [],
     buyInDistribution: [],
     progressDistribution: [],
+    churnReasonDistribution: [],
     clientsByJourney: [],
     journeyMilestoneIds: [],
     tasksByStatus: [],
@@ -3568,6 +3571,7 @@ export function Dashboard() {
         programDistribution: [],
         buyInDistribution: [],
         progressDistribution: [],
+        churnReasonDistribution: [],
         clientsByJourney: [],
         journeyMilestoneIds: [],
         tasksByStatus: [],
@@ -3609,6 +3613,7 @@ export function Dashboard() {
             "offer_milestones_current_milestone_change_date",
             "outcomes_progress_date",
             "outcomes_buy_in_date",
+            "churn_reason_value",
             "offer_milestones_current_offer_id",
             "csm_team_member_id",
             "csm_secondary_assignee_id",
@@ -3628,6 +3633,7 @@ export function Dashboard() {
             "offer_milestones_current_milestone_change_date",
             "outcomes_progress_date",
             "outcomes_buy_in_date",
+            "churn_reason_value",
             "offer_milestones_current_offer_id",
             "csm_team_member_id",
             "csm_secondary_assignee_id",
@@ -3882,6 +3888,46 @@ export function Dashboard() {
             (client) => client.offer_milestones_current_offer_id,
             offerNameById,
           );
+      let churnReasonNameByValue = new Map<string, string>();
+      let churnReasonOrderByValue = new Map<string, number>();
+
+      if (appliedUsesAppClients && appliedAppCompany?.id) {
+        const { data: churnReasons, error: churnReasonsError } = await supabase
+          .from("company_churn_reasons")
+          .select("value, label, position, status")
+          .eq("company_id", appliedAppCompany.id)
+          .order("position", { ascending: true, nullsFirst: false });
+
+        if (!cancelled) {
+          if (churnReasonsError) {
+            console.error("Failed to load churn reason labels:", churnReasonsError);
+          }
+          const rows = (churnReasons ?? []) as {
+            value: string | null;
+            label: string | null;
+            position: number | null;
+            status?: string | null;
+          }[];
+          churnReasonNameByValue = new Map(
+            rows
+              .filter((reason) => reason.value)
+              .map((reason) => [
+                reason.value as string,
+                `${reason.label ?? reason.value}${
+                  reason.status === "archived" ? " (Archived)" : ""
+                }`,
+              ]),
+          );
+          churnReasonOrderByValue = new Map(
+            rows
+              .filter((reason) => reason.value)
+              .map((reason, index) => [
+                reason.value as string,
+                Number(reason.position ?? index),
+              ]),
+          );
+        }
+      }
 
       setChartData({
         programDistribution: countBy(clients, (client) => client.program_status_value),
@@ -3892,6 +3938,12 @@ export function Dashboard() {
         progressDistribution: countBy(
           clients,
           (client) => client.outcomes_progress_for_filtering,
+        ),
+        churnReasonDistribution: countByOrdered(
+          clients.filter((client) => chartKey(client.churn_reason_value) !== "not-set"),
+          (client) => client.churn_reason_value,
+          churnReasonNameByValue,
+          churnReasonOrderByValue,
         ),
         clientsByJourney,
         journeyMilestoneIds,
@@ -4454,6 +4506,24 @@ export function Dashboard() {
                             "Progress",
                             item,
                             (client) => client.outcomes_progress_for_filtering,
+                          )
+                      : undefined
+                  }
+                />
+              </ChartCard>
+              <ChartCard
+                title="Churn Reason"
+                subtitle="Clients grouped by recorded churn/offboarding reason"
+              >
+                <DonutChart
+                  data={chartData.churnReasonDistribution}
+                  onItemClick={
+                    canUseDashboardDrilldowns
+                      ? (item) =>
+                          openChartDetail(
+                            "Churn Reason",
+                            item,
+                            (client) => client.churn_reason_value,
                           )
                       : undefined
                   }
