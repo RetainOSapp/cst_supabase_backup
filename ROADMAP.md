@@ -1059,6 +1059,7 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[ ]` See client update history.
 - `[~]` `[qa]` Update dates of last / next contact.
   - 2026-07-06 MM launch hotfix: Clients list/card now have a one-click contacted button that writes Date of Last Contact through `manage-client-quick-update`; Company Settings has a Contact cadence automation toggle to set Date of Next Contact X days after the contacted action. Awaiting Jay QA on live MM.
+  - 2026-07-06 follow-up: the contacted button now uses the app blue treatment, manual Quick Update / Client Detail contact edits omit untouched date fields so the automation can apply safely, and Fathom/call-summary ingestion plus integration-review apply paths also set Date of Next Contact when the company automation is enabled.
 - `[ ]` Track call attendance.
 - `[~]` `[qa]` Edit Next Steps/contact directly from Client Detail > Program.
   - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.

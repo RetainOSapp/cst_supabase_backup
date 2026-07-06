@@ -627,3 +627,12 @@ For historical context:
 - Updated `src/pages/SaasClientDetail.tsx` and `supabase/functions/manage-company-customization/index.ts`: Company Settings now has a Contact cadence automation section with a toggle and days field stored in `company_settings.metadata`.
 - Deployed `manage-client-quick-update` and `manage-company-customization` to Supabase project `zjauqflzxzsbpnivzsct`.
 - Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; the symlink was removed before commit. Jay live QA is still pending.
+
+## Moves Method Contact Cadence Coverage Follow-up - 2026-07-06
+
+- Jay asked whether the Company Settings "Set next contact with last contact" rule covers three flows: the new roster contacted button, manual Quick Update edits, and Fathom/call-summary webhook updates.
+- Updated `src/pages/Clients.tsx`: roster contacted buttons now use the RetainOS blue treatment; Quick Update only sends Last Contact / Next Contact when the user edits those fields, preventing notes-only updates from accidentally shifting next-contact dates while still allowing the automation to run when Last Contact is manually changed.
+- Updated `src/pages/ClientDetail.tsx`: the Program tab's Update Next Steps/Contact modal uses the same touched-field behavior for contact dates.
+- Updated/deployed `supabase/functions/ingest-client-call-summary/index.ts`: direct call-summary/Fathom events now set `csm_date_of_next_contact` from the company metadata rule when they update Last Contact.
+- Updated/deployed `supabase/functions/manage-integration-review/index.ts`: manually matched/retried call-summary events and reviewed client-update events now apply the same next-contact automation when Last Contact is updated and Next Contact is not explicitly provided.
+- Redeployed `manage-client-quick-update`, `ingest-client-call-summary`, and `manage-integration-review` to Supabase project `zjauqflzxzsbpnivzsct`. Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; the symlink was removed before commit.

@@ -169,6 +169,45 @@ function parseDateTime(value: unknown) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
+function metadataRecord(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function addDaysFromDateIso(value: string, days: number) {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+async function nextContactFromCompanySetting(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  lastContactAt: string | null,
+) {
+  if (!lastContactAt) return null;
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("metadata")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (error) throw error;
+  const metadata = metadataRecord(data?.metadata);
+  if (metadata.contact_touch_sets_next_contact !== true) return null;
+  return addDaysFromDateIso(
+    lastContactAt,
+    boundedInteger(metadata.contact_touch_next_contact_days, 4, 0, 365),
+  );
+}
+
 function compactObject(value: Record<string, unknown>) {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined && item !== ""),
@@ -438,10 +477,10 @@ Deno.serve(async (req) => {
     }
 
     let clientQuery = supabase
-      .from("clients")
-      .select(
-        "id, glide_row_id, client_name, client_email, client_email_secondary, client_email_tertiary, program_status_value, next_steps_value, csm_date_of_last_contact",
-      )
+        .from("clients")
+        .select(
+          "id, glide_row_id, client_name, client_email, client_email_secondary, client_email_tertiary, program_status_value, next_steps_value, csm_date_of_last_contact, csm_date_of_next_contact",
+        )
       .eq("company_id", company.id);
 
     const emailClauses = clientEmails.flatMap((email) => {
@@ -508,12 +547,19 @@ Deno.serve(async (req) => {
     const matchedEmail = matchedClientEmail(client, clientEmails) || clientEmail;
     const previousNextSteps = client.next_steps_value ?? null;
     const previousLastContact = client.csm_date_of_last_contact ?? null;
+    const previousNextContact = client.csm_date_of_next_contact ?? null;
+    const nextContactAt = await nextContactFromCompanySetting(
+      supabase,
+      company.id,
+      startedAt,
+    );
 
     const { data: updatedClient, error: updateClientError } = await supabase
       .from("clients")
       .update({
         next_steps_value: summary,
         csm_date_of_last_contact: startedAt,
+        ...(nextContactAt ? { csm_date_of_next_contact: nextContactAt } : {}),
       })
       .eq("id", client.id)
       .select("*")
@@ -531,6 +577,7 @@ Deno.serve(async (req) => {
         summary,
         next_steps: summary,
         last_contact_at: startedAt,
+        next_contact_at: nextContactAt,
         notes: summary,
         metadata: {
           integration_intake_event_id: intakeEvent.id,
@@ -542,6 +589,7 @@ Deno.serve(async (req) => {
           title: nullableText(body.title),
           previous_next_steps: previousNextSteps,
           previous_last_contact_at: previousLastContact,
+          previous_next_contact_at: previousNextContact,
         },
         payload: {
           integration_type: "call_summary_next_steps",
@@ -567,6 +615,7 @@ Deno.serve(async (req) => {
           history_event_id: historyEvent.id,
           previous_next_steps: previousNextSteps,
           previous_last_contact_at: previousLastContact,
+          previous_next_contact_at: previousNextContact,
         },
       })
       .eq("id", intakeEvent.id)
@@ -586,10 +635,12 @@ Deno.serve(async (req) => {
       before_data: {
         next_steps_value: previousNextSteps,
         csm_date_of_last_contact: previousLastContact,
+        csm_date_of_next_contact: previousNextContact,
       },
       after_data: {
         next_steps_value: updatedClient.next_steps_value,
         csm_date_of_last_contact: updatedClient.csm_date_of_last_contact,
+        csm_date_of_next_contact: updatedClient.csm_date_of_next_contact,
       },
       metadata: {
         integration_intake_event_id: processedEvent.id,

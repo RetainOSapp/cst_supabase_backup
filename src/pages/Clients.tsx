@@ -1489,6 +1489,8 @@ function QuickUpdateModal({
   const [nextContactAt, setNextContactAt] = useState(
     toDateInputValue(valueFrom(client, nextContactColumns)),
   );
+  const [lastContactTouched, setLastContactTouched] = useState(false);
+  const [nextContactTouched, setNextContactTouched] = useState(false);
   const [successStatus, setSuccessStatus] = useState(
     normalizeOutcome(valueFrom(client, successColumns)),
   );
@@ -1868,8 +1870,8 @@ function QuickUpdateModal({
           companyLegacyId,
           clientLegacyId: client.glide_row_id,
           nextSteps,
-          lastContactAt,
-          nextContactAt,
+          ...(lastContactTouched ? { lastContactAt } : {}),
+          ...(nextContactTouched ? { nextContactAt } : {}),
           successStatus,
           progressStatus,
           buyInStatus,
@@ -2108,7 +2110,10 @@ function QuickUpdateModal({
                 type="datetime-local"
                 disabled={!isPilotCompany || saving}
                 value={lastContactAt}
-                onChange={(event) => setLastContactAt(event.target.value)}
+                onChange={(event) => {
+                  setLastContactTouched(true);
+                  setLastContactAt(event.target.value);
+                }}
                 className="retainos-input"
               />
             </label>
@@ -2118,7 +2123,10 @@ function QuickUpdateModal({
                 type="date"
                 disabled={!isPilotCompany || saving}
                 value={nextContactAt}
-                onChange={(event) => setNextContactAt(event.target.value)}
+                onChange={(event) => {
+                  setNextContactTouched(true);
+                  setNextContactAt(event.target.value);
+                }}
                 className="retainos-input"
               />
             </label>
@@ -5308,10 +5316,10 @@ function ClientTable({
                           event.stopPropagation();
                           onMarkContacted(client);
                         }}
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[#34b389] bg-white text-[#2a9272] shadow-sm transition-colors hover:bg-[#e7f6f0] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[#59abf0] bg-white text-[#2b79c4] shadow-sm transition-colors hover:bg-[#eaf4fe] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                       >
                         {isMarkingContacted ? (
-                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#34b389] border-t-transparent" />
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2b79c4] border-t-transparent" />
                         ) : (
                           <CalendarContactIcon />
                         )}
@@ -5471,10 +5479,10 @@ function ClientCards({
                       event.stopPropagation();
                       onMarkContacted(client);
                     }}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#34b389] bg-white text-[#2a9272] shadow-sm transition-colors hover:bg-[#e7f6f0] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#59abf0] bg-white text-[#2b79c4] shadow-sm transition-colors hover:bg-[#eaf4fe] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                   >
                     {isMarkingContacted ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#34b389] border-t-transparent" />
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2b79c4] border-t-transparent" />
                     ) : (
                       <CalendarContactIcon />
                     )}

@@ -2099,6 +2099,8 @@ function ClientNextStepsModal({
   const [nextContactAt, setNextContactAt] = useState(
     dateInputValue(valueFrom(client, nextContactFieldCandidates)),
   );
+  const [lastContactTouched, setLastContactTouched] = useState(false);
+  const [nextContactTouched, setNextContactTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -2115,8 +2117,8 @@ function ClientNextStepsModal({
           companyLegacyId: client.company_glide_row_id ?? client.company_id,
           clientLegacyId: client.glide_row_id,
           nextSteps,
-          lastContactAt,
-          nextContactAt,
+          ...(lastContactTouched ? { lastContactAt } : {}),
+          ...(nextContactTouched ? { nextContactAt } : {}),
         },
       },
     );
@@ -2187,7 +2189,10 @@ function ClientNextStepsModal({
               <input
                 type="datetime-local"
                 value={lastContactAt}
-                onChange={(event) => setLastContactAt(event.target.value)}
+                onChange={(event) => {
+                  setLastContactTouched(true);
+                  setLastContactAt(event.target.value);
+                }}
                 disabled={saving}
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 disabled:bg-gray-50"
               />
@@ -2199,7 +2204,10 @@ function ClientNextStepsModal({
               <input
                 type="date"
                 value={nextContactAt}
-                onChange={(event) => setNextContactAt(event.target.value)}
+                onChange={(event) => {
+                  setNextContactTouched(true);
+                  setNextContactAt(event.target.value);
+                }}
                 disabled={saving}
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm leading-6 text-gray-900 disabled:bg-gray-50"
               />
@@ -2220,7 +2228,10 @@ function ClientNextStepsModal({
             </button>
             <button
               type="submit"
-              disabled={saving || (!nextSteps.trim() && !lastContactAt && !nextContactAt)}
+              disabled={
+                saving ||
+                (!nextSteps.trim() && !lastContactTouched && !nextContactTouched)
+              }
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
               {saving ? "Saving..." : "Save Next Steps/Contact"}
