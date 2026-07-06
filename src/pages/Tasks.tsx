@@ -136,9 +136,17 @@ function getInitials(name: string | null | undefined) {
   );
 }
 
+function normalizeLookupKey(value: unknown) {
+  if (!isPresent(value)) return null;
+  const key = String(value).trim();
+  return key || null;
+}
+
 function addClientToLookup(map: Map<string, ClientRow>, client: ClientRow) {
-  if (client.glide_row_id) map.set(client.glide_row_id, client);
-  if (client.id) map.set(client.id, client);
+  const legacyId = normalizeLookupKey(client.glide_row_id);
+  const appId = normalizeLookupKey(client.id);
+  if (legacyId) map.set(legacyId, client);
+  if (appId) map.set(appId, client);
 }
 
 function buildClientLookup(clients: ClientRow[]) {
@@ -237,6 +245,65 @@ function taskMetadata(task: TaskRow | null | undefined) {
     : {};
 }
 
+function taskClientLookupKeys(task: TaskRow | null | undefined) {
+  const metadata = taskMetadata(task);
+  const rawKeys = [
+    task?.client_id,
+    task?.clientId,
+    task?.client_glide_row_id,
+    task?.clientGlideRowId,
+    task?.legacy_client_id,
+    task?.legacyClientId,
+    task?.legacy_client_glide_row_id,
+    task?.matched_legacy_client_glide_row_id,
+    task?.source_client_id,
+    task?.sourceClientId,
+    metadata.client_id,
+    metadata.clientId,
+    metadata.client_glide_row_id,
+    metadata.clientGlideRowId,
+    metadata.legacy_client_id,
+    metadata.legacyClientId,
+    metadata.legacy_client_glide_row_id,
+    metadata.matched_legacy_client_glide_row_id,
+    metadata.source_client_id,
+    metadata.sourceClientId,
+  ];
+  return [...new Set(rawKeys.map(normalizeLookupKey).filter(Boolean))] as string[];
+}
+
+function taskClientNameFallback(task: TaskRow | null | undefined) {
+  const metadata = taskMetadata(task);
+  const rawNames = [
+    task?.client_name,
+    task?.clientName,
+    task?.source_client_name,
+    task?.sourceClientName,
+    metadata.client_name,
+    metadata.clientName,
+    metadata.source_client_name,
+    metadata.sourceClientName,
+  ];
+  for (const name of rawNames) {
+    const normalized = normalizeLookupKey(name);
+    if (normalized) return normalized;
+  }
+  return "Unknown client";
+}
+
+function resolveTaskClient(
+  task: TaskRow | null | undefined,
+  ...lookups: Array<Map<string, ClientRow>>
+) {
+  for (const key of taskClientLookupKeys(task)) {
+    for (const lookup of lookups) {
+      const client = lookup.get(key);
+      if (client) return client;
+    }
+  }
+  return undefined;
+}
+
 function getRecurringIntervalDays(task: TaskRow | null | undefined) {
   const days = Number(taskMetadata(task).recurring_interval_days ?? 7);
   return Number.isFinite(days) ? Math.min(365, Math.max(1, Math.round(days))) : 7;
@@ -307,6 +374,7 @@ function readTasksCache() {
 function TaskCard({
   task,
   client,
+  fallbackClientName,
   teamMemberNameById,
   canManage,
   isMoving,
@@ -316,6 +384,7 @@ function TaskCard({
 }: {
   task: TaskRow;
   client: ClientRow | undefined;
+  fallbackClientName: string;
   teamMemberNameById: Map<string, string>;
   canManage: boolean;
   isMoving: boolean;
@@ -405,8 +474,13 @@ function TaskCard({
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-2.5">
         <Link
           to={client ? `/clients/${encodeURIComponent(client.glide_row_id)}` : "#"}
-          onClick={(event) => event.stopPropagation()}
-          className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 hover:text-indigo-700"
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!client) event.preventDefault();
+          }}
+          className={`flex min-w-0 items-center gap-2 text-sm font-medium ${
+            client ? "text-gray-800 hover:text-indigo-700" : "text-gray-700"
+          }`}
         >
           {client?.client_image ? (
             <img
@@ -416,10 +490,10 @@ function TaskCard({
             />
           ) : (
             <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
-              {getInitials(client?.client_name)}
+              {getInitials(client?.client_name ?? fallbackClientName)}
             </span>
           )}
-          <span className="truncate">{client?.client_name ?? "Unknown client"}</span>
+          <span className="truncate">{client?.client_name ?? fallbackClientName}</span>
         </Link>
         {client?.program_status_value && (
           <ProgramStatusPill value={client.program_status_value} />
@@ -432,6 +506,7 @@ function TaskCard({
 function TaskListTable({
   tasks,
   clientById,
+  companyClientById,
   teamMemberNameById,
   canManage,
   movingTaskId,
@@ -441,6 +516,7 @@ function TaskListTable({
 }: {
   tasks: TaskRow[];
   clientById: Map<string, ClientRow>;
+  companyClientById: Map<string, ClientRow>;
   teamMemberNameById: Map<string, string>;
   canManage: boolean;
   movingTaskId: string | null;
@@ -467,9 +543,8 @@ function TaskListTable({
         </thead>
         <tbody className="divide-y divide-gray-200">
           {tasks.map((task) => {
-            const client = task.client_id
-              ? clientById.get(task.client_id)
-              : undefined;
+            const client = resolveTaskClient(task, clientById, companyClientById);
+            const fallbackClientName = taskClientNameFallback(task);
             const dueSignal = dueBadge(task);
             return (
               <tr
@@ -503,7 +578,7 @@ function TaskListTable({
                       {client.client_name ?? "Unnamed client"}
                     </Link>
                   ) : (
-                    "Unknown client"
+                    fallbackClientName
                   )}
                 </td>
                 <td className="px-4 py-3">
@@ -951,6 +1026,10 @@ export function Tasks() {
   const isUsingAppTasks = appTaskCompanyIds.has(companyId);
   const canManageTasks =
     capabilities.canAccessTasks && Boolean(companyId) && isUsingAppTasks;
+  const companyClientById = useMemo(
+    () => buildClientLookup(companyClients),
+    [companyClients],
+  );
 
   const availableTeamMembers = useMemo(
     () =>
@@ -1311,8 +1390,8 @@ export function Tasks() {
       setTasks(rows);
 
       const clientIds = [
-        ...new Set(rows.map((task) => task.client_id).filter(Boolean)),
-      ] as string[];
+        ...new Set(rows.flatMap((task) => taskClientLookupKeys(task))),
+      ];
       if (clientIds.length > 0) {
         const clients: ClientRow[] = [];
         const chunkSize = 150;
@@ -1354,10 +1433,10 @@ export function Tasks() {
         if (!cancelled) {
           if (clientLookupError)
             console.error("Failed to load task clients:", clientLookupError);
-          setClientById(buildClientLookup(clients));
+          setClientById(buildClientLookup([...companyClients, ...clients]));
         }
       } else {
-        setClientById(new Map());
+        setClientById(companyClientById);
       }
 
       if (!cancelled) setLoadingTasks(false);
@@ -1370,6 +1449,7 @@ export function Tasks() {
     appTaskCompanyIds,
     assignedTeamMemberId,
     clientFilterId,
+    companyClientById,
     companyClients,
     companyId,
     csmId,
@@ -1715,6 +1795,7 @@ export function Tasks() {
                 <TaskListTable
                   tasks={column.tasks}
                   clientById={clientById}
+                  companyClientById={companyClientById}
                   teamMemberNameById={teamMemberNameById}
                   canManage={canManageTasks}
                   movingTaskId={movingTaskId}
@@ -1764,9 +1845,8 @@ export function Tasks() {
                   <TaskCard
                     key={task.glide_row_id}
                     task={task}
-                    client={
-                      task.client_id ? clientById.get(task.client_id) : undefined
-                    }
+                    client={resolveTaskClient(task, clientById, companyClientById)}
+                    fallbackClientName={taskClientNameFallback(task)}
                     teamMemberNameById={teamMemberNameById}
                     canManage={canManageTasks}
                     isMoving={movingTaskId === task.glide_row_id}
