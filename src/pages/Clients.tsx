@@ -4398,14 +4398,16 @@ export function Clients() {
         return;
       }
 
-      const { error: generationError } = await supabase.rpc(
-        "generate_company_notifications",
-        { p_company_id: appCompany.id },
-      );
-      if (generationError) {
-        console.error("Failed to generate RetainOS notifications:", generationError);
-        await fallbackToClientFields();
-        return;
+      if (!assignedTeamMemberId) {
+        const { error: generationError } = await supabase.rpc(
+          "generate_company_notifications",
+          { p_company_id: appCompany.id },
+        );
+        if (generationError) {
+          console.error("Failed to generate RetainOS notifications:", generationError);
+          await fallbackToClientFields();
+          return;
+        }
       }
 
       const start = new Date();
@@ -4414,7 +4416,37 @@ export function Clients() {
       oldest.setDate(oldest.getDate() - 30);
       const end = new Date(start);
       end.setDate(end.getDate() + 8);
-      const { data: notificationRows, error: notificationsError } = await supabase
+
+      let scopedClientIds: string[] | null = null;
+      if (assignedTeamMemberId) {
+        const { data: assignedClients, error: assignedClientsError } = await supabase
+          .from("clients")
+          .select("id")
+          .eq("company_id", appCompany.id)
+          .or(
+            `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+          )
+          .is("archived_at", null)
+          .range(0, 499);
+        if (cancelled) return;
+        if (assignedClientsError) {
+          console.error(
+            "Failed to load assigned clients for reminders:",
+            assignedClientsError,
+          );
+          await fallbackToClientFields();
+          return;
+        }
+        scopedClientIds = (assignedClients ?? [])
+          .map((client) => String(client.id ?? ""))
+          .filter(Boolean);
+        if (scopedClientIds.length === 0) {
+          setPilotReminders([]);
+          return;
+        }
+      }
+
+      let notificationsQuery = supabase
         .from("notifications")
         .select(
           "id, type, title, due_at, client_id, legacy_client_id, metadata",
@@ -4432,6 +4464,11 @@ export function Clients() {
         .lt("due_at", end.toISOString())
         .order("due_at", { ascending: true, nullsFirst: false })
         .range(0, 199);
+      if (scopedClientIds) {
+        notificationsQuery = notificationsQuery.in("client_id", scopedClientIds);
+      }
+      const { data: notificationRows, error: notificationsError } =
+        await notificationsQuery;
       if (cancelled) return;
       if (notificationsError) {
         console.error("Failed to load RetainOS notifications:", notificationsError);
