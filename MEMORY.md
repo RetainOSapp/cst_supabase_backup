@@ -617,3 +617,13 @@ For historical context:
 - Root cause: `manage-client-task` revalidated linked clients on every CSM task update and validated assignees with `id.eq.<assignedToId>` even when the task used a legacy Glide member id. Imported MM tasks can be CSM-owned while pointing at legacy-only client ids; the UUID comparison could throw before the status update.
 - Updated/deployed `supabase/functions/manage-client-task/index.ts`: CSM-owned task updates only revalidate the linked client when the user changes the task's client link, and assignee lookup only compares against `company_members.id` when the supplied id is actually a UUID. Legacy member ids use `legacy_glide_row_id`.
 - Verification: `npm run build` passed in the hotfix worktree. Live smoke test created a temporary MM CSM auth user/member and temporary task assigned to that CSM with a legacy-only client id; the deployed function moved it to `dismissed` successfully. Cleanup verification found 0 temp auth users, members, tasks, history rows, or audit rows.
+
+## Moves Method Contacted Button Hotfix - 2026-07-06
+
+- Jay/coach feedback from the MM launch: RetainOS needed the old CST one-click contacted action so CSMs can mark quick touchpoints without opening Quick Update.
+- Used the separate clean hotfix worktree from `origin/main`; did not touch the dirty local `security-phase-0` project.
+- Updated `src/pages/Clients.tsx`: Clients list and card views now show a compact calendar-check icon for app-owned companies where the user can Quick Update. Clicking it calls `manage-client-quick-update` with `contactTouch: true` and updates Last Contact to today, then refreshes the visible client row/card.
+- Updated `supabase/functions/manage-client-quick-update/index.ts`: the function now preserves fields that are not sent, so the contacted action can update only Last Contact. If company settings metadata enables `contact_touch_sets_next_contact`, the function also sets Next Contact to Last Contact plus `contact_touch_next_contact_days`.
+- Updated `src/pages/SaasClientDetail.tsx` and `supabase/functions/manage-company-customization/index.ts`: Company Settings now has a Contact cadence automation section with a toggle and days field stored in `company_settings.metadata`.
+- Deployed `manage-client-quick-update` and `manage-company-customization` to Supabase project `zjauqflzxzsbpnivzsct`.
+- Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; the symlink was removed before commit. Jay live QA is still pending.

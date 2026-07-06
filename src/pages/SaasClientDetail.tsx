@@ -174,6 +174,8 @@ interface CompanySettingsRow {
   updated_at?: string | null;
 }
 
+const DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS = 4;
+
 type SettingsNotificationPreference = NotificationPreference;
 
 interface IntegrationIntakeEventRow {
@@ -2543,6 +2545,42 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_call_ai_for_csms: company?.enable_call_ai_for_csms === true,
     enable_embeds: false,
     enable_zapier_client_create: false,
+    metadata: {
+      contact_touch_sets_next_contact: false,
+      contact_touch_next_contact_days: DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS,
+    },
+  };
+}
+
+function settingsMetadata(settings: CompanySettingsRow) {
+  return settings.metadata && typeof settings.metadata === "object"
+    ? settings.metadata
+    : {};
+}
+
+function contactTouchSetsNextContact(settings: CompanySettingsRow) {
+  return settingsMetadata(settings).contact_touch_sets_next_contact === true;
+}
+
+function contactTouchNextContactDays(settings: CompanySettingsRow) {
+  const days = Number(settingsMetadata(settings).contact_touch_next_contact_days);
+  if (!Number.isFinite(days)) return DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS;
+  return Math.min(365, Math.max(0, Math.round(days)));
+}
+
+function updateContactTouchMetadata(
+  settings: CompanySettingsRow,
+  patch: Partial<{
+    contact_touch_sets_next_contact: boolean;
+    contact_touch_next_contact_days: number;
+  }>,
+): CompanySettingsRow {
+  return {
+    ...settings,
+    metadata: {
+      ...settingsMetadata(settings),
+      ...patch,
+    },
   };
 }
 
@@ -3476,6 +3514,8 @@ function CompanySettingsSetup({
           enableCallAiForCsms: draft.enable_call_ai_for_csms,
           enableEmbeds: draft.enable_embeds,
           enableZapierClientCreate: draft.enable_zapier_client_create,
+          contactTouchSetsNextContact: contactTouchSetsNextContact(draft),
+          contactTouchNextContactDays: contactTouchNextContactDays(draft),
         },
       },
     );
@@ -3716,6 +3756,54 @@ function CompanySettingsSetup({
               setDraft((current) => ({ ...current, default_calendar_mode: value }))
             }
           />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Contact cadence automation
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Configure the fast contacted action used by CSMs from the client roster.
+          </p>
+        </div>
+        <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <SettingsFlag
+            label="Set next contact with last contact"
+            description="When a team member marks a client as contacted, automatically schedule the next contact date."
+            checked={contactTouchSetsNextContact(draft)}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) =>
+                updateContactTouchMetadata(current, {
+                  contact_touch_sets_next_contact: checked,
+                }),
+              )
+            }
+          />
+          <label className="block text-sm font-medium text-[#344054]">
+            Number of days
+            <input
+              type="number"
+              min="0"
+              max="365"
+              disabled={disabled || !contactTouchSetsNextContact(draft)}
+              value={contactTouchNextContactDays(draft)}
+              onChange={(event) =>
+                setDraft((current) =>
+                  updateContactTouchMetadata(current, {
+                    contact_touch_next_contact_days: Number.isFinite(
+                      Number(event.target.value),
+                    )
+                      ? Number(event.target.value)
+                      : DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS,
+                  }),
+                )
+              }
+              className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            />
+          </label>
         </div>
       </section>
 

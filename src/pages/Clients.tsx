@@ -1303,6 +1303,26 @@ function OutcomePill({ value }: { value: unknown }) {
     </span>
   );
 }
+function CalendarContactIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <path d="M8 2v4" />
+      <path d="M16 2v4" />
+      <path d="M3 10h18" />
+      <path d="m8.5 15 2.25 2.25L16 12" />
+    </svg>
+  );
+}
 function ReadOnlyField({
   label,
   value,
@@ -3176,6 +3196,13 @@ export function Clients() {
   const [quickUpdateClient, setQuickUpdateClient] = useState<ClientRow | null>(
     null,
   );
+  const [contactTouchClientId, setContactTouchClientId] = useState<string | null>(
+    null,
+  );
+  const [contactTouchMessage, setContactTouchMessage] = useState<string | null>(
+    null,
+  );
+  const [contactTouchError, setContactTouchError] = useState<string | null>(null);
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [expandedFilterSections, setExpandedFilterSections] = useState({
     journey: true,
@@ -3266,6 +3293,71 @@ export function Clients() {
     isUsingAppClients &&
     Boolean(appliedFilters.companyId || filters.companyId);
   const canQuickUpdateClients = capabilities.canQuickUpdate && isUsingAppClients;
+
+  const handleMarkContacted = useCallback(
+    async (client: ClientRow) => {
+      if (!canQuickUpdateClients || contactTouchClientId) return;
+      const companyLegacyId =
+        client.company_id ?? appliedFilters.companyId ?? filters.companyId ?? "";
+      if (!companyLegacyId) {
+        setContactTouchError("Missing company id.");
+        setContactTouchMessage(null);
+        return;
+      }
+
+      setContactTouchClientId(client.glide_row_id);
+      setContactTouchError(null);
+      setContactTouchMessage(null);
+      const { data, error } = await supabase.functions.invoke(
+        "manage-client-quick-update",
+        {
+          body: {
+            companyLegacyId,
+            clientLegacyId: client.glide_row_id,
+            contactTouch: true,
+            lastContactAt: new Date().toISOString(),
+          },
+        },
+      );
+      setContactTouchClientId(null);
+
+      if (error) {
+        setContactTouchError(error.message);
+        return;
+      }
+      if (data?.error) {
+        setContactTouchError(data.error);
+        return;
+      }
+      if (data?.client) {
+        const updatedClient = mapAppClientRow(data.client as Record<string, unknown>);
+        setClients((current) =>
+          current.map((row) =>
+            row.glide_row_id === updatedClient.glide_row_id ? updatedClient : row,
+          ),
+        );
+        setCalendarClients((current) =>
+          current.map((row) =>
+            row.glide_row_id === updatedClient.glide_row_id ? updatedClient : row,
+          ),
+        );
+        setQuickUpdateClient((current) =>
+          current?.glide_row_id === updatedClient.glide_row_id
+            ? updatedClient
+            : current,
+        );
+      }
+      setContactTouchMessage(
+        `${client.client_name ?? "Client"} marked as contacted today.`,
+      );
+    },
+    [
+      appliedFilters.companyId,
+      canQuickUpdateClients,
+      contactTouchClientId,
+      filters.companyId,
+    ],
+  );
 
   useEffect(() => {
     writeClientsCache({
@@ -4948,6 +5040,16 @@ export function Clients() {
               </div>
             )}
           </div>
+          {contactTouchError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {contactTouchError}
+            </div>
+          ) : null}
+          {contactTouchMessage ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              {contactTouchMessage}
+            </div>
+          ) : null}
           {viewMode === "notes" ? (
             <NoteSearchPanel
               search={noteSearch}
@@ -5025,6 +5127,10 @@ export function Clients() {
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
               onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
+              onMarkContacted={
+                canQuickUpdateClients ? handleMarkContacted : undefined
+              }
+              markingContactedClientId={contactTouchClientId}
             />
           ) : (
             <ClientCards
@@ -5038,6 +5144,10 @@ export function Clients() {
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
               onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
+              onMarkContacted={
+                canQuickUpdateClients ? handleMarkContacted : undefined
+              }
+              markingContactedClientId={contactTouchClientId}
             />
           )}
           {(viewMode === "list" || viewMode === "card") &&
@@ -5117,6 +5227,8 @@ function ClientTable({
   showArchetypes,
   onOpenClient,
   onQuickUpdate,
+  onMarkContacted,
+  markingContactedClientId,
 }: {
   clients: ClientRow[];
   programChoices: ProgramChoice[];
@@ -5134,6 +5246,8 @@ function ClientTable({
   showArchetypes: boolean;
   onOpenClient: (id: string) => void;
   onQuickUpdate?: (client: ClientRow) => void;
+  onMarkContacted?: (client: ClientRow) => void;
+  markingContactedClientId?: string | null;
 }) {
   return (
     <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white shadow-sm">
@@ -5165,6 +5279,8 @@ function ClientTable({
         <tbody className="divide-y divide-[#e4e9f0]">
           {clients.map((client) => {
             const meta = clientMeta(client);
+            const isMarkingContacted =
+              markingContactedClientId === client.glide_row_id;
             return (
               <tr
                 key={client.glide_row_id}
@@ -5182,6 +5298,25 @@ function ClientTable({
                         {client.client_name ?? "Unnamed client"}
                       </button>
                     </div>
+                    {onMarkContacted ? (
+                      <button
+                        type="button"
+                        title="Mark contacted today"
+                        aria-label={`Mark ${client.client_name ?? "client"} as contacted today`}
+                        disabled={isMarkingContacted}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onMarkContacted(client);
+                        }}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[#34b389] bg-white text-[#2a9272] shadow-sm transition-colors hover:bg-[#e7f6f0] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                      >
+                        {isMarkingContacted ? (
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#34b389] border-t-transparent" />
+                        ) : (
+                          <CalendarContactIcon />
+                        )}
+                      </button>
+                    ) : null}
                   </div>
                 </td>
                 <td className="px-4 py-3 text-sm text-[#586273]">
@@ -5250,6 +5385,8 @@ function ClientCards({
   showArchetypes,
   onOpenClient,
   onQuickUpdate,
+  onMarkContacted,
+  markingContactedClientId,
 }: {
   clients: ClientRow[];
   programChoices: ProgramChoice[];
@@ -5267,11 +5404,15 @@ function ClientCards({
   showArchetypes: boolean;
   onOpenClient: (id: string) => void;
   onQuickUpdate?: (client: ClientRow) => void;
+  onMarkContacted?: (client: ClientRow) => void;
+  markingContactedClientId?: string | null;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {clients.map((client) => {
         const meta = clientMeta(client);
+        const isMarkingContacted =
+          markingContactedClientId === client.glide_row_id;
         return (
           <div
             key={client.glide_row_id}
@@ -5318,13 +5459,33 @@ function ClientCards({
               <MiniMeta label="Renewal" value={formatDate(meta.renewal)} />
               <MiniMeta label="Pathway" value={displayValue(meta.pathway)} />
             </div>
-            {onQuickUpdate && (
+            {(onQuickUpdate || onMarkContacted) && (
               <div className="mt-4 flex justify-end gap-2">
+                {onMarkContacted ? (
+                  <button
+                    type="button"
+                    title="Mark contacted today"
+                    aria-label={`Mark ${client.client_name ?? "client"} as contacted today`}
+                    disabled={isMarkingContacted}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onMarkContacted(client);
+                    }}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#34b389] bg-white text-[#2a9272] shadow-sm transition-colors hover:bg-[#e7f6f0] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                  >
+                    {isMarkingContacted ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#34b389] border-t-transparent" />
+                    ) : (
+                      <CalendarContactIcon />
+                    )}
+                  </button>
+                ) : null}
                 <button
                   type="button"
+                  disabled={!onQuickUpdate}
                   onClick={(event) => {
                     event.stopPropagation();
-                    onQuickUpdate(client);
+                    onQuickUpdate?.(client);
                   }}
                   className="rounded-full border border-[#59abf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#2b79c4] transition-colors hover:bg-[#eaf4fe] cursor-pointer"
                 >

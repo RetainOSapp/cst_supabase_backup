@@ -61,6 +61,29 @@ function parseDateTime(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function hasOwn(record: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function metadataRecord(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function addDaysFromDateIso(value: string, days: number) {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
 function parseAdvocacyEvents(value: unknown) {
   const rows = Array.isArray(value) ? value : [];
   return rows
@@ -412,13 +435,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    const nextSteps = cleanText(body.nextSteps);
+    const hasNextSteps = hasOwn(body, "nextSteps");
+    const hasLastContactAt = hasOwn(body, "lastContactAt");
+    const hasNextContactAt = hasOwn(body, "nextContactAt");
+    const hasSuccessStatus = hasOwn(body, "successStatus");
+    const hasProgressStatus = hasOwn(body, "progressStatus");
+    const hasBuyInStatus = hasOwn(body, "buyInStatus");
+    const isContactTouch = body.contactTouch === true;
+
+    const nextSteps = hasNextSteps ? cleanText(body.nextSteps) : "";
     const notes = cleanText(body.notes);
-    const lastContactAt = parseDateTime(body.lastContactAt);
-    const nextContactAt = parseDateTime(body.nextContactAt);
-    const successStatus = cleanText(body.successStatus);
-    const progressStatus = cleanText(body.progressStatus);
-    const buyInStatus = cleanText(body.buyInStatus);
+    const lastContactAt = hasLastContactAt
+      ? parseDateTime(body.lastContactAt)
+      : null;
+    let nextContactAt = hasNextContactAt
+      ? parseDateTime(body.nextContactAt)
+      : null;
+    const successStatus = hasSuccessStatus ? cleanText(body.successStatus) : "";
+    const progressStatus = hasProgressStatus ? cleanText(body.progressStatus) : "";
+    const buyInStatus = hasBuyInStatus ? cleanText(body.buyInStatus) : "";
     const advocacyEvents = parseAdvocacyEvents(body.advocacyEvents);
     const customFieldUpdates = await prepareCustomFieldUpdates(
       supabase,
@@ -427,14 +462,33 @@ Deno.serve(async (req) => {
       body.customFields,
     );
 
+    if (lastContactAt && !hasNextContactAt) {
+      const { data: settings, error: settingsError } = await supabase
+        .from("company_settings")
+        .select("metadata")
+        .eq("company_id", company.id)
+        .maybeSingle();
+      if (settingsError) throw settingsError;
+      const metadata = metadataRecord(settings?.metadata);
+      if (metadata.contact_touch_sets_next_contact === true) {
+        const days = boundedInteger(
+          metadata.contact_touch_next_contact_days,
+          4,
+          0,
+          365,
+        );
+        nextContactAt = addDaysFromDateIso(lastContactAt, days);
+      }
+    }
+
     if (
-      !nextSteps &&
+      !hasNextSteps &&
       !notes &&
-      !lastContactAt &&
-      !nextContactAt &&
-      !successStatus &&
-      !progressStatus &&
-      !buyInStatus &&
+      !hasLastContactAt &&
+      !hasNextContactAt &&
+      !hasSuccessStatus &&
+      !hasProgressStatus &&
+      !hasBuyInStatus &&
       advocacyEvents.length === 0 &&
       customFieldUpdates.changes.length === 0
     ) {
@@ -452,17 +506,18 @@ Deno.serve(async (req) => {
       event_type: "quick_update",
       source: "client_quick_update",
       title: `Quick update for ${client.client_name ?? "client"}`,
-      summary: notes || nextSteps || null,
-      next_steps: nextSteps || null,
-      last_contact_at: lastContactAt,
-      next_contact_at: nextContactAt,
-      success_status: successStatus || null,
-      progress_status: progressStatus || null,
-      buy_in_status: buyInStatus || null,
+      summary: notes || nextSteps || (isContactTouch ? "Contacted today" : null),
+      next_steps: hasNextSteps ? nextSteps || null : null,
+      last_contact_at: hasLastContactAt ? lastContactAt : null,
+      next_contact_at: hasNextContactAt || nextContactAt ? nextContactAt : null,
+      success_status: hasSuccessStatus ? successStatus || null : null,
+      progress_status: hasProgressStatus ? progressStatus || null : null,
+      buy_in_status: hasBuyInStatus ? buyInStatus || null : null,
       notes: notes || null,
       payload: {
         actor_role: actor.role,
         client_name: client.client_name ?? null,
+        contact_touch: isContactTouch,
         custom_fields: customFieldUpdates.changes,
         advocacy_events: advocacyEvents,
       },
@@ -511,31 +566,53 @@ Deno.serve(async (req) => {
         ? await refreshAdvocacySummary(supabase, company.id, clientLegacyId)
         : {};
 
-    const clientUpdates = {
-      next_steps_value: nextSteps || null,
-      csm_date_of_last_contact: lastContactAt,
-      csm_date_of_next_contact: nextContactAt,
-      outcomes_success_value: successStatus || null,
-      outcomes_success_value_for_filtering: successStatus || null,
-      outcomes_success_date: successStatus ? new Date().toISOString() : null,
-      outcomes_progress_value: progressStatus || null,
-      outcomes_progress_for_filtering: progressStatus || null,
-      outcomes_progress_date: progressStatus ? new Date().toISOString() : null,
-      outcomes_buy_in_value: buyInStatus || null,
-      outcomes_buy_in_for_filtering: buyInStatus || null,
-      outcomes_buy_in_date: buyInStatus ? new Date().toISOString() : null,
+    const clientUpdates: Record<string, unknown> = {
       ...advocacySummaryUpdates,
     };
+    if (hasNextSteps) clientUpdates.next_steps_value = nextSteps || null;
+    if (hasLastContactAt) clientUpdates.csm_date_of_last_contact = lastContactAt;
+    if (hasNextContactAt || nextContactAt) {
+      clientUpdates.csm_date_of_next_contact = nextContactAt;
+    }
+    const outcomeUpdatedAt = new Date().toISOString();
+    if (hasSuccessStatus) {
+      clientUpdates.outcomes_success_value = successStatus || null;
+      clientUpdates.outcomes_success_value_for_filtering = successStatus || null;
+      clientUpdates.outcomes_success_date = successStatus ? outcomeUpdatedAt : null;
+    }
+    if (hasProgressStatus) {
+      clientUpdates.outcomes_progress_value = progressStatus || null;
+      clientUpdates.outcomes_progress_for_filtering = progressStatus || null;
+      clientUpdates.outcomes_progress_date = progressStatus ? outcomeUpdatedAt : null;
+    }
+    if (hasBuyInStatus) {
+      clientUpdates.outcomes_buy_in_value = buyInStatus || null;
+      clientUpdates.outcomes_buy_in_for_filtering = buyInStatus || null;
+      clientUpdates.outcomes_buy_in_date = buyInStatus ? outcomeUpdatedAt : null;
+    }
 
-    const { data: updatedClient, error: updateClientError } = await supabase
-      .from("clients")
-      .update(clientUpdates)
-      .eq("company_id", company.id)
-      .eq("glide_row_id", clientLegacyId)
-      .select("*")
-      .maybeSingle();
+    let updatedClient: Record<string, unknown> | null = null;
+    if (Object.keys(clientUpdates).length > 0) {
+      const { data, error: updateClientError } = await supabase
+        .from("clients")
+        .update(clientUpdates)
+        .eq("company_id", company.id)
+        .eq("glide_row_id", clientLegacyId)
+        .select("*")
+        .maybeSingle();
 
-    if (updateClientError) throw updateClientError;
+      if (updateClientError) throw updateClientError;
+      updatedClient = data as Record<string, unknown> | null;
+    } else {
+      const { data, error: reloadClientError } = await supabase
+        .from("clients")
+        .select("*")
+        .eq("company_id", company.id)
+        .eq("glide_row_id", clientLegacyId)
+        .maybeSingle();
+      if (reloadClientError) throw reloadClientError;
+      updatedClient = data as Record<string, unknown> | null;
+    }
 
     if (customFieldUpdates.upserts.length > 0) {
       const { error: customFieldsError } = await supabase

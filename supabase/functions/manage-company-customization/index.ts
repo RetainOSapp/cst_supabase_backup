@@ -143,6 +143,12 @@ function normalizeNotificationMetadata(
   };
 }
 
+function metadataRecord(value: unknown) {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
@@ -309,6 +315,11 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (existingError) throw existingError;
 
+      const existingMetadata = metadataRecord(existing?.metadata);
+      const hasContactTouchSettings =
+        Object.prototype.hasOwnProperty.call(body, "contactTouchSetsNextContact") ||
+        Object.prototype.hasOwnProperty.call(body, "contactTouchNextContactDays");
+
       const payload = {
         company_id: company.id,
         profile_upkeep_freshness_days: requiredBoundedInteger(
@@ -325,6 +336,19 @@ Deno.serve(async (req) => {
         enable_call_ai_for_csms: Boolean(body.enableCallAiForCsms),
         enable_embeds: Boolean(body.enableEmbeds),
         enable_zapier_client_create: Boolean(body.enableZapierClientCreate),
+        metadata: hasContactTouchSettings
+          ? {
+              ...existingMetadata,
+              contact_touch_sets_next_contact:
+                body.contactTouchSetsNextContact === true,
+              contact_touch_next_contact_days: requiredBoundedInteger(
+                body.contactTouchNextContactDays,
+                4,
+                0,
+                365,
+              ),
+            }
+          : existingMetadata,
       };
 
       const { data: saved, error: saveError } = existing?.id
@@ -339,7 +363,10 @@ Deno.serve(async (req) => {
             .from("company_settings")
             .insert({
               ...payload,
-              metadata: { created_from: "manage-company-customization" },
+              metadata: {
+                created_from: "manage-company-customization",
+                ...payload.metadata,
+              },
             })
             .select("*")
             .single();
