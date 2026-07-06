@@ -105,3 +105,7 @@ For historical context:
 - The stale active block from `Latest Checkpoint - 2026-06-17` onward was moved under `## Active MEMORY Archive Before 2026-07-06 Cleanup` in `MEMORY_ARCHIVE.md` for search-only history.
 - Resource migration details should live in `RETAINOS_RESOURCES_MIGRATION.md`, resource SQL migrations, `ROADMAP.md`, or archive, not active memory.
 - Future entries here must be durable operational facts only; completed work summaries should go to roadmap/archive.
+
+## MM Launch Reminder Bell Pause - 2026-07-06
+
+- Clients-page reminder bell data loading is intentionally paused during MM launch; the bell shows "in development" and CSMs should use Daily Pulse + Tasks. Details/future scope live in `ROADMAP.md`.
