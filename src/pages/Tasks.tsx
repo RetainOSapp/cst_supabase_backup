@@ -314,7 +314,7 @@ function taskClientNameFallback(task: TaskRow | null | undefined) {
     if (normalized) return normalized;
   }
   if (taskClientLookupKeys(task).length === 0) return "Company task";
-  return "Unknown client";
+  return "Imported client task";
 }
 
 function resolveTaskClient(
