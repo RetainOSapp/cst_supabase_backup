@@ -39,6 +39,16 @@ const DASHBOARD_IN_FILTER_CHUNK_SIZE = 500;
 const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
 const PROFILE_UPKEEP_FRESHNESS_DAYS = 14;
 const MILESTONE_MISMATCH_KEY = "milestone-mismatch";
+const CHURN_REASON_COLOR_MAP: Record<string, string> = {
+  financial: "#22c55e",
+  overwhelm: "#2563eb",
+  medical: "#facc15",
+  refund: "#ef4444",
+  paused: "#f59e0b",
+  drop_off: "#a855f7",
+  other: "#94a3b8",
+  Other: "#94a3b8",
+};
 
 type DashboardTab = "overview" | "charts" | "ai";
 
@@ -1183,12 +1193,19 @@ function isRetainedStatusTransition(fromStatus: string | null, toStatus: string 
 function DonutChart({
   data,
   onItemClick,
+  colorMap,
+  maxItems = 5,
 }: {
   data: ChartDatum[];
   onItemClick?: (item: ChartDatum) => void;
+  colorMap?: Record<string, string>;
+  maxItems?: number;
 }) {
-  const total = chartTotal(data);
+  const visibleData = data.slice(0, maxItems);
+  const total = chartTotal(visibleData);
   const palette = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#60a5fa"];
+  const colorForItem = (item: ChartDatum, index: number) =>
+    colorMap?.[item.key] ?? palette[index % palette.length];
   let offset = 25;
 
   if (total === 0) {
@@ -1210,7 +1227,7 @@ function DonutChart({
           stroke="#e5e7eb"
           strokeWidth="7"
         />
-        {data.slice(0, 5).map((item, index) => {
+        {visibleData.map((item, index) => {
           const dash = (item.value / total) * 100;
           const circle = (
             <circle
@@ -1219,12 +1236,11 @@ function DonutChart({
               cy="21"
               r="15.915"
               fill="transparent"
-              stroke={palette[index % palette.length]}
+              stroke={colorForItem(item, index)}
               strokeWidth="7"
               strokeDasharray={`${dash} ${100 - dash}`}
               strokeDashoffset={offset}
-              onClick={() => onItemClick?.(item)}
-              className={onItemClick ? "cursor-pointer" : ""}
+              pointerEvents="none"
             />
           );
           offset -= dash;
@@ -1232,7 +1248,7 @@ function DonutChart({
         })}
       </svg>
       <div className="min-w-0 flex-1 space-y-2">
-        {data.slice(0, 5).map((item, index) => (
+        {visibleData.map((item, index) => (
           <button
             key={item.key}
             type="button"
@@ -1243,7 +1259,7 @@ function DonutChart({
             <div className="flex min-w-0 items-center gap-2">
               <span
                 className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: palette[index % palette.length] }}
+                style={{ backgroundColor: colorForItem(item, index) }}
               />
               <span className="truncate text-gray-700">{item.label}</span>
             </div>
@@ -3639,68 +3655,77 @@ export function Dashboard() {
             "csm_secondary_assignee_id",
             "client_age_date_onboarded",
           ].join(", ");
-      let clientsQuery = supabase
-        .from(clientSourceTable)
-        .select(clientSelect)
-        .eq(
-          appliedUsesAppClients ? "company_glide_row_id" : "company_id",
-          appliedFilters.companyId,
-        )
-        .range(0, 4999);
+      const buildClientsQuery = (from: number, to: number) => {
+        let query = supabase
+          .from(clientSourceTable)
+          .select(clientSelect)
+          .eq(
+            appliedUsesAppClients ? "company_glide_row_id" : "company_id",
+            appliedFilters.companyId,
+          )
+          .range(from, to);
 
-      if (assignedTeamMemberId) {
-        clientsQuery = clientsQuery.or(
-          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
-        );
-      } else if (appliedFilters.csmId) {
-        clientsQuery = clientsQuery.eq("csm_team_member_id", appliedFilters.csmId);
-      }
-      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
-        clientsQuery = clientsQuery.eq(
-          "csm_secondary_assignee_id",
-          appliedFilters.secondaryAssigneeId,
-        );
-      }
-      if (appliedProgramValues.length === 1) {
-        clientsQuery = clientsQuery.eq("program_status_value", appliedProgramValues[0]);
-      } else if (appliedProgramValues.length > 1) {
-        clientsQuery = clientsQuery.in("program_status_value", appliedProgramValues);
-      }
-      if (appliedFilters.offerId) {
-        clientsQuery = clientsQuery.eq(
-          "offer_milestones_current_offer_id",
-          appliedFilters.offerId,
-        );
-      }
-      if (appliedFilters.clientStartDate.startDate) {
-        clientsQuery = clientsQuery.gte(
-          "client_age_date_onboarded",
-          `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
-        );
-      }
-      if (appliedFilters.clientStartDate.endDate) {
-        clientsQuery = clientsQuery.lte(
-          "client_age_date_onboarded",
-          `${appliedFilters.clientStartDate.endDate}T23:59:59.999Z`,
-        );
-      }
+        if (assignedTeamMemberId) {
+          query = query.or(
+            `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+          );
+        } else if (appliedFilters.csmId) {
+          query = query.eq("csm_team_member_id", appliedFilters.csmId);
+        }
+        if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+          query = query.eq(
+            "csm_secondary_assignee_id",
+            appliedFilters.secondaryAssigneeId,
+          );
+        }
+        if (appliedProgramValues.length === 1) {
+          query = query.eq("program_status_value", appliedProgramValues[0]);
+        } else if (appliedProgramValues.length > 1) {
+          query = query.in("program_status_value", appliedProgramValues);
+        }
+        if (appliedFilters.offerId) {
+          query = query.eq(
+            "offer_milestones_current_offer_id",
+            appliedFilters.offerId,
+          );
+        }
+        if (appliedFilters.clientStartDate.startDate) {
+          query = query.gte(
+            "client_age_date_onboarded",
+            `${appliedFilters.clientStartDate.startDate}T00:00:00.000Z`,
+          );
+        }
+        if (appliedFilters.clientStartDate.endDate) {
+          query = query.lte(
+            "client_age_date_onboarded",
+            `${appliedFilters.clientStartDate.endDate}T23:59:59.999Z`,
+          );
+        }
+        return query;
+      };
 
-      let tasksQuery = supabase
-        .from(appliedUsesAppClients ? "client_tasks" : "backup_company_clients_tasks")
-        .select("status_value, assigned_to_id")
-        .eq(
-          appliedUsesAppClients ? "company_glide_row_id" : "company_id",
-          appliedFilters.companyId,
-        )
-        .range(0, 4999);
-      if (assignedTeamMemberId) {
-        tasksQuery = tasksQuery.eq("assigned_to_id", assignedTeamMemberId);
-      } else if (appliedFilters.csmId) {
-        tasksQuery = tasksQuery.eq("assigned_to_id", appliedFilters.csmId);
-      }
+      const buildTasksQuery = (from: number, to: number) => {
+        let query = supabase
+          .from(appliedUsesAppClients ? "client_tasks" : "backup_company_clients_tasks")
+          .select("status_value, assigned_to_id")
+          .eq(
+            appliedUsesAppClients ? "company_glide_row_id" : "company_id",
+            appliedFilters.companyId,
+          )
+          .range(from, to);
+        if (assignedTeamMemberId) {
+          query = query.eq("assigned_to_id", assignedTeamMemberId);
+        } else if (appliedFilters.csmId) {
+          query = query.eq("assigned_to_id", appliedFilters.csmId);
+        }
+        return query;
+      };
 
       const [{ data: clientRows, error: clientsError }, { data: taskRows, error: tasksError }] =
-        await Promise.all([clientsQuery, tasksQuery]);
+        await Promise.all([
+          fetchPagedDashboardRows(buildClientsQuery),
+          fetchPagedDashboardRows(buildTasksQuery),
+        ]);
 
       if (cancelled) return;
 
@@ -4517,6 +4542,8 @@ export function Dashboard() {
               >
                 <DonutChart
                   data={chartData.churnReasonDistribution}
+                  colorMap={CHURN_REASON_COLOR_MAP}
+                  maxItems={8}
                   onItemClick={
                     canUseDashboardDrilldowns
                       ? (item) =>
