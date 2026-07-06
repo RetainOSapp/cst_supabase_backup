@@ -48,6 +48,7 @@ interface ClientRow {
   client_image: string | null;
   program_status_value: string | null;
   csm_team_member_id?: string | null;
+  isMirrorFallback?: boolean;
 }
 
 interface TaskTemplateRow {
@@ -145,8 +146,8 @@ function normalizeLookupKey(value: unknown) {
 function addClientToLookup(map: Map<string, ClientRow>, client: ClientRow) {
   const legacyId = normalizeLookupKey(client.glide_row_id);
   const appId = normalizeLookupKey(client.id);
-  if (legacyId) map.set(legacyId, client);
-  if (appId) map.set(appId, client);
+  if (legacyId && !map.has(legacyId)) map.set(legacyId, client);
+  if (appId && !map.has(appId)) map.set(appId, client);
 }
 
 function buildClientLookup(clients: ClientRow[]) {
@@ -394,6 +395,7 @@ function TaskCard({
 }) {
   const assignedTo = assignedDisplayName(task.assigned_to_id, teamMemberNameById);
   const dueSignal = dueBadge(task);
+  const canOpenClient = Boolean(client && !client.isMirrorFallback);
 
   return (
     <article
@@ -473,13 +475,17 @@ function TaskCard({
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-2.5">
         <Link
-          to={client ? `/clients/${encodeURIComponent(client.glide_row_id)}` : "#"}
+          to={
+            canOpenClient && client
+              ? `/clients/${encodeURIComponent(client.glide_row_id)}`
+              : "#"
+          }
           onClick={(event) => {
             event.stopPropagation();
-            if (!client) event.preventDefault();
+            if (!canOpenClient) event.preventDefault();
           }}
           className={`flex min-w-0 items-center gap-2 text-sm font-medium ${
-            client ? "text-gray-800 hover:text-indigo-700" : "text-gray-700"
+            canOpenClient ? "text-gray-800 hover:text-indigo-700" : "text-gray-700"
           }`}
         >
           {client?.client_image ? (
@@ -545,6 +551,7 @@ function TaskListTable({
           {tasks.map((task) => {
             const client = resolveTaskClient(task, clientById, companyClientById);
             const fallbackClientName = taskClientNameFallback(task);
+            const canOpenClient = Boolean(client && !client.isMirrorFallback);
             const dueSignal = dueBadge(task);
             return (
               <tr
@@ -570,13 +577,17 @@ function TaskListTable({
                   )}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
-                  {client ? (
+                  {canOpenClient && client ? (
                     <Link
                       to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
                       className="font-medium text-indigo-600 hover:text-indigo-800"
                     >
                       {client.client_name ?? "Unnamed client"}
                     </Link>
+                  ) : client ? (
+                    <span className="font-medium text-gray-800">
+                      {client.client_name ?? fallbackClientName}
+                    </span>
                   ) : (
                     fallbackClientName
                   )}
@@ -1426,6 +1437,27 @@ export function Tasks() {
               }
               clients.push(
                 ...(((clientsByUuidResult.data ?? []) as unknown) as ClientRow[]),
+              );
+            }
+
+            const mirrorClientsResult = await supabase
+              .from("backup_company_clients")
+              .select(
+                "glide_row_id, client_name, client_image, program_status_value, csm_team_member_id",
+              )
+              .eq("company_id", companyId)
+              .in("glide_row_id", chunk);
+            if (cancelled) return;
+            if (mirrorClientsResult.error) {
+              console.error(
+                "Failed to load mirror task client fallbacks:",
+                mirrorClientsResult.error,
+              );
+            } else {
+              clients.push(
+                ...(((mirrorClientsResult.data ?? []) as unknown) as ClientRow[]).map(
+                  (client) => ({ ...client, isMirrorFallback: true }),
+                ),
               );
             }
           }
