@@ -132,22 +132,6 @@ type ClientMilestoneProgress = Record<string, unknown> & {
   start_date?: string | null;
   completion_date?: string | null;
 };
-interface PilotReminder {
-  id: string;
-  type: "next-contact" | "renewal" | "paused-return" | "task-due";
-  label: string;
-  date: string;
-  client: ClientRow;
-}
-interface NotificationRow {
-  id: string;
-  type: string;
-  title: string | null;
-  due_at: string | null;
-  client_id: string | null;
-  legacy_client_id: string | null;
-  metadata?: Record<string, unknown> | null;
-}
 interface NoteSearchResult {
   source_key: string;
   source_type: string | null;
@@ -969,79 +953,6 @@ function dateKeyFromValue(value: unknown) {
   if (!value) return "";
   const date = new Date(String(value));
   return Number.isNaN(date.getTime()) ? "" : dateKey(date);
-}
-export function notificationReminderType(type: string): PilotReminder["type"] | null {
-  if (type === "next_contact_due") return "next-contact";
-  if (type === "renewal_due") return "renewal";
-  if (type === "paused_return_due") return "paused-return";
-  if (type === "task_due") return "task-due";
-  return null;
-}
-export function notificationReminderLabel(notification: NotificationRow) {
-  if (notification.type === "next_contact_due") return "Next contact";
-  if (notification.type === "renewal_due") return "Contract renewal";
-  if (notification.type === "paused_return_due") return "Paused client return";
-  if (notification.type === "task_due") return "Task due";
-  return notification.title ?? "Reminder";
-}
-export function buildClientFieldReminders(rawClients: Record<string, unknown>[]) {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const oldest = new Date(start);
-  oldest.setDate(oldest.getDate() - 30);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 8);
-  const reminders: PilotReminder[] = [];
-
-  for (const rawClient of rawClients) {
-    const client = mapAppClientRow(rawClient);
-    const candidates = [
-      {
-        type: "next-contact" as const,
-        label: "Next contact",
-        date: client.csm_date_of_next_contact,
-        enabled: ["front-end", "back-end"].includes(
-          String(client.program_status_value ?? ""),
-        ),
-      },
-      {
-        type: "renewal" as const,
-        label: "Contract renewal",
-        date: client.current_contract_end_date_for_filtering,
-        enabled: ["front-end", "back-end"].includes(
-          String(client.program_status_value ?? ""),
-        ),
-      },
-      {
-        type: "paused-return" as const,
-        label: "Paused client return",
-        date: client.program_paused_return_date,
-        enabled: client.program_status_value === "paused",
-      },
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate.enabled || typeof candidate.date !== "string") continue;
-      const date = new Date(candidate.date);
-      if (Number.isNaN(date.getTime()) || date < oldest || date >= end) continue;
-      reminders.push({
-        id: `${client.glide_row_id}:${candidate.type}`,
-        type: candidate.type,
-        label: candidate.label,
-        date: candidate.date,
-        client,
-      });
-    }
-  }
-
-  reminders.sort(
-    (a, b) =>
-      new Date(a.date).getTime() - new Date(b.date).getTime() ||
-      String(a.client.client_name ?? "").localeCompare(
-        String(b.client.client_name ?? ""),
-      ),
-  );
-  return reminders;
 }
 function monthBounds(monthDate: Date) {
   const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
@@ -3266,15 +3177,8 @@ function MiniMeta({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
-function ClientNotificationsBell({
-  reminders,
-  onOpenClient,
-}: {
-  reminders: PilotReminder[];
-  onOpenClient: (id: string) => void;
-}) {
+function ClientNotificationsBell() {
   const [open, setOpen] = useState(false);
-  const today = dateKey(new Date());
   return (
     <div className="relative">
       <button
@@ -3299,11 +3203,6 @@ function ClientNotificationsBell({
             strokeLinejoin="round"
           />
         </svg>
-        {reminders.length > 0 ? (
-          <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#e02d3c] px-1 text-[10px] font-bold text-white">
-            {reminders.length > 9 ? "9+" : reminders.length}
-          </span>
-        ) : null}
       </button>
       {open ? (
         <div className="absolute right-0 z-20 mt-3 w-[min(360px,calc(100vw-48px))] overflow-hidden rounded-md border border-[#dfe6ef] bg-white shadow-xl">
@@ -3312,52 +3211,13 @@ function ClientNotificationsBell({
               Reminder bell
             </div>
             <div className="mt-0.5 text-xs text-[#6c7684]">
-              Short-term client reminders. Use Daily Pulse for the full operating view.
+              In development while we tune the notification workflow.
             </div>
           </div>
-          {reminders.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-[#6c7684]">
-              No generated reminders are due or coming up in the next 7 days.
-            </div>
-          ) : (
-            <div className="max-h-[360px] overflow-y-auto py-1">
-              {reminders.slice(0, 12).map((reminder) => {
-                const reminderKey = dateKeyFromValue(reminder.date);
-                const overdue = Boolean(reminderKey && reminderKey < today);
-                return (
-                  <button
-                    key={reminder.id}
-                    type="button"
-                    onClick={() => {
-                      setOpen(false);
-                      onOpenClient(reminder.client.glide_row_id);
-                    }}
-                    className="block w-full border-b border-[#f1f4f8] px-4 py-3 text-left transition hover:bg-[#f7fbff]"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-[#162b3e]">
-                          {reminder.client.client_name ?? "Unnamed client"}
-                        </div>
-                        <div className="mt-1 text-xs text-[#586273]">
-                          {reminder.label}
-                        </div>
-                      </div>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          overdue
-                            ? "bg-red-50 text-red-700"
-                            : "bg-[#fcf3e6] text-[#9b5c0f]"
-                        }`}
-                      >
-                        {overdue ? "Overdue" : formatDate(reminder.date)}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <div className="px-4 py-6 text-sm text-[#6c7684]">
+            Reminders are temporarily paused. Use Daily Pulse and Tasks for
+            current follow-up work.
+          </div>
         </div>
       ) : null}
     </div>
@@ -3437,7 +3297,6 @@ export function Clients() {
   const [noteResultsError, setNoteResultsError] = useState<string | null>(null);
   const [noteResultsTotal, setNoteResultsTotal] = useState(0);
   const [noteResultsPage, setNoteResultsPage] = useState(1);
-  const [pilotReminders, setPilotReminders] = useState<PilotReminder[]>([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [totalClients, setTotalClients] = useState(0);
@@ -4350,207 +4209,6 @@ export function Clients() {
   useEffect(() => {
     void loadNoteResults();
   }, [loadNoteResults]);
-  useEffect(() => {
-    let cancelled = false;
-    async function loadPilotReminders() {
-      if (
-        !appliedFilters.companyId ||
-        !appClientCompanyIds.has(appliedFilters.companyId)
-      ) {
-        setPilotReminders([]);
-        return;
-      }
-      let fallbackQuery = supabase
-        .from("clients")
-        .select("*")
-        .eq("company_glide_row_id", appliedFilters.companyId)
-        .range(0, 4999);
-      if (assignedTeamMemberId) {
-        fallbackQuery = fallbackQuery.or(
-          `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
-        );
-      }
-
-      const { data: appCompany, error: appCompanyError } = await supabase
-        .from("companies")
-        .select("id")
-        .eq("legacy_glide_row_id", appliedFilters.companyId)
-        .in("migration_status", ["pilot", "migrated"])
-        .maybeSingle();
-
-      const fallbackToClientFields = async () => {
-        const { data, error } = await fallbackQuery;
-        if (cancelled) return;
-        if (error) {
-          console.error("Failed to load RetainOS reminders:", error);
-          setPilotReminders([]);
-          return;
-        }
-        setPilotReminders(
-          buildClientFieldReminders((data ?? []) as Record<string, unknown>[]),
-        );
-      };
-
-      if (appCompanyError || !appCompany?.id) {
-        if (appCompanyError)
-          console.error("Failed to resolve app company reminders:", appCompanyError);
-        await fallbackToClientFields();
-        return;
-      }
-
-      if (!assignedTeamMemberId) {
-        const { error: generationError } = await supabase.rpc(
-          "generate_company_notifications",
-          { p_company_id: appCompany.id },
-        );
-        if (generationError) {
-          console.error("Failed to generate RetainOS notifications:", generationError);
-          await fallbackToClientFields();
-          return;
-        }
-      }
-
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      const oldest = new Date(start);
-      oldest.setDate(oldest.getDate() - 30);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 8);
-
-      let scopedClientIds: string[] | null = null;
-      if (assignedTeamMemberId) {
-        const { data: assignedClients, error: assignedClientsError } = await supabase
-          .from("clients")
-          .select("id")
-          .eq("company_id", appCompany.id)
-          .or(
-            `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
-          )
-          .is("archived_at", null)
-          .range(0, 499);
-        if (cancelled) return;
-        if (assignedClientsError) {
-          console.error(
-            "Failed to load assigned clients for reminders:",
-            assignedClientsError,
-          );
-          await fallbackToClientFields();
-          return;
-        }
-        scopedClientIds = (assignedClients ?? [])
-          .map((client) => String(client.id ?? ""))
-          .filter(Boolean);
-        if (scopedClientIds.length === 0) {
-          setPilotReminders([]);
-          return;
-        }
-      }
-
-      let notificationsQuery = supabase
-        .from("notifications")
-        .select(
-          "id, type, title, due_at, client_id, legacy_client_id, metadata",
-        )
-        .eq("company_id", appCompany.id)
-        .is("resolved_at", null)
-        .is("dismissed_at", null)
-        .in("type", [
-          "next_contact_due",
-          "renewal_due",
-          "paused_return_due",
-          "task_due",
-        ])
-        .gte("due_at", oldest.toISOString())
-        .lt("due_at", end.toISOString())
-        .order("due_at", { ascending: true, nullsFirst: false })
-        .range(0, 199);
-      if (scopedClientIds) {
-        notificationsQuery = notificationsQuery.in("client_id", scopedClientIds);
-      }
-      const { data: notificationRows, error: notificationsError } =
-        await notificationsQuery;
-      if (cancelled) return;
-      if (notificationsError) {
-        console.error("Failed to load RetainOS notifications:", notificationsError);
-        await fallbackToClientFields();
-        return;
-      }
-
-      const notifications = (notificationRows ?? []) as NotificationRow[];
-      const clientIds = [
-        ...new Set(
-          notifications
-            .map((notification) => notification.client_id)
-            .filter((id): id is string => typeof id === "string" && id !== ""),
-        ),
-      ];
-      if (clientIds.length === 0) {
-        setPilotReminders([]);
-        return;
-      }
-      const { data: clientRows, error: clientsError } = await supabase
-        .from("clients")
-        .select("*")
-        .in("id", clientIds)
-        .range(0, 199);
-      if (cancelled) return;
-      if (clientsError) {
-        console.error("Failed to load notification clients:", clientsError);
-        await fallbackToClientFields();
-        return;
-      }
-
-      const clientsById = new Map(
-        ((clientRows ?? []) as Record<string, unknown>[]).map((row) => [
-          String(row.id ?? ""),
-          mapAppClientRow(row),
-        ]),
-      );
-      const reminderRows = notifications.flatMap((notification) => {
-        const type = notificationReminderType(notification.type);
-        const date = notification.due_at;
-        const client = notification.client_id
-          ? clientsById.get(notification.client_id)
-          : undefined;
-        if (!type || !date || !client) return [];
-        if (
-          assignedTeamMemberId &&
-          client.csm_team_member_id !== assignedTeamMemberId &&
-          client.csm_secondary_assignee_id !== assignedTeamMemberId
-        ) {
-          return [];
-        }
-        return [
-          {
-            id: notification.id,
-            type,
-            label: notificationReminderLabel(notification),
-            date,
-            client,
-          },
-        ];
-      });
-      const reminders = [
-        ...new Map(
-          reminderRows.map((reminder) => [
-            `${reminder.client.glide_row_id}:${reminder.type}:${dateKeyFromValue(reminder.date)}`,
-            reminder,
-          ]),
-        ).values(),
-      ].sort(
-        (a, b) =>
-          new Date(a.date).getTime() - new Date(b.date).getTime() ||
-          String(a.client.client_name ?? "").localeCompare(
-            String(b.client.client_name ?? ""),
-          ),
-      );
-      setPilotReminders(reminders);
-    }
-    void loadPilotReminders();
-    return () => {
-      cancelled = true;
-    };
-  }, [appClientCompanyIds, appliedFilters.companyId, assignedTeamMemberId]);
   const hasPendingFilterChanges = useMemo(() => {
     if (!filters.companyId) return false;
     const nextAppliedFilters = {
@@ -4687,10 +4345,7 @@ export function Clients() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <ClientNotificationsBell
-              reminders={pilotReminders}
-              onOpenClient={(id) => navigate(`/clients/${encodeURIComponent(id)}`)}
-            />
+            <ClientNotificationsBell />
             {canCreateClient ? (
               <button
                 type="button"

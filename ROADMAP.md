@@ -599,6 +599,7 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
   - 2026-06-10 local polish: Company Settings now includes in-app visibility toggles for next contacts, renewals, pause returns, churn risk, RGAs, quiet profiles, and client-linked task due reminders. Clients bell and Daily Pulse respect those toggles.
   - 2026-06-16 product polish renamed the Clients dropdown as a reminder bell, clarified that full operating review belongs in Daily Pulse, and tightened Company Settings copy around bell-only, Daily Pulse, and timing-rule controls.
   - 2026-06-16 Jay QA passed the V1 in-app reminder bell and Company Settings notification-control clarity. Email delivery, push, and full inbox/read-dismiss behavior remain later notification scope.
+  - 2026-07-06 launch triage: Clients reminder bell data loading is paused and shown as "in development" because Daily Pulse + Tasks cover the current operating workflow and the reminder loader was adding avoidable rollout performance risk for CSMs. Rebuild as a lighter notification/inbox slice later.
   - Email delivery and full inbox remain intentionally disabled until read/dismiss/counts and delivery preferences are QAed.
 - `[ ]` `[priority: medium]` CST-style operational alert review surface.
   - Add a RetainOS equivalent of the old CST alert review modal/list: summarized alert groups, counts, and direct `View clients` actions.
@@ -1459,6 +1460,7 @@ Guiding note from source: keep notification triggers simple and avoid spamming u
   - Local Clients-page bell/dropdown prototype is the preferred UX direction after Jay QA; global bell placement and full inbox still need final design/build.
   - Company-level in-app visibility preferences are editable from Company Settings for pilot/migrated companies and consumed by the Clients bell and Daily Pulse.
   - Peak Diagnostic timing now supports one-time or recurring behavior for company-specific operating rhythms.
+  - 2026-07-06 launch triage pauses Clients bell data loading and shows the bell as in development; Daily Pulse and Tasks remain the supported CSM workflow until notification/inbox performance and dismiss/read semantics are redesigned.
   - Read/unread, dismiss UX, bell counts, email delivery, future push channel, and mature unsubscribe/preference rules remain future slices.
 - `[ ]` `[priority: medium]` Daily Pulse should reuse notification/workflow signals without becoming a dismissible inbox.
   - Treat it as the CSM start-of-day operating page for Today, This Week, and This Month.
