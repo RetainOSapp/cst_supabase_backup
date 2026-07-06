@@ -636,3 +636,11 @@ For historical context:
 - Updated/deployed `supabase/functions/ingest-client-call-summary/index.ts`: direct call-summary/Fathom events now set `csm_date_of_next_contact` from the company metadata rule when they update Last Contact.
 - Updated/deployed `supabase/functions/manage-integration-review/index.ts`: manually matched/retried call-summary events and reviewed client-update events now apply the same next-contact automation when Last Contact is updated and Next Contact is not explicitly provided.
 - Redeployed `manage-client-quick-update`, `ingest-client-call-summary`, and `manage-integration-review` to Supabase project `zjauqflzxzsbpnivzsct`. Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; the symlink was removed before commit.
+
+## Moves Method Legacy History Visibility Hotfix - 2026-07-06
+
+- Lorcan/Jay flagged that coaches expected old CST call info, transcripts/summaries, and Next Steps history to be visible from the client profile. The MM cutover intentionally kept old CST history mirror-only, but Client Detail > History was only loading app-owned `client_history_events`.
+- Live readback confirmed Angela Røren's old CST history rows exist in `backup_company_clients_history` by `client_id`, including a `change_type_code = next-steps` row with the full old Fathom/Next Steps summary.
+- Updated `src/pages/ClientDetail.tsx`: History now loads up to 100 app-owned RetainOS events plus up to 100 legacy CST mirror rows for the same client, maps CST rows into the same timeline, sorts newest-first, and labels them as CST history / Imported from CST.
+- Added a Calls filter, kept the Next Steps filter, rendered long history values through the existing rich preview/read-more modal, converted raw `<br>` text into readable content, and made plain Fathom/recording URLs clickable.
+- Verification: `npm run build` passed in the hotfix worktree by temporarily symlinking to the main workspace `node_modules`; the symlink was removed before commit. No Edge Function deploy required; this is a frontend/history read-path hotfix.

@@ -173,6 +173,8 @@ type ClientTaskRow = Record<string, unknown> & {
 type ClientHistoryEventRow = Record<string, unknown> & {
   id: string;
   legacy_client_glide_row_id?: string | null;
+  event_type?: string | null;
+  source?: string | null;
   title?: string | null;
   summary?: string | null;
   next_steps?: string | null;
@@ -183,6 +185,7 @@ type ClientHistoryEventRow = Record<string, unknown> & {
   buy_in_status?: string | null;
   notes?: string | null;
   created_at?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 type CompanyCustomFieldRow = {
   id: string;
@@ -1287,6 +1290,21 @@ function sanitizeHtml(value: string) {
     .replace(/\son\w+=["'][^"']*["']/gi, "")
     .replace(/javascript:/gi, "");
 }
+function linkifyHtmlUrls(value: string) {
+  if (/<a\s/i.test(value)) return value;
+  return value.replace(/https?:\/\/[^\s<]+/g, (url) => {
+    const trailingMatch = url.match(/[),.;:]+$/);
+    const trailing = trailingMatch?.[0] ?? "";
+    const href = trailing ? url.slice(0, -trailing.length) : url;
+    try {
+      const parsed = new URL(href);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return url;
+    } catch {
+      return url;
+    }
+    return `<a href="${href}" target="_blank" rel="noreferrer">${href}</a>${trailing}`;
+  });
+}
 function decodeBasicHtmlEntities(value: string) {
   return value
     .replace(/&nbsp;/gi, " ")
@@ -1313,11 +1331,13 @@ function RichValue({ value }: { value: unknown }) {
   const text = displayValue(value);
   if (text === "--") return <>{text}</>;
   const hasHtml = /<\/?[a-z][\s\S]*>/i.test(text);
-  const html = hasHtml
-    ? sanitizeHtml(text)
-    : escapeHtml(text)
+  const html = linkifyHtmlUrls(
+    hasHtml
+      ? sanitizeHtml(text)
+      : escapeHtml(text)
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/\n/g, "<br />");
+        .replace(/\n/g, "<br />"),
+  );
   return (
     <div
       className="max-w-none text-sm leading-relaxed text-gray-800 [&_a]:text-indigo-600 [&_a]:underline [&_br]:leading-6 [&_li]:ml-4 [&_li]:list-disc [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-2 [&_strong]:font-semibold [&_ul]:ml-4"
@@ -6331,6 +6351,10 @@ function getHistorySourceLabel(event: ClientHistoryEventRow) {
   const eventType = String(event.event_type ?? "");
   const source = String(event.source ?? "");
 
+  if (source === "cst_mirror") {
+    return "Imported from CST";
+  }
+
   if (eventType === "call_summary_webhook") {
     return "Updated via webhook";
   }
@@ -6346,10 +6370,80 @@ function getHistorySourceLabel(event: ClientHistoryEventRow) {
   return null;
 }
 
-type HistoryFilter = "all" | "contract" | "last_contact" | "next_steps" | "health";
+function legacyHistoryTitle(changeType: string) {
+  if (changeType === "next-steps") return "Previous Next Steps";
+  if (changeType === "call-tracker") return "Call / Communication";
+  if (changeType === "contract") return "Contract history";
+  if (changeType.includes("success")) return "Success update";
+  if (changeType.includes("progress")) return "Progress update";
+  if (changeType.includes("buy-in")) return "Buy In update";
+  if (changeType.includes("program")) return "Program update";
+  return "CST history";
+}
+
+function normalizeLegacyHistoryValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function mapLegacyHistoryRow(row: Record<string, unknown>): ClientHistoryEventRow {
+  const changeType = String(row.change_type_code ?? "legacy").trim();
+  const value = normalizeLegacyHistoryValue(row.value);
+  const isNextSteps = changeType === "next-steps";
+  const isCall = changeType === "call-tracker";
+  const createdAt =
+    typeof row.modified_date === "string"
+      ? row.modified_date
+      : typeof row.synced_at === "string"
+        ? row.synced_at
+        : null;
+  const modifiedBy =
+    typeof row.modified_by === "string" && row.modified_by.trim()
+      ? row.modified_by.trim()
+      : null;
+  const callAiId =
+    typeof row.call_ai_id === "string" && row.call_ai_id.trim()
+      ? row.call_ai_id.trim()
+      : null;
+
+  return {
+    id: `legacy:${String(row.glide_row_id ?? createdAt ?? row.client_id ?? "unknown")}`,
+    legacy_client_glide_row_id:
+      typeof row.client_id === "string" ? row.client_id : null,
+    event_type: `legacy_${changeType.replace(/[^a-z0-9]+/gi, "_")}`,
+    source: "cst_mirror",
+    title: legacyHistoryTitle(changeType),
+    summary: isNextSteps ? null : value || null,
+    next_steps: isNextSteps ? value || null : null,
+    notes: !isNextSteps && !isCall ? normalizeLegacyHistoryValue(row.context) || null : null,
+    last_contact_at: isCall ? createdAt : null,
+    created_at: createdAt,
+    metadata: {
+      imported_from: "backup_company_clients_history",
+      change_type_code: changeType,
+      modified_by: modifiedBy,
+      call_ai_id: callAiId,
+      original_value: row.original_value ?? null,
+    },
+  };
+}
+
+function historyTimestamp(event: ClientHistoryEventRow) {
+  const value = event.created_at ?? "";
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+type HistoryFilter =
+  | "all"
+  | "calls"
+  | "contract"
+  | "last_contact"
+  | "next_steps"
+  | "health";
 
 const HISTORY_FILTERS: { key: HistoryFilter; label: string }[] = [
   { key: "all", label: "All" },
+  { key: "calls", label: "Calls" },
   { key: "contract", label: "Contract" },
   { key: "last_contact", label: "Last Contact" },
   { key: "next_steps", label: "Next Steps" },
@@ -6367,9 +6461,20 @@ function historyEventMatchesFilter(event: ClientHistoryEventRow, filter: History
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+  if (filter === "calls") {
+    const metadata = event.metadata ?? {};
+    return (
+      haystack.includes("call") ||
+      haystack.includes("communication") ||
+      haystack.includes("fathom") ||
+      Boolean(metadata.recording_url || metadata.call_ai_id)
+    );
+  }
   if (filter === "contract") return haystack.includes("contract");
   if (filter === "last_contact") return Boolean(event.last_contact_at);
-  if (filter === "next_steps") return Boolean(event.next_steps);
+  if (filter === "next_steps") {
+    return Boolean(event.next_steps) || haystack.includes("next steps");
+  }
   if (filter === "health") {
     return Boolean(event.success_status || event.progress_status || event.buy_in_status);
   }
@@ -6454,6 +6559,11 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
 
       {visibleEvents.map((event) => {
         const sourceLabel = getHistorySourceLabel(event);
+        const isLegacyHistory = event.source === "cst_mirror";
+        const modifiedBy =
+          typeof event.metadata?.modified_by === "string"
+            ? event.metadata.modified_by
+            : "";
 
         return (
           <article
@@ -6470,13 +6580,17 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
                 </p>
                 {sourceLabel ? (
                   <p className="mt-1 text-xs text-gray-500">
-                    {sourceLabel}. Event time is when RetainOS received it.
+                    {sourceLabel}
+                    {modifiedBy ? ` by ${modifiedBy}` : ""}
+                    {!isLegacyHistory
+                      ? ". Event time is when RetainOS received it."
+                      : "."}
                   </p>
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 <span className="w-fit rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                  RetainOS history
+                  {isLegacyHistory ? "CST history" : "RetainOS history"}
                 </span>
                 {sourceLabel ? (
                   <span className="w-fit rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
@@ -6486,22 +6600,22 @@ function HistorySection({ events }: { events: ClientHistoryEventRow[] }) {
               </div>
             </div>
             {event.notes ? (
-              <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
-                {event.notes}
-              </p>
+              <div className="mt-4">
+                <RichPreviewValue label="History notes" value={event.notes} />
+              </div>
             ) : event.summary ? (
-              <p className="mt-4 whitespace-pre-wrap text-sm text-gray-800">
-                {event.summary}
-              </p>
+              <div className="mt-4">
+                <RichPreviewValue label="History summary" value={event.summary} />
+              </div>
             ) : null}
             {event.next_steps ? (
               <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
                 <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
                   Next Steps
                 </div>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900">
-                  {event.next_steps}
-                </p>
+                <div className="mt-1">
+                  <RichPreviewValue label="Next Steps history" value={event.next_steps} />
+                </div>
               </div>
             ) : null}
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -6695,6 +6809,7 @@ export function ClientDetail() {
         { data: taskRows },
         { data: appTaskRows },
         { data: historyRows },
+        { data: legacyHistoryRows },
         customFieldsResult,
         customFieldValuesResult,
         companySettingsResult,
@@ -6786,7 +6901,13 @@ export function ClientDetail() {
           .select("*")
           .eq("legacy_client_glide_row_id", nextClient.glide_row_id)
           .order("created_at", { ascending: false })
-          .limit(25),
+          .limit(100),
+        supabase
+          .from("backup_company_clients_history")
+          .select("*")
+          .eq("client_id", nextClient.glide_row_id)
+          .order("modified_date", { ascending: false, nullsFirst: false })
+          .limit(100),
         appPathwayCompany?.id
           ? supabase
               .from("company_custom_fields")
@@ -6898,7 +7019,16 @@ export function ClientDetail() {
           ...((appTaskRows ?? []) as ClientTaskRow[]),
           ...((taskRows ?? []) as ClientTaskRow[]),
         ]);
-        setHistoryEvents((historyRows ?? []) as ClientHistoryEventRow[]);
+        setHistoryEvents(
+          [
+            ...((historyRows ?? []) as ClientHistoryEventRow[]),
+            ...((legacyHistoryRows ?? []) as Record<string, unknown>[]).map(
+              mapLegacyHistoryRow,
+            ),
+          ]
+            .sort((left, right) => historyTimestamp(right) - historyTimestamp(left))
+            .slice(0, 160),
+        );
         setCustomFields(
           customFieldsResult.error
             ? []

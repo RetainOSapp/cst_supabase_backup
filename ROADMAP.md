@@ -351,6 +351,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Dashboard duplicate was removed so Dashboard stays focused on KPI/chart reporting and CSM Reports owns field-upkeep compliance.
 - `[~]` `[polish]` Client history/change log.
   - Client Detail now has a pilot `History` tab for RetainOS Quick Update events.
+  - 2026-07-06 MM launch hotfix: Client Detail > History now merges legacy CST `backup_company_clients_history` rows with RetainOS app-owned history events, so migrated clients can see previous Next Steps / call-history context from the CST mirror. Added a Calls filter, CST history badge, clickable links, and long-entry Read more expansion.
 
 ### Phase 3: Operations, QC Reporting, And Migration Readiness
 
