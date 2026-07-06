@@ -246,8 +246,17 @@ function taskMetadata(task: TaskRow | null | undefined) {
     : {};
 }
 
+function taskSourceSnapshot(task: TaskRow | null | undefined) {
+  return task?.source_snapshot &&
+    typeof task.source_snapshot === "object" &&
+    !Array.isArray(task.source_snapshot)
+    ? (task.source_snapshot as Record<string, unknown>)
+    : {};
+}
+
 function taskClientLookupKeys(task: TaskRow | null | undefined) {
   const metadata = taskMetadata(task);
+  const sourceSnapshot = taskSourceSnapshot(task);
   const rawKeys = [
     task?.client_id,
     task?.clientId,
@@ -269,12 +278,23 @@ function taskClientLookupKeys(task: TaskRow | null | undefined) {
     metadata.matched_legacy_client_glide_row_id,
     metadata.source_client_id,
     metadata.sourceClientId,
+    sourceSnapshot.client_id,
+    sourceSnapshot.clientId,
+    sourceSnapshot.client_glide_row_id,
+    sourceSnapshot.clientGlideRowId,
+    sourceSnapshot.legacy_client_id,
+    sourceSnapshot.legacyClientId,
+    sourceSnapshot.legacy_client_glide_row_id,
+    sourceSnapshot.matched_legacy_client_glide_row_id,
+    sourceSnapshot.source_client_id,
+    sourceSnapshot.sourceClientId,
   ];
   return [...new Set(rawKeys.map(normalizeLookupKey).filter(Boolean))] as string[];
 }
 
 function taskClientNameFallback(task: TaskRow | null | undefined) {
   const metadata = taskMetadata(task);
+  const sourceSnapshot = taskSourceSnapshot(task);
   const rawNames = [
     task?.client_name,
     task?.clientName,
@@ -284,11 +304,16 @@ function taskClientNameFallback(task: TaskRow | null | undefined) {
     metadata.clientName,
     metadata.source_client_name,
     metadata.sourceClientName,
+    sourceSnapshot.client_name,
+    sourceSnapshot.clientName,
+    sourceSnapshot.source_client_name,
+    sourceSnapshot.sourceClientName,
   ];
   for (const name of rawNames) {
     const normalized = normalizeLookupKey(name);
     if (normalized) return normalized;
   }
+  if (taskClientLookupKeys(task).length === 0) return "Company task";
   return "Unknown client";
 }
 
