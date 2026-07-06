@@ -27,7 +27,8 @@ import {
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
 
-const PAGE_SIZE = 12;
+const DEFAULT_PAGE_SIZE = 25;
+const PAGE_SIZE_OPTIONS = [12, 25, 50, 100] as const;
 const NOTE_SEARCH_PAGE_SIZE = 12;
 const QUICK_UPDATE_CONTEXT_PREVIEW_LIMIT = 260;
 const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
@@ -320,6 +321,7 @@ interface ClientsCacheState {
   filters: ClientFilters;
   appliedFilters: ClientFilters;
   page: number;
+  pageSize: number;
   viewMode: ViewMode;
   viewModeCompanyId?: string;
   viewModeUserOverride?: boolean;
@@ -341,6 +343,11 @@ function readClientsCache(): ClientsCacheState | null {
       filters: { ...emptyFilters, ...(parsed.filters ?? {}) },
       appliedFilters: { ...emptyFilters, ...(parsed.appliedFilters ?? {}) },
       page: Math.max(1, Number(parsed.page) || 1),
+      pageSize: PAGE_SIZE_OPTIONS.includes(
+        Number(parsed.pageSize) as (typeof PAGE_SIZE_OPTIONS)[number],
+      )
+        ? Number(parsed.pageSize)
+        : DEFAULT_PAGE_SIZE,
       viewMode:
         parsed.viewMode === "card" ||
         parsed.viewMode === "calendar" ||
@@ -3187,6 +3194,9 @@ export function Clients() {
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [totalClients, setTotalClients] = useState(0);
   const [page, setPage] = useState(cachedState?.page ?? 1);
+  const [pageSize, setPageSize] = useState(
+    cachedState?.pageSize ?? DEFAULT_PAGE_SIZE,
+  );
   const [viewMode, setViewMode] = useState<ViewMode>(
     cachedViewModeMatchesCompany ? (cachedState?.viewMode ?? "list") : "list",
   );
@@ -3276,9 +3286,9 @@ export function Clients() {
       ),
     [filterMilestones, filters.offerId],
   );
-  const totalPages = Math.max(1, Math.ceil(totalClients / PAGE_SIZE));
-  const pageStart = totalClients === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(page * PAGE_SIZE, totalClients);
+  const totalPages = Math.max(1, Math.ceil(totalClients / pageSize));
+  const pageStart = totalClients === 0 ? 0 : (page - 1) * pageSize + 1;
+  const pageEnd = Math.min(page * pageSize, totalClients);
   const noteResultsTotalPages = Math.max(
     1,
     Math.ceil(noteResultsTotal / NOTE_SEARCH_PAGE_SIZE),
@@ -3358,6 +3368,9 @@ export function Clients() {
       setContactTouchMessage(
         `${client.client_name ?? "Client"} marked as contacted today.`,
       );
+      const refreshToken = `${Date.now()}`;
+      window.localStorage.setItem(CLIENTS_ROSTER_REFRESH_KEY, refreshToken);
+      setRosterRefreshToken(refreshToken);
     },
     [
       appliedFilters.companyId,
@@ -3372,6 +3385,7 @@ export function Clients() {
       filters,
       appliedFilters,
       page,
+      pageSize,
       viewMode,
       viewModeCompanyId: appliedFilters.companyId || filters.companyId || "",
       viewModeUserOverride: viewModeTouchedRef.current,
@@ -3386,6 +3400,7 @@ export function Clients() {
     calendarMode,
     filters,
     page,
+    pageSize,
     sortDirection,
     sortField,
     viewMode,
@@ -3721,8 +3736,8 @@ export function Clients() {
     }
     setClientsLoading(true);
     setClientsError(null);
-    const from = (page - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
     const useAppClients = appClientCompanyIds.has(appliedFilters.companyId);
     let query = supabase
       .from(useAppClients ? "clients" : "backup_company_clients")
@@ -3830,6 +3845,7 @@ export function Clients() {
     appliedFilters,
     assignedTeamMemberId,
     page,
+    pageSize,
     rosterRefreshToken,
     sortDirection,
     sortField,
@@ -4984,6 +5000,27 @@ export function Clients() {
                       ? "Oldest first"
                       : "Newest first"}
                 </button>
+                <label
+                  htmlFor="clients-page-size"
+                  className="ml-1 text-xs font-semibold uppercase tracking-wider text-[#586273]"
+                >
+                  Rows
+                </label>
+                <select
+                  id="clients-page-size"
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setPage(1);
+                  }}
+                  className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
+                >
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-2">
@@ -5217,7 +5254,7 @@ export function Clients() {
           canEditDirectorNotes={capabilities.canViewDirectorNotes}
           onClose={() => setNewClientOpen(false)}
           onCreated={(client) => {
-            setClients((current) => [client, ...current].slice(0, PAGE_SIZE));
+            setClients((current) => [client, ...current].slice(0, pageSize));
             setTotalClients((current) => current + 1);
             setPage(1);
           }}
