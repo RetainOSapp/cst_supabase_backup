@@ -85,8 +85,32 @@ function optionalNumber(value: unknown) {
 function addDaysIso(value: string | null, days: number) {
   const base = value ? new Date(value) : new Date();
   if (Number.isNaN(base.getTime())) return new Date().toISOString();
-  base.setDate(base.getDate() + days);
+  base.setUTCDate(base.getUTCDate() + days);
   return base.toISOString();
+}
+
+async function resolveContractTemplate({
+  supabase,
+  companyId,
+  offerId,
+}: {
+  supabase: ReturnType<typeof createClient>;
+  companyId: string;
+  offerId: string | null;
+}) {
+  if (!offerId) return null;
+  const { data, error } = await supabase
+    .from("company_contract_templates")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("applies_to_offer_id", offerId)
+    .eq("is_enabled", true)
+    .is("archived_at", null)
+    .order("position", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as Record<string, unknown> | null;
 }
 
 function renderTemplateText(value: unknown, client: Record<string, unknown>) {
@@ -395,11 +419,11 @@ Deno.serve(async (req) => {
     const programStatus = nullableText(body.programStatusValue) ?? "front-end";
     const requestedOfferId = nullableText(body.offerId);
     const requestedMilestoneId = nullableText(body.milestoneId);
-    const contractStartDate = normalizeDate(body.contractStartDate);
-    const contractEndDate = normalizeDate(body.contractEndDate);
-    const contractMonthlyValue = optionalNumber(body.contractMonthlyValue);
-    const contractReferenceLink = nullableText(body.contractReferenceLink);
-    const contractNotes = nullableText(body.contractNotes);
+    let contractStartDate = normalizeDate(body.contractStartDate);
+    let contractEndDate = normalizeDate(body.contractEndDate);
+    let contractMonthlyValue = optionalNumber(body.contractMonthlyValue);
+    let contractReferenceLink = nullableText(body.contractReferenceLink);
+    let contractNotes = nullableText(body.contractNotes);
 
     let selectedOffer: Record<string, unknown> | null = null;
     let selectedMilestone: Record<string, unknown> | null = null;
@@ -434,6 +458,35 @@ Deno.serve(async (req) => {
         }
         selectedMilestone = milestone;
       }
+    }
+
+    const hasExplicitContract =
+      Boolean(contractStartDate || contractEndDate) ||
+      contractMonthlyValue !== null ||
+      Boolean(contractReferenceLink || contractNotes);
+    const contractTemplate = !hasExplicitContract
+      ? await resolveContractTemplate({
+          supabase,
+          companyId: company.id,
+          offerId: requestedOfferId,
+        })
+      : null;
+    const templateContractDays =
+      contractTemplate && Number.isFinite(Number(contractTemplate.contract_days))
+        ? Math.max(1, Math.round(Number(contractTemplate.contract_days)))
+        : null;
+    if (contractTemplate && templateContractDays !== null) {
+      contractStartDate = onboardedAt;
+      contractEndDate = addDaysIso(contractStartDate, templateContractDays);
+      contractMonthlyValue =
+        contractTemplate.monthly_value === null ||
+        contractTemplate.monthly_value === undefined
+          ? null
+          : Number(contractTemplate.monthly_value);
+      contractReferenceLink = nullableText(contractTemplate.reference_link);
+      contractNotes =
+        nullableText(contractTemplate.notes) ??
+        `Auto-created from contract template: ${contractTemplate.name ?? "Contract template"}`;
     }
 
     const clientArchetype = normalizeArchetype(body.clientArchetype);
@@ -474,7 +527,8 @@ Deno.serve(async (req) => {
       current_contract_start_date: contractStartDate,
       current_contract_end_date: contractEndDate,
       current_contract_end_date_for_filtering: contractEndDate,
-      current_contract_of_days: daysBetween(contractStartDate, contractEndDate),
+      current_contract_of_days:
+        templateContractDays ?? daysBetween(contractStartDate, contractEndDate),
       current_contract_monthly_value: contractMonthlyValue,
       current_contract_reference_link: contractReferenceLink,
       current_contract_notes: contractNotes,
@@ -536,14 +590,18 @@ Deno.serve(async (req) => {
           client_id: glideRowId,
           start_date: contractStartDate,
           end_date: contractEndDate,
-          contract_days: daysBetween(contractStartDate, contractEndDate),
+          contract_days:
+            templateContractDays ?? daysBetween(contractStartDate, contractEndDate),
           monthly_value: contractMonthlyValue,
           reference_link: contractReferenceLink,
           notes: contractNotes,
+          auto_renew: contractTemplate?.auto_renew === true,
           status: "active",
           metadata: {
             actor_role: actor.role,
             created_in: "retainos_client_create_pilot",
+            contract_template_id: contractTemplate?.id ?? null,
+            contract_template_name: contractTemplate?.name ?? null,
           },
         })
         .select("*")

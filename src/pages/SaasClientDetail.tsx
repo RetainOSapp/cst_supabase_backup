@@ -159,6 +159,22 @@ interface CompanyTaskTemplateRow {
   archived_at?: string | null;
 }
 
+interface CompanyContractTemplateRow {
+  id?: string;
+  name: string;
+  description?: string | null;
+  applies_to_offer_id: string;
+  contract_days: number;
+  monthly_value?: number | null;
+  reference_link?: string | null;
+  notes?: string | null;
+  auto_renew?: boolean | null;
+  is_enabled: boolean;
+  position?: number | null;
+  metadata?: Record<string, unknown> | null;
+  archived_at?: string | null;
+}
+
 interface CompanySettingsRow {
   id?: string;
   profile_upkeep_freshness_days: number;
@@ -3422,12 +3438,374 @@ function TaskTemplatesModal({
   );
 }
 
+function ContractTemplatesModal({
+  companyLegacyId,
+  templates,
+  offers,
+  disabled,
+  onClose,
+  onReload,
+}: {
+  companyLegacyId: string;
+  templates: CompanyContractTemplateRow[];
+  offers: CompanyOfferRow[];
+  disabled: boolean;
+  onClose: () => void;
+  onReload: () => void;
+}) {
+  const activeOffers = offers.filter((offer) => offer.status !== "archived");
+  const offerNameById = new Map(
+    activeOffers.map((offer) => [offer.glide_row_id, offer.name ?? "Unnamed pathway"]),
+  );
+  const [editing, setEditing] = useState<CompanyContractTemplateRow | null>(null);
+  const [draft, setDraft] = useState<CompanyContractTemplateRow>(() => ({
+    name: "",
+    description: "",
+    applies_to_offer_id: "",
+    contract_days: 90,
+    monthly_value: null,
+    reference_link: "",
+    notes: "",
+    auto_renew: false,
+    is_enabled: true,
+    position: templates.length * 10,
+  }));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function resetDraft() {
+    setEditing(null);
+    setDraft({
+      name: "",
+      description: "",
+      applies_to_offer_id: "",
+      contract_days: 90,
+      monthly_value: null,
+      reference_link: "",
+      notes: "",
+      auto_renew: false,
+      is_enabled: true,
+      position: templates.length * 10,
+    });
+    setError(null);
+  }
+
+  function editTemplate(template: CompanyContractTemplateRow) {
+    setEditing(template);
+    setDraft({
+      ...template,
+      description: template.description ?? "",
+      reference_link: template.reference_link ?? "",
+      notes: template.notes ?? "",
+      monthly_value: template.monthly_value ?? null,
+      auto_renew: template.auto_renew === true,
+      position: template.position ?? 0,
+    });
+    setError(null);
+  }
+
+  async function saveTemplate(event: FormEvent) {
+    event.preventDefault();
+    if (disabled || saving) return;
+    setSaving(true);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "upsert_contract_template",
+          companyLegacyId,
+          entityId: editing?.id,
+          name: draft.name,
+          description: draft.description,
+          appliesToOfferId: draft.applies_to_offer_id,
+          contractDays: draft.contract_days,
+          monthlyValue: draft.monthly_value,
+          referenceLink: draft.reference_link,
+          notes: draft.notes,
+          autoRenew: draft.auto_renew === true,
+          isEnabled: draft.is_enabled,
+          position: draft.position ?? 0,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError || data?.error) {
+      setError(invokeError?.message ?? data.error);
+      return;
+    }
+    resetDraft();
+    onReload();
+  }
+
+  async function archiveTemplate(template: CompanyContractTemplateRow) {
+    if (disabled || saving || !template.id) return;
+    const confirmed = window.confirm(`Archive contract template "${template.name}"?`);
+    if (!confirmed) return;
+    setSaving(true);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-company-customization",
+      {
+        body: {
+          action: "archive_contract_template",
+          companyLegacyId,
+          entityId: template.id,
+        },
+      },
+    );
+    setSaving(false);
+    if (invokeError || data?.error) {
+      setError(invokeError?.message ?? data.error);
+      return;
+    }
+    if (editing?.id === template.id) resetDraft();
+    onReload();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+      <div className="retainos-modal max-h-[92vh] w-full max-w-5xl overflow-y-auto">
+        <div className="retainos-modal-header sticky top-0 z-10 flex items-start justify-between gap-4 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold text-[#101828]">
+              Contract Templates
+            </h2>
+            <p className="mt-1 text-sm text-[#667085]">
+              Auto-create initial contracts from the primary pathway assigned to a new client.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-[#d0d5dd] px-3 py-1.5 text-sm font-medium text-[#344054] hover:bg-[#f8fafc]"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="grid gap-5 px-6 py-5 lg:grid-cols-[1fr_1.15fr]">
+          <section>
+            <h3 className="text-sm font-semibold text-[#101828]">
+              Active templates
+            </h3>
+            <div className="mt-3 space-y-3">
+              {templates.length === 0 ? (
+                <div className="rounded-md border border-dashed border-[#d9e2ec] bg-[#f8fafc] px-4 py-6 text-sm text-[#667085]">
+                  No contract templates yet.
+                </div>
+              ) : (
+                templates.map((template) => (
+                  <div
+                    key={template.id ?? template.name}
+                    className="rounded-md border border-[#e4e9f0] bg-white p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-[#101828]">
+                          {template.name}
+                        </h4>
+                        <p className="mt-1 text-xs text-[#667085]">
+                          {offerNameById.get(template.applies_to_offer_id) ??
+                            "Unknown pathway"}{" "}
+                          · {template.contract_days} days
+                        </p>
+                        {template.monthly_value ? (
+                          <p className="mt-1 text-xs text-[#667085]">
+                            ${Number(template.monthly_value).toLocaleString()} / month
+                          </p>
+                        ) : null}
+                      </div>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          template.is_enabled
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-50 text-slate-600"
+                        }`}
+                      >
+                        {template.is_enabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editTemplate(template)}
+                        className="rounded-md border border-[#d0d5dd] px-3 py-1.5 text-xs font-semibold text-[#344054] hover:bg-[#f8fafc]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void archiveTemplate(template)}
+                        className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                      >
+                        Archive
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+
+          <form onSubmit={saveTemplate} className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-[#101828]">
+                {editing ? "Edit template" : "New template"}
+              </h3>
+              {editing ? (
+                <button
+                  type="button"
+                  onClick={resetDraft}
+                  className="text-xs font-semibold text-[#2f73b8] hover:text-[#1d4f8f]"
+                >
+                  New template
+                </button>
+              ) : null}
+            </div>
+            {error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
+            <label className="block text-sm font-medium text-[#344054]">
+              Template name
+              <input
+                value={draft.name}
+                disabled={disabled || saving}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, name: event.target.value }))
+                }
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                placeholder="Inner Circle - 3 Months contract"
+              />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm font-medium text-[#344054]">
+                Pathway
+                <select
+                  disabled={disabled || saving || Boolean(editing)}
+                  value={draft.applies_to_offer_id}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      applies_to_offer_id: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                >
+                  <option value="">Choose pathway</option>
+                  {activeOffers.map((offer) => (
+                    <option key={offer.glide_row_id} value={offer.glide_row_id}>
+                      {offer.name ?? "Unnamed pathway"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-[#344054]">
+                Expected duration days
+                <input
+                  type="number"
+                  min="1"
+                  max="3650"
+                  value={draft.contract_days}
+                  disabled={disabled || saving}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      contract_days: Number(event.target.value) || 1,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                />
+              </label>
+              <label className="block text-sm font-medium text-[#344054]">
+                Monthly value
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={draft.monthly_value ?? ""}
+                  disabled={disabled || saving}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      monthly_value: event.target.value
+                        ? Number(event.target.value)
+                        : null,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                />
+              </label>
+              <SettingsFlag
+                label="Enabled"
+                description="Use this template for new clients assigned to this pathway."
+                checked={draft.is_enabled}
+                disabled={disabled || saving}
+                onChange={(checked) =>
+                  setDraft((current) => ({ ...current, is_enabled: checked }))
+                }
+              />
+            </div>
+            <label className="block text-sm font-medium text-[#344054]">
+              Reference link
+              <input
+                value={draft.reference_link ?? ""}
+                disabled={disabled || saving}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    reference_link: event.target.value,
+                  }))
+                }
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+              />
+            </label>
+            <label className="block text-sm font-medium text-[#344054]">
+              Notes
+              <textarea
+                value={draft.notes ?? ""}
+                disabled={disabled || saving}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, notes: event.target.value }))
+                }
+                rows={3}
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                placeholder="Optional default notes for auto-created contracts"
+              />
+            </label>
+            <div className="flex justify-end gap-3 border-t border-[#e4e9f0] pt-4">
+              <button
+                type="button"
+                onClick={resetDraft}
+                disabled={disabled || saving}
+                className="rounded-md border border-[#d0d5dd] px-4 py-2 text-sm font-semibold text-[#344054] hover:bg-[#f8fafc] disabled:opacity-50"
+              >
+                Reset
+              </button>
+              <button
+                type="submit"
+                disabled={disabled || saving}
+                className="rounded-md bg-[#59abf0] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2f73b8] disabled:opacity-50"
+              >
+                {saving ? "Saving..." : editing ? "Save template" : "Create template"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CompanySettingsSetup({
   companyLegacyId,
   source,
   settings,
   notificationPreferences,
   taskTemplates,
+  contractTemplates,
   taskTemplateOffers,
   taskTemplateMilestones,
   teamMembers,
@@ -3445,6 +3823,7 @@ function CompanySettingsSetup({
   settings: CompanySettingsRow;
   notificationPreferences: SettingsNotificationPreference[];
   taskTemplates: CompanyTaskTemplateRow[];
+  contractTemplates: CompanyContractTemplateRow[];
   taskTemplateOffers: CompanyOfferRow[];
   taskTemplateMilestones: CompanyOfferMilestoneRow[];
   teamMembers: TeamRow[];
@@ -3465,6 +3844,7 @@ function CompanySettingsSetup({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [taskTemplateModalOpen, setTaskTemplateModalOpen] = useState(false);
+  const [contractTemplateModalOpen, setContractTemplateModalOpen] = useState(false);
   const [eventClientSelections, setEventClientSelections] = useState<
     Record<string, string>
   >({});
@@ -3963,6 +4343,57 @@ function CompanySettingsSetup({
       </section>
 
       <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="flex flex-col gap-3 border-b border-[#e4e9f0] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-[#101828]">
+              Contract templates
+            </h3>
+            <p className="mt-1 text-xs text-[#667085]">
+              Auto-create initial contracts from the primary pathway assigned to a new client.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setContractTemplateModalOpen(true)}
+            className="rounded-md border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-semibold text-[#344054] hover:bg-[#f8fafc] disabled:opacity-50"
+          >
+            Manage contract templates
+          </button>
+        </div>
+        <div className="grid gap-3 p-4 md:grid-cols-3">
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Templates
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {contractTemplates.length}
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Enabled
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {contractTemplates.filter((template) => template.is_enabled).length}
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Pathways covered
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {
+                new Set(
+                  contractTemplates.map((template) => template.applies_to_offer_id),
+                ).size
+              }
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
         <div className="border-b border-[#e4e9f0] px-5 py-4">
           <h3 className="text-sm font-semibold text-[#101828]">
             Notification and reminder preferences
@@ -4055,6 +4486,17 @@ function CompanySettingsSetup({
           teamMembers={teamMembers}
           disabled={disabled}
           onClose={() => setTaskTemplateModalOpen(false)}
+          onReload={onReload}
+        />
+      ) : null}
+
+      {contractTemplateModalOpen ? (
+        <ContractTemplatesModal
+          companyLegacyId={companyLegacyId}
+          templates={contractTemplates}
+          offers={taskTemplateOffers}
+          disabled={disabled}
+          onClose={() => setContractTemplateModalOpen(false)}
           onReload={onReload}
         />
       ) : null}
@@ -4582,6 +5024,9 @@ export function SaasClientDetail({
     [],
   );
   const [taskTemplates, setTaskTemplates] = useState<CompanyTaskTemplateRow[]>([]);
+  const [contractTemplates, setContractTemplates] = useState<
+    CompanyContractTemplateRow[]
+  >([]);
   const [taskTemplateOffers, setTaskTemplateOffers] = useState<CompanyOfferRow[]>([]);
   const [taskTemplateMilestones, setTaskTemplateMilestones] = useState<
     CompanyOfferMilestoneRow[]
@@ -4998,6 +5443,7 @@ export function SaasClientDetail({
           integrationClientsResult,
           integrationTokensResult,
           taskTemplatesResult,
+          contractTemplatesResult,
           taskTemplateOffersResult,
           taskTemplateMilestonesResult,
         ] = await Promise.all([
@@ -5043,6 +5489,15 @@ export function SaasClientDetail({
             .from("company_task_templates")
             .select(
               "id, name, description, trigger_type, applies_to_offer_id, applies_to_milestone_id, assign_to_type, assigned_member_legacy_id, due_offset_days, priority, status_value, is_enabled, position, metadata, archived_at",
+            )
+            .eq("company_id", appCompany.id)
+            .is("archived_at", null)
+            .order("position", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("company_contract_templates")
+            .select(
+              "id, name, description, applies_to_offer_id, contract_days, monthly_value, reference_link, notes, auto_renew, is_enabled, position, metadata, archived_at",
             )
             .eq("company_id", appCompany.id)
             .is("archived_at", null)
@@ -5120,6 +5575,17 @@ export function SaasClientDetail({
           console.error("Failed to load task templates:", taskTemplatesResult.error);
           setTaskTemplates([]);
         }
+        if (!contractTemplatesResult.error) {
+          setContractTemplates(
+            (contractTemplatesResult.data ?? []) as CompanyContractTemplateRow[],
+          );
+        } else {
+          console.error(
+            "Failed to load contract templates:",
+            contractTemplatesResult.error,
+          );
+          setContractTemplates([]);
+        }
         if (!taskTemplateOffersResult.error) {
           setTaskTemplateOffers(
             (taskTemplateOffersResult.data ?? []) as CompanyOfferRow[],
@@ -5168,6 +5634,7 @@ export function SaasClientDetail({
       setIntegrationReviewClients([]);
       setIntegrationTokens([]);
       setTaskTemplates([]);
+      setContractTemplates([]);
       setTaskTemplateOffers([]);
       setTaskTemplateMilestones([]);
       setIntegrationReviewLoading(false);
@@ -5576,6 +6043,7 @@ export function SaasClientDetail({
             settings={companySettings}
             notificationPreferences={notificationPreferences}
             taskTemplates={taskTemplates}
+            contractTemplates={contractTemplates}
             taskTemplateOffers={taskTemplateOffers}
             taskTemplateMilestones={taskTemplateMilestones}
             teamMembers={teamMembers}

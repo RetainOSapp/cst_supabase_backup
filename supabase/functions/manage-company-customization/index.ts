@@ -21,6 +21,8 @@ const ACTIONS = new Set([
   "archive_churn_reason",
   "upsert_task_template",
   "archive_task_template",
+  "upsert_contract_template",
+  "archive_contract_template",
 ]);
 const OUTCOME_TYPES = new Set(["success", "progress", "buy_in", "suitable"]);
 const CUSTOM_FIELD_TYPES = new Set([
@@ -171,6 +173,12 @@ function optionalInteger(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function optionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function requiredBoundedInteger(
@@ -845,6 +853,142 @@ Deno.serve(async (req) => {
         legacy_glide_row_id: company.legacy_glide_row_id,
         title: action.replaceAll("_", " "),
         summary: `${saved?.name ?? "Task template"} was ${action.replaceAll("_", " ")}.`,
+        before_data: beforeData,
+        after_data: saved,
+      });
+
+      return jsonResponse({ ok: true, item: saved });
+    }
+
+    if (
+      action === "upsert_contract_template" ||
+      action === "archive_contract_template"
+    ) {
+      const table = "company_contract_templates";
+      const entityId = cleanText(body.entityId);
+      let beforeData: Record<string, unknown> | null = null;
+      let saved: Record<string, unknown> | null = null;
+
+      if (action === "archive_contract_template") {
+        if (!entityId) {
+          return jsonResponse({ error: "Missing contract template id." }, 400);
+        }
+        const { data: existing, error: existingError } = await supabase
+          .from(table)
+          .select("*")
+          .eq("id", entityId)
+          .eq("company_id", company.id)
+          .maybeSingle();
+        if (existingError) throw existingError;
+        if (!existing) {
+          return jsonResponse({ error: "Contract template not found." }, 404);
+        }
+        beforeData = existing;
+
+        const { data, error } = await supabase
+          .from(table)
+          .update({
+            is_enabled: false,
+            archived_at: new Date().toISOString(),
+          })
+          .eq("id", entityId)
+          .eq("company_id", company.id)
+          .select("*")
+          .single();
+        if (error) throw error;
+        saved = data;
+      } else {
+        const name = cleanText(body.name);
+        const appliesToOfferId = cleanText(body.appliesToOfferId);
+        if (!name) {
+          return jsonResponse({ error: "Template name is required." }, 400);
+        }
+        if (!appliesToOfferId) {
+          return jsonResponse({ error: "Choose a pathway for this template." }, 400);
+        }
+
+        const { data: offer, error: offerError } = await supabase
+          .from("company_offers")
+          .select("glide_row_id, name, status")
+          .eq("company_id", company.id)
+          .eq("glide_row_id", appliesToOfferId)
+          .maybeSingle();
+        if (offerError) throw offerError;
+        if (!offer || offer.status !== "active") {
+          return jsonResponse(
+            { error: "Template pathway is not active for this company." },
+            400,
+          );
+        }
+
+        const payload = {
+          company_id: company.id,
+          name,
+          description: nullableText(body.description),
+          applies_to_offer_id: appliesToOfferId,
+          contract_days: requiredBoundedInteger(body.contractDays, 90, 1, 3650),
+          monthly_value: optionalNumber(body.monthlyValue),
+          reference_link: nullableText(body.referenceLink),
+          notes: nullableText(body.notes),
+          auto_renew: body.autoRenew === true,
+          is_enabled: body.isEnabled === false ? false : true,
+          position: optionalInteger(body.position) ?? 0,
+          archived_at: null,
+          metadata: {
+            pathway_name: offer.name ?? null,
+            updated_from: "manage-company-customization",
+          },
+        };
+
+        if (entityId) {
+          const { data: existing, error: existingError } = await supabase
+            .from(table)
+            .select("*")
+            .eq("id", entityId)
+            .eq("company_id", company.id)
+            .maybeSingle();
+          if (existingError) throw existingError;
+          if (!existing) {
+            return jsonResponse({ error: "Contract template not found." }, 404);
+          }
+          beforeData = existing;
+          const { data, error } = await supabase
+            .from(table)
+            .update(payload)
+            .eq("id", entityId)
+            .eq("company_id", company.id)
+            .select("*")
+            .single();
+          if (error) throw error;
+          saved = data;
+        } else {
+          const { data, error } = await supabase
+            .from(table)
+            .insert({
+              ...payload,
+              metadata: {
+                ...payload.metadata,
+                created_from: "manage-company-customization",
+              },
+            })
+            .select("*")
+            .single();
+          if (error) throw error;
+          saved = data;
+        }
+      }
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: `company_customization_${action}`,
+        source: "company_customization_admin",
+        entity_table: table,
+        entity_id: saved?.id ?? null,
+        legacy_glide_row_id: company.legacy_glide_row_id,
+        title: action.replaceAll("_", " "),
+        summary: `${saved?.name ?? "Contract template"} was ${action.replaceAll("_", " ")}.`,
         before_data: beforeData,
         after_data: saved,
       });

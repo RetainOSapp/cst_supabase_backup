@@ -91,8 +91,32 @@ function daysBetween(startIso: string | null, endIso: string | null) {
 function addDaysIso(value: string | null, days: number) {
   const base = value ? new Date(value) : new Date();
   if (Number.isNaN(base.getTime())) return new Date().toISOString();
-  base.setDate(base.getDate() + days);
+  base.setUTCDate(base.getUTCDate() + days);
   return base.toISOString();
+}
+
+async function resolveContractTemplate({
+  supabase,
+  companyId,
+  offerId,
+}: {
+  supabase: ReturnType<typeof createClient>;
+  companyId: string;
+  offerId: string | null;
+}) {
+  if (!offerId) return null;
+  const { data, error } = await supabase
+    .from("company_contract_templates")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("applies_to_offer_id", offerId)
+    .eq("is_enabled", true)
+    .is("archived_at", null)
+    .order("position", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? null) as Record<string, unknown> | null;
 }
 
 function renderTemplateText(value: unknown, client: Record<string, unknown>) {
@@ -856,15 +880,48 @@ Deno.serve(async (req) => {
       normalizeDate(body.dateOnboarded) ??
       normalizeDate(body.onboarded_at) ??
       now;
-    const contractStartDate =
+    let contractStartDate =
       normalizeDate(body.contract_start_date) ??
       normalizeDate(body.contractStartDate);
-    const contractEndDate =
+    let contractEndDate =
       normalizeDate(body.contract_end_date) ??
       normalizeDate(body.contractEndDate);
-    const contractMonthlyValue =
+    let contractMonthlyValue =
       nullableNumber(body.contract_monthly_value) ??
       nullableNumber(body.contractMonthlyValue);
+    let contractReferenceLink =
+      firstNullableText(body.contract_reference_link, body.contractReferenceLink);
+    let contractNotes = firstNullableText(body.contract_notes, body.contractNotes);
+
+    const hasExplicitContract =
+      Boolean(contractStartDate || contractEndDate) ||
+      contractMonthlyValue !== null ||
+      Boolean(contractReferenceLink || contractNotes);
+    const contractTemplate = !hasExplicitContract
+      ? await resolveContractTemplate({
+          supabase,
+          companyId: company.id,
+          offerId,
+        })
+      : null;
+    const templateContractDays =
+      contractTemplate && Number.isFinite(Number(contractTemplate.contract_days))
+        ? Math.max(1, Math.round(Number(contractTemplate.contract_days)))
+        : null;
+    if (contractTemplate && templateContractDays !== null) {
+      contractStartDate = onboardedAt;
+      contractEndDate = addDaysIso(contractStartDate, templateContractDays);
+      contractMonthlyValue =
+        contractTemplate.monthly_value === null ||
+        contractTemplate.monthly_value === undefined
+          ? null
+          : Number(contractTemplate.monthly_value);
+      contractReferenceLink =
+        firstNullableText(contractTemplate.reference_link) ?? null;
+      contractNotes =
+        firstNullableText(contractTemplate.notes) ??
+        `Auto-created from contract template: ${contractTemplate.name ?? "Contract template"}`;
+    }
 
     const customFieldRows = customFieldRowsFromPayload(body);
     const metadataCustomFields = Object.fromEntries(
@@ -928,8 +985,11 @@ Deno.serve(async (req) => {
       current_contract_start_date: contractStartDate,
       current_contract_end_date: contractEndDate,
       current_contract_end_date_for_filtering: contractEndDate,
-      current_contract_of_days: daysBetween(contractStartDate, contractEndDate),
+      current_contract_of_days:
+        templateContractDays ?? daysBetween(contractStartDate, contractEndDate),
       current_contract_monthly_value: contractMonthlyValue,
+      current_contract_reference_link: contractReferenceLink,
+      current_contract_notes: contractNotes,
       metadata: {
         created_in: "zapier_create_client",
         external_id: externalId,
@@ -957,7 +1017,13 @@ Deno.serve(async (req) => {
     if (createError) throw createError;
 
     let contract = null;
-    if (contractStartDate || contractEndDate) {
+    if (
+      contractStartDate ||
+      contractEndDate ||
+      contractMonthlyValue !== null ||
+      contractReferenceLink ||
+      contractNotes
+    ) {
       const { data, error } = await supabase
         .from("client_contracts")
         .insert({
@@ -968,7 +1034,11 @@ Deno.serve(async (req) => {
           start_date: contractStartDate,
           end_date: contractEndDate,
           monthly_value: contractMonthlyValue,
-          contract_days: daysBetween(contractStartDate, contractEndDate),
+          contract_days:
+            templateContractDays ?? daysBetween(contractStartDate, contractEndDate),
+          reference_link: contractReferenceLink,
+          notes: contractNotes,
+          auto_renew: contractTemplate?.auto_renew === true,
           status: "active",
           metadata: {
             created_in: "zapier_create_client",
@@ -976,6 +1046,8 @@ Deno.serve(async (req) => {
             auth_mode: authResult.authMode,
             integration_token_id: authResult.tokenId,
             integration_token_prefix: authResult.tokenPrefix,
+            contract_template_id: contractTemplate?.id ?? null,
+            contract_template_name: contractTemplate?.name ?? null,
           },
         })
         .select("*")
