@@ -6450,6 +6450,120 @@ function mapLegacyHistoryRow(row: Record<string, unknown>): ClientHistoryEventRo
   };
 }
 
+function buildMigratedOutcomeHistoryRows(client: ClientRow): ClientHistoryEventRow[] {
+  const configs = [
+    {
+      field: "success",
+      label: "Success",
+      value: valueFrom(client, [
+        "outcomes_success_for_filtering",
+        "outcomes_success_value_for_filtering",
+        "outcomes_success_value",
+        "success_status",
+      ]),
+      date: valueFrom(client, [
+        "outcomes_success_date",
+        "success_date",
+        "success_updated_at",
+      ]),
+    },
+    {
+      field: "progress",
+      label: "Progress",
+      value: valueFrom(client, [
+        "outcomes_progress_for_filtering",
+        "outcomes_progress_value",
+        "progress_status",
+      ]),
+      date: valueFrom(client, [
+        "outcomes_progress_date",
+        "progress_date",
+        "progress_updated_at",
+      ]),
+    },
+    {
+      field: "buy_in",
+      label: "Buy In",
+      value: valueFrom(client, [
+        "outcomes_buy_in_for_filtering",
+        "outcomes_buy_in_value",
+        "buy_in_status",
+      ]),
+      date: valueFrom(client, [
+        "outcomes_buy_in_date",
+        "buy_in_date",
+        "buy_in_updated_at",
+      ]),
+    },
+  ];
+
+  const rows: ClientHistoryEventRow[] = [];
+  for (const config of configs) {
+    const value = normalizeOutcome(config.value);
+    const date = typeof config.date === "string" ? config.date : "";
+    if (!value || !date) continue;
+    rows.push({
+      id: `migrated-health:${client.glide_row_id}:${config.field}`,
+      legacy_client_glide_row_id: client.glide_row_id,
+      event_type: "migrated_health_score",
+      source: "migrated_current_field",
+      title: `${config.label} update`,
+      summary: `${config.label}: ${outcomeLabel(value)}`,
+      success_status: config.field === "success" ? value : null,
+      progress_status: config.field === "progress" ? value : null,
+      buy_in_status: config.field === "buy_in" ? value : null,
+      created_at: date,
+      metadata: {
+        imported_from: "clients_current_outcome_fields",
+        health_field: config.field,
+        generated_from_current_field: true,
+      },
+    });
+  }
+  return rows;
+}
+
+function historyHealthKey(event: ClientHistoryEventRow) {
+  const metadata = event.metadata ?? {};
+  const healthField =
+    typeof metadata.health_field === "string" ? metadata.health_field : "";
+  const field =
+    healthField ||
+    (event.success_status
+      ? "success"
+      : event.progress_status
+        ? "progress"
+        : event.buy_in_status
+          ? "buy_in"
+          : "");
+  if (!field) return null;
+  const value =
+    event.success_status ??
+    event.progress_status ??
+    event.buy_in_status ??
+    event.summary ??
+    "";
+  return `${field}|${dateInputValue(event.created_at)}|${normalizeOutcome(value)}`;
+}
+
+function mergeSyntheticHealthHistory(
+  events: ClientHistoryEventRow[],
+  syntheticEvents: ClientHistoryEventRow[],
+) {
+  const existingKeys = new Set(
+    events
+      .map(historyHealthKey)
+      .filter((key): key is string => Boolean(key)),
+  );
+  return [
+    ...events,
+    ...syntheticEvents.filter((event) => {
+      const key = historyHealthKey(event);
+      return !key || !existingKeys.has(key);
+    }),
+  ];
+}
+
 function historyTimestamp(event: ClientHistoryEventRow) {
   const value = event.created_at ?? "";
   const time = new Date(value).getTime();
@@ -7261,12 +7375,17 @@ export function ClientDetail() {
           ...((taskRows ?? []) as ClientTaskRow[]),
         ]);
         setHistoryEvents(
-          sortHistoryEvents([
-            ...((historyRows ?? []) as ClientHistoryEventRow[]),
-            ...((legacyHistoryRows ?? []) as Record<string, unknown>[]).map(
-              mapLegacyHistoryRow,
+          sortHistoryEvents(
+            mergeSyntheticHealthHistory(
+              [
+                ...((historyRows ?? []) as ClientHistoryEventRow[]),
+                ...((legacyHistoryRows ?? []) as Record<string, unknown>[]).map(
+                  mapLegacyHistoryRow,
+                ),
+              ],
+              buildMigratedOutcomeHistoryRows(nextClient),
             ),
-          ]),
+          ),
         );
         setCustomFields(
           customFieldsResult.error

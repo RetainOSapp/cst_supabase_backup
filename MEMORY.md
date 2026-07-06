@@ -660,3 +660,10 @@ For historical context:
 - Increased Client Detail history loading from 100 app-owned / 100 CST rows to 200 app-owned / 500 CST rows and removed the combined 160-row cap so older CST health-score events are not hidden behind high-volume Fathom/Next Steps history.
 - Audit clarification: history edit/delete audit lives in internal `app_audit_events`; there is no user-facing audit log page yet.
 - Verification: `npm run build` passed in the hotfix worktree. No Edge Function deploy required.
+
+## Moves Method Current Outcome History Synthesis - 2026-07-06
+
+- Jay tested Caroline Anthony and found Health Scores history was still blank even though Outcomes and the roster showed current migrated score values/dates.
+- Root cause: some CST health-score data exists only as current client fields (`outcomes_*_value` + `outcomes_*_date`) rather than discrete rows in `backup_company_clients_history`.
+- Updated `src/pages/ClientDetail.tsx`: Client Detail > History now synthesizes "migrated current field" Health Scores entries from current Success, Progress, and Buy In values when they have dates. These rows dedupe against real history rows when the same score/date/value exists.
+- Verification: `npm run build` passed in the hotfix worktree. No Edge Function deploy required.
