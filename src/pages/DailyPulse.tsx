@@ -83,6 +83,47 @@ interface CsmOption {
 }
 
 const ACTIVE_STATUSES = new Set(["front-end", "back-end"]);
+const APP_PULSE_CLIENT_SELECT = [
+  "id",
+  "glide_row_id",
+  "client_name",
+  "company_id",
+  "company_glide_row_id",
+  "csm_team_member_id",
+  "csm_secondary_assignee_id",
+  "program_status_value",
+  "csm_date_of_last_contact",
+  "csm_date_of_next_contact",
+  "program_paused_return_date",
+  "current_contract_end_date_for_filtering",
+  "current_contract_end_date",
+  "outcomes_progress_for_filtering",
+  "outcomes_progress_value",
+  "outcomes_buy_in_for_filtering",
+  "outcomes_buy_in_value",
+  "outcomes_progress_date",
+  "outcomes_buy_in_date",
+  "client_age_date_onboarded",
+].join(", ");
+const MIRROR_PULSE_CLIENT_SELECT = [
+  "glide_row_id",
+  "client_name",
+  "company_id",
+  "csm_team_member_id",
+  "csm_secondary_assignee_id",
+  "program_status_value",
+  "csm_date_of_last_contact",
+  "csm_date_of_next_contact",
+  "current_contract_end_date_for_filtering",
+  "current_contract_end_date",
+  "outcomes_progress_for_filtering",
+  "outcomes_progress_value",
+  "outcomes_buy_in_for_filtering",
+  "outcomes_buy_in_value",
+  "outcomes_progress_date",
+  "outcomes_buy_in_date",
+  "client_age_date_onboarded",
+].join(", ");
 
 function mapClient(row: Record<string, unknown>): PulseClient {
   return {
@@ -891,7 +932,11 @@ export function DailyPulse() {
         const usesAppClients = company?.source === "app_owned";
         let query = supabase
           .from(usesAppClients ? "clients" : "backup_company_clients")
-          .select("*")
+          .select(
+            usesAppClients
+              ? APP_PULSE_CLIENT_SELECT
+              : MIRROR_PULSE_CLIENT_SELECT,
+          )
           .eq(
             usesAppClients ? "company_glide_row_id" : "company_id",
             effectiveCompanyId,
@@ -912,7 +957,7 @@ export function DailyPulse() {
         const { data, error: clientsError } = await query;
         if (clientsError) throw clientsError;
 
-        const mappedClients = ((data ?? []) as Record<string, unknown>[])
+        const mappedClients = (((data ?? []) as unknown) as Record<string, unknown>[])
           .map(mapClient)
           .filter((client) => client.glide_row_id);
 
