@@ -2214,7 +2214,7 @@ function QuickUpdateModal({
                 truncateAt={QUICK_UPDATE_CONTEXT_PREVIEW_LIMIT}
               />
             </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <ReadOnlyField
                 label="Date of Last Contact"
                 value={formatDate(valueFrom(client, lastContactColumns))}
@@ -2224,12 +2224,6 @@ function QuickUpdateModal({
                 label="Date of Next Contact"
                 value={formatDate(valueFrom(client, nextContactColumns))}
                 tone="amber"
-              />
-              <CallAttendanceControls
-                counts={callAttendanceCounts}
-                value={callAttendance}
-                disabled={!isPilotCompany || saving}
-                onChange={handleCallAttendanceChange}
               />
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -2254,69 +2248,77 @@ function QuickUpdateModal({
                   className="retainos-input"
                 />
               </label>
-            <label className="block">
-              <span className="retainos-field-label">Date of Last Contact</span>
-              <input
-                type="datetime-local"
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <label className="block">
+                <span className="retainos-field-label">Date of Last Contact</span>
+                <input
+                  type="datetime-local"
+                  disabled={!isPilotCompany || saving}
+                  value={lastContactAt}
+                  onChange={(event) => {
+                    setLastContactTouched(true);
+                    setLastContactAt(event.target.value);
+                  }}
+                  className="retainos-input"
+                />
+              </label>
+              <label className="block">
+                <span className="retainos-field-label">Date of Next Contact</span>
+                <input
+                  type="date"
+                  disabled={!isPilotCompany || saving}
+                  value={nextContactAt}
+                  onChange={(event) => {
+                    setNextContactTouched(true);
+                    setNextContactAt(event.target.value);
+                  }}
+                  className="retainos-input"
+                />
+              </label>
+              <CallAttendanceControls
+                counts={callAttendanceCounts}
+                value={callAttendance}
                 disabled={!isPilotCompany || saving}
-                value={lastContactAt}
-                onChange={(event) => {
-                  setLastContactTouched(true);
-                  setLastContactAt(event.target.value);
-                }}
-                className="retainos-input"
+                onChange={handleCallAttendanceChange}
               />
-            </label>
-            <label className="block">
-              <span className="retainos-field-label">Date of Next Contact</span>
-              <input
-                type="date"
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <OutcomeSelect
+                label="Success"
+                value={successStatus}
+                choices={successChoices}
                 disabled={!isPilotCompany || saving}
-                value={nextContactAt}
-                onChange={(event) => {
-                  setNextContactTouched(true);
-                  setNextContactAt(event.target.value);
-                }}
-                className="retainos-input"
+                onChange={setSuccessStatus}
               />
-            </label>
-          </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <OutcomeSelect
-              label="Success"
-              value={successStatus}
-              choices={successChoices}
+              <OutcomeSelect
+                label="Progress"
+                value={progressStatus}
+                choices={progressChoices}
+                disabled={!isPilotCompany || saving}
+                onChange={setProgressStatus}
+              />
+              <OutcomeSelect
+                label="Buy In"
+                value={buyInStatus}
+                choices={buyInChoices}
+                disabled={!isPilotCompany || saving}
+                onChange={setBuyInStatus}
+              />
+            </div>
+            <CustomFieldEditorGrid
+              client={client}
+              fields={customFields}
+              values={customFieldValues}
+              drafts={customFieldDrafts}
               disabled={!isPilotCompany || saving}
-              onChange={setSuccessStatus}
+              onChange={(fieldId, value) =>
+                setCustomFieldDrafts((current) => ({
+                  ...current,
+                  [fieldId]: value,
+                }))
+              }
             />
-            <OutcomeSelect
-              label="Progress"
-              value={progressStatus}
-              choices={progressChoices}
-              disabled={!isPilotCompany || saving}
-              onChange={setProgressStatus}
-            />
-            <OutcomeSelect
-              label="Buy In"
-              value={buyInStatus}
-              choices={buyInChoices}
-              disabled={!isPilotCompany || saving}
-              onChange={setBuyInStatus}
-            />
-          </div>
-          <CustomFieldEditorGrid
-            client={client}
-            fields={customFields}
-            values={customFieldValues}
-            drafts={customFieldDrafts}
-            disabled={!isPilotCompany || saving}
-            onChange={(fieldId, value) =>
-              setCustomFieldDrafts((current) => ({
-                ...current,
-                [fieldId]: value,
-              }))
-            }
-          />
           <section className="retainos-section overflow-hidden">
             <div className="border-b border-[#e4e9f0] bg-[#f7f9fc] px-4 py-3">
               <h3 className="retainos-section-title">Pathway progress</h3>

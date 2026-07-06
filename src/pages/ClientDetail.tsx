@@ -1553,7 +1553,7 @@ function CallAttendanceControls({
     },
   ];
   return (
-    <section className="rounded-md border border-gray-200 bg-gray-50 px-3.5 py-3 sm:col-span-2">
+    <section className="rounded-md border border-gray-200 bg-gray-50 px-3.5 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -2320,8 +2320,8 @@ function ClientNextStepsModal({
           </button>
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-2">
-            <label className="block sm:col-span-2">
+          <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-3">
+            <label className="block sm:col-span-3">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
                 Next Steps
               </span>
@@ -2369,7 +2369,7 @@ function ClientNextStepsModal({
               onChange={handleCallAttendanceChange}
             />
             {saveError ? (
-              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:col-span-2">
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:col-span-3">
                 {saveError}
               </div>
             ) : null}
