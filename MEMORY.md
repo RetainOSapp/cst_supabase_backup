@@ -114,6 +114,11 @@ For historical context:
 
 - Strategic Review remains a Company Timing Rule, not a pathway milestone. Completion is stored in `client_timed_checkpoint_completions` via `manage-client-timed-checkpoint`; Daily Pulse shows SR pending/complete from the configured contract-end offset.
 
+## MM Retention Formula Correction - 2026-07-07
+
+- Dashboard retention now splits migrated CST history from RetainOS-era writes: CST FE->BE and BE->BE `program-status` movements count as historical retention events by CST modified date; new RetainOS retention counts only Renewal/Upsell contract events by contract start date.
+- Live SOP resource `retention-churn-metrics` was refreshed via `20260707180000_update_retention_sop_resource.sql`.
+
 ## Fathom Recording URL Hotfix - 2026-07-08
 
 - Fathom payloads include `recording_url`; `ingest-client-call-summary` / `manage-integration-review` now normalize it onto history payloads, and Client History reads existing metadata/raw payload links.

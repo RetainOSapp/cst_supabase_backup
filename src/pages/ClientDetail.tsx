@@ -3025,6 +3025,10 @@ function ClientStatusModal({
   const requiresReturnDate = targetStatus === "paused";
   const isReactivation =
     targetStatus === "front-end" || targetStatus === "back-end";
+  const isRetentionStatusMove =
+    (client.program_status_value === "front-end" && targetStatus === "back-end") ||
+    (client.program_status_value === "back-end" && targetStatus === "back-end") ||
+    (client.program_status_value === "front-end" && targetStatus === "front-end");
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -3161,6 +3165,12 @@ function ClientStatusModal({
                 ))}
               </select>
             </label>
+            {isRetentionStatusMove ? (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                Pair this status change with a new contract marked Renewal or
+                Upsell so retention reporting stays accurate.
+              </div>
+            ) : null}
             {requiresReason ? (
               <label className="block">
                 <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -3666,9 +3676,21 @@ function NewContractModal({
                 </select>
               </label>
               <p className="mt-2 text-xs text-indigo-700">
-                Use this when the new contract represents a renewal or upsell. It
-                writes a RetainOS retention event for Dashboard reporting.
+                Use this when the new contract represents a renewal or upsell.
+                The contract start date becomes the retention date for Dashboard
+                reporting.
               </p>
+              {retentionType !== "none" ? (
+                <p className="mt-2 text-xs text-indigo-700">
+                  RetainOS will treat this as{" "}
+                  {retentionType === "upsell"
+                    ? "Front End to Back End"
+                    : currentProgramStatus === "back-end"
+                      ? "Back End restart"
+                      : "Front End restart"}
+                  .
+                </p>
+              ) : null}
               {retentionType !== "none" ? (
                 <label className="mt-3 flex items-center gap-2 text-sm font-medium text-indigo-900">
                   <input

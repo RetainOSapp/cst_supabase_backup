@@ -123,19 +123,26 @@ async function fetchPagedDashboardRows<T>(
   return { data: rows, error: null };
 }
 
-async function fetchDashboardRowsInChunks<T>(
+async function fetchDashboardRowsInChunksPaged<T>(
   ids: string[],
   buildQuery: (
     chunk: string[],
+    from: number,
+    to: number,
   ) => PromiseLike<{ data: T[] | null; error: unknown | null }>,
 ) {
   const rows: T[] = [];
 
   for (let index = 0; index < ids.length; index += DASHBOARD_IN_FILTER_CHUNK_SIZE) {
     const chunk = ids.slice(index, index + DASHBOARD_IN_FILTER_CHUNK_SIZE);
-    const { data, error } = await buildQuery(chunk);
-    if (error) return { data: rows, error };
-    rows.push(...(data ?? []));
+
+    for (let from = 0; ; from += DASHBOARD_QUERY_PAGE_SIZE) {
+      const to = from + DASHBOARD_QUERY_PAGE_SIZE - 1;
+      const { data, error } = await buildQuery(chunk, from, to);
+      if (error) return { data: rows, error };
+      rows.push(...(data ?? []));
+      if ((data ?? []).length < DASHBOARD_QUERY_PAGE_SIZE) break;
+    }
   }
 
   return { data: rows, error: null };
@@ -336,11 +343,15 @@ type OfferKpiClientRow = Record<string, unknown> & {
 
 interface OfferKpiHistoryRow {
   client_id: string | null;
+  modified_date?: string | null;
+  original_value?: string | null;
+  value?: string | null;
 }
 
 interface AppKpiHistoryRow {
   legacy_client_glide_row_id: string | null;
   event_type: string | null;
+  created_at?: string | null;
   payload: Record<string, unknown> | null;
 }
 
@@ -1198,15 +1209,40 @@ function isChurnedClient(client: OfferKpiClientRow, startDate: string, endDate: 
   return isInDateRange(offboarded, startDate, endDate);
 }
 
-function stringFromPayload(payload: Record<string, unknown> | null, key: string) {
-  const value = payload?.[key];
-  return typeof value === "string" ? value : null;
+function normalizedProgramStatus(value: unknown) {
+  const key = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "-")
+    .replace(/\s+/g, "-");
+  if (["front-end", "frontend", "front"].includes(key)) return "front-end";
+  if (["back-end", "backend", "back"].includes(key)) return "back-end";
+  return key || null;
 }
 
-function isRetainedStatusTransition(fromStatus: string | null, toStatus: string | null) {
+function isLegacyRetainedStatusTransition(
+  fromStatus: unknown,
+  toStatus: unknown,
+) {
+  const from = normalizedProgramStatus(fromStatus);
+  const to = normalizedProgramStatus(toStatus);
   return (
-    Boolean(fromStatus && ACTIVE_CLIENT_STATUSES.has(fromStatus)) &&
-    Boolean(toStatus && ACTIVE_CLIENT_STATUSES.has(toStatus))
+    (from === "front-end" && to === "back-end") ||
+    (from === "back-end" && to === "back-end")
+  );
+}
+
+function appRetentionDate(row: AppKpiHistoryRow) {
+  if (row.event_type !== "client_retention_recorded") return null;
+  const contract =
+    row.payload && typeof row.payload === "object"
+      ? (row.payload.contract as Record<string, unknown> | undefined)
+      : undefined;
+  return (
+    dateFromValue(contract?.start_date) ??
+    dateFromValue(contract?.startDate) ??
+    dateFromValue(row.payload?.retention_date) ??
+    dateFromValue(row.created_at)
   );
 }
 
@@ -2298,53 +2334,35 @@ export function Dashboard() {
 
       const renewalDateRange = appliedRenewalDateRange;
       const appHistoryQuery = appliedUsesAppClients
-        ? fetchDashboardRowsInChunks<AppKpiHistoryRow>(clientIds, (chunk) =>
+        ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
             supabase
               .from("client_history_events")
-              .select("legacy_client_glide_row_id, event_type, payload")
+              .select("legacy_client_glide_row_id, event_type, payload, created_at")
               .in("legacy_client_glide_row_id", chunk)
-              .in("event_type", [
-                "client_status_changed",
-                "client_retention_recorded",
-              ])
-              .gte(
-                "created_at",
-                renewalDateRange.startDate
-                  ? `${renewalDateRange.startDate}T00:00:00.000Z`
-                  : "0001-01-01T00:00:00.000Z",
-              )
-              .lt(
-                "created_at",
-                renewalDateRange.endDate
-                  ? addDays(
-                      new Date(`${renewalDateRange.endDate}T00:00:00.000Z`),
-                      1,
-                    ).toISOString()
-                  : "9999-12-31T00:00:00.000Z",
-              ),
+              .eq("event_type", "client_retention_recorded")
+              .range(from, to),
           )
         : Promise.resolve({ data: [], error: null });
       const appContractsQuery = appliedUsesAppClients
-        ? fetchDashboardRowsInChunks<OfferKpiContractRow>(clientIds, (chunk) =>
+        ? fetchDashboardRowsInChunksPaged<OfferKpiContractRow>(clientIds, (chunk, from, to) =>
             supabase
               .from("client_contracts")
               .select("client_id, end_date")
               .in("client_id", chunk)
               .is("archived_at", null)
               .or("status.is.null,status.neq.archived")
-              .not("end_date", "is", null),
+              .not("end_date", "is", null)
+              .range(from, to),
           )
         : Promise.resolve({ data: [], error: null });
-      const legacyHistoryQuery = fetchDashboardRowsInChunks<OfferKpiHistoryRow>(
+      const legacyHistoryQuery = fetchDashboardRowsInChunksPaged<OfferKpiHistoryRow>(
         clientIds,
-        (chunk) =>
+        (chunk, from, to) =>
           supabase
             .from("backup_company_clients_history")
-            .select("client_id")
+            .select("client_id, modified_date, original_value, value")
             .in("client_id", chunk)
             .eq("change_type_code", "program-status")
-            .in("value", ["front-end", "back-end"])
-            .in("original_value", ["front-end", "back-end"])
             .gte(
               "modified_date",
               renewalDateRange.startDate
@@ -2359,16 +2377,18 @@ export function Dashboard() {
                     1,
                   ).toISOString()
                 : "9999-12-31T00:00:00.000Z",
-            ),
+            )
+            .range(from, to),
       );
-      const legacyContractsQuery = fetchDashboardRowsInChunks<OfferKpiContractRow>(
+      const legacyContractsQuery = fetchDashboardRowsInChunksPaged<OfferKpiContractRow>(
         clientIds,
-        (chunk) =>
+        (chunk, from, to) =>
           supabase
             .from("backup_company_clients_contracts")
             .select("client_id, end_date")
             .in("client_id", chunk)
-            .not("end_date", "is", null),
+            .not("end_date", "is", null)
+            .range(from, to),
       );
 
       const [
@@ -2399,23 +2419,32 @@ export function Dashboard() {
       }
 
       const retainedIds = new Set<string>();
+      let retainedEventCount = 0;
       ((appHistoryResult.data ?? []) as AppKpiHistoryRow[]).forEach((row) => {
         const clientId = row.legacy_client_glide_row_id;
         if (!clientId) return;
+        const retentionDate = appRetentionDate(row);
         if (
-          row.event_type === "client_retention_recorded" ||
-          isRetainedStatusTransition(
-            stringFromPayload(row.payload, "from_status"),
-            stringFromPayload(row.payload, "to_status"),
+          retentionDate &&
+          isInDateRange(
+            retentionDate,
+            renewalDateRange.startDate,
+            renewalDateRange.endDate,
           )
         ) {
           retainedIds.add(clientId);
+          retainedEventCount += 1;
         }
       });
       ((legacyHistoryResult.data ?? []) as OfferKpiHistoryRow[])
-          .map((row) => row.client_id)
-          .filter((id): id is string => Boolean(id))
-          .forEach((id) => retainedIds.add(id));
+        .filter((row) =>
+          isLegacyRetainedStatusTransition(row.original_value, row.value),
+        )
+        .forEach((row) => {
+          if (!row.client_id) return;
+          retainedIds.add(row.client_id);
+          retainedEventCount += 1;
+        });
       const churnedIds = new Set(churned.map((client) => client.glide_row_id));
       const renewingIds = new Set<string>();
       const currentSummaryRenewingIds = new Set<string>();
@@ -2458,12 +2487,12 @@ export function Dashboard() {
         }
       });
 
-      setRetainedClients(retainedIds.size);
+      setRetainedClients(retainedEventCount);
       setRenewingClientsCount(renewingIds.size);
       setRetentionPercentage(
         renewingIds.size === 0
           ? 0
-          : Math.round((retainedIds.size / renewingIds.size) * 100),
+          : Math.round((retainedEventCount / renewingIds.size) * 100),
       );
       setActiveRenewingClients(
         [...currentSummaryRenewingIds].filter((id) => {
@@ -3282,6 +3311,10 @@ export function Dashboard() {
       }
 
       let retainedIds = new Set<string>();
+      let retainedEventRows: Array<{
+        client: OfferKpiClientRow;
+        retainedAt: string | null;
+      }> = [];
       let renewingIds = new Set<string>();
       let currentSummaryRenewingIds = new Set<string>();
       let churnedIds = new Set<string>();
@@ -3327,55 +3360,35 @@ export function Dashboard() {
         clientIds.length > 0
       ) {
         const appHistoryQuery = appliedUsesAppClients
-          ? fetchDashboardRowsInChunks<AppKpiHistoryRow>(clientIds, (chunk) =>
+          ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
               supabase
                 .from("client_history_events")
-                .select("legacy_client_glide_row_id, event_type, payload")
+                .select("legacy_client_glide_row_id, event_type, payload, created_at")
                 .in("legacy_client_glide_row_id", chunk)
-                .in("event_type", [
-                  "client_status_changed",
-                  "client_retention_recorded",
-                ])
-                .gte(
-                  "created_at",
-                  detailRenewalDateRange.startDate
-                    ? `${detailRenewalDateRange.startDate}T00:00:00.000Z`
-                    : "0001-01-01T00:00:00.000Z",
-                )
-                .lt(
-                  "created_at",
-                  detailRenewalDateRange.endDate
-                    ? addDays(
-                        new Date(
-                          `${detailRenewalDateRange.endDate}T00:00:00.000Z`,
-                        ),
-                        1,
-                      ).toISOString()
-                    : "9999-12-31T00:00:00.000Z",
-                ),
+                .eq("event_type", "client_retention_recorded")
+                .range(from, to),
             )
           : Promise.resolve({ data: [], error: null });
         const appContractsQuery = appliedUsesAppClients
-          ? fetchDashboardRowsInChunks<OfferKpiContractRow>(clientIds, (chunk) =>
+          ? fetchDashboardRowsInChunksPaged<OfferKpiContractRow>(clientIds, (chunk, from, to) =>
               supabase
                 .from("client_contracts")
                 .select("client_id, end_date")
                 .in("client_id", chunk)
                 .is("archived_at", null)
                 .or("status.is.null,status.neq.archived")
-                .not("end_date", "is", null),
+                .not("end_date", "is", null)
+                .range(from, to),
             )
           : Promise.resolve({ data: [], error: null });
-        const legacyHistoryQuery = fetchDashboardRowsInChunks<OfferKpiHistoryRow>(
+        const legacyHistoryQuery = fetchDashboardRowsInChunksPaged<OfferKpiHistoryRow>(
           clientIds,
-          (chunk) =>
+          (chunk, from, to) =>
             supabase
               .from("backup_company_clients_history")
-              .select("client_id")
+              .select("client_id, modified_date, original_value, value")
               .in("client_id", chunk)
               .eq("change_type_code", "program-status")
-              .in("value", ["front-end", "back-end"])
-              .in("original_value", ["front-end", "back-end"])
               .gte(
                 "modified_date",
                 detailRenewalDateRange.startDate
@@ -3392,16 +3405,18 @@ export function Dashboard() {
                       1,
                     ).toISOString()
                   : "9999-12-31T00:00:00.000Z",
-              ),
+              )
+              .range(from, to),
         );
-        const legacyContractsQuery = fetchDashboardRowsInChunks<OfferKpiContractRow>(
+        const legacyContractsQuery = fetchDashboardRowsInChunksPaged<OfferKpiContractRow>(
           clientIds,
-          (chunk) =>
+          (chunk, from, to) =>
             supabase
               .from("backup_company_clients_contracts")
               .select("client_id, end_date")
               .in("client_id", chunk)
-              .not("end_date", "is", null),
+              .not("end_date", "is", null)
+              .range(from, to),
         );
 
         const [
@@ -3432,23 +3447,42 @@ export function Dashboard() {
         }
 
         retainedIds = new Set<string>();
+        retainedEventRows = [];
         ((appHistoryResult.data ?? []) as AppKpiHistoryRow[]).forEach((row) => {
           const clientId = row.legacy_client_glide_row_id;
           if (!clientId) return;
+          const retentionDate = appRetentionDate(row);
+          const client = clientById.get(clientId);
           if (
-            row.event_type === "client_retention_recorded" ||
-            isRetainedStatusTransition(
-              stringFromPayload(row.payload, "from_status"),
-              stringFromPayload(row.payload, "to_status"),
+            retentionDate &&
+            client &&
+            isInDateRange(
+              retentionDate,
+              detailRenewalDateRange.startDate,
+              detailRenewalDateRange.endDate,
             )
           ) {
             retainedIds.add(clientId);
+            retainedEventRows.push({
+              client,
+              retainedAt: retentionDate.toISOString(),
+            });
           }
         });
         ((legacyHistoryResult.data ?? []) as OfferKpiHistoryRow[])
-          .map((row) => row.client_id)
-          .filter((id): id is string => Boolean(id))
-          .forEach((id) => retainedIds.add(id));
+          .filter((row) =>
+            isLegacyRetainedStatusTransition(row.original_value, row.value),
+          )
+          .forEach((row) => {
+            if (!row.client_id) return;
+            const client = clientById.get(row.client_id);
+            if (!client) return;
+            retainedIds.add(row.client_id);
+            retainedEventRows.push({
+              client,
+              retainedAt: row.modified_date ?? null,
+            });
+          });
 
         churnedIds = new Set(
           reportClients
@@ -3504,6 +3538,43 @@ export function Dashboard() {
         });
       }
 
+      if (detailKey === "retained") {
+        let rows = retainedEventRows;
+        const search = detailSearch.trim().toLowerCase();
+        if (search) {
+          rows = rows.filter(({ client }) =>
+            String(client.client_name ?? "").toLowerCase().includes(search),
+          );
+        }
+        rows = rows.sort((a, b) => {
+          const aDate = dateFromValue(a.retainedAt);
+          const bDate = dateFromValue(b.retainedAt);
+          if (aDate && bDate && aDate.getTime() !== bDate.getTime()) {
+            return bDate.getTime() - aDate.getTime();
+          }
+          if (aDate && !bDate) return -1;
+          if (!aDate && bDate) return 1;
+          return String(a.client.client_name ?? "").localeCompare(
+            String(b.client.client_name ?? ""),
+          );
+        });
+        const totalCount = rows.length;
+        const start = (detailPage - 1) * DETAIL_PAGE_SIZE;
+        const pageRows = rows.slice(start, start + DETAIL_PAGE_SIZE);
+        setDetailRows(
+          pageRows.map(({ client, retainedAt }) => ({
+            glide_row_id: client.glide_row_id,
+            client_name: client.client_name,
+            client_image: client.client_image,
+            csm_team_member_id: client.csm_team_member_id,
+            renewal_date: retainedAt,
+          })),
+        );
+        setDetailTotalCount(totalCount);
+        setDetailLoading(false);
+        return;
+      }
+
       let rows = reportClients.filter((client) => {
         if (detailKey === "active") {
           return ["front-end", "back-end"].includes(client.program_status_value ?? "");
@@ -3522,7 +3593,6 @@ export function Dashboard() {
           );
         }
         if (detailKey === "churned") return churnedIds.has(client.glide_row_id);
-        if (detailKey === "retained") return retainedIds.has(client.glide_row_id);
         if (detailKey === "renewing") return renewingIds.has(client.glide_row_id);
         if (detailKey === "active-renewing") {
           return (
