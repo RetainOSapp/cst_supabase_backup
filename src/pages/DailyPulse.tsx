@@ -67,6 +67,15 @@ interface PulseTask {
   archived_at: string | null;
 }
 
+interface TimedCheckpointCompletion {
+  id: string;
+  legacy_client_id: string;
+  checkpoint_type: "strategic_review";
+  due_at: string;
+  completed_at: string;
+  completed_by_name: string | null;
+}
+
 interface PulseItem {
   id: string;
   client?: PulseClient;
@@ -75,6 +84,11 @@ interface PulseItem {
   date?: string | null;
   tone: "blue" | "amber" | "red" | "green" | "slate";
   href?: string;
+  checkpoint?: {
+    type: "strategic_review";
+    dueAt: string;
+    completion?: TimedCheckpointCompletion;
+  };
 }
 
 interface PulseSection {
@@ -232,6 +246,20 @@ function dateOnlyIso(date: Date) {
   return startOfDay(date).toISOString();
 }
 
+function dateOnlyKey(value: string | Date | null | undefined) {
+  const date = value instanceof Date ? value : parseDate(value);
+  if (!date) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function checkpointCompletionKey(
+  clientId: string,
+  checkpointType: string,
+  dueAt: string | Date,
+) {
+  return `${clientId}:${checkpointType}:${dateOnlyKey(dueAt)}`;
+}
+
 function recurringDueDateInRange(
   anchorValue: string | null | undefined,
   intervalDays: number,
@@ -327,6 +355,7 @@ function makeItem(
   tone: PulseItem["tone"],
   date?: string | null,
   href?: string,
+  checkpoint?: PulseItem["checkpoint"],
 ): PulseItem {
   return {
     id: `${sectionId}:${client?.glide_row_id ?? href ?? "company"}:${label}:${date ?? ""}`,
@@ -336,6 +365,7 @@ function makeItem(
     date,
     tone,
     href,
+    checkpoint,
   };
 }
 
@@ -406,6 +436,7 @@ function buildPulseSections(
   clients: PulseClient[],
   tasks: PulseTask[],
   latestHistoryByClient: Map<string, string>,
+  checkpointCompletions: Map<string, TimedCheckpointCompletion>,
   window: PulseWindow,
   enabledTypes = enabledNotificationTypes([]),
   notificationPreferences: NotificationPreference[] = [],
@@ -614,13 +645,29 @@ function buildPulseSections(
           if (!contractEnd) return null;
           const reviewDate = addDays(startOfDay(contractEnd), -strategicReviewLeadDays);
           if (reviewDate < range.start || reviewDate >= range.end) return null;
+          const dueAt = dateOnlyKey(reviewDate);
+          const completion = checkpointCompletions.get(
+            checkpointCompletionKey(client.glide_row_id, "strategic_review", dueAt),
+          );
           return makeItem(
             `strategic-review-${window}`,
             client,
-            "Strategic review",
-            `Review before renewal on ${formatDate(client.current_contract_end_date_for_filtering)}`,
-            "amber",
-            dateOnlyIso(reviewDate),
+            completion ? "SR complete" : "SR pending",
+            completion
+              ? `Strategic Review completed ${formatDate(completion.completed_at)}${
+                  completion.completed_by_name
+                    ? ` by ${completion.completed_by_name}`
+                    : ""
+                }. Renewal date is ${formatDate(client.current_contract_end_date_for_filtering)}`
+              : `Strategic Review due before renewal on ${formatDate(client.current_contract_end_date_for_filtering)}`,
+            completion ? "green" : "amber",
+            dueAt,
+            undefined,
+            {
+              type: "strategic_review",
+              dueAt,
+              completion,
+            },
           );
         })
         .filter((item): item is PulseItem => Boolean(item)),
@@ -754,7 +801,15 @@ function WindowButton({
   );
 }
 
-function PulseSectionCard({ section }: { section: PulseSection }) {
+function PulseSectionCard({
+  section,
+  completingCheckpointKey,
+  onCompleteCheckpoint,
+}: {
+  section: PulseSection;
+  completingCheckpointKey: string | null;
+  onCompleteCheckpoint: (item: PulseItem) => void;
+}) {
   const [open, setOpen] = useState(section.items.length > 0);
 
   useEffect(() => {
@@ -821,6 +876,36 @@ function PulseSectionCard({ section }: { section: PulseSection }) {
                       {item.client ? "Open client" : "Open tasks"}
                     </span>
                   </div>
+                  {item.checkpoint && !item.checkpoint.completion ? (
+                    <div className="mt-4 border-t border-[#e8edf3] pt-3">
+                      <button
+                        type="button"
+                        disabled={
+                          completingCheckpointKey ===
+                          checkpointCompletionKey(
+                            item.client?.glide_row_id ?? "",
+                            item.checkpoint.type,
+                            item.checkpoint.dueAt,
+                          )
+                        }
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onCompleteCheckpoint(item);
+                        }}
+                        className="retainos-focus rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {completingCheckpointKey ===
+                        checkpointCompletionKey(
+                          item.client?.glide_row_id ?? "",
+                          item.checkpoint.type,
+                          item.checkpoint.dueAt,
+                        )
+                          ? "Saving..."
+                          : "Mark SR complete"}
+                      </button>
+                    </div>
+                  ) : null}
                 </Link>
               ))}
             </div>
@@ -845,6 +930,9 @@ export function DailyPulse() {
   const [latestHistoryByClient, setLatestHistoryByClient] = useState(
     new Map<string, string>(),
   );
+  const [checkpointCompletions, setCheckpointCompletions] = useState(
+    new Map<string, TimedCheckpointCompletion>(),
+  );
   const [enabledTypes, setEnabledTypes] = useState<Set<NotificationPreferenceType>>(
     enabledNotificationTypes([]),
   );
@@ -852,6 +940,9 @@ export function DailyPulse() {
     NotificationPreference[]
   >(mergeNotificationPreferences([]));
   const [loading, setLoading] = useState(false);
+  const [completingCheckpointKey, setCompletingCheckpointKey] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const canFilterByCsm = !capabilities.canViewOnlyAssignedClients;
   const activeCsmScopeId =
@@ -948,6 +1039,7 @@ export function DailyPulse() {
         setClients([]);
         setTasks([]);
         setLatestHistoryByClient(new Map());
+        setCheckpointCompletions(new Map());
         return;
       }
 
@@ -999,6 +1091,7 @@ export function DailyPulse() {
         );
 
         const historyByClient = new Map<string, string>();
+        const completionsByClientDue = new Map<string, TimedCheckpointCompletion>();
         let taskRows: PulseTask[] = [];
 
         if (usesAppClients) {
@@ -1047,12 +1140,44 @@ export function DailyPulse() {
               }
             }
           }
+
+          if (company?.app_company_id) {
+            const { data: completions, error: completionsError } = await supabase
+              .from("client_timed_checkpoint_completions")
+              .select(
+                "id, legacy_client_id, checkpoint_type, due_at, completed_at, completed_by_name",
+              )
+              .eq("company_id", company.app_company_id)
+              .eq("checkpoint_type", "strategic_review")
+              .in("legacy_client_id", clientIds)
+              .is("archived_at", null)
+              .limit(5000);
+
+            if (completionsError) {
+              console.warn(
+                "Daily Pulse timed checkpoint completions unavailable:",
+                completionsError,
+              );
+            } else {
+              for (const row of (completions ?? []) as TimedCheckpointCompletion[]) {
+                completionsByClientDue.set(
+                  checkpointCompletionKey(
+                    row.legacy_client_id,
+                    row.checkpoint_type,
+                    row.due_at,
+                  ),
+                  row,
+                );
+              }
+            }
+          }
         }
 
         if (!cancelled) {
           setClients(visibleClients);
           setTasks(taskRows);
           setLatestHistoryByClient(historyByClient);
+          setCheckpointCompletions(completionsByClientDue);
         }
       } catch (loadError) {
         console.error("Failed to load Daily Pulse:", loadError);
@@ -1060,6 +1185,7 @@ export function DailyPulse() {
           setClients([]);
           setTasks([]);
           setLatestHistoryByClient(new Map());
+          setCheckpointCompletions(new Map());
           setError(
             loadError instanceof Error
               ? loadError.message
@@ -1090,15 +1216,76 @@ export function DailyPulse() {
         clients,
         tasks,
         latestHistoryByClient,
+        checkpointCompletions,
         windowMode,
         enabledTypes,
         notificationPreferences,
       ),
-    [clients, enabledTypes, latestHistoryByClient, notificationPreferences, tasks, windowMode],
+    [
+      checkpointCompletions,
+      clients,
+      enabledTypes,
+      latestHistoryByClient,
+      notificationPreferences,
+      tasks,
+      windowMode,
+    ],
   );
 
   const totalItems = sections.reduce((sum, section) => sum + section.items.length, 0);
   const enabledSignalCount = enabledTypes.size;
+
+  async function handleCompleteCheckpoint(item: PulseItem) {
+    if (!effectiveCompanyId || !item.client || !item.checkpoint) return;
+    const key = checkpointCompletionKey(
+      item.client.glide_row_id,
+      item.checkpoint.type,
+      item.checkpoint.dueAt,
+    );
+    setCompletingCheckpointKey(key);
+    setError(null);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "manage-client-timed-checkpoint",
+        {
+          body: {
+            action: "complete",
+            companyLegacyId: effectiveCompanyId,
+            clientLegacyId: item.client.glide_row_id,
+            checkpointType: item.checkpoint.type,
+            dueAt: item.checkpoint.dueAt,
+          },
+        },
+      );
+
+      if (invokeError) throw invokeError;
+      if (data?.error) throw new Error(data.error);
+
+      const completion = data?.completion as TimedCheckpointCompletion | undefined;
+      if (completion) {
+        setCheckpointCompletions((current) => {
+          const next = new Map(current);
+          next.set(
+            checkpointCompletionKey(
+              completion.legacy_client_id,
+              completion.checkpoint_type,
+              completion.due_at,
+            ),
+            completion,
+          );
+          return next;
+        });
+      }
+    } catch (completeError) {
+      setError(
+        completeError instanceof Error
+          ? completeError.message
+          : "Could not complete Strategic Review.",
+      );
+    } finally {
+      setCompletingCheckpointKey(null);
+    }
+  }
 
   if (!effectiveCompanyId) {
     return (
@@ -1219,7 +1406,12 @@ export function DailyPulse() {
             </div>
           ) : null}
           {sections.map((section) => (
-            <PulseSectionCard key={section.id} section={section} />
+            <PulseSectionCard
+              key={section.id}
+              section={section}
+              completingCheckpointKey={completingCheckpointKey}
+              onCompleteCheckpoint={handleCompleteCheckpoint}
+            />
           ))}
         </div>
       )}
