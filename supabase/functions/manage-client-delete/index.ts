@@ -170,6 +170,21 @@ Deno.serve(async (req) => {
       (client.company_glide_row_id as string | null) ??
       (company.legacy_glide_row_id as string | null) ??
       "";
+    const deletedAt = new Date().toISOString();
+
+    const { error: archiveClientError } = await supabase
+      .from("clients")
+      .update({
+        archived_at: deletedAt,
+        metadata: {
+          ...(client.metadata ?? {}),
+          deleted_by_retainos: true,
+          deleted_at: deletedAt,
+          deletion_reason: reason,
+        },
+      })
+      .eq("id", client.id);
+    if (archiveClientError) throw archiveClientError;
 
     const [
       tasks,
@@ -221,7 +236,7 @@ Deno.serve(async (req) => {
       ]),
       deleteMatching(supabase, "client_call_attendance_events", [
         ["company_id", company.id],
-        ["legacy_client_id", clientLegacyId],
+        ["client_legacy_id", clientLegacyId],
       ]),
     ]);
 

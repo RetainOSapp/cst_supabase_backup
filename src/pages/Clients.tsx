@@ -3886,6 +3886,9 @@ export function Clients() {
         appliedFilters.companyId,
       )
       .range(from, to);
+    if (useAppClients) {
+      query = query.is("archived_at", null);
+    }
     if (appliedFilters.clientName.trim())
       query = query.ilike(
         "client_name",
@@ -4025,6 +4028,9 @@ export function Clients() {
       )
       .order("client_name", { ascending: true, nullsFirst: false })
       .range(0, 4999);
+    if (useAppClients) {
+      query = query.is("archived_at", null);
+    }
 
     if (appliedFilters.clientName.trim()) {
       query = query.ilike(
