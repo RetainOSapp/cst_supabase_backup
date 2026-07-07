@@ -18,11 +18,18 @@ import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
 type PulseWindow = "today" | "week" | "month";
+type CsmRelationshipFilter = "both" | "primary" | "secondary";
 
 const PULSE_WINDOW_LABELS: Record<PulseWindow, string> = {
   today: "today",
   week: "this week",
   month: "this month",
+};
+
+const CSM_RELATIONSHIP_LABELS: Record<CsmRelationshipFilter, string> = {
+  both: "Both",
+  primary: "Primary clients",
+  secondary: "Secondary clients",
 };
 
 interface PulseClient {
@@ -283,6 +290,18 @@ function csmOptionsFromTeam(teamMembers: UnifiedTeamMember[]) {
       return true;
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function filterClientsByCsmRelationship(
+  clients: PulseClient[],
+  csmId: string,
+  relationship: CsmRelationshipFilter,
+) {
+  if (!csmId || relationship === "both") return clients;
+  if (relationship === "primary") {
+    return clients.filter((client) => client.csm_team_member_id === csmId);
+  }
+  return clients.filter((client) => client.csm_secondary_assignee_id === csmId);
 }
 
 function clientUrl(client: PulseClient) {
@@ -815,6 +834,8 @@ function PulseSectionCard({ section }: { section: PulseSection }) {
 export function DailyPulse() {
   const { capabilities, effectiveCompanyId, teamMemberId } = useAccountContext();
   const [windowMode, setWindowMode] = useState<PulseWindow>("today");
+  const [csmRelationshipFilter, setCsmRelationshipFilter] =
+    useState<CsmRelationshipFilter>("both");
   const [companyName, setCompanyName] = useState("");
   const [selectedCsmId, setSelectedCsmId] = useState("");
   const [csmOptions, setCsmOptions] = useState<CsmOption[]>([]);
@@ -833,6 +854,11 @@ export function DailyPulse() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canFilterByCsm = !capabilities.canViewOnlyAssignedClients;
+  const activeCsmScopeId =
+    capabilities.canViewOnlyAssignedClients && teamMemberId
+      ? teamMemberId
+      : selectedCsmId;
+  const showRelationshipFilter = Boolean(activeCsmScopeId);
 
   useEffect(() => {
     let cancelled = false;
@@ -878,6 +904,7 @@ export function DailyPulse() {
 
   useEffect(() => {
     setSelectedCsmId("");
+    setCsmRelationshipFilter("both");
   }, [effectiveCompanyId]);
 
   useEffect(() => {
@@ -960,6 +987,16 @@ export function DailyPulse() {
         const mappedClients = (((data ?? []) as unknown) as Record<string, unknown>[])
           .map(mapClient)
           .filter((client) => client.glide_row_id);
+        const visibleClients = scopedCsmId
+          ? filterClientsByCsmRelationship(
+              mappedClients,
+              scopedCsmId,
+              csmRelationshipFilter,
+            )
+          : mappedClients;
+        const visibleClientIds = new Set(
+          visibleClients.map((client) => client.glide_row_id),
+        );
 
         const historyByClient = new Map<string, string>();
         let taskRows: PulseTask[] = [];
@@ -982,12 +1019,14 @@ export function DailyPulse() {
           if (tasksError) {
             console.warn("Daily Pulse task data unavailable:", tasksError);
           } else {
-            taskRows = (tasksData ?? []) as PulseTask[];
+            taskRows = ((tasksData ?? []) as PulseTask[]).filter(
+              (task) => !task.client_id || visibleClientIds.has(task.client_id),
+            );
           }
         }
 
         const clientIds = usesAppClients
-          ? mappedClients.map((client) => client.glide_row_id)
+          ? visibleClients.map((client) => client.glide_row_id)
           : [];
 
         if (clientIds.length > 0) {
@@ -1011,7 +1050,7 @@ export function DailyPulse() {
         }
 
         if (!cancelled) {
-          setClients(mappedClients);
+          setClients(visibleClients);
           setTasks(taskRows);
           setLatestHistoryByClient(historyByClient);
         }
@@ -1039,6 +1078,7 @@ export function DailyPulse() {
     };
   }, [
     capabilities.canViewOnlyAssignedClients,
+    csmRelationshipFilter,
     effectiveCompanyId,
     selectedCsmId,
     teamMemberId,
@@ -1104,25 +1144,48 @@ export function DailyPulse() {
           </WindowButton>
         </div>
 
-        {canFilterByCsm && (
-          <label className="flex w-full flex-col gap-1 text-sm font-semibold text-[#4b5565] lg:w-72">
-            CSM view
-            <select
-              value={selectedCsmId}
-              onChange={(event) => setSelectedCsmId(event.target.value)}
-              className="retainos-focus h-11 rounded-lg border border-[#d8e0ea] bg-white px-3 text-sm font-semibold text-[#162b3e] shadow-sm"
-            >
-              <option value="">
-                {teamLoading ? "Loading CSMs..." : "All CSMs"}
-              </option>
-              {csmOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
+        <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
+          {showRelationshipFilter && (
+            <label className="flex w-full flex-col gap-1 text-sm font-semibold text-[#4b5565] sm:w-56">
+              Assignment view
+              <select
+                value={csmRelationshipFilter}
+                onChange={(event) =>
+                  setCsmRelationshipFilter(
+                    event.target.value as CsmRelationshipFilter,
+                  )
+                }
+                className="retainos-focus h-11 rounded-lg border border-[#d8e0ea] bg-white px-3 text-sm font-semibold text-[#162b3e] shadow-sm"
+              >
+                {Object.entries(CSM_RELATIONSHIP_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {canFilterByCsm && (
+            <label className="flex w-full flex-col gap-1 text-sm font-semibold text-[#4b5565] sm:w-72">
+              CSM view
+              <select
+                value={selectedCsmId}
+                onChange={(event) => setSelectedCsmId(event.target.value)}
+                className="retainos-focus h-11 rounded-lg border border-[#d8e0ea] bg-white px-3 text-sm font-semibold text-[#162b3e] shadow-sm"
+              >
+                <option value="">
+                  {teamLoading ? "Loading CSMs..." : "All CSMs"}
                 </option>
-              ))}
-            </select>
-          </label>
-        )}
+                {csmOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       </div>
 
       {error && (
