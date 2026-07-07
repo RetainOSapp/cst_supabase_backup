@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   getProgramStatusDisplay,
   ProgramStatusPill,
@@ -7142,6 +7142,7 @@ function HistorySection({
 }
 export function ClientDetail() {
   const { clientId } = useParams<{ clientId: string }>();
+  const navigate = useNavigate();
   const { capabilities, effectiveCompanyId, teamMemberId } = useAccountContext();
   const [client, setClient] = useState<ClientRow | null>(null);
   const [contracts, setContracts] = useState<ContractRow[]>([]);
@@ -7178,6 +7179,7 @@ export function ClientDetail() {
   const [creatingContract, setCreatingContract] = useState(false);
   const [editingContract, setEditingContract] = useState<ContractRow | null>(null);
   const [archivingContractId, setArchivingContractId] = useState<string | null>(null);
+  const [deletingClient, setDeletingClient] = useState(false);
   const [isAppOwnedClient, setIsAppOwnedClient] = useState(false);
   const [milestoneAction, setMilestoneAction] = useState<{
     action: MilestoneActionKind;
@@ -7663,6 +7665,10 @@ export function ClientDetail() {
   const canCreateContract = canEditProfile;
   const canDeleteContract = canEditProfile;
   const canManageHistory = canEditProfile;
+  const canDeleteClient =
+    canEditProfile &&
+    !capabilities.canViewOnlyAssignedClients &&
+    capabilities.canManageClientPathways;
   function applyCustomFieldChanges(changes: CustomFieldChange[]) {
     if (changes.length === 0) return;
     setCustomFieldValues((current) => {
@@ -7830,6 +7836,46 @@ export function ClientDetail() {
       );
     }
   }
+  async function deleteClient() {
+    if (!client || deletingClient) return;
+    const reason = window.prompt(
+      `Delete ${client.client_name ?? "this client"} permanently from RetainOS?\n\nThis removes the app-owned client plus related tasks, contracts, history, links, notifications, and checkpoint data. Type a short reason to continue.`,
+      "Ghost client / refunded before kickoff",
+    );
+    if (!reason?.trim()) return;
+    const confirmed = window.confirm(
+      `Final confirmation: permanently delete ${client.client_name ?? "this client"}? This cannot be undone from the app.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingClient(true);
+    const { data, error } = await supabase.functions.invoke("manage-client-delete", {
+      body: {
+        clientLegacyId: client.glide_row_id,
+        reason: reason.trim(),
+      },
+    });
+    setDeletingClient(false);
+
+    if (error || data?.error) {
+      window.alert(
+        data?.error ??
+          (error ? await functionErrorMessage(error) : null) ??
+          "Could not delete client.",
+      );
+      return;
+    }
+
+    window.localStorage.setItem(
+      CLIENTS_ROSTER_REFRESH_KEY,
+      JSON.stringify({
+        clientId: client.glide_row_id,
+        deleted: true,
+        updatedAt: Date.now(),
+      }),
+    );
+    navigate("/clients", { replace: true });
+  }
   const upsertMilestone = (milestone: ClientMilestoneRow) => {
     setClientMilestones((current) => [
       milestone,
@@ -7902,6 +7948,16 @@ export function ClientDetail() {
               <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                 Read-only preview
               </div>
+            ) : null}
+            {canDeleteClient ? (
+              <button
+                type="button"
+                onClick={() => void deleteClient()}
+                disabled={deletingClient}
+                className="retainos-focus rounded-md border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-wait disabled:opacity-60"
+              >
+                {deletingClient ? "Deleting..." : "Delete Client"}
+              </button>
             ) : null}
           </div>
         </div>
