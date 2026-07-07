@@ -551,6 +551,7 @@ Next session lock:
   - 2026-06-16 product polish clarified the persistent Daily Pulse vs compact reminder bell distinction, added an empty state when no Daily Pulse sections are enabled, and made zero-signal windows easier to QA.
   - 2026-06-16 Jay QA passed Daily Pulse page polish and Company Settings notification clarity.
   - 2026-07-07 Moves Method launch polish: CSM-scoped Daily Pulse now has an Assignment view filter for Both, Primary clients, or Secondary clients. Admin/Director users get the same filter after selecting a specific CSM.
+  - 2026-07-07 Strategic Review timing rules now have app-owned completion tracking: Daily Pulse shows SR pending/complete from the configured contract-end offset and lets assigned coaches mark the checkpoint complete without turning it into a pathway milestone.
 - `[ ]` `[priority: medium]` Dashboard HTML export.
 
 ### Phase 4: Resources, User Management, Notifications, And Migration Readiness

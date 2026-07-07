@@ -109,3 +109,7 @@ For historical context:
 ## MM Launch Reminder Bell Pause - 2026-07-06
 
 - Clients-page reminder bell data loading is intentionally paused during MM launch; the bell shows "in development" and CSMs should use Daily Pulse + Tasks. Details/future scope live in `ROADMAP.md`.
+
+## Daily Pulse Strategic Review Completion - 2026-07-07
+
+- Strategic Review remains a Company Timing Rule, not a pathway milestone. Completion is stored in `client_timed_checkpoint_completions` via `manage-client-timed-checkpoint`; Daily Pulse shows SR pending/complete from the configured contract-end offset.
