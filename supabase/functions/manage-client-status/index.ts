@@ -400,7 +400,7 @@ Deno.serve(async (req) => {
 
     let updatedContract = null;
     if (extendedContractEndDate) {
-      const { data: latestContract } = await supabase
+      const { data: latestContract, error: latestContractError } = await supabase
         .from("client_contracts")
         .select("*")
         .eq("client_id", client.glide_row_id)
@@ -408,7 +408,9 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
-      if (latestContract) {
+      if (latestContractError) {
+        console.warn("Could not load latest contract for pause extension:", latestContractError);
+      } else if (latestContract) {
         const nextContractDays =
           latestContract.contract_days !== null
             ? Number(latestContract.contract_days) + pauseExtensionDays
@@ -427,8 +429,11 @@ Deno.serve(async (req) => {
           .eq("id", latestContract.id)
           .select("*")
           .single();
-        if (contractError) throw contractError;
-        updatedContract = contractAfter;
+        if (contractError) {
+          console.warn("Could not extend latest contract during status change:", contractError);
+        } else {
+          updatedContract = contractAfter;
+        }
       }
     }
 

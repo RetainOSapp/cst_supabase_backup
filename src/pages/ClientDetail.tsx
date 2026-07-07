@@ -2488,7 +2488,7 @@ function ClientOutcomesEditModal({
     setSaving(false);
 
     if (error) {
-      setSaveError(error.message);
+      setSaveError(await functionErrorMessage(error));
       return;
     }
     if (data?.error) {
