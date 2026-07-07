@@ -4411,7 +4411,13 @@ export function Clients() {
           </div>
         </div>
       </div>
-      <div className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          applyFilters();
+        }}
+        className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm"
+      >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {filters.companyId && (
             <>
@@ -4866,8 +4872,7 @@ export function Clients() {
             </p>
           ) : null}
           <button
-            type="button"
-            onClick={applyFilters}
+            type="submit"
             disabled={!filters.companyId || clientsLoading}
             className="rounded-full bg-[#59abf0] px-5 py-2.5 text-sm font-semibold text-[#162b3e] shadow-sm transition-colors hover:bg-[#3b8fd9] hover:text-white disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
           >
@@ -4881,7 +4886,7 @@ export function Clients() {
             Clear All Filters
           </button>
         </div>
-      </div>
+      </form>
       {!filters.companyId ? (
         <EmptyState text="Select a company above to load clients." />
       ) : !appliedFilters.companyId ? (
