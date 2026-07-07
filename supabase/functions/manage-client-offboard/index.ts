@@ -73,11 +73,13 @@ async function resolveActor(
     .select("id, legacy_glide_row_id, role, status")
     .eq("company_id", companyId)
     .ilike("email", userEmail)
+    .eq("status", "active")
+    .limit(1)
     .maybeSingle();
 
   if (error) throw error;
 
-  if (data?.status === "active" && WRITER_ROLES.has(data.role)) {
+  if (data && WRITER_ROLES.has(data.role)) {
     return {
       role: data.role as string,
       memberId: data.id as string,

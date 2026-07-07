@@ -115,9 +115,11 @@ async function assertCanManageCompany(
     .select("id, role, status")
     .eq("company_id", companyId)
     .ilike("email", userEmail)
+    .eq("status", "active")
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
-  if (data?.status === "active" && data.role === "director") {
+  if (data && data.role === "director") {
     return { role: "director", memberId: data.id as string };
   }
   throw new Error("You do not have permission to manage company pathways.");

@@ -1924,6 +1924,7 @@ Use this section as the “what good looks like” checklist before migrating re
   - 2026-07-04 Moves Method Director QA catch: invite copy used localhost during local QA, CSM Reports returned Bad Request at MM scale, and Director company-resource create/edit was missing. Patched invite login URL copy, chunked CSM Reports history reads, and deployed Director company-resource management. Jay retested and passed Director QA.
   - 2026-07-04 Moves Method CSM QA catch: temp app-owned CSMs with no legacy CST member ID could see assigned clients/tasks but could not write quick edits because Edge Functions checked only `legacy_glide_row_id`. Deployed client write function patches so CSM authorization accepts either legacy member ID or app-owned member UUID. Jay retested and passed CSM QA.
   - 2026-07-04 Moves Method Support QA passed: Support sees approved company-wide operational views, cannot see/use integrations or token management, and has no SuperAdmin/company switcher access.
+  - 2026-07-07 MM launch hotfix: client/company write functions now ignore archived duplicate `company_members` rows when resolving the active actor by email. `manage-client-profile` and `manage-client-quick-update` were deployed after Ben Alfaro hit generic save errors on profile/archetype and Next Steps/Contact edits.
 - `[x]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
 - `[x]` Final cutover plan exists for:
   - Data backfill.
