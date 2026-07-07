@@ -3867,6 +3867,12 @@ export function Clients() {
       setClientsLoading(true);
       return;
     }
+    if (capabilities.canViewOnlyAssignedClients && !assignedTeamMemberId) {
+      setClients([]);
+      setTotalClients(0);
+      setClientsLoading(false);
+      return;
+    }
     setClientsLoading(true);
     setClientsError(null);
     const from = (page - 1) * pageSize;
@@ -3977,6 +3983,7 @@ export function Clients() {
     appClientCompanyIdsLoaded,
     appliedFilters,
     assignedTeamMemberId,
+    capabilities.canViewOnlyAssignedClients,
     page,
     pageSize,
     rosterRefreshToken,
@@ -3995,6 +4002,12 @@ export function Clients() {
     }
     if (!appClientCompanyIdsLoaded) {
       setCalendarLoading(true);
+      return;
+    }
+    if (capabilities.canViewOnlyAssignedClients && !assignedTeamMemberId) {
+      setCalendarClients([]);
+      setCalendarTasks([]);
+      setCalendarLoading(false);
       return;
     }
 
@@ -4157,6 +4170,7 @@ export function Clients() {
     assignedTeamMemberId,
     calendarDate,
     calendarMode,
+    capabilities.canViewOnlyAssignedClients,
     rosterRefreshToken,
     viewMode,
   ]);
@@ -4169,6 +4183,12 @@ export function Clients() {
       return;
     }
     if (!appliedFilters.companyId) {
+      setNoteResults([]);
+      setNoteResultsTotal(0);
+      setNoteResultsLoading(false);
+      return;
+    }
+    if (capabilities.canViewOnlyAssignedClients && !assignedTeamMemberId) {
       setNoteResults([]);
       setNoteResultsTotal(0);
       setNoteResultsLoading(false);
@@ -4229,6 +4249,7 @@ export function Clients() {
     appliedFilters,
     appliedNoteSearch,
     assignedTeamMemberId,
+    capabilities.canViewOnlyAssignedClients,
     noteResultsPage,
     viewMode,
   ]);

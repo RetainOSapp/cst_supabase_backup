@@ -1042,6 +1042,14 @@ export function DailyPulse() {
         setCheckpointCompletions(new Map());
         return;
       }
+      if (capabilities.canViewOnlyAssignedClients && !teamMemberId) {
+        setClients([]);
+        setTasks([]);
+        setLatestHistoryByClient(new Map());
+        setCheckpointCompletions(new Map());
+        setLoading(false);
+        return;
+      }
 
       setLoading(true);
       setError(null);

@@ -1250,6 +1250,10 @@ export function Tasks() {
       setClientFilterId("");
       return;
     }
+    if (capabilities.canViewOnlyAssignedClients && !assignedTeamMemberId) {
+      setCompanyClients([]);
+      return;
+    }
     let cancelled = false;
     async function loadCompanyClients() {
       const usesAppClients = appTaskCompanyIds.has(companyId);
@@ -1303,7 +1307,13 @@ export function Tasks() {
     return () => {
       cancelled = true;
     };
-  }, [appTaskCompanyIds, clientFilterId, companyId]);
+  }, [
+    appTaskCompanyIds,
+    assignedTeamMemberId,
+    capabilities.canViewOnlyAssignedClients,
+    clientFilterId,
+    companyId,
+  ]);
 
   useEffect(() => {
     if (!companyId || !appTaskCompanyIds.has(companyId)) {
@@ -1356,6 +1366,12 @@ export function Tasks() {
     }
     let cancelled = false;
     async function loadTasks() {
+      if (capabilities.canViewOnlyAssignedClients && !assignedTeamMemberId) {
+        setTasks([]);
+        setClientById(new Map());
+        setLoadingTasks(false);
+        return;
+      }
       setLoadingTasks(true);
       setTasksError(null);
       const usesAppTasks = appTaskCompanyIds.has(companyId);
@@ -1515,6 +1531,7 @@ export function Tasks() {
   }, [
     appTaskCompanyIds,
     assignedTeamMemberId,
+    capabilities.canViewOnlyAssignedClients,
     clientFilterId,
     companyClientById,
     companyClients,
