@@ -186,6 +186,7 @@ interface CompanySettingsRow {
   enable_call_ai_for_csms: boolean;
   enable_embeds: boolean;
   enable_zapier_client_create: boolean;
+  allow_status_change_retention: boolean;
   metadata?: Record<string, unknown> | null;
   updated_at?: string | null;
 }
@@ -2561,6 +2562,7 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_call_ai_for_csms: company?.enable_call_ai_for_csms === true,
     enable_embeds: false,
     enable_zapier_client_create: false,
+    allow_status_change_retention: false,
     metadata: {
       contact_touch_sets_next_contact: false,
       contact_touch_next_contact_days: DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS,
@@ -3904,6 +3906,7 @@ function CompanySettingsSetup({
           enableCallAiForCsms: draft.enable_call_ai_for_csms,
           enableEmbeds: draft.enable_embeds,
           enableZapierClientCreate: draft.enable_zapier_client_create,
+          allowStatusChangeRetention: draft.allow_status_change_retention,
           contactTouchSetsNextContact: contactTouchSetsNextContact(draft),
           contactTouchNextContactDays: contactTouchNextContactDays(draft),
         },
@@ -4345,6 +4348,18 @@ function CompanySettingsSetup({
               setDraft((current) => ({
                 ...current,
                 enable_zapier_client_create: checked,
+              }))
+            }
+          />
+          <SettingsFlag
+            label="Status-only retention"
+            description="Allow active Front End or Back End status movements to count as retention without requiring a renewal or upsell contract."
+            checked={draft.allow_status_change_retention}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                allow_status_change_retention: checked,
               }))
             }
           />
@@ -5556,7 +5571,7 @@ export function SaasClientDetail({
           supabase
             .from("company_settings")
             .select(
-              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, metadata, updated_at",
+              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, allow_status_change_retention, metadata, updated_at",
             )
             .eq("company_id", appCompany.id)
             .maybeSingle(),

@@ -2928,12 +2928,14 @@ function ClientStatusModal({
   client,
   programChoices,
   churnReasons,
+  allowStatusChangeRetention,
   onClose,
   onSaved,
 }: {
   client: ClientRow;
   programChoices: ProgramChoice[];
   churnReasons: CompanyChurnReasonRow[];
+  allowStatusChangeRetention: boolean;
   onClose: () => void;
   onSaved: (
     client: ClientRow,
@@ -3167,8 +3169,9 @@ function ClientStatusModal({
             </label>
             {isRetentionStatusMove ? (
               <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                Pair this status change with a new contract marked Renewal or
-                Upsell so retention reporting stays accurate.
+                {allowStatusChangeRetention
+                  ? "This company allows active status movements to count as retention. Add a Renewal or Upsell contract too if dates or value changed."
+                  : "Pair this status change with a new contract marked Renewal or Upsell so retention reporting stays accurate."}
               </div>
             ) : null}
             {requiresReason ? (
@@ -7229,6 +7232,8 @@ export function ClientDetail() {
   >(mergeNotificationPreferences(null));
   const [secondaryPathwaysEnabled, setSecondaryPathwaysEnabled] = useState(false);
   const [secondaryAssigneeEnabled, setSecondaryAssigneeEnabled] = useState(false);
+  const [allowStatusChangeRetention, setAllowStatusChangeRetention] =
+    useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
@@ -7487,7 +7492,9 @@ export function ClientDetail() {
         appPathwayCompany?.id
           ? supabase
               .from("company_settings")
-              .select("enable_secondary_assignee, enable_secondary_offers")
+              .select(
+                "enable_secondary_assignee, enable_secondary_offers, allow_status_change_retention",
+              )
               .eq("company_id", appPathwayCompany.id)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
@@ -7500,6 +7507,9 @@ export function ClientDetail() {
           setSecondaryPathwaysEnabled(
             companySettingsResult.data?.enable_secondary_offers === true,
           );
+          setAllowStatusChangeRetention(
+            companySettingsResult.data?.allow_status_change_retention === true,
+          );
         } else {
           console.error(
             "Failed to load company settings:",
@@ -7507,6 +7517,7 @@ export function ClientDetail() {
           );
           setSecondaryPathwaysEnabled(false);
           setSecondaryAssigneeEnabled(false);
+          setAllowStatusChangeRetention(false);
         }
         if (customFieldsResult.error) {
           console.error("Failed to load company custom fields:", customFieldsResult.error);
@@ -8214,6 +8225,7 @@ export function ClientDetail() {
           client={client}
           programChoices={programChoices}
           churnReasons={churnReasons}
+          allowStatusChangeRetention={allowStatusChangeRetention}
           onClose={() => setChangingStatus(false)}
           onSaved={(updatedClient, event, updatedContract) => {
             setClient(updatedClient);

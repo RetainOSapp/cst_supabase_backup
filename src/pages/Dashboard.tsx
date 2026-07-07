@@ -355,6 +355,10 @@ interface AppKpiHistoryRow {
   payload: Record<string, unknown> | null;
 }
 
+interface CompanyRetentionSettingsRow {
+  allow_status_change_retention: boolean | null;
+}
+
 interface OfferKpiContractRow {
   client_id: string | null;
   end_date: string | null;
@@ -1232,6 +1236,19 @@ function isLegacyRetainedStatusTransition(
   );
 }
 
+function isRetainOsRetainedStatusTransition(
+  fromStatus: unknown,
+  toStatus: unknown,
+) {
+  const from = normalizedProgramStatus(fromStatus);
+  const to = normalizedProgramStatus(toStatus);
+  return (
+    (from === "front-end" && to === "front-end") ||
+    (from === "front-end" && to === "back-end") ||
+    (from === "back-end" && to === "back-end")
+  );
+}
+
 function appRetentionDate(row: AppKpiHistoryRow) {
   if (row.event_type !== "client_retention_recorded") return null;
   const contract =
@@ -1243,6 +1260,44 @@ function appRetentionDate(row: AppKpiHistoryRow) {
     dateFromValue(contract?.startDate) ??
     dateFromValue(row.payload?.retention_date) ??
     dateFromValue(row.created_at)
+  );
+}
+
+function appRetainedEventDate(
+  row: AppKpiHistoryRow,
+  allowStatusChangeRetention: boolean,
+) {
+  if (row.event_type === "client_retention_recorded") {
+    return appRetentionDate(row);
+  }
+  if (!allowStatusChangeRetention || row.event_type !== "client_status_changed") {
+    return null;
+  }
+  if (
+    !isRetainOsRetainedStatusTransition(
+      row.payload?.from_status,
+      row.payload?.to_status,
+    )
+  ) {
+    return null;
+  }
+  return dateFromValue(row.created_at);
+}
+
+async function loadStatusChangeRetentionSetting(companyId?: string | null) {
+  if (!companyId) return false;
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("allow_status_change_retention")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (error) {
+    console.error("Failed to load retention settings:", error);
+    return false;
+  }
+  return (
+    (data as CompanyRetentionSettingsRow | null)?.allow_status_change_retention ===
+    true
   );
 }
 
@@ -2333,13 +2388,20 @@ export function Dashboard() {
       }
 
       const renewalDateRange = appliedRenewalDateRange;
+      const allowStatusChangeRetention = appliedUsesAppClients
+        ? await loadStatusChangeRetentionSetting(appliedAppCompany?.id)
+        : false;
+      if (cancelled) return;
+      const appRetentionEventTypes = allowStatusChangeRetention
+        ? ["client_retention_recorded", "client_status_changed"]
+        : ["client_retention_recorded"];
       const appHistoryQuery = appliedUsesAppClients
         ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
             supabase
               .from("client_history_events")
               .select("legacy_client_glide_row_id, event_type, payload, created_at")
               .in("legacy_client_glide_row_id", chunk)
-              .eq("event_type", "client_retention_recorded")
+              .in("event_type", appRetentionEventTypes)
               .range(from, to),
           )
         : Promise.resolve({ data: [], error: null });
@@ -2423,7 +2485,10 @@ export function Dashboard() {
       ((appHistoryResult.data ?? []) as AppKpiHistoryRow[]).forEach((row) => {
         const clientId = row.legacy_client_glide_row_id;
         if (!clientId) return;
-        const retentionDate = appRetentionDate(row);
+        const retentionDate = appRetainedEventDate(
+          row,
+          allowStatusChangeRetention,
+        );
         if (
           retentionDate &&
           isInDateRange(
@@ -2653,6 +2718,7 @@ export function Dashboard() {
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
     appliedShowSecondaryFilter,
+    appliedAppCompany?.id,
     appliedUsesAppClients,
     appliedProgramValues,
     reportVersion,
@@ -3359,13 +3425,20 @@ export function Dashboard() {
         ) &&
         clientIds.length > 0
       ) {
+        const allowStatusChangeRetention = appliedUsesAppClients
+          ? await loadStatusChangeRetentionSetting(appliedAppCompany?.id)
+          : false;
+        if (cancelled) return;
+        const appRetentionEventTypes = allowStatusChangeRetention
+          ? ["client_retention_recorded", "client_status_changed"]
+          : ["client_retention_recorded"];
         const appHistoryQuery = appliedUsesAppClients
           ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
               supabase
                 .from("client_history_events")
                 .select("legacy_client_glide_row_id, event_type, payload, created_at")
                 .in("legacy_client_glide_row_id", chunk)
-                .eq("event_type", "client_retention_recorded")
+                .in("event_type", appRetentionEventTypes)
                 .range(from, to),
             )
           : Promise.resolve({ data: [], error: null });
@@ -3451,7 +3524,10 @@ export function Dashboard() {
         ((appHistoryResult.data ?? []) as AppKpiHistoryRow[]).forEach((row) => {
           const clientId = row.legacy_client_glide_row_id;
           if (!clientId) return;
-          const retentionDate = appRetentionDate(row);
+          const retentionDate = appRetainedEventDate(
+            row,
+            allowStatusChangeRetention,
+          );
           const client = clientById.get(clientId);
           if (
             retentionDate &&
@@ -3660,6 +3736,7 @@ export function Dashboard() {
     appliedFilters.program,
     appliedFilters.secondaryAssigneeId,
     appCompanyByLegacyId,
+    appliedAppCompany?.id,
     appliedProgramValues,
     appliedShowSecondaryFilter,
     appliedUsesAppClients,

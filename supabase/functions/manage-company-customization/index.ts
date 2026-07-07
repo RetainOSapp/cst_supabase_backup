@@ -346,6 +346,7 @@ Deno.serve(async (req) => {
         enable_call_ai_for_csms: Boolean(body.enableCallAiForCsms),
         enable_embeds: Boolean(body.enableEmbeds),
         enable_zapier_client_create: Boolean(body.enableZapierClientCreate),
+        allow_status_change_retention: Boolean(body.allowStatusChangeRetention),
         metadata: hasContactTouchSettings
           ? {
               ...existingMetadata,

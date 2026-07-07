@@ -119,6 +119,11 @@ For historical context:
 - Dashboard retention now splits migrated CST history from RetainOS-era writes: CST FE->BE and BE->BE `program-status` movements count as historical retention events by CST modified date; new RetainOS retention counts only Renewal/Upsell contract events by contract start date.
 - Live SOP resource `retention-churn-metrics` was refreshed via `20260707180000_update_retention_sop_resource.sql`.
 
+## Status-Only Retention Company Setting - 2026-07-07
+
+- RetainOS-era status-only retention is strict/off by default, but `company_settings.allow_status_change_retention` can let a company count active Front End / Back End status movements as retention without a paired Renewal/Upsell contract.
+- Migration `20260707183000_status_change_retention_setting.sql` and `manage-company-customization` were applied/deployed live before the app push.
+
 ## Fathom Recording URL Hotfix - 2026-07-08
 
 - Fathom payloads include `recording_url`; `ingest-client-call-summary` / `manage-integration-review` now normalize it onto history payloads, and Client History reads existing metadata/raw payload links.
