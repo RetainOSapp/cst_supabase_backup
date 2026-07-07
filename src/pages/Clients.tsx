@@ -3321,8 +3321,8 @@ export function Clients() {
   const [quickUpdateClient, setQuickUpdateClient] = useState<ClientRow | null>(
     null,
   );
-  const [contactTouchClientId, setContactTouchClientId] = useState<string | null>(
-    null,
+  const [contactTouchClientIds, setContactTouchClientIds] = useState<Set<string>>(
+    () => new Set(),
   );
   const [contactTouchMessage, setContactTouchMessage] = useState<string | null>(
     null,
@@ -3421,7 +3421,9 @@ export function Clients() {
 
   const handleMarkContacted = useCallback(
     async (client: ClientRow) => {
-      if (!canQuickUpdateClients || contactTouchClientId) return;
+      if (!canQuickUpdateClients || contactTouchClientIds.has(client.glide_row_id)) {
+        return;
+      }
       const companyLegacyId =
         client.company_id ?? appliedFilters.companyId ?? filters.companyId ?? "";
       if (!companyLegacyId) {
@@ -3430,32 +3432,15 @@ export function Clients() {
         return;
       }
 
-      setContactTouchClientId(client.glide_row_id);
-      setContactTouchError(null);
-      setContactTouchMessage(null);
-      const { data, error } = await supabase.functions.invoke(
-        "manage-client-quick-update",
-        {
-          body: {
-            companyLegacyId,
-            clientLegacyId: client.glide_row_id,
-            contactTouch: true,
-            lastContactAt: new Date().toISOString(),
-          },
-        },
-      );
-      setContactTouchClientId(null);
-
-      if (error) {
-        setContactTouchError(error.message);
-        return;
-      }
-      if (data?.error) {
-        setContactTouchError(data.error);
-        return;
-      }
-      if (data?.client) {
-        const updatedClient = mapAppClientRow(data.client as Record<string, unknown>);
+      const contactedAt = new Date().toISOString();
+      const optimisticClient = {
+        ...client,
+        csm_date_of_last_contact: contactedAt,
+        last_contact: contactedAt,
+        last_contact_date: contactedAt,
+        date_of_last_contact: contactedAt,
+      };
+      const applyClientPatch = (updatedClient: ClientRow) => {
         setClients((current) =>
           current.map((row) =>
             row.glide_row_id === updatedClient.glide_row_id ? updatedClient : row,
@@ -3471,6 +3456,47 @@ export function Clients() {
             ? updatedClient
             : current,
         );
+      };
+
+      setContactTouchClientIds((current) => {
+        const next = new Set(current);
+        next.add(client.glide_row_id);
+        return next;
+      });
+      setContactTouchError(null);
+      setContactTouchMessage(null);
+      applyClientPatch(optimisticClient);
+
+      const { data, error } = await supabase.functions.invoke(
+        "manage-client-quick-update",
+        {
+          body: {
+            companyLegacyId,
+            clientLegacyId: client.glide_row_id,
+            contactTouch: true,
+            lastContactAt: contactedAt,
+          },
+        },
+      );
+      setContactTouchClientIds((current) => {
+        const next = new Set(current);
+        next.delete(client.glide_row_id);
+        return next;
+      });
+
+      if (error) {
+        applyClientPatch(client);
+        setContactTouchError(error.message);
+        return;
+      }
+      if (data?.error) {
+        applyClientPatch(client);
+        setContactTouchError(data.error);
+        return;
+      }
+      if (data?.client) {
+        const updatedClient = mapAppClientRow(data.client as Record<string, unknown>);
+        applyClientPatch(updatedClient);
       }
       setContactTouchMessage(
         `${client.client_name ?? "Client"} marked as contacted today.`,
@@ -3482,7 +3508,7 @@ export function Clients() {
     [
       appliedFilters.companyId,
       canQuickUpdateClients,
-      contactTouchClientId,
+      contactTouchClientIds,
       filters.companyId,
     ],
   );
@@ -5115,7 +5141,7 @@ export function Clients() {
               onMarkContacted={
                 canQuickUpdateClients ? handleMarkContacted : undefined
               }
-              markingContactedClientId={contactTouchClientId}
+              markingContactedClientIds={contactTouchClientIds}
             />
           ) : (
             <ClientCards
@@ -5132,7 +5158,7 @@ export function Clients() {
               onMarkContacted={
                 canQuickUpdateClients ? handleMarkContacted : undefined
               }
-              markingContactedClientId={contactTouchClientId}
+              markingContactedClientIds={contactTouchClientIds}
             />
           )}
           {(viewMode === "list" || viewMode === "card") &&
@@ -5195,7 +5221,7 @@ function ClientTable({
   onOpenClient,
   onQuickUpdate,
   onMarkContacted,
-  markingContactedClientId,
+  markingContactedClientIds,
 }: {
   clients: ClientRow[];
   programChoices: ProgramChoice[];
@@ -5214,7 +5240,7 @@ function ClientTable({
   onOpenClient: (id: string) => void;
   onQuickUpdate?: (client: ClientRow) => void;
   onMarkContacted?: (client: ClientRow) => void;
-  markingContactedClientId?: string | null;
+  markingContactedClientIds?: Set<string>;
 }) {
   return (
     <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white shadow-sm">
@@ -5247,7 +5273,7 @@ function ClientTable({
           {clients.map((client) => {
             const meta = clientMeta(client);
             const isMarkingContacted =
-              markingContactedClientId === client.glide_row_id;
+              markingContactedClientIds?.has(client.glide_row_id) === true;
             return (
               <tr
                 key={client.glide_row_id}
@@ -5353,7 +5379,7 @@ function ClientCards({
   onOpenClient,
   onQuickUpdate,
   onMarkContacted,
-  markingContactedClientId,
+  markingContactedClientIds,
 }: {
   clients: ClientRow[];
   programChoices: ProgramChoice[];
@@ -5372,14 +5398,14 @@ function ClientCards({
   onOpenClient: (id: string) => void;
   onQuickUpdate?: (client: ClientRow) => void;
   onMarkContacted?: (client: ClientRow) => void;
-  markingContactedClientId?: string | null;
+  markingContactedClientIds?: Set<string>;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {clients.map((client) => {
         const meta = clientMeta(client);
         const isMarkingContacted =
-          markingContactedClientId === client.glide_row_id;
+          markingContactedClientIds?.has(client.glide_row_id) === true;
         return (
           <div
             key={client.glide_row_id}
