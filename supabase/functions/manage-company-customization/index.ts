@@ -39,6 +39,21 @@ const CUSTOM_FIELD_TYPES = new Set([
 const CUSTOM_FIELD_ENTITY_TYPES = new Set(["client", "company_member", "contract"]);
 const CLIENT_VIEWS = new Set(["list", "card", "calendar"]);
 const CALENDAR_MODES = new Set(["month", "week", "day"]);
+const CLIENT_LIST_COLUMNS = new Set([
+  "csm",
+  "program",
+  "archetype",
+  "status",
+  "onboarded",
+  "renewal",
+  "last_contact",
+  "next_contact",
+  "weeks_in_program",
+  "weeks_left",
+  "buy_in",
+  "progress",
+  "actions",
+]);
 const TASK_TEMPLATE_TRIGGERS = new Set([
   "manual",
   "client_created",
@@ -149,6 +164,15 @@ function metadataRecord(value: unknown) {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function normalizeClientListColumns(value: unknown) {
+  if (!Array.isArray(value)) return null;
+  const columns = value.filter(
+    (item): item is string =>
+      typeof item === "string" && CLIENT_LIST_COLUMNS.has(item),
+  );
+  return columns.length > 0 ? [...new Set(columns)] : null;
 }
 
 function normalizeEmail(value: unknown) {
@@ -329,6 +353,7 @@ Deno.serve(async (req) => {
       const hasContactTouchSettings =
         Object.prototype.hasOwnProperty.call(body, "contactTouchSetsNextContact") ||
         Object.prototype.hasOwnProperty.call(body, "contactTouchNextContactDays");
+      const clientListColumns = normalizeClientListColumns(body.clientListColumns);
 
       const payload = {
         company_id: company.id,
@@ -347,19 +372,22 @@ Deno.serve(async (req) => {
         enable_embeds: Boolean(body.enableEmbeds),
         enable_zapier_client_create: Boolean(body.enableZapierClientCreate),
         allow_status_change_retention: Boolean(body.allowStatusChangeRetention),
-        metadata: hasContactTouchSettings
-          ? {
-              ...existingMetadata,
-              contact_touch_sets_next_contact:
-                body.contactTouchSetsNextContact === true,
-              contact_touch_next_contact_days: requiredBoundedInteger(
-                body.contactTouchNextContactDays,
-                4,
-                0,
-                365,
-              ),
-            }
-          : existingMetadata,
+        metadata: {
+          ...existingMetadata,
+          ...(hasContactTouchSettings
+            ? {
+                contact_touch_sets_next_contact:
+                  body.contactTouchSetsNextContact === true,
+                contact_touch_next_contact_days: requiredBoundedInteger(
+                  body.contactTouchNextContactDays,
+                  4,
+                  0,
+                  365,
+                ),
+              }
+            : {}),
+          ...(clientListColumns ? { client_list_columns: clientListColumns } : {}),
+        },
       };
 
       const { data: saved, error: saveError } = existing?.id

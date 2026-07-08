@@ -217,6 +217,7 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
 - `[ ]` `[priority: medium]` Company settings V2.
   - Dashboard/client-list preference consumption beyond current defaults.
   - Client list column presets.
+  - 2026-07-08 MM launch follow-up: Admin Hub > Company Settings can configure Clients List columns per company; the Clients List keeps the client column frozen and horizontally scrolls when many columns are enabled.
   - Call/communication settings after integrations are closer to rollout.
 - `[ ]` `[priority: medium]` SaaS Client archive/offboard flow.
 - `[ ]` `[priority: medium]` Zapier SaaS company automation, if this remains needed.
@@ -245,6 +246,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-20 Filtering Clients overview audit added strategic roster filters for milestone, renewal window, last-contact age, next-contact window, Success, Progress, and Buy-In. List/card/calendar views now share the same applied filter set for app-owned and mirrored clients.
   - 2026-06-20 Contact cadence follow-up added Last Contact and Next Contact sort options to List/Card views, using the same app-owned and mirrored contact date columns as the roster display.
   - 2026-06-20 CSM assignment audit added `Unassigned` to the Clients CSM filter so Admin/Director/Support users can find clients that still need a primary CSM.
+  - 2026-07-08 MM column preference: Moves Method defaults now show Program plus Weeks In Program and Weeks Left instead of forcing Archetype, while other companies keep the existing fallback until configured.
 - `[x]` Clients calendar view and filters.
 - `[~]` `[polish]` `[priority: medium]` Client detail general information write flow.
   - Ethical Scaling pilot has profile edit v1 through `manage-client-profile`.

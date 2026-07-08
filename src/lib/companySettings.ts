@@ -2,11 +2,26 @@ import { supabase } from "./supabase.ts";
 
 export type DefaultClientView = "list" | "card" | "calendar";
 export type DefaultCalendarMode = "month" | "week" | "day";
+export type ClientListColumnKey =
+  | "csm"
+  | "program"
+  | "archetype"
+  | "status"
+  | "onboarded"
+  | "renewal"
+  | "last_contact"
+  | "next_contact"
+  | "weeks_in_program"
+  | "weeks_left"
+  | "buy_in"
+  | "progress"
+  | "actions";
 
 export interface CompanyWorkspaceDefaults {
   profileUpkeepFreshnessDays: number;
   defaultClientView: DefaultClientView;
   defaultCalendarMode: DefaultCalendarMode;
+  clientListColumns: ClientListColumnKey[];
   source: "app_owned" | "fallback";
 }
 
@@ -33,8 +48,46 @@ const FALLBACK_WORKSPACE_DEFAULTS: CompanyWorkspaceDefaults = {
   profileUpkeepFreshnessDays: 14,
   defaultClientView: "list",
   defaultCalendarMode: "month",
+  clientListColumns: [
+    "csm",
+    "status",
+    "onboarded",
+    "renewal",
+    "last_contact",
+    "next_contact",
+    "buy_in",
+    "progress",
+    "actions",
+  ],
   source: "fallback",
 };
+
+export const DEFAULT_CLIENT_LIST_COLUMNS =
+  FALLBACK_WORKSPACE_DEFAULTS.clientListColumns;
+
+export const CLIENT_LIST_COLUMN_OPTIONS: Array<{
+  key: ClientListColumnKey;
+  label: string;
+  description: string;
+}> = [
+  { key: "csm", label: "CSM", description: "Primary assigned team member." },
+  { key: "program", label: "Program", description: "Current pathway/program." },
+  { key: "archetype", label: "Archetype", description: "Client archetype." },
+  { key: "status", label: "Status", description: "Front End, Back End, Paused, or other program status." },
+  { key: "onboarded", label: "Onboarded", description: "Client start/onboarded date." },
+  { key: "renewal", label: "Renewal", description: "Current contract or renewal date." },
+  { key: "last_contact", label: "Last Contact", description: "Most recent contact date." },
+  { key: "next_contact", label: "Next Contact", description: "Next scheduled contact date." },
+  { key: "weeks_in_program", label: "Weeks In Program", description: "Weeks since onboarded date." },
+  { key: "weeks_left", label: "Weeks Left", description: "Weeks until current renewal date." },
+  { key: "buy_in", label: "Buy In", description: "Current buy-in score." },
+  { key: "progress", label: "Progress", description: "Current progress score." },
+  { key: "actions", label: "Actions", description: "Quick Update and fast client actions." },
+];
+
+const CLIENT_LIST_COLUMN_KEYS = new Set<ClientListColumnKey>(
+  CLIENT_LIST_COLUMN_OPTIONS.map((option) => option.key),
+);
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreference[] = [
   {
@@ -112,6 +165,18 @@ function normalizeFreshnessDays(value: unknown): number {
   return Math.min(365, Math.max(1, Math.round(days)));
 }
 
+export function normalizeClientListColumns(
+  value: unknown,
+  fallback: ClientListColumnKey[] = FALLBACK_WORKSPACE_DEFAULTS.clientListColumns,
+) {
+  if (!Array.isArray(value)) return fallback;
+  const columns = value.filter(
+    (item): item is ClientListColumnKey =>
+      typeof item === "string" && CLIENT_LIST_COLUMN_KEYS.has(item as ClientListColumnKey),
+  );
+  return columns.length > 0 ? [...new Set(columns)] : fallback;
+}
+
 function normalizeLeadDays(value: unknown, fallback: number): number {
   const days = Number(value);
   if (!Number.isFinite(days)) return fallback;
@@ -184,7 +249,7 @@ export async function loadCompanyWorkspaceDefaults(
   const { data, error } = await supabase
     .from("company_settings")
     .select(
-      "profile_upkeep_freshness_days, default_client_view, default_calendar_mode",
+      "profile_upkeep_freshness_days, default_client_view, default_calendar_mode, metadata",
     )
     .eq("company_id", appCompany.id)
     .maybeSingle();
@@ -202,6 +267,13 @@ export async function loadCompanyWorkspaceDefaults(
     ),
     defaultClientView: normalizeClientView(data.default_client_view),
     defaultCalendarMode: normalizeCalendarMode(data.default_calendar_mode),
+    clientListColumns: normalizeClientListColumns(
+      data.metadata &&
+        typeof data.metadata === "object" &&
+        !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>).client_list_columns
+        : null,
+    ),
     source: "app_owned",
   };
 }

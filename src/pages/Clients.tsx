@@ -12,7 +12,9 @@ import {
   type ProgramChoice,
 } from "../lib/clientDisplay.tsx";
 import {
+  DEFAULT_CLIENT_LIST_COLUMNS,
   loadCompanyWorkspaceDefaults,
+  type ClientListColumnKey,
   type DefaultCalendarMode,
   type DefaultClientView,
 } from "../lib/companySettings.ts";
@@ -106,6 +108,7 @@ interface Company {
   name: string | null;
   enable_secondary_assignee: boolean | null;
   enable_archetypes?: boolean | null;
+  client_list_columns?: ClientListColumnKey[] | null;
 }
 interface TeamMember {
   glide_row_id: string;
@@ -534,6 +537,22 @@ const renewalColumns = [
   "next_renewal_date",
 ];
 
+const clientListColumnLabels: Record<ClientListColumnKey, string> = {
+  csm: "CSM",
+  program: "Program",
+  archetype: "Archetype",
+  status: "Status",
+  onboarded: "Onboarded",
+  renewal: "Renewal",
+  last_contact: "Last Contact",
+  next_contact: "Next Contact",
+  weeks_in_program: "Weeks In Program",
+  weeks_left: "Weeks Left",
+  buy_in: "Buy In",
+  progress: "Progress",
+  actions: "Actions",
+};
+
 function sortColumnFor(field: SortField) {
   if (field === "onboarded") return "client_age_date_onboarded";
   if (field === "renewal") return "current_contract_end_date_for_filtering";
@@ -878,6 +897,25 @@ function formatDate(value: unknown) {
   return Number.isNaN(date.getTime())
     ? formatValue(value)
     : date.toLocaleDateString();
+}
+
+function formatWeeksSince(value: unknown) {
+  if (!value) return "--";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "--";
+  const diff = Date.now() - date.getTime();
+  const weeks = diff <= 0 ? 0 : Math.floor(diff / (7 * 24 * 60 * 60 * 1000));
+  return `${weeks.toLocaleString()} week${weeks === 1 ? "" : "s"}`;
+}
+
+function formatWeeksUntil(value: unknown) {
+  if (!value) return "--";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "--";
+  const diff = date.getTime() - Date.now();
+  if (diff < 0) return "Overdue";
+  const weeks = Math.ceil(diff / (7 * 24 * 60 * 60 * 1000));
+  return `${weeks.toLocaleString()} week${weeks === 1 ? "" : "s"}`;
 }
 
 function plainText(value: unknown) {
@@ -3307,6 +3345,8 @@ export function Clients() {
   const [viewMode, setViewMode] = useState<ViewMode>(
     cachedViewModeMatchesCompany ? (cachedState?.viewMode ?? "list") : "list",
   );
+  const [clientListColumns, setClientListColumns] =
+    useState<ClientListColumnKey[]>(DEFAULT_CLIENT_LIST_COLUMNS);
   const [sortField, setSortField] = useState<SortField>(
     cachedState?.sortField ?? "client_name",
   );
@@ -3557,6 +3597,7 @@ export function Clients() {
       if (!calendarModeTouchedRef.current) {
         setCalendarMode(toCalendarMode(defaults.defaultCalendarMode));
       }
+      setClientListColumns(defaults.clientListColumns);
       defaultAppliedCompanyRef.current = companyId;
     }
 
@@ -4349,6 +4390,7 @@ export function Clients() {
         if (!calendarModeTouchedRef.current) {
           setCalendarMode(toCalendarMode(defaults.defaultCalendarMode));
         }
+        setClientListColumns(defaults.clientListColumns);
         defaultAppliedCompanyRef.current = defaultCompanyId;
       });
     }
@@ -5165,7 +5207,7 @@ export function Clients() {
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
-              showArchetypes={selectedCompany?.enable_archetypes === true}
+              columns={clientListColumns}
               onOpenClient={(id) =>
                 navigate(`/clients/${encodeURIComponent(id)}`)
               }
@@ -5249,7 +5291,7 @@ function ClientTable({
   teamMemberNameById,
   renderClientAvatar,
   clientMeta,
-  showArchetypes,
+  columns,
   onOpenClient,
   onQuickUpdate,
   onMarkContacted,
@@ -5266,37 +5308,30 @@ function ClientTable({
     renewal: unknown;
     buyIn: unknown;
     progress: unknown;
+    pathway: unknown;
     archetype: unknown;
   };
-  showArchetypes: boolean;
+  columns: ClientListColumnKey[];
   onOpenClient: (id: string) => void;
   onQuickUpdate?: (client: ClientRow) => void;
   onMarkContacted?: (client: ClientRow) => void;
   markingContactedClientIds?: Set<string>;
 }) {
+  const visibleColumns = columns.length > 0 ? columns : DEFAULT_CLIENT_LIST_COLUMNS;
   return (
     <div className="overflow-x-auto rounded-md border border-[#e4e9f0] bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-[#e4e9f0]">
+      <table className="min-w-max divide-y divide-[#e4e9f0]">
         <thead className="bg-[#f7f9fc]">
           <tr>
-            {[
-              "Client",
-              "CSM",
-              ...(showArchetypes ? ["Archetype"] : []),
-              "Status",
-              "Onboarded",
-              "Renewal",
-              "Last Contact",
-              "Next Contact",
-              "Buy In",
-              "Progress",
-              "Actions",
-            ].map((heading) => (
+            <th className="sticky left-0 z-10 min-w-[280px] bg-[#f7f9fc] px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273] shadow-[1px_0_0_#e4e9f0]">
+              Client
+            </th>
+            {visibleColumns.map((column) => (
               <th
-                key={heading}
-                className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273]"
+                key={column}
+                className="min-w-[140px] whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273]"
               >
-                {heading}
+                {clientListColumnLabels[column]}
               </th>
             ))}
           </tr>
@@ -5309,9 +5344,9 @@ function ClientTable({
             return (
               <tr
                 key={client.glide_row_id}
-                className="transition-colors hover:bg-[#f7f9fc]"
+                className="group transition-colors hover:bg-[#f7f9fc]"
               >
-                <td className="px-4 py-3">
+                <td className="sticky left-0 z-10 bg-white px-4 py-3 shadow-[1px_0_0_#e4e9f0] group-hover:bg-[#f7f9fc]">
                   <div className="flex items-center gap-3">
                     {renderClientAvatar(client)}
                     <div className="min-w-0">
@@ -5344,55 +5379,59 @@ function ClientTable({
                     ) : null}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-sm text-[#586273]">
-                  {teamMemberNameById.get(client.csm_team_member_id ?? "") ??
-                    "Unassigned"}
-                </td>
-                {showArchetypes ? (
-                  <td className="px-4 py-3 text-sm text-[#586273]">
-                    {displayValue(meta.archetype)}
+                {visibleColumns.map((column) => (
+                  <td
+                    key={column}
+                    className="whitespace-nowrap px-4 py-3 text-sm text-[#586273]"
+                  >
+                    {column === "csm"
+                      ? teamMemberNameById.get(client.csm_team_member_id ?? "") ??
+                        "Unassigned"
+                      : column === "program"
+                        ? displayValue(meta.pathway)
+                        : column === "archetype"
+                          ? displayValue(meta.archetype)
+                          : column === "status"
+                            ? (
+                              <ProgramStatusPill
+                                value={client.program_status_value}
+                                choices={programChoices}
+                              />
+                            )
+                            : column === "onboarded"
+                              ? formatDate(meta.onboarded)
+                              : column === "renewal"
+                                ? formatDate(meta.renewal)
+                                : column === "last_contact"
+                                  ? formatDate(meta.last)
+                                  : column === "next_contact"
+                                    ? formatDate(meta.next)
+                                    : column === "weeks_in_program"
+                                      ? formatWeeksSince(meta.onboarded)
+                                      : column === "weeks_left"
+                                        ? formatWeeksUntil(meta.renewal)
+                                        : column === "buy_in"
+                                          ? <OutcomePill value={meta.buyIn} />
+                                          : column === "progress"
+                                            ? <OutcomePill value={meta.progress} />
+                                            : onQuickUpdate ? (
+                                              <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  onQuickUpdate(client);
+                                                }}
+                                                className="rounded-full border border-[#59abf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#2b79c4] transition-colors hover:bg-[#eaf4fe] cursor-pointer"
+                                              >
+                                                Quick Update
+                                              </button>
+                                            ) : (
+                                              <span className="text-xs text-gray-400">
+                                                Read-only
+                                              </span>
+                                            )}
                   </td>
-                ) : null}
-                <td className="px-4 py-3">
-                  <ProgramStatusPill
-                    value={client.program_status_value}
-                    choices={programChoices}
-                  />
-                </td>
-                <td className="px-4 py-3 text-sm text-[#586273]">
-                  {formatDate(meta.onboarded)}
-                </td>
-                <td className="px-4 py-3 text-sm text-[#586273]">
-                  {formatDate(meta.renewal)}
-                </td>
-                <td className="px-4 py-3 text-sm text-[#586273]">
-                  {formatDate(meta.last)}
-                </td>
-                <td className="px-4 py-3 text-sm text-[#586273]">
-                  {formatDate(meta.next)}
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <OutcomePill value={meta.buyIn} />
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <OutcomePill value={meta.progress} />
-                </td>
-                <td className="px-4 py-3 text-sm">
-                  {onQuickUpdate ? (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onQuickUpdate(client);
-                      }}
-                      className="rounded-full border border-[#59abf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#2b79c4] transition-colors hover:bg-[#eaf4fe] cursor-pointer"
-                    >
-                      Quick Update
-                    </button>
-                  ) : (
-                    <span className="text-xs text-gray-400">Read-only</span>
-                  )}
-                </td>
+                ))}
               </tr>
             );
           })}

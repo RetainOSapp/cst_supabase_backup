@@ -3,8 +3,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
 import {
+  CLIENT_LIST_COLUMN_OPTIONS,
   DEFAULT_NOTIFICATION_PREFERENCES,
+  normalizeClientListColumns,
   mergeNotificationPreferences,
+  type ClientListColumnKey,
   type NotificationPreference,
   type NotificationPreferenceType,
 } from "../lib/companySettings.ts";
@@ -187,6 +190,7 @@ interface CompanySettingsRow {
   enable_embeds: boolean;
   enable_zapier_client_create: boolean;
   allow_status_change_retention: boolean;
+  client_list_columns?: ClientListColumnKey[];
   metadata?: Record<string, unknown> | null;
   updated_at?: string | null;
 }
@@ -2563,6 +2567,7 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_embeds: false,
     enable_zapier_client_create: false,
     allow_status_change_retention: false,
+    client_list_columns: normalizeClientListColumns(null),
     metadata: {
       contact_touch_sets_next_contact: false,
       contact_touch_next_contact_days: DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS,
@@ -2574,6 +2579,22 @@ function settingsMetadata(settings: CompanySettingsRow) {
   return settings.metadata && typeof settings.metadata === "object"
     ? settings.metadata
     : {};
+}
+
+function clientListColumns(settings: CompanySettingsRow) {
+  return normalizeClientListColumns(
+    settings.client_list_columns ?? settingsMetadata(settings).client_list_columns,
+  );
+}
+
+function updateClientListColumns(
+  settings: CompanySettingsRow,
+  columns: ClientListColumnKey[],
+): CompanySettingsRow {
+  return {
+    ...settings,
+    client_list_columns: normalizeClientListColumns(columns),
+  };
 }
 
 function contactTouchSetsNextContact(settings: CompanySettingsRow) {
@@ -3907,6 +3928,7 @@ function CompanySettingsSetup({
           enableEmbeds: draft.enable_embeds,
           enableZapierClientCreate: draft.enable_zapier_client_create,
           allowStatusChangeRetention: draft.allow_status_change_retention,
+          clientListColumns: clientListColumns(draft),
           contactTouchSetsNextContact: contactTouchSetsNextContact(draft),
           contactTouchNextContactDays: contactTouchNextContactDays(draft),
         },
@@ -3942,6 +3964,7 @@ function CompanySettingsSetup({
   }
 
   const disabled = !canManage || saving;
+  const selectedClientListColumns = clientListColumns(draft);
 
   async function handleIntegrationReviewAction(
     eventId: string,
@@ -4220,6 +4243,54 @@ function CompanySettingsSetup({
               setDraft((current) => ({ ...current, default_calendar_mode: value }))
             }
           />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Client list columns
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Choose which columns show in Clients List view. Client name is always
+            visible and freezes while the rest of the table scrolls.
+          </p>
+        </div>
+        <div className="grid gap-3 p-4 lg:grid-cols-2">
+          {CLIENT_LIST_COLUMN_OPTIONS.map((option) => {
+            const checked = selectedClientListColumns.includes(option.key);
+            const isLastChecked = checked && selectedClientListColumns.length === 1;
+            return (
+              <label
+                key={option.key}
+                className="flex items-start gap-3 rounded-md border border-[#e4e9f0] bg-white px-4 py-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled || isLastChecked}
+                  onChange={(event) =>
+                    setDraft((current) => {
+                      const currentColumns = clientListColumns(current);
+                      const nextColumns = event.target.checked
+                        ? [...currentColumns, option.key]
+                        : currentColumns.filter((column) => column !== option.key);
+                      return updateClientListColumns(current, nextColumns);
+                    })
+                  }
+                  className="mt-1 h-4 w-4 rounded border-[#d0d5dd] text-[#2b79c4]"
+                />
+                <span>
+                  <span className="block font-semibold text-[#101828]">
+                    {option.label}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-[#667085]">
+                    {option.description}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
         </div>
       </section>
 
@@ -5711,7 +5782,11 @@ export function SaasClientDetail({
         setIntegrationReviewLoading(false);
         setIntegrationTokensLoading(false);
         if (!settingsResult.error && settingsResult.data) {
-          setCompanySettings(settingsResult.data as CompanySettingsRow);
+          const loadedSettings = settingsResult.data as CompanySettingsRow;
+          setCompanySettings({
+            ...loadedSettings,
+            client_list_columns: clientListColumns(loadedSettings),
+          });
           setSettingsSource("app_owned");
           setSettingsLoading(false);
           return;
