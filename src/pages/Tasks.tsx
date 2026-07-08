@@ -683,11 +683,14 @@ function NewTaskModal({
           client.glide_row_id === task.client_id || client.id === task.client_id,
       )
     : null;
+  const initialClientId =
+    initialClient?.glide_row_id ?? (task?.client_id && isEditing ? task.client_id : "");
+  const hasUnavailableInitialClient = Boolean(
+    isEditing && task?.client_id && !initialClient,
+  );
   const [taskName, setTaskName] = useState(task?.task_name ?? "");
   const [taskDescription, setTaskDescription] = useState(task?.task_description ?? "");
-  const [clientId, setClientId] = useState(
-    initialClient?.glide_row_id ?? task?.client_id ?? "",
-  );
+  const [clientId, setClientId] = useState(initialClientId);
   const [assignedToId, setAssignedToId] = useState(
     task?.assigned_to_id ?? assignedTeamMemberId,
   );
@@ -743,24 +746,29 @@ function NewTaskModal({
     setSaving(true);
     setSaveError(null);
 
+    const payload: Record<string, unknown> = {
+      companyGlideId: companyId,
+      action: isEditing ? "update" : "create",
+      taskId: task?.glide_row_id,
+      taskName,
+      taskDescription,
+      assignedToId,
+      taskDueDate,
+      priority,
+      statusValue,
+      externalLink,
+      recurringIsRecurring,
+      recurringIntervalDays,
+    };
+
+    if (!isEditing || clientId !== initialClientId) {
+      payload.clientId = clientId;
+    }
+
     const { data, error } = await supabase.functions.invoke(
       "manage-client-task",
       {
-        body: {
-          companyGlideId: companyId,
-          action: isEditing ? "update" : "create",
-          taskId: task?.glide_row_id,
-          taskName,
-          taskDescription,
-          clientId,
-          assignedToId,
-          taskDueDate,
-          priority,
-          statusValue,
-          externalLink,
-          recurringIsRecurring,
-          recurringIntervalDays,
-        },
+        body: payload,
       },
     );
 
@@ -866,6 +874,11 @@ function NewTaskModal({
                 className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
               >
                 <option value="">Company-level task</option>
+                {hasUnavailableInitialClient ? (
+                  <option value={initialClientId}>
+                    {taskClientNameFallback(task)} (not in current client list)
+                  </option>
+                ) : null}
                 {clients.map((client) => (
                   <option key={client.glide_row_id} value={client.glide_row_id}>
                     {client.client_name ?? "Unnamed client"}
