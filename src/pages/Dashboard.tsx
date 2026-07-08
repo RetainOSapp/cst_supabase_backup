@@ -252,6 +252,38 @@ interface AdvocacyDetail {
   label: string;
 }
 
+type AdvocacySummaryColumn =
+  | "advocacy_review_last_asked_at"
+  | "advocacy_review_last_received_at"
+  | "advocacy_testimonial_last_asked_at"
+  | "advocacy_testimonial_last_received_at"
+  | "advocacy_referral_last_asked_at"
+  | "advocacy_referral_last_received_at"
+  | "advocacy_renewal_upsell_last_asked_at"
+  | "advocacy_renewal_upsell_last_received_at";
+
+const advocacySummaryDateColumns: Record<
+  AdvocacyType,
+  Record<AdvocacyAction, AdvocacySummaryColumn>
+> = {
+  review: {
+    asked: "advocacy_review_last_asked_at",
+    received: "advocacy_review_last_received_at",
+  },
+  testimonial: {
+    asked: "advocacy_testimonial_last_asked_at",
+    received: "advocacy_testimonial_last_received_at",
+  },
+  referral: {
+    asked: "advocacy_referral_last_asked_at",
+    received: "advocacy_referral_last_received_at",
+  },
+  renewal_upsell: {
+    asked: "advocacy_renewal_upsell_last_asked_at",
+    received: "advocacy_renewal_upsell_last_received_at",
+  },
+};
+
 interface TtvMetric {
   averageDays: number | null;
   reachedCount: number;
@@ -995,6 +1027,20 @@ function parseAdvocacyDetailKey(key: KpiDetailKey | null): AdvocacyDetail | null
     action,
     label: definition.label,
   };
+}
+
+function advocacyDateInWindow(
+  value: unknown,
+  startDate: string,
+  endDate: string,
+) {
+  const date = dateFromValue(value);
+  if (!date) return false;
+  if (startDate && date < new Date(`${startDate}T00:00:00.000Z`)) return false;
+  if (endDate && date >= addDays(new Date(`${endDate}T00:00:00.000Z`), 1)) {
+    return false;
+  }
+  return true;
 }
 
 function dateFromValue(value: unknown) {
@@ -2291,6 +2337,18 @@ export function Dashboard() {
         "current_contract_of_days",
         "current_contract_end_date",
         "current_contract_end_date_for_filtering",
+        ...(appliedUsesAppClients
+          ? [
+              "advocacy_review_last_asked_at",
+              "advocacy_review_last_received_at",
+              "advocacy_testimonial_last_asked_at",
+              "advocacy_testimonial_last_received_at",
+              "advocacy_referral_last_asked_at",
+              "advocacy_referral_last_received_at",
+              "advocacy_renewal_upsell_last_asked_at",
+              "advocacy_renewal_upsell_last_received_at",
+            ]
+          : []),
       ].join(", ");
 
       const buildClientRowsQuery = (from: number, to: number) => {
@@ -2777,61 +2835,62 @@ export function Dashboard() {
       }
 
       setAdvocacyLoading(true);
-      let eligibleClientIds: Set<string> | null = null;
 
-      if (
-        appliedFilters.offerId ||
-        appliedFilters.program ||
-        appliedFilters.clientStartDate.startDate ||
-        appliedFilters.clientStartDate.endDate ||
-        (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId)
-      ) {
-        let clientQuery = supabase
-          .from("clients")
-          .select("glide_row_id")
-          .eq("company_id", appCompany.id);
+      const advocacySummarySelect = [
+        "glide_row_id",
+        "advocacy_review_last_asked_at",
+        "advocacy_review_last_received_at",
+        "advocacy_testimonial_last_asked_at",
+        "advocacy_testimonial_last_received_at",
+        "advocacy_referral_last_asked_at",
+        "advocacy_referral_last_received_at",
+        "advocacy_renewal_upsell_last_asked_at",
+        "advocacy_renewal_upsell_last_received_at",
+      ].join(", ");
 
-        if (appliedFilters.offerId) {
-          clientQuery = clientQuery.eq(
-            "offer_milestones_current_offer_id",
-            appliedFilters.offerId,
-          );
-        }
-        if (appliedProgramValues.length === 1) {
-          clientQuery = clientQuery.eq("program_status_value", appliedProgramValues[0]);
-        } else if (appliedProgramValues.length > 1) {
-          clientQuery = clientQuery.in("program_status_value", appliedProgramValues);
-        }
-        if (appliedFilters.clientStartDate.startDate) {
-          clientQuery = clientQuery.gte(
-            "client_age_date_onboarded",
-            appliedFilters.clientStartDate.startDate,
-          );
-        }
-        if (appliedFilters.clientStartDate.endDate) {
-          clientQuery = clientQuery.lt(
-            "client_age_date_onboarded",
-            `${appliedFilters.clientStartDate.endDate}T23:59:59.999`,
-          );
-        }
-        if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
-          clientQuery = clientQuery.eq(
-            "csm_secondary_assignee_id",
-            appliedFilters.secondaryAssigneeId,
-          );
-        }
+      let clientQuery = supabase
+        .from("clients")
+        .select(advocacySummarySelect)
+        .eq("company_id", appCompany.id);
 
-        const { data: clientRows, error: clientError } = await clientQuery.limit(5000);
-        if (clientError) {
-          console.error("Failed to load advocacy client filter rows:", clientError);
-          if (!cancelled) setAdvocacyLoading(false);
-          return;
-        }
-        eligibleClientIds = new Set(
-          (clientRows ?? [])
-            .map((row) => row.glide_row_id)
-            .filter((id): id is string => typeof id === "string" && id.length > 0),
+      if (appliedFilters.offerId) {
+        clientQuery = clientQuery.eq(
+          "offer_milestones_current_offer_id",
+          appliedFilters.offerId,
         );
+      }
+      if (appliedProgramValues.length === 1) {
+        clientQuery = clientQuery.eq("program_status_value", appliedProgramValues[0]);
+      } else if (appliedProgramValues.length > 1) {
+        clientQuery = clientQuery.in("program_status_value", appliedProgramValues);
+      }
+      if (appliedFilters.clientStartDate.startDate) {
+        clientQuery = clientQuery.gte(
+          "client_age_date_onboarded",
+          appliedFilters.clientStartDate.startDate,
+        );
+      }
+      if (appliedFilters.clientStartDate.endDate) {
+        clientQuery = clientQuery.lt(
+          "client_age_date_onboarded",
+          `${appliedFilters.clientStartDate.endDate}T23:59:59.999`,
+        );
+      }
+      if (appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId) {
+        clientQuery = clientQuery.eq(
+          "csm_secondary_assignee_id",
+          appliedFilters.secondaryAssigneeId,
+        );
+      }
+      if (appliedFilters.csmId) {
+        clientQuery = clientQuery.eq("csm_team_member_id", appliedFilters.csmId);
+      }
+
+      const { data: clientRows, error: clientError } = await clientQuery.limit(5000);
+      if (clientError) {
+        console.error("Failed to load advocacy client summary rows:", clientError);
+        if (!cancelled) setAdvocacyLoading(false);
+        return;
       }
 
       let eventQuery = supabase
@@ -2860,17 +2919,48 @@ export function Dashboard() {
       }
 
       const nextMetrics = advocacyDefinitions.map((definition) => {
-        const matching = ((events ?? []) as Record<string, unknown>[]).filter(
+        const matchingEvents = ((events ?? []) as Record<string, unknown>[]).filter(
           (event) =>
-            event.advocacy_type === definition.type &&
-            (!eligibleClientIds ||
-              eligibleClientIds.has(String(event.client_legacy_id ?? ""))),
+            event.advocacy_type === definition.type,
         );
+        const askedClientIds = new Set(
+          matchingEvents
+            .filter((event) => event.action === "asked")
+            .map((event) => String(event.client_legacy_id ?? ""))
+            .filter(Boolean),
+        );
+        const receivedClientIds = new Set(
+          matchingEvents
+            .filter((event) => event.action === "received")
+            .map((event) => String(event.client_legacy_id ?? ""))
+            .filter(Boolean),
+        );
+
+        for (const row of ((clientRows ?? []) as unknown as Record<
+          string,
+          unknown
+        >[])) {
+          const clientId = String(row.glide_row_id ?? "");
+          if (!clientId) continue;
+          for (const action of ["asked", "received"] as AdvocacyAction[]) {
+            const column = advocacySummaryDateColumns[definition.type][action];
+            if (
+              advocacyDateInWindow(
+                row[column],
+                appliedFilters.dateRange.startDate,
+                appliedFilters.dateRange.endDate,
+              )
+            ) {
+              (action === "asked" ? askedClientIds : receivedClientIds).add(clientId);
+            }
+          }
+        }
+
         return {
           type: definition.type,
           label: definition.label,
-          asked: matching.filter((event) => event.action === "asked").length,
-          received: matching.filter((event) => event.action === "received").length,
+          asked: askedClientIds.size,
+          received: receivedClientIds.size,
         };
       });
 
@@ -3377,8 +3467,15 @@ export function Dashboard() {
             .map((event) => event.client_legacy_id)
             .filter((id): id is string => Boolean(id)),
         );
+        const summaryColumn =
+          advocacySummaryDateColumns[advocacyDetail.type][advocacyDetail.action];
         let rows = reportClients.filter((client) =>
-          advocacyClientIds.has(client.glide_row_id),
+          advocacyClientIds.has(client.glide_row_id) ||
+          advocacyDateInWindow(
+            client[summaryColumn],
+            appliedFilters.dateRange.startDate,
+            appliedFilters.dateRange.endDate,
+          ),
         );
 
         const search = detailSearch.trim().toLowerCase();

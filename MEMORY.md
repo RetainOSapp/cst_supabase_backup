@@ -137,3 +137,7 @@ For historical context:
 ## Contract Type UI Removal - 2026-07-08
 
 - Client Detail no longer shows Contract Type in contract create/edit/display; `manage-client-contract` preserves existing metadata when editing.
+
+## MM Advocacy Dashboard Fallback - 2026-07-08
+
+- Dashboard Advocacy & Growth now counts migrated client summary advocacy dates as fallback rows when historical `client_advocacy_events` are missing.
