@@ -1,5 +1,6 @@
--- Configure Moves Method's default Clients List columns without changing
--- the fallback for future companies.
+-- Correct the MM client-list column metadata after launch QA:
+-- Status should appear before Pathway, and the saved key should use pathway
+-- instead of the old internal "program" name.
 update public.company_settings settings
 set metadata = coalesce(settings.metadata, '{}'::jsonb) || jsonb_build_object(
   'client_list_columns',

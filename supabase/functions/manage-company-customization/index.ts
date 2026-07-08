@@ -41,7 +41,7 @@ const CLIENT_VIEWS = new Set(["list", "card", "calendar"]);
 const CALENDAR_MODES = new Set(["month", "week", "day"]);
 const CLIENT_LIST_COLUMNS = new Set([
   "csm",
-  "program",
+  "pathway",
   "archetype",
   "status",
   "onboarded",
@@ -168,10 +168,11 @@ function metadataRecord(value: unknown) {
 
 function normalizeClientListColumns(value: unknown) {
   if (!Array.isArray(value)) return null;
-  const columns = value.filter(
-    (item): item is string =>
-      typeof item === "string" && CLIENT_LIST_COLUMNS.has(item),
-  );
+  const columns = value.flatMap((item) => {
+    if (typeof item !== "string") return [];
+    const normalized = item === "program" ? "pathway" : item;
+    return CLIENT_LIST_COLUMNS.has(normalized) ? [normalized] : [];
+  });
   return columns.length > 0 ? [...new Set(columns)] : null;
 }
 

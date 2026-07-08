@@ -4,7 +4,7 @@ export type DefaultClientView = "list" | "card" | "calendar";
 export type DefaultCalendarMode = "month" | "week" | "day";
 export type ClientListColumnKey =
   | "csm"
-  | "program"
+  | "pathway"
   | "archetype"
   | "status"
   | "onboarded"
@@ -71,14 +71,14 @@ export const CLIENT_LIST_COLUMN_OPTIONS: Array<{
   description: string;
 }> = [
   { key: "csm", label: "CSM", description: "Primary assigned team member." },
-  { key: "program", label: "Program", description: "Current pathway/program." },
+  { key: "pathway", label: "Pathway", description: "Current primary pathway." },
   { key: "archetype", label: "Archetype", description: "Client archetype." },
   { key: "status", label: "Status", description: "Front End, Back End, Paused, or other program status." },
   { key: "onboarded", label: "Onboarded", description: "Client start/onboarded date." },
   { key: "renewal", label: "Renewal", description: "Current contract or renewal date." },
   { key: "last_contact", label: "Last Contact", description: "Most recent contact date." },
   { key: "next_contact", label: "Next Contact", description: "Next scheduled contact date." },
-  { key: "weeks_in_program", label: "Weeks In Program", description: "Weeks since onboarded date." },
+  { key: "weeks_in_program", label: "Weeks In", description: "Weeks since onboarded date." },
   { key: "weeks_left", label: "Weeks Left", description: "Weeks until current renewal date." },
   { key: "buy_in", label: "Buy In", description: "Current buy-in score." },
   { key: "progress", label: "Progress", description: "Current progress score." },
@@ -170,10 +170,13 @@ export function normalizeClientListColumns(
   fallback: ClientListColumnKey[] = FALLBACK_WORKSPACE_DEFAULTS.clientListColumns,
 ) {
   if (!Array.isArray(value)) return fallback;
-  const columns = value.filter(
-    (item): item is ClientListColumnKey =>
-      typeof item === "string" && CLIENT_LIST_COLUMN_KEYS.has(item as ClientListColumnKey),
-  );
+  const columns = value.flatMap((item) => {
+    if (typeof item !== "string") return [];
+    const normalized = item === "program" ? "pathway" : item;
+    return CLIENT_LIST_COLUMN_KEYS.has(normalized as ClientListColumnKey)
+      ? [normalized as ClientListColumnKey]
+      : [];
+  });
   return columns.length > 0 ? [...new Set(columns)] : fallback;
 }
 

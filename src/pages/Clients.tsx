@@ -539,18 +539,34 @@ const renewalColumns = [
 
 const clientListColumnLabels: Record<ClientListColumnKey, string> = {
   csm: "CSM",
-  program: "Program",
+  pathway: "Pathway",
   archetype: "Archetype",
   status: "Status",
   onboarded: "Onboarded",
   renewal: "Renewal",
   last_contact: "Last Contact",
   next_contact: "Next Contact",
-  weeks_in_program: "Weeks In Program",
+  weeks_in_program: "Weeks In",
   weeks_left: "Weeks Left",
   buy_in: "Buy In",
   progress: "Progress",
   actions: "Actions",
+};
+
+const clientListColumnWidths: Record<ClientListColumnKey, string> = {
+  csm: "min-w-[125px]",
+  pathway: "min-w-[150px]",
+  archetype: "min-w-[105px]",
+  status: "min-w-[110px]",
+  onboarded: "min-w-[105px]",
+  renewal: "min-w-[105px]",
+  last_contact: "min-w-[110px]",
+  next_contact: "min-w-[110px]",
+  weeks_in_program: "min-w-[95px]",
+  weeks_left: "min-w-[95px]",
+  buy_in: "min-w-[90px]",
+  progress: "min-w-[90px]",
+  actions: "min-w-[120px]",
 };
 
 function sortColumnFor(field: SortField) {
@@ -5323,13 +5339,13 @@ function ClientTable({
       <table className="min-w-max divide-y divide-[#e4e9f0]">
         <thead className="bg-[#f7f9fc]">
           <tr>
-            <th className="sticky left-0 z-10 min-w-[280px] bg-[#f7f9fc] px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273] shadow-[1px_0_0_#e4e9f0]">
+            <th className="sticky left-0 z-10 min-w-[240px] bg-[#f7f9fc] px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273] shadow-[1px_0_0_#e4e9f0]">
               Client
             </th>
             {visibleColumns.map((column) => (
               <th
                 key={column}
-                className="min-w-[140px] whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273]"
+                className={`${clientListColumnWidths[column]} whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-[#586273]`}
               >
                 {clientListColumnLabels[column]}
               </th>
@@ -5346,7 +5362,7 @@ function ClientTable({
                 key={client.glide_row_id}
                 className="group transition-colors hover:bg-[#f7f9fc]"
               >
-                <td className="sticky left-0 z-10 bg-white px-4 py-3 shadow-[1px_0_0_#e4e9f0] group-hover:bg-[#f7f9fc]">
+                <td className="sticky left-0 z-10 bg-white px-3 py-2.5 shadow-[1px_0_0_#e4e9f0] group-hover:bg-[#f7f9fc]">
                   <div className="flex items-center gap-3">
                     {renderClientAvatar(client)}
                     <div className="min-w-0">
@@ -5382,12 +5398,12 @@ function ClientTable({
                 {visibleColumns.map((column) => (
                   <td
                     key={column}
-                    className="whitespace-nowrap px-4 py-3 text-sm text-[#586273]"
+                    className="whitespace-nowrap px-3 py-2.5 text-sm text-[#586273]"
                   >
                     {column === "csm"
                       ? teamMemberNameById.get(client.csm_team_member_id ?? "") ??
                         "Unassigned"
-                      : column === "program"
+                      : column === "pathway"
                         ? displayValue(meta.pathway)
                         : column === "archetype"
                           ? displayValue(meta.archetype)
