@@ -127,3 +127,4 @@ For historical context:
 ## Fathom Recording URL Hotfix - 2026-07-08
 
 - Fathom payloads include `recording_url`; `ingest-client-call-summary` / `manage-integration-review` now normalize it onto history payloads, and Client History reads existing metadata/raw payload links.
+- Follow-up UI hotfix: Client Detail > Program and Update Next Steps/Contact surface the latest Fathom recording link from call-summary history without rewriting the note body.

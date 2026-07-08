@@ -2197,10 +2197,12 @@ function ClientProfileEditModal({
 
 function ClientNextStepsModal({
   client,
+  latestRecordingUrl,
   onClose,
   onSaved,
 }: {
   client: ClientRow;
+  latestRecordingUrl?: string | null;
   onClose: () => void;
   onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
 }) {
@@ -2323,8 +2325,18 @@ function ClientNextStepsModal({
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-3">
             <label className="block sm:col-span-3">
-              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                Next Steps
+              <span className="mb-1 flex items-center justify-between gap-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                <span>Next Steps</span>
+                {latestRecordingUrl ? (
+                  <a
+                    href={latestRecordingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="normal-case tracking-normal text-[#2b79c4] underline-offset-2 hover:text-[#162b3e] hover:underline"
+                  >
+                    Open Fathom recording
+                  </a>
+                ) : null}
               </span>
               <textarea
                 value={nextSteps}
@@ -4762,6 +4774,7 @@ function FieldGrid({
   client,
   programChoices,
   relationLookup,
+  latestRecordingUrl,
   canEditNorthStar = false,
   onEditNorthStar,
 }: {
@@ -4769,6 +4782,7 @@ function FieldGrid({
   client: ClientRow;
   programChoices: ProgramChoice[];
   relationLookup?: Map<string, string>;
+  latestRecordingUrl?: string | null;
   canEditNorthStar?: boolean;
   onEditNorthStar?: () => void;
 }) {
@@ -4817,10 +4831,22 @@ function FieldGrid({
               <OutcomePill value={valueFrom(client, candidates)} />
             ) : isRichField(label) ? (
               label === "Next Steps" ? (
-                <RichPreviewValue
-                  label={label}
-                  value={displayValue(valueFrom(client, candidates), relationLookup)}
-                />
+                <>
+                  <RichPreviewValue
+                    label={label}
+                    value={displayValue(valueFrom(client, candidates), relationLookup)}
+                  />
+                  {latestRecordingUrl ? (
+                    <a
+                      href={latestRecordingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-3 inline-flex w-fit rounded-full border border-[#b9dcfa] bg-white px-3 py-1 text-xs font-semibold text-[#2b79c4] transition hover:border-[#59abf0] hover:text-[#162b3e]"
+                    >
+                      Open Fathom recording
+                    </a>
+                  ) : null}
+                </>
               ) : (
                 <RichValue
                   value={displayValue(valueFrom(client, candidates), relationLookup)}
@@ -6784,6 +6810,24 @@ function historyRecordingUrl(event: ClientHistoryEventRow) {
   return url && /^https?:\/\//i.test(url) ? url : null;
 }
 
+function latestCallSummaryRecordingUrl(events: ClientHistoryEventRow[]) {
+  for (const event of events) {
+    const haystack = [event.event_type, event.source, event.title]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (
+      haystack.includes("call_summary_webhook") ||
+      haystack.includes("fathom") ||
+      haystack.includes("call summary")
+    ) {
+      const url = historyRecordingUrl(event);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
 function historyEventMatchesFilter(event: ClientHistoryEventRow, filter: HistoryFilter) {
   if (filter === "all") return true;
   const haystack = [
@@ -7694,6 +7738,10 @@ export function ClientDetail() {
     }
     return next;
   }, [offers, offerMilestones, relationLookup]);
+  const latestFathomRecordingUrl = useMemo(
+    () => latestCallSummaryRecordingUrl(historyEvents),
+    [historyEvents],
+  );
   if (loading)
     return (
       <div className="flex items-center justify-center py-20">
@@ -8169,6 +8217,9 @@ export function ClientDetail() {
               client={client}
               programChoices={programChoices}
               relationLookup={displayLookup}
+              latestRecordingUrl={
+                activeTab === "program" ? latestFathomRecordingUrl : null
+              }
               canEditNorthStar={activeTab === "program" && canEditProfile}
               onEditNorthStar={() => setEditingProfile(true)}
             />
@@ -8195,6 +8246,7 @@ export function ClientDetail() {
       {editingNextSteps ? (
         <ClientNextStepsModal
           client={client}
+          latestRecordingUrl={latestFathomRecordingUrl}
           onClose={() => setEditingNextSteps(false)}
           onSaved={(updatedClient, event) => {
             setClient(updatedClient);

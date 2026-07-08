@@ -336,6 +336,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-17 closeout QA: disposable company-scoped `call_summary_next_steps` token accepted an unmatched payload into the review queue, rejected a wrong integration token type with 401, rejected the revoked token with 401, updated `last_used_at`, and cleaned up temporary intake/token rows.
   - 2026-06-20 old Loom audit hardening: `ingest-client-call-summary` now accepts `client_email` or provider attendee/invitee email lists and only auto-applies when exactly one active app-owned client matches; deployed to `zjauqflzxzsbpnivzsct`.
   - 2026-07-08 MM hotfix: recent Fathom payloads were verified to include `recording_url`; RetainOS now normalizes that URL onto call-summary history payloads and Client Detail > History surfaces existing metadata/raw-payload recording links.
+  - 2026-07-08 follow-up: Client Detail > Program and Update Next Steps/Contact now surface the latest Fathom recording link from call-summary history.
   - Before giving this to Moves Method or any customer: create one active company token per target company/integration, and document that revoking tokens stops RetainOS writes/processing but the customer-side Zap still needs to be turned off to avoid Zapier task spend.
 - `[x]` Client update webhook V1.
   - 2026-06-12 local implementation: `webhook-update-client` accepts app-owned company UUID or legacy company id plus exact `client_email`, or explicit app-owned `client_id` when it belongs to the submitted company and optional email also matches.
