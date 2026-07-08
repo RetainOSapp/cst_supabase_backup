@@ -1,7 +1,15 @@
 import { supabase } from "./supabase.ts";
+import type { ProgramChoice } from "./clientDisplay.tsx";
 
 export type DefaultClientView = "list" | "card" | "calendar";
 export type DefaultCalendarMode = "month" | "week" | "day";
+export type ProgramStatusValue =
+  | "front-end"
+  | "back-end"
+  | "paused"
+  | "suspended"
+  | "off-boarded";
+export type ProgramStatusLabelMap = Record<ProgramStatusValue, string>;
 export type ClientListColumnKey =
   | "csm"
   | "pathway"
@@ -22,6 +30,7 @@ export interface CompanyWorkspaceDefaults {
   defaultClientView: DefaultClientView;
   defaultCalendarMode: DefaultCalendarMode;
   clientListColumns: ClientListColumnKey[];
+  programStatusLabels: ProgramStatusLabelMap;
   source: "app_owned" | "fallback";
 }
 
@@ -44,6 +53,44 @@ export interface NotificationPreference {
   metadata?: Record<string, unknown> | null;
 }
 
+export const PROGRAM_STATUS_LABEL_OPTIONS: Array<{
+  value: ProgramStatusValue;
+  defaultLabel: string;
+  description: string;
+}> = [
+  {
+    value: "front-end",
+    defaultLabel: "Front End",
+    description: "Active clients in the first delivery phase.",
+  },
+  {
+    value: "back-end",
+    defaultLabel: "Back End",
+    description: "Active clients in the later delivery phase.",
+  },
+  {
+    value: "paused",
+    defaultLabel: "Paused",
+    description: "Temporarily paused clients with a planned return.",
+  },
+  {
+    value: "suspended",
+    defaultLabel: "Suspended",
+    description: "Clients temporarily stopped or missing in action.",
+  },
+  {
+    value: "off-boarded",
+    defaultLabel: "Offboarded",
+    description: "Clients who have completed or left the program.",
+  },
+];
+
+export const DEFAULT_PROGRAM_STATUS_LABELS: ProgramStatusLabelMap =
+  PROGRAM_STATUS_LABEL_OPTIONS.reduce((labels, option) => {
+    labels[option.value] = option.defaultLabel;
+    return labels;
+  }, {} as ProgramStatusLabelMap);
+
 const FALLBACK_WORKSPACE_DEFAULTS: CompanyWorkspaceDefaults = {
   profileUpkeepFreshnessDays: 14,
   defaultClientView: "list",
@@ -59,6 +106,7 @@ const FALLBACK_WORKSPACE_DEFAULTS: CompanyWorkspaceDefaults = {
     "progress",
     "actions",
   ],
+  programStatusLabels: DEFAULT_PROGRAM_STATUS_LABELS,
   source: "fallback",
 };
 
@@ -166,6 +214,48 @@ function normalizeFreshnessDays(value: unknown): number {
   const days = Number(value);
   if (!Number.isFinite(days)) return FALLBACK_WORKSPACE_DEFAULTS.profileUpkeepFreshnessDays;
   return Math.min(365, Math.max(1, Math.round(days)));
+}
+
+export function normalizeProgramStatusLabels(
+  value: unknown,
+  fallback: ProgramStatusLabelMap = DEFAULT_PROGRAM_STATUS_LABELS,
+): ProgramStatusLabelMap {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return PROGRAM_STATUS_LABEL_OPTIONS.reduce((labels, option) => {
+    const raw = record[option.value];
+    const label =
+      typeof raw === "string" && raw.trim()
+        ? raw.trim().slice(0, 60)
+        : fallback[option.value] || option.defaultLabel;
+    labels[option.value] = label;
+    return labels;
+  }, {} as ProgramStatusLabelMap);
+}
+
+export function applyProgramStatusLabels<T extends ProgramChoice>(
+  choices: T[],
+  labels: ProgramStatusLabelMap = DEFAULT_PROGRAM_STATUS_LABELS,
+): T[] {
+  return choices.map((choice) => {
+    const value = choice.program_value as ProgramStatusValue | null;
+    return value && labels[value]
+      ? { ...choice, program_label: labels[value] }
+      : choice;
+  });
+}
+
+export function programStatusChoicesWithLabels(
+  labels: ProgramStatusLabelMap = DEFAULT_PROGRAM_STATUS_LABELS,
+): ProgramChoice[] {
+  return PROGRAM_STATUS_LABEL_OPTIONS.map((option) => ({
+    program_value: option.value,
+    program_label: labels[option.value] || option.defaultLabel,
+    program_emoji: null,
+  }));
 }
 
 export function normalizeClientListColumns(
@@ -284,6 +374,13 @@ export async function loadCompanyWorkspaceDefaults(
         typeof data.metadata === "object" &&
         !Array.isArray(data.metadata)
         ? (data.metadata as Record<string, unknown>).client_list_columns
+        : null,
+    ),
+    programStatusLabels: normalizeProgramStatusLabels(
+      data.metadata &&
+        typeof data.metadata === "object" &&
+        !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>).program_status_labels
         : null,
     ),
     source: "app_owned",

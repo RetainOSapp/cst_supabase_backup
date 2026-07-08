@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { ProgramStatusPill, type ProgramChoice } from "../lib/clientDisplay.tsx";
-import { loadCompanyWorkspaceDefaults } from "../lib/companySettings.ts";
+import {
+  DEFAULT_PROGRAM_STATUS_LABELS,
+  applyProgramStatusLabels,
+  loadCompanyWorkspaceDefaults,
+  type ProgramStatusLabelMap,
+} from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 
 type DatePreset = "today" | "7" | "14" | "30" | "custom";
@@ -355,6 +360,8 @@ export function CsmReports() {
   const [companyId, setCompanyId] = useState(effectiveCompanyId);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
+  const [programStatusLabels, setProgramStatusLabels] =
+    useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
   const [csmId, setCsmId] = useState("");
   const [preset, setPreset] = useState<DatePreset>("30");
   const [startDate, setStartDate] = useState(presetStartDate("30"));
@@ -650,6 +657,7 @@ export function CsmReports() {
   useEffect(() => {
     if (!companyId) {
       setProfileUpkeepFreshnessDays(14);
+      setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
       return;
     }
     let cancelled = false;
@@ -657,6 +665,7 @@ export function CsmReports() {
       const defaults = await loadCompanyWorkspaceDefaults(companyId);
       if (cancelled) return;
       setProfileUpkeepFreshnessDays(defaults.profileUpkeepFreshnessDays);
+      setProgramStatusLabels(defaults.programStatusLabels);
     }
     void loadWorkspaceDefaults();
     return () => {
@@ -682,6 +691,11 @@ export function CsmReports() {
       cancelled = true;
     };
   }, [programChoices.length]);
+
+  const displayProgramChoices = useMemo(
+    () => applyProgramStatusLabels(programChoices, programStatusLabels),
+    [programChoices, programStatusLabels],
+  );
 
   const loadReport = useCallback(async () => {
     if (!companyId) {
@@ -1335,7 +1349,7 @@ export function CsmReports() {
                         <td className="px-3 py-2">
                           <ProgramStatusPill
                             value={row.client.program_status_value}
-                            choices={programChoices}
+                            choices={displayProgramChoices}
                           />
                         </td>
                         <td className="px-3 py-2 text-gray-700">
@@ -1453,7 +1467,7 @@ export function CsmReports() {
                         <div className="mt-1">
                           <ProgramStatusPill
                             value={row.client.program_status_value}
-                            choices={programChoices}
+                            choices={displayProgramChoices}
                           />
                         </div>
                       </div>

@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ProgramStatusPill } from "../lib/clientDisplay.tsx";
+import { ProgramStatusPill, type ProgramChoice } from "../lib/clientDisplay.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
+import {
+  DEFAULT_PROGRAM_STATUS_LABELS,
+  loadCompanyWorkspaceDefaults,
+  programStatusChoicesWithLabels,
+  type ProgramStatusLabelMap,
+} from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 import { ComingSoonPanel } from "../components/ComingSoon.tsx";
 
@@ -405,6 +411,7 @@ function TaskCard({
   teamMemberNameById,
   canManage,
   isMoving,
+  programChoices,
   onClick,
   onDragStart,
   onDragEnd,
@@ -415,6 +422,7 @@ function TaskCard({
   teamMemberNameById: Map<string, string>;
   canManage: boolean;
   isMoving: boolean;
+  programChoices: ProgramChoice[];
   onClick: () => void;
   onDragStart: (event: DragEvent<HTMLElement>) => void;
   onDragEnd: (event: DragEvent<HTMLElement>) => void;
@@ -528,7 +536,10 @@ function TaskCard({
           <span className="truncate">{client?.client_name ?? fallbackClientName}</span>
         </Link>
         {client?.program_status_value && (
-          <ProgramStatusPill value={client.program_status_value} />
+          <ProgramStatusPill
+            value={client.program_status_value}
+            choices={programChoices}
+          />
         )}
       </div>
     </article>
@@ -1059,6 +1070,8 @@ export function Tasks() {
   const [clientById, setClientById] = useState(new Map<string, ClientRow>());
   const [companyClients, setCompanyClients] = useState<ClientRow[]>([]);
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplateRow[]>([]);
+  const [programStatusLabels, setProgramStatusLabels] =
+    useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -1076,6 +1089,10 @@ export function Tasks() {
   const isUsingAppTasks = appTaskCompanyIds.has(companyId);
   const canManageTasks =
     capabilities.canAccessTasks && Boolean(companyId) && isUsingAppTasks;
+  const programChoices = useMemo(
+    () => programStatusChoicesWithLabels(programStatusLabels),
+    [programStatusLabels],
+  );
   const companyClientById = useMemo(
     () => buildClientLookup(companyClients),
     [companyClients],
@@ -1189,6 +1206,26 @@ export function Tasks() {
     }
     void loadCompanies();
   }, [canUseCompanySwitcher, effectiveCompanyId]);
+
+  useEffect(() => {
+    if (!companyId) {
+      setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadWorkspaceDefaults() {
+      const defaults = await loadCompanyWorkspaceDefaults(companyId);
+      if (!cancelled) setProgramStatusLabels(defaults.programStatusLabels);
+    }
+
+    void loadWorkspaceDefaults();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId]);
 
   useEffect(() => {
     if (!companyId) {
@@ -1947,6 +1984,7 @@ export function Tasks() {
                     teamMemberNameById={teamMemberNameById}
                     canManage={canManageTasks}
                     isMoving={movingTaskId === task.glide_row_id}
+                    programChoices={programChoices}
                     onClick={() => {
                       if (canManageTasks) setSelectedTask(task);
                     }}

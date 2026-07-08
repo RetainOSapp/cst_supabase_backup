@@ -58,6 +58,20 @@ const CLIENT_LIST_COLUMNS = new Set<string>(CLIENT_LIST_COLUMN_ORDER);
 const CLIENT_LIST_COLUMN_POSITION = new Map<string, number>(
   CLIENT_LIST_COLUMN_ORDER.map((column, index) => [column, index]),
 );
+const PROGRAM_STATUS_LABEL_KEYS = [
+  "front-end",
+  "back-end",
+  "paused",
+  "suspended",
+  "off-boarded",
+] as const;
+const DEFAULT_PROGRAM_STATUS_LABELS: Record<string, string> = {
+  "front-end": "Front End",
+  "back-end": "Back End",
+  paused: "Paused",
+  suspended: "Suspended",
+  "off-boarded": "Offboarded",
+};
 const TASK_TEMPLATE_TRIGGERS = new Set([
   "manual",
   "client_created",
@@ -184,6 +198,22 @@ function normalizeClientListColumns(value: unknown) {
           (CLIENT_LIST_COLUMN_POSITION.get(right) ?? 999),
       )
     : null;
+}
+
+function normalizeProgramStatusLabels(value: unknown) {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return PROGRAM_STATUS_LABEL_KEYS.reduce<Record<string, string>>((labels, key) => {
+    const raw = record[key];
+    labels[key] =
+      typeof raw === "string" && raw.trim()
+        ? raw.trim().slice(0, 60)
+        : DEFAULT_PROGRAM_STATUS_LABELS[key];
+    return labels;
+  }, {});
 }
 
 function normalizeEmail(value: unknown) {
@@ -365,6 +395,9 @@ Deno.serve(async (req) => {
         Object.prototype.hasOwnProperty.call(body, "contactTouchSetsNextContact") ||
         Object.prototype.hasOwnProperty.call(body, "contactTouchNextContactDays");
       const clientListColumns = normalizeClientListColumns(body.clientListColumns);
+      const programStatusLabels = normalizeProgramStatusLabels(
+        body.programStatusLabels,
+      );
 
       const payload = {
         company_id: company.id,
@@ -398,6 +431,7 @@ Deno.serve(async (req) => {
               }
             : {}),
           ...(clientListColumns ? { client_list_columns: clientListColumns } : {}),
+          program_status_labels: programStatusLabels,
         },
       };
 

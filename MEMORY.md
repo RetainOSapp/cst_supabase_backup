@@ -128,3 +128,8 @@ For historical context:
 
 - Fathom payloads include `recording_url`; `ingest-client-call-summary` / `manage-integration-review` now normalize it onto history payloads, and Client History reads existing metadata/raw payload links.
 - Follow-up UI hotfix: Client Detail > Program and Update Next Steps/Contact surface the latest Fathom recording link from call-summary history without rewriting the note body.
+
+## Company Status Labels - 2026-07-08
+
+- Company Settings can now store display-only program/status labels in `metadata.program_status_labels`; canonical values stay unchanged for migration/reporting.
+- MM was seeded with `suspended` displayed as `MIA` via `20260708170000_mm_program_status_labels.sql`; `manage-company-customization` was deployed for Admin Hub saves.

@@ -5,11 +5,15 @@ import { loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
 import {
   CLIENT_LIST_COLUMN_OPTIONS,
   DEFAULT_NOTIFICATION_PREFERENCES,
+  DEFAULT_PROGRAM_STATUS_LABELS,
+  PROGRAM_STATUS_LABEL_OPTIONS,
   normalizeClientListColumns,
+  normalizeProgramStatusLabels,
   mergeNotificationPreferences,
   type ClientListColumnKey,
   type NotificationPreference,
   type NotificationPreferenceType,
+  type ProgramStatusLabelMap,
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 
@@ -191,6 +195,7 @@ interface CompanySettingsRow {
   enable_zapier_client_create: boolean;
   allow_status_change_retention: boolean;
   client_list_columns?: ClientListColumnKey[];
+  program_status_labels?: ProgramStatusLabelMap;
   metadata?: Record<string, unknown> | null;
   updated_at?: string | null;
 }
@@ -2568,6 +2573,7 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_zapier_client_create: false,
     allow_status_change_retention: false,
     client_list_columns: normalizeClientListColumns(null),
+    program_status_labels: DEFAULT_PROGRAM_STATUS_LABELS,
     metadata: {
       contact_touch_sets_next_contact: false,
       contact_touch_next_contact_days: DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS,
@@ -2594,6 +2600,27 @@ function updateClientListColumns(
   return {
     ...settings,
     client_list_columns: normalizeClientListColumns(columns),
+  };
+}
+
+function programStatusLabels(settings: CompanySettingsRow) {
+  return normalizeProgramStatusLabels(
+    settings.program_status_labels ??
+      settingsMetadata(settings).program_status_labels,
+  );
+}
+
+function updateProgramStatusLabel(
+  settings: CompanySettingsRow,
+  status: keyof ProgramStatusLabelMap,
+  label: string,
+): CompanySettingsRow {
+  return {
+    ...settings,
+    program_status_labels: {
+      ...programStatusLabels(settings),
+      [status]: label,
+    },
   };
 }
 
@@ -3929,6 +3956,7 @@ function CompanySettingsSetup({
           enableZapierClientCreate: draft.enable_zapier_client_create,
           allowStatusChangeRetention: draft.allow_status_change_retention,
           clientListColumns: clientListColumns(draft),
+          programStatusLabels: programStatusLabels(draft),
           contactTouchSetsNextContact: contactTouchSetsNextContact(draft),
           contactTouchNextContactDays: contactTouchNextContactDays(draft),
         },
@@ -3965,6 +3993,7 @@ function CompanySettingsSetup({
 
   const disabled = !canManage || saving;
   const selectedClientListColumns = clientListColumns(draft);
+  const selectedProgramStatusLabels = programStatusLabels(draft);
 
   async function handleIntegrationReviewAction(
     eventId: string,
@@ -4291,6 +4320,51 @@ function CompanySettingsSetup({
               </label>
             );
           })}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Program status labels
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Rename status labels for this company without changing the underlying
+            status values used by reports, filters, and automations.
+          </p>
+        </div>
+        <div className="grid gap-4 p-4 lg:grid-cols-2">
+          {PROGRAM_STATUS_LABEL_OPTIONS.map((option) => (
+            <label
+              key={option.value}
+              className="block rounded-md border border-[#e4e9f0] bg-white px-4 py-3 text-sm"
+            >
+              <span className="font-semibold text-[#101828]">
+                {option.defaultLabel}
+              </span>
+              <span className="mt-0.5 block text-xs text-[#667085]">
+                {option.description}
+              </span>
+              <input
+                type="text"
+                disabled={disabled}
+                value={
+                  selectedProgramStatusLabels[option.value] ??
+                  option.defaultLabel
+                }
+                onChange={(event) =>
+                  setDraft((current) =>
+                    updateProgramStatusLabel(
+                      current,
+                      option.value,
+                      event.target.value,
+                    ),
+                  )
+                }
+                className="mt-3 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+              />
+            </label>
+          ))}
         </div>
       </section>
 
@@ -5786,6 +5860,7 @@ export function SaasClientDetail({
           setCompanySettings({
             ...loadedSettings,
             client_list_columns: clientListColumns(loadedSettings),
+            program_status_labels: programStatusLabels(loadedSettings),
           });
           setSettingsSource("app_owned");
           setSettingsLoading(false);

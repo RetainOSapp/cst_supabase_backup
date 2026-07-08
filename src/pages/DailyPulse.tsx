@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ProgramStatusPill } from "../lib/clientDisplay.tsx";
+import { ProgramStatusPill, type ProgramChoice } from "../lib/clientDisplay.tsx";
 import {
   loadUnifiedCompanyByLegacyId,
   loadUnifiedTeamMembers,
@@ -8,9 +8,13 @@ import {
   type UnifiedTeamMember,
 } from "../lib/appOwnedData.ts";
 import {
+  DEFAULT_PROGRAM_STATUS_LABELS,
   enabledNotificationTypes,
+  loadCompanyWorkspaceDefaults,
   loadCompanyNotificationPreferences,
   mergeNotificationPreferences,
+  programStatusChoicesWithLabels,
+  type ProgramStatusLabelMap,
   type NotificationPreference,
   type NotificationPreferenceType,
 } from "../lib/companySettings.ts";
@@ -805,10 +809,12 @@ function PulseSectionCard({
   section,
   completingCheckpointKey,
   onCompleteCheckpoint,
+  programChoices,
 }: {
   section: PulseSection;
   completingCheckpointKey: string | null;
   onCompleteCheckpoint: (item: PulseItem) => void;
+  programChoices: ProgramChoice[];
 }) {
   const [open, setOpen] = useState(section.items.length > 0);
 
@@ -866,7 +872,10 @@ function PulseSectionCard({
                   </div>
                   <div className="mt-4 flex items-center justify-between gap-3">
                     {item.client ? (
-                      <ProgramStatusPill value={item.client.program_status_value} />
+                      <ProgramStatusPill
+                        value={item.client.program_status_value}
+                        choices={programChoices}
+                      />
                     ) : (
                       <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
                         Company-level
@@ -939,6 +948,8 @@ export function DailyPulse() {
   const [notificationPreferences, setNotificationPreferences] = useState<
     NotificationPreference[]
   >(mergeNotificationPreferences([]));
+  const [programStatusLabels, setProgramStatusLabels] =
+    useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
   const [loading, setLoading] = useState(false);
   const [completingCheckpointKey, setCompletingCheckpointKey] = useState<string | null>(
     null,
@@ -950,6 +961,10 @@ export function DailyPulse() {
       ? teamMemberId
       : selectedCsmId;
   const showRelationshipFilter = Boolean(activeCsmScopeId);
+  const programChoices = useMemo(
+    () => programStatusChoicesWithLabels(programStatusLabels),
+    [programStatusLabels],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -967,6 +982,23 @@ export function DailyPulse() {
       .catch(() => {
         if (!cancelled) setCompanyName("");
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCompanyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadWorkspaceDefaults() {
+      if (!effectiveCompanyId) {
+        setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+        return;
+      }
+      const defaults = await loadCompanyWorkspaceDefaults(effectiveCompanyId);
+      if (!cancelled) setProgramStatusLabels(defaults.programStatusLabels);
+    }
+
+    void loadWorkspaceDefaults();
     return () => {
       cancelled = true;
     };
@@ -1419,6 +1451,7 @@ export function DailyPulse() {
               section={section}
               completingCheckpointKey={completingCheckpointKey}
               onCompleteCheckpoint={handleCompleteCheckpoint}
+              programChoices={programChoices}
             />
           ))}
         </div>

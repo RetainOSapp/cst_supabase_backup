@@ -218,6 +218,7 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - Dashboard/client-list preference consumption beyond current defaults.
   - Client list column presets.
   - 2026-07-08 MM launch follow-up: Admin Hub > Company Settings can configure Clients List columns per company; the Clients List keeps the client column frozen and horizontally scrolls when many columns are enabled.
+  - 2026-07-08 MM launch follow-up: Admin Hub > Company Settings can configure company-specific program/status display labels without changing canonical status values; MM seeds `suspended` as `MIA`.
   - Call/communication settings after integrations are closer to rollout.
 - `[ ]` `[priority: medium]` SaaS Client archive/offboard flow.
 - `[ ]` `[priority: medium]` Zapier SaaS company automation, if this remains needed.

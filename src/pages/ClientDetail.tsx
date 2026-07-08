@@ -7,8 +7,10 @@ import {
 } from "../lib/clientDisplay.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import {
+  applyProgramStatusLabels,
   loadCompanyNotificationPreferences,
   mergeNotificationPreferences,
+  normalizeProgramStatusLabels,
   type NotificationPreference,
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
@@ -7537,7 +7539,7 @@ export function ClientDetail() {
           ? supabase
               .from("company_settings")
               .select(
-                "enable_secondary_assignee, enable_secondary_offers, allow_status_change_retention",
+                "enable_secondary_assignee, enable_secondary_offers, allow_status_change_retention, metadata",
               )
               .eq("company_id", appPathwayCompany.id)
               .maybeSingle()
@@ -7583,7 +7585,20 @@ export function ClientDetail() {
             withContractSource(contract, "mirror"),
           ),
         ]);
-        setProgramChoices((choices ?? []) as ProgramChoice[]);
+        const nextProgramStatusLabels = normalizeProgramStatusLabels(
+          companySettingsResult.data?.metadata &&
+            typeof companySettingsResult.data.metadata === "object" &&
+            !Array.isArray(companySettingsResult.data.metadata)
+            ? (companySettingsResult.data.metadata as Record<string, unknown>)
+                .program_status_labels
+            : null,
+        );
+        setProgramChoices(
+          applyProgramStatusLabels(
+            (choices ?? []) as ProgramChoice[],
+            nextProgramStatusLabels,
+          ),
+        );
         setChurnReasons(
           churnReasonsResult.error
             ? []

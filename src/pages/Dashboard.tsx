@@ -21,6 +21,12 @@ import { ComingSoonModal, ComingSoonPanel } from "../components/ComingSoon.tsx";
 import { supabase } from "../lib/supabase.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import {
+  DEFAULT_PROGRAM_STATUS_LABELS,
+  applyProgramStatusLabels,
+  loadCompanyWorkspaceDefaults,
+  type ProgramStatusLabelMap,
+} from "../lib/companySettings.ts";
+import {
   advocacyDefinitions,
   type AdvocacyAction,
   type AdvocacyType,
@@ -1499,6 +1505,8 @@ export function Dashboard() {
   const [offersLoading, setOffersLoading] = useState(false);
   const [baseProgramChoices, setBaseProgramChoices] = useState<ProgramChoice[]>([]);
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
+  const [programStatusLabels, setProgramStatusLabels] =
+    useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
 
   const [activeClients, setActiveClients] = useState<number | null>(null);
   const [frontEndClients, setFrontEndClients] = useState<number | null>(null);
@@ -1746,13 +1754,16 @@ export function Dashboard() {
 
   const programChoices = useMemo(
     () =>
-      baseProgramChoices
-        .filter((choice) => choice.program_value)
+      applyProgramStatusLabels(
+        baseProgramChoices.filter((choice) => choice.program_value),
+        programStatusLabels,
+      )
         .map((choice) => {
           let displayLabel = choice.program_label ?? choice.program_value ?? "";
 
           if (
             choice.program_value === "paused" &&
+            programStatusLabels.paused === DEFAULT_PROGRAM_STATUS_LABELS.paused &&
             pendingCompany?.program_paused_override
           ) {
             displayLabel = pendingCompany.program_paused_override;
@@ -1760,6 +1771,8 @@ export function Dashboard() {
 
           if (
             choice.program_value === "suspended" &&
+            programStatusLabels.suspended ===
+              DEFAULT_PROGRAM_STATUS_LABELS.suspended &&
             pendingCompany?.program_suspended_override
           ) {
             displayLabel = pendingCompany.program_suspended_override;
@@ -1772,7 +1785,7 @@ export function Dashboard() {
               : displayLabel,
           };
         }),
-    [baseProgramChoices, pendingCompany],
+    [baseProgramChoices, pendingCompany, programStatusLabels],
   );
 
   const detailTitle = useMemo(() => {
@@ -2088,6 +2101,26 @@ export function Dashboard() {
       cancelled = true;
     };
   }, [appCompanyByLegacyId, pendingFilters.companyId]);
+
+  useEffect(() => {
+    if (!pendingFilters.companyId) {
+      setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadWorkspaceDefaults() {
+      const defaults = await loadCompanyWorkspaceDefaults(pendingFilters.companyId);
+      if (!cancelled) setProgramStatusLabels(defaults.programStatusLabels);
+    }
+
+    void loadWorkspaceDefaults();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingFilters.companyId]);
 
   useEffect(() => {
     if (!pendingFilters.companyId || baseProgramChoices.length > 0) return;

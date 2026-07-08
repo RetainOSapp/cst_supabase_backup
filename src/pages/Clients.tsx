@@ -13,10 +13,13 @@ import {
 } from "../lib/clientDisplay.tsx";
 import {
   DEFAULT_CLIENT_LIST_COLUMNS,
+  DEFAULT_PROGRAM_STATUS_LABELS,
+  applyProgramStatusLabels,
   loadCompanyWorkspaceDefaults,
   type ClientListColumnKey,
   type DefaultCalendarMode,
   type DefaultClientView,
+  type ProgramStatusLabelMap,
 } from "../lib/companySettings.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
@@ -3327,6 +3330,8 @@ export function Clients() {
   const [filterMilestonesLoading, setFilterMilestonesLoading] = useState(false);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
+  const [programStatusLabels, setProgramStatusLabels] =
+    useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
   const [appClientCompanyIdsLoaded, setAppClientCompanyIdsLoaded] = useState(false);
   const [appClientCompanyIds, setAppClientCompanyIds] = useState<Set<string>>(
     () => new Set(),
@@ -3447,6 +3452,10 @@ export function Clients() {
       return map;
     },
     [offers],
+  );
+  const displayProgramChoices = useMemo(
+    () => applyProgramStatusLabels(programChoices, programStatusLabels),
+    [programChoices, programStatusLabels],
   );
   const visibleFilterMilestones = useMemo(
     () =>
@@ -3603,7 +3612,10 @@ export function Clients() {
 
   useEffect(() => {
     const companyId = filters.companyId || appliedFilters.companyId;
-    if (!companyId) return;
+    if (!companyId) {
+      setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      return;
+    }
     if (defaultAppliedCompanyRef.current === companyId) return;
 
     viewModeTouchedRef.current = false;
@@ -3620,6 +3632,7 @@ export function Clients() {
         setCalendarMode(toCalendarMode(defaults.defaultCalendarMode));
       }
       setClientListColumns(defaults.clientListColumns);
+      setProgramStatusLabels(defaults.programStatusLabels);
       defaultAppliedCompanyRef.current = companyId;
     }
 
@@ -4413,8 +4426,11 @@ export function Clients() {
           setCalendarMode(toCalendarMode(defaults.defaultCalendarMode));
         }
         setClientListColumns(defaults.clientListColumns);
+        setProgramStatusLabels(defaults.programStatusLabels);
         defaultAppliedCompanyRef.current = defaultCompanyId;
       });
+    } else {
+      setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
     }
     setSearchParams(defaultCompanyId ? { companyId: defaultCompanyId } : {}, {
       replace: true,
@@ -4526,7 +4542,7 @@ export function Clients() {
                     >
                       All statuses
                     </button>
-                    {programChoices.map((choice) => {
+                    {displayProgramChoices.map((choice) => {
                       const value = choice.program_value ?? "";
                       if (!value) return null;
                       const checked = filters.programs.includes(value);
@@ -4558,7 +4574,7 @@ export function Clients() {
                         </label>
                       );
                     })}
-                    {programChoices.length === 0 && (
+                    {displayProgramChoices.length === 0 && (
                       <p className="px-2 py-1.5 text-sm text-gray-400">
                         No statuses found
                       </p>
@@ -5195,7 +5211,7 @@ export function Clients() {
               tasks={calendarTasks}
               loading={calendarLoading}
               error={calendarError}
-              programChoices={programChoices}
+              programChoices={displayProgramChoices}
               teamMemberNameById={teamMemberNameById}
               clientMeta={clientMeta}
               onOpenClient={(id) =>
@@ -5227,7 +5243,7 @@ export function Clients() {
           ) : viewMode === "list" ? (
             <ClientTable
               clients={clients}
-              programChoices={programChoices}
+              programChoices={displayProgramChoices}
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
@@ -5244,7 +5260,7 @@ export function Clients() {
           ) : (
             <ClientCards
               clients={clients}
-              programChoices={programChoices}
+              programChoices={displayProgramChoices}
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
@@ -5293,7 +5309,7 @@ export function Clients() {
         <NewClientModal
           companyLegacyId={appliedFilters.companyId || filters.companyId}
           teamMembers={teamMembers}
-          programChoices={programChoices}
+          programChoices={displayProgramChoices}
           offers={offers}
           assignedTeamMemberId={assignedTeamMemberId}
           secondaryAssigneeEnabled={selectedCompany?.enable_secondary_assignee === true}
