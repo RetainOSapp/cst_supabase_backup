@@ -606,7 +606,11 @@ Deno.serve(async (req) => {
         status: nullableText(body.status) ?? "active",
         metadata: {
           ...(existingContract.metadata ?? {}),
-          contract_type: normalizeContractType(body.contractType),
+          contract_type: normalizeContractType(
+            body.contractType ??
+              (existingContract.metadata as Record<string, unknown> | null)
+                ?.contract_type,
+          ),
           updated_in: "retainos_contract_write_pilot",
           updated_by_role: actor.role,
         },

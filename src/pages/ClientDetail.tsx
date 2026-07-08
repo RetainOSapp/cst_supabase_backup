@@ -96,14 +96,6 @@ type ContractRow = Record<string, unknown> & {
 };
 type ContractFilter = "active" | "old" | "archived" | "all";
 const CONTRACT_SOURCE_KEY = "__retainos_contract_source";
-const contractTypeOptions = [
-  { value: "standard", label: "Standard" },
-  { value: "renewal", label: "Renewal" },
-  { value: "upsell", label: "Upsell" },
-  { value: "pause_extension", label: "Pause Extension" },
-  { value: "add_on", label: "Add-on" },
-  { value: "other", label: "Other" },
-];
 
 function normalizeClientArchetype(value: unknown) {
   const text = String(value ?? "").trim().toLowerCase();
@@ -773,22 +765,6 @@ function isAppOwnedContract(contract: Record<string, unknown>) {
 
 function withContractSource(contract: ContractRow, source: "app" | "mirror") {
   return { ...contract, [CONTRACT_SOURCE_KEY]: source };
-}
-
-function getContractTypeValue(contract: Record<string, unknown>) {
-  const metadata = contract.metadata;
-  const value =
-    metadata && typeof metadata === "object" && "contract_type" in metadata
-      ? (metadata as Record<string, unknown>).contract_type
-      : valueFrom(contract, ["contract_type"]);
-  return typeof value === "string" && value.trim() ? value : "standard";
-}
-
-function getContractTypeLabel(contract: Record<string, unknown>) {
-  const value = getContractTypeValue(contract);
-  return (
-    contractTypeOptions.find((option) => option.value === value)?.label ?? "Standard"
-  );
 }
 
 function daysUntilDate(value: unknown) {
@@ -3458,9 +3434,6 @@ function NewContractModal({
   );
   const [autoRenew, setAutoRenew] = useState(Boolean(contract?.auto_renew));
   const [status, setStatus] = useState(contract?.status ?? "active");
-  const [contractType, setContractType] = useState(
-    getContractTypeValue(contract ?? {}),
-  );
   const currentProgramStatus =
     typeof client.program_status_value === "string"
       ? client.program_status_value
@@ -3496,7 +3469,6 @@ function NewContractModal({
           notes,
           autoRenew,
           status,
-          contractType,
           retentionType: isEditing ? "none" : retentionType,
           retentionTargetStatus,
           markSuccess: isEditing ? false : markSuccess,
@@ -3636,22 +3608,6 @@ function NewContractModal({
                   <option value="active">Active</option>
                   <option value="pending">Pending</option>
                   <option value="expired">Expired</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Contract Type
-                </span>
-                <select
-                  value={contractType}
-                  onChange={(event) => setContractType(event.target.value)}
-                  className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
-                >
-                  {contractTypeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
                 </select>
               </label>
             </div>
@@ -5224,7 +5180,6 @@ function ContractCard({
   const isCurrentSummary = isCurrentSummaryContract(contract);
   const status = getContractStatus(contract);
   const isArchived = status === "Archived";
-  const contractTypeLabel = getContractTypeLabel(contract);
   const renewalDate = renewalDateConfidence(contract);
 
   return (
@@ -5257,9 +5212,6 @@ function ContractCard({
             }`}
           >
             {status}
-          </span>
-          <span className="rounded-full border border-[#cbdff5] bg-[#f2f8fd] px-2 py-0.5 text-xs font-medium text-[#2b79c4]">
-            {contractTypeLabel}
           </span>
           {isEditable && !isArchived ? (
             <>

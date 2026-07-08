@@ -274,6 +274,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Optional cleanup: use the SuperAdmin delete action for duplicate QA/test contracts when Jay wants demo data tidied.
   - When a manually created or webhook-created client is missing contract info, remind/ensure the contract is added.
   - 2026-07-06 Contract Templates V1 shipped for app-owned companies: Admin Hub > Company Settings can define one active initial-contract template per primary pathway; manual New Client and Zapier client-create auto-create a contract from the pathway template only when explicit contract fields are not provided. Awaiting Jay/Ben QA with MM Inner Circle 3/6/12 month templates.
+  - 2026-07-08 launch polish: Contract Type was removed from Client Detail create/edit/display UI as redundant label noise; existing metadata is preserved for compatibility.
   - Richer multi-contract/LTV reporting.
   - High-fidelity renewal UX.
   - Automated renewal notifications.

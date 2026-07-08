@@ -133,3 +133,7 @@ For historical context:
 
 - Company Settings can now store display-only program/status labels in `metadata.program_status_labels`; canonical values stay unchanged for migration/reporting.
 - MM was seeded with `suspended` displayed as `MIA` via `20260708170000_mm_program_status_labels.sql`; `manage-company-customization` was deployed for Admin Hub saves.
+
+## Contract Type UI Removal - 2026-07-08
+
+- Client Detail no longer shows Contract Type in contract create/edit/display; `manage-client-contract` preserves existing metadata when editing.
