@@ -117,6 +117,7 @@ interface TeamMember {
   role_hide_from_csm_list: boolean | null;
 }
 interface Offer {
+  id?: string | null;
   glide_row_id: string;
   name: string | null;
 }
@@ -3436,10 +3437,15 @@ export function Clients() {
     [teamMembers],
   );
   const offerNameById = useMemo(
-    () =>
-      new Map(
-        offers.map((offer) => [offer.glide_row_id, offer.name ?? "Unnamed offer"]),
-      ),
+    () => {
+      const map = new Map<string, string>();
+      for (const offer of offers) {
+        const name = offer.name ?? "Unnamed pathway";
+        if (offer.glide_row_id) map.set(offer.glide_row_id, name);
+        if (offer.id) map.set(offer.id, name);
+      }
+      return map;
+    },
     [offers],
   );
   const visibleFilterMilestones = useMemo(
@@ -3822,7 +3828,7 @@ export function Clients() {
       const { data, error } = usesAppOffers
         ? await supabase
             .from("company_offers")
-            .select("glide_row_id, name")
+            .select("id, glide_row_id, name")
             .eq("company_glide_row_id", filters.companyId)
             .eq("status", "active")
             .order("name", { ascending: true })
@@ -4440,7 +4446,9 @@ export function Clients() {
         "archetype",
       ]),
     ),
-    pathway: valueFrom(client, pathwayColumns),
+    pathway:
+      offerNameById.get(String(client.offer_milestones_current_offer_id ?? "")) ??
+      valueFrom(client, pathwayColumns),
     progress: valueFrom(client, progressColumns),
     onboarded: valueFrom(client, onboardedColumns),
     renewal: valueFrom(client, renewalColumns),

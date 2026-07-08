@@ -70,23 +70,26 @@ export const CLIENT_LIST_COLUMN_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { key: "csm", label: "CSM", description: "Primary assigned team member." },
-  { key: "pathway", label: "Pathway", description: "Current primary pathway." },
-  { key: "archetype", label: "Archetype", description: "Client archetype." },
   { key: "status", label: "Status", description: "Front End, Back End, Paused, or other program status." },
+  { key: "pathway", label: "Pathway", description: "Current primary pathway." },
+  { key: "csm", label: "CSM", description: "Primary assigned team member." },
   { key: "onboarded", label: "Onboarded", description: "Client start/onboarded date." },
   { key: "renewal", label: "Renewal", description: "Current contract or renewal date." },
-  { key: "last_contact", label: "Last Contact", description: "Most recent contact date." },
-  { key: "next_contact", label: "Next Contact", description: "Next scheduled contact date." },
   { key: "weeks_in_program", label: "Weeks In", description: "Weeks since onboarded date." },
   { key: "weeks_left", label: "Weeks Left", description: "Weeks until current renewal date." },
+  { key: "last_contact", label: "Last Contact", description: "Most recent contact date." },
+  { key: "next_contact", label: "Next Contact", description: "Next scheduled contact date." },
   { key: "buy_in", label: "Buy In", description: "Current buy-in score." },
   { key: "progress", label: "Progress", description: "Current progress score." },
+  { key: "archetype", label: "Archetype", description: "Client archetype." },
   { key: "actions", label: "Actions", description: "Quick Update and fast client actions." },
 ];
 
 const CLIENT_LIST_COLUMN_KEYS = new Set<ClientListColumnKey>(
   CLIENT_LIST_COLUMN_OPTIONS.map((option) => option.key),
+);
+const CLIENT_LIST_COLUMN_ORDER = new Map<ClientListColumnKey, number>(
+  CLIENT_LIST_COLUMN_OPTIONS.map((option, index) => [option.key, index]),
 );
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreference[] = [
@@ -177,7 +180,13 @@ export function normalizeClientListColumns(
       ? [normalized as ClientListColumnKey]
       : [];
   });
-  return columns.length > 0 ? [...new Set(columns)] : fallback;
+  return columns.length > 0
+    ? [...new Set(columns)].sort(
+        (left, right) =>
+          (CLIENT_LIST_COLUMN_ORDER.get(left) ?? 999) -
+          (CLIENT_LIST_COLUMN_ORDER.get(right) ?? 999),
+      )
+    : fallback;
 }
 
 function normalizeLeadDays(value: unknown, fallback: number): number {

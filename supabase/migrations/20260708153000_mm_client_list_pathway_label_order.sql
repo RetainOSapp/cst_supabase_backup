@@ -5,9 +5,9 @@ update public.company_settings settings
 set metadata = coalesce(settings.metadata, '{}'::jsonb) || jsonb_build_object(
   'client_list_columns',
   jsonb_build_array(
-    'csm',
     'status',
     'pathway',
+    'csm',
     'onboarded',
     'renewal',
     'weeks_in_program',

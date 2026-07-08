@@ -39,21 +39,25 @@ const CUSTOM_FIELD_TYPES = new Set([
 const CUSTOM_FIELD_ENTITY_TYPES = new Set(["client", "company_member", "contract"]);
 const CLIENT_VIEWS = new Set(["list", "card", "calendar"]);
 const CALENDAR_MODES = new Set(["month", "week", "day"]);
-const CLIENT_LIST_COLUMNS = new Set([
-  "csm",
-  "pathway",
-  "archetype",
+const CLIENT_LIST_COLUMN_ORDER = [
   "status",
+  "pathway",
+  "csm",
   "onboarded",
   "renewal",
-  "last_contact",
-  "next_contact",
   "weeks_in_program",
   "weeks_left",
+  "last_contact",
+  "next_contact",
   "buy_in",
   "progress",
+  "archetype",
   "actions",
-]);
+] as const;
+const CLIENT_LIST_COLUMNS = new Set<string>(CLIENT_LIST_COLUMN_ORDER);
+const CLIENT_LIST_COLUMN_POSITION = new Map<string, number>(
+  CLIENT_LIST_COLUMN_ORDER.map((column, index) => [column, index]),
+);
 const TASK_TEMPLATE_TRIGGERS = new Set([
   "manual",
   "client_created",
@@ -173,7 +177,13 @@ function normalizeClientListColumns(value: unknown) {
     const normalized = item === "program" ? "pathway" : item;
     return CLIENT_LIST_COLUMNS.has(normalized) ? [normalized] : [];
   });
-  return columns.length > 0 ? [...new Set(columns)] : null;
+  return columns.length > 0
+    ? [...new Set(columns)].sort(
+        (left, right) =>
+          (CLIENT_LIST_COLUMN_POSITION.get(left) ?? 999) -
+          (CLIENT_LIST_COLUMN_POSITION.get(right) ?? 999),
+      )
+    : null;
 }
 
 function normalizeEmail(value: unknown) {
