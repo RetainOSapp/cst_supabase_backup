@@ -113,3 +113,7 @@ For historical context:
 ## Daily Pulse Strategic Review Completion - 2026-07-07
 
 - Strategic Review remains a Company Timing Rule, not a pathway milestone. Completion is stored in `client_timed_checkpoint_completions` via `manage-client-timed-checkpoint`; Daily Pulse shows SR pending/complete from the configured contract-end offset.
+
+## Fathom Recording URL Hotfix - 2026-07-08
+
+- Fathom payloads include `recording_url`; `ingest-client-call-summary` / `manage-integration-review` now normalize it onto history payloads, and Client History reads existing metadata/raw payload links.

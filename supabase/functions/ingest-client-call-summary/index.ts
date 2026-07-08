@@ -548,6 +548,7 @@ Deno.serve(async (req) => {
     const previousNextSteps = client.next_steps_value ?? null;
     const previousLastContact = client.csm_date_of_last_contact ?? null;
     const previousNextContact = client.csm_date_of_next_contact ?? null;
+    const recordingUrl = nullableText(body.recording_url) ?? nullableText(body.url);
     const nextContactAt = await nextContactFromCompanySetting(
       supabase,
       company.id,
@@ -585,7 +586,7 @@ Deno.serve(async (req) => {
           external_event_id: externalEventId,
           client_email: matchedEmail,
           submitted_client_emails: clientEmails,
-          recording_url: nullableText(body.recording_url) ?? nullableText(body.url),
+          recording_url: recordingUrl,
           title: nullableText(body.title),
           previous_next_steps: previousNextSteps,
           previous_last_contact_at: previousLastContact,
@@ -593,6 +594,9 @@ Deno.serve(async (req) => {
         },
         payload: {
           integration_type: "call_summary_next_steps",
+          recording_url: recordingUrl,
+          title: nullableText(body.title),
+          started_at: startedAt,
           raw_payload: body,
         },
       })

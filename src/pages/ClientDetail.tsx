@@ -191,6 +191,7 @@ type ClientHistoryEventRow = Record<string, unknown> & {
   notes?: string | null;
   created_at?: string | null;
   metadata?: Record<string, unknown> | null;
+  payload?: Record<string, unknown> | null;
 };
 type CompanyCustomFieldRow = {
   id: string;
@@ -6732,6 +6733,32 @@ const HISTORY_FILTERS: { key: HistoryFilter; label: string }[] = [
   { key: "health", label: "Health Scores" },
 ];
 
+function recordFromUnknown(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringFromUnknown(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function historyRecordingUrl(event: ClientHistoryEventRow) {
+  const metadata = recordFromUnknown(event.metadata);
+  const payload = recordFromUnknown(event.payload);
+  const rawPayload = recordFromUnknown(payload.raw_payload);
+  const url =
+    stringFromUnknown(metadata.recording_url) ??
+    stringFromUnknown(metadata.recordingUrl) ??
+    stringFromUnknown(payload.recording_url) ??
+    stringFromUnknown(payload.recordingUrl) ??
+    stringFromUnknown(payload.url) ??
+    stringFromUnknown(rawPayload.recording_url) ??
+    stringFromUnknown(rawPayload.recordingUrl) ??
+    stringFromUnknown(rawPayload.url);
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
+
 function historyEventMatchesFilter(event: ClientHistoryEventRow, filter: HistoryFilter) {
   if (filter === "all") return true;
   const haystack = [
@@ -6749,7 +6776,7 @@ function historyEventMatchesFilter(event: ClientHistoryEventRow, filter: History
       haystack.includes("call") ||
       haystack.includes("communication") ||
       haystack.includes("fathom") ||
-      Boolean(metadata.recording_url || metadata.call_ai_id)
+      Boolean(metadata.recording_url || metadata.call_ai_id || historyRecordingUrl(event))
     );
   }
   if (filter === "contract") return haystack.includes("contract");
@@ -6926,6 +6953,7 @@ function HistorySection({
       {visibleEvents.map((event) => {
         const sourceLabel = getHistorySourceLabel(event);
         const isLegacyHistory = event.source === "cst_mirror";
+        const recordingUrl = historyRecordingUrl(event);
         const modifiedBy =
           typeof event.metadata?.modified_by === "string"
             ? event.metadata.modified_by
@@ -6962,6 +6990,16 @@ function HistorySection({
                   <span className="w-fit rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
                     {sourceLabel}
                   </span>
+                ) : null}
+                {recordingUrl ? (
+                  <a
+                    href={recordingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-fit rounded-full border border-[#59abf0] bg-[#eef7ff] px-2 py-1 text-xs font-semibold text-[#2b79c4] hover:border-[#2b79c4] hover:bg-[#dff0ff]"
+                  >
+                    Open recording
+                  </a>
                 ) : null}
                 {canManageHistory ? (
                   <div className="relative">

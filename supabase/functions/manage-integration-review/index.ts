@@ -432,6 +432,10 @@ async function applyCallSummary(
   const previousNextSteps = client.next_steps_value ?? null;
   const previousLastContact = client.csm_date_of_last_contact ?? null;
   const previousNextContact = client.csm_date_of_next_contact ?? null;
+  const recordingUrl =
+    nullableText(payload.recording_url) ??
+    nullableText(payload.recordingUrl) ??
+    nullableText(payload.url);
   const clientUpdates: JsonRecord = { next_steps_value: summary };
   if (startedAt) clientUpdates.csm_date_of_last_contact = startedAt;
   const nextContactAt = await nextContactFromCompanySetting(
@@ -471,10 +475,7 @@ async function applyCallSummary(
           payload.client_email ??
           payload.clientEmail ??
           payload.email,
-        recording_url:
-          nullableText(payload.recording_url) ??
-          nullableText(payload.recordingUrl) ??
-          nullableText(payload.url),
+        recording_url: recordingUrl,
         title: nullableText(payload.title) ?? nullableText(metadata.title),
         previous_next_steps: previousNextSteps,
         previous_last_contact_at: previousLastContact,
@@ -484,6 +485,9 @@ async function applyCallSummary(
       },
       payload: {
         integration_type: "call_summary_next_steps",
+        recording_url: recordingUrl,
+        title: nullableText(payload.title) ?? nullableText(metadata.title),
+        started_at: startedAt,
         raw_payload: payload,
       },
     })
