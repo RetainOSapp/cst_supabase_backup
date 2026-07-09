@@ -6209,19 +6209,24 @@ function PathwaysSection({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-md border border-[#d0d5dd] bg-white p-1">
+            <div
+              className="flex rounded-md border border-[#d0d5dd] bg-white p-0.5"
+              aria-label="Timeline scale"
+            >
               {(["days", "weeks"] as const).map((scale) => (
                 <button
                   key={scale}
                   type="button"
+                  aria-label={`Show timeline in ${scale}`}
+                  title={scale === "days" ? "Days" : "Weeks"}
                   onClick={() => setTimelineScale(scale)}
-                  className={`rounded px-3 py-1.5 text-sm font-semibold capitalize transition ${
+                  className={`h-8 w-8 rounded text-xs font-semibold transition ${
                     timelineScale === scale
                       ? "bg-[#162b3e] text-white"
                       : "text-[#344054] hover:bg-[#f7f9fc]"
                   }`}
                 >
-                  {scale}
+                  {scale === "days" ? "D" : "W"}
                 </button>
               ))}
             </div>
