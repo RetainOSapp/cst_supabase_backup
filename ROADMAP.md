@@ -333,6 +333,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-11 QA fix: `ingest-client-call-summary` must run with Supabase JWT verification disabled because Zapier sends the webhook secret in the Authorization header.
   - 2026-06-11 local polish: Admin Hub > Company Settings now surfaces an Integration Review Queue for app-owned companies, showing unmatched/ambiguous/failed webhook events with provider, match status, client email, summary preview, and recording link when available.
   - 2026-06-11 QA note: the queue successfully catches unmatched events, but still needs manual match/resolve actions. Long-term placement is likely Call AI / integration operations or a task-style inbox, not permanent Company Settings.
+  - 2026-07-09 MM operations update: dedicated `/call-ai` page added for SuperAdmin, Director, and Support to reconcile unmatched/ambiguous Fathom call-summary events. Support can now match/retry/ignore review events through the deployed `manage-integration-review` function.
   - 2026-06-12 hardening: added app-owned `company_integration_secrets` and updated `ingest-client-call-summary` to validate the submitted token against the submitted company before processing. Active company tokens override the old global secret; the global env secret remains only as a local/dev fallback for companies with no active token rows.
   - 2026-06-12 local queue v1: added `manage-integration-review` plus UI actions to Match to client, Retry apply, and Ignore open intake events. Supports `call_summary_next_steps` and `client_update` events for app-owned companies; ignored events are auditable via `integration_intake_events.status = ignored`.
   - 2026-06-13 local/admin plumbing: added SuperAdmin-only Integration Tokens UI and `manage-integration-token` Edge Function for list/create/revoke/revoke-all. This gives RetainOS a per-company offboarding control for inbound integrations.
@@ -1100,6 +1101,8 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 
 ### Call AI
 
+- `[x]` Call AI unmatched recording reconciliation page for SuperAdmin, Director, and Support.
+  - V1 route: `/call-ai`; focused on unmatched Fathom/call-summary events, client search, match/retry/ignore, and recording links. Full transcript analysis remains later.
 - `[ ]` Add new call transcript to analyze for SuperAdmin, Director, and Support.
 - `[ ]` View past analyzed meetings for SuperAdmin, Director, and Support.
 - `[ ]` Share call analysis with team for SuperAdmin, Director, and Support.

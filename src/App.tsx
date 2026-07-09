@@ -13,6 +13,7 @@ import { DailyPulse } from "./pages/DailyPulse.tsx";
 import { Clients } from "./pages/Clients.tsx";
 import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { Tasks } from "./pages/Tasks.tsx";
+import { CallAi } from "./pages/CallAi.tsx";
 import { Resources } from "./pages/Resources.tsx";
 import { SaasClients } from "./pages/SaasClients.tsx";
 import { SaasClientDetail } from "./pages/SaasClientDetail.tsx";
@@ -161,6 +162,14 @@ function AccountShell() {
             element={
               <RequireCapability allowed={capabilities.canAccessTasks}>
                 <Tasks />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="call-ai"
+            element={
+              <RequireCapability allowed={capabilities.canAccessCallAi}>
+                <CallAi />
               </RequireCapability>
             }
           />

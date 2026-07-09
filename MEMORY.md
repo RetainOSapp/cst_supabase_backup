@@ -141,3 +141,7 @@ For historical context:
 ## MM Advocacy Dashboard Fallback - 2026-07-08
 
 - Dashboard Advocacy & Growth counts migrated client summary advocacy dates as fallback rows; MM-only backfill `20260709100000_backfill_missing_advocacy_events_from_clients.sql` was applied live.
+
+## Call AI Reconciliation Page - 2026-07-09
+
+- `/call-ai` is the V1 home for unmatched Fathom/call-summary reconciliation; Support can match/retry/ignore via deployed `manage-integration-review`.

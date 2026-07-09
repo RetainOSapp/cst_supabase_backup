@@ -61,6 +61,7 @@ export interface AccountCapabilities {
   canAccessClients: boolean;
   canAccessResources: boolean;
   canAccessTasks: boolean;
+  canAccessCallAi: boolean;
   canAccessTables: boolean;
   canAccessAdminHub: boolean;
   canUseCompanySwitcher: boolean;
@@ -172,6 +173,7 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
     canAccessClients: canSeeCompany,
     canAccessResources: canSeeCompany,
     canAccessTasks: canWork,
+    canAccessCallAi: isSuperAdmin || isDirector || isSupport,
     canAccessTables: isSuperAdmin,
     canAccessAdminHub: isSuperAdmin || isDirector,
     canUseCompanySwitcher: isSuperAdmin,

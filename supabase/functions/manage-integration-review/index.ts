@@ -189,7 +189,10 @@ async function assertCanReviewIntegrations(
     .ilike("email", userEmail)
     .maybeSingle();
   if (error) throw error;
-  if (data?.status === "active" && data.role === "director") {
+  if (
+    data?.status === "active" &&
+    (data.role === "director" || data.role === "support")
+  ) {
     return data.role as string;
   }
   throw new ReviewValidationError(
