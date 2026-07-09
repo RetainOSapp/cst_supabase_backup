@@ -489,6 +489,7 @@ Next session lock:
   - Retention now includes `client_retention_recorded` events for same-program renewals.
   - 2026-07-04 Moves Method QA fix: Up For Renewal no longer treats "no Dashboard Date Range" as unbounded all-time renewal coverage. Default is overdue through next 30 days; explicit Date Range still wins.
   - 2026-07-07 MM retention correction: migrated CST retention counts now use historical `program-status` movement rows as retention events for Front End -> Back End and Back End -> Back End, dated by the CST modified date. RetainOS-era retention counts new contracts marked Renewal/Upsell by contract start date; company settings can optionally allow active Front End / Back End status movements to count without a paired contract.
+  - 2026-07-09 MM hotfix: app-owned/migrated Dashboard retention now uses `dashboard_retention_counts_fast` to count unique retained clients server-side and avoid browser/RLS/large-history fetch zeroes.
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
   - `[qa]` When an Offer filter is applied in Dashboard > Charts, the Clients By Offer chart switches to Clients By Milestone for that selected offer/pathway and keeps client-list drilldowns.

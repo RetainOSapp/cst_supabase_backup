@@ -118,6 +118,7 @@ For historical context:
 
 - Dashboard retention now splits migrated CST history from RetainOS-era writes: CST FE->BE and BE->BE `program-status` movements count as historical retention events by CST modified date; new RetainOS retention counts only Renewal/Upsell contract events by contract start date.
 - Live SOP resource `retention-churn-metrics` was refreshed via `20260707180000_update_retention_sop_resource.sql`.
+- 2026-07-09 hotfix: app-owned Dashboard retention uses `dashboard_retention_counts_fast` to count unique retained clients server-side for migrated CST history.
 
 ## Status-Only Retention Company Setting - 2026-07-07
 

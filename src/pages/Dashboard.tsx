@@ -397,6 +397,17 @@ interface CompanyRetentionSettingsRow {
   allow_status_change_retention: boolean | null;
 }
 
+interface DashboardRetentionFastRow {
+  retained_clients: number | string | null;
+  retained_client_ids: string[] | null;
+  retained_events:
+    | Array<{
+        client_id?: string | null;
+        retained_at?: string | null;
+      }>
+    | null;
+}
+
 interface OfferKpiContractRow {
   client_id: string | null;
   end_date: string | null;
@@ -2486,6 +2497,26 @@ export function Dashboard() {
       const appRetentionEventTypes = allowStatusChangeRetention
         ? ["client_retention_recorded", "client_status_changed"]
         : ["client_retention_recorded"];
+      const retentionFastQuery = appliedUsesAppClients
+        ? supabase.rpc("dashboard_retention_counts_fast", {
+            p_company_id: appliedFilters.companyId,
+            p_csm_id: appliedFilters.csmId || null,
+            p_secondary_assignee_id:
+              appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId
+                ? appliedFilters.secondaryAssigneeId
+                : null,
+            p_program_values:
+              appliedProgramValues.length > 0 ? appliedProgramValues : null,
+            p_offer_id: appliedFilters.offerId || null,
+            p_client_start_date_from:
+              appliedFilters.clientStartDate.startDate || null,
+            p_client_start_date_to:
+              appliedFilters.clientStartDate.endDate || null,
+            p_date_range_start: renewalDateRange.startDate || null,
+            p_date_range_end: renewalDateRange.endDate || null,
+            p_assigned_team_member_id: assignedTeamMemberId || null,
+          })
+        : Promise.resolve({ data: [], error: null });
       const appHistoryQuery = appliedUsesAppClients
         ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
             supabase
@@ -2549,11 +2580,13 @@ export function Dashboard() {
         legacyHistoryResult,
         appContractsResult,
         legacyContractsResult,
+        retentionFastResult,
       ] = await Promise.all([
         appHistoryQuery,
         legacyHistoryQuery,
         appContractsQuery,
         legacyContractsQuery,
+        retentionFastQuery,
       ]);
 
       if (cancelled) return;
@@ -2569,6 +2602,9 @@ export function Dashboard() {
       }
       if (legacyContractsResult.error) {
         console.error("Failed to load legacy contract history:", legacyContractsResult.error);
+      }
+      if (retentionFastResult.error) {
+        console.error("Failed to load fast dashboard retention:", retentionFastResult.error);
       }
 
       const retainedIds = new Set<string>();
@@ -2601,6 +2637,17 @@ export function Dashboard() {
           retainedIds.add(row.client_id);
           retainedEventCount += 1;
         });
+      if (appliedUsesAppClients && !retentionFastResult.error) {
+        retainedIds.clear();
+        retainedEventCount = 0;
+        const fastRow = (
+          (retentionFastResult.data ?? []) as DashboardRetentionFastRow[]
+        )[0];
+        (fastRow?.retained_client_ids ?? []).forEach((clientId) => {
+          if (clientById.has(clientId)) retainedIds.add(clientId);
+        });
+        retainedEventCount = Number(fastRow?.retained_clients ?? retainedIds.size);
+      }
       const churnedIds = new Set(churned.map((client) => client.glide_row_id));
       const renewingIds = new Set<string>();
       const currentSummaryRenewingIds = new Set<string>();
@@ -3562,6 +3609,26 @@ export function Dashboard() {
         const appRetentionEventTypes = allowStatusChangeRetention
           ? ["client_retention_recorded", "client_status_changed"]
           : ["client_retention_recorded"];
+        const retentionFastQuery = appliedUsesAppClients
+          ? supabase.rpc("dashboard_retention_counts_fast", {
+              p_company_id: appliedFilters.companyId,
+              p_csm_id: appliedFilters.csmId || null,
+              p_secondary_assignee_id:
+                appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId
+                  ? appliedFilters.secondaryAssigneeId
+                  : null,
+              p_program_values:
+                appliedProgramValues.length > 0 ? appliedProgramValues : null,
+              p_offer_id: appliedFilters.offerId || null,
+              p_client_start_date_from:
+                appliedFilters.clientStartDate.startDate || null,
+              p_client_start_date_to:
+                appliedFilters.clientStartDate.endDate || null,
+              p_date_range_start: detailRenewalDateRange.startDate || null,
+              p_date_range_end: detailRenewalDateRange.endDate || null,
+              p_assigned_team_member_id: assignedTeamMemberId || null,
+            })
+          : Promise.resolve({ data: [], error: null });
         const appHistoryQuery = appliedUsesAppClients
           ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
               supabase
@@ -3627,11 +3694,13 @@ export function Dashboard() {
           legacyHistoryResult,
           appContractsResult,
           legacyContractsResult,
+          retentionFastResult,
         ] = await Promise.all([
           appHistoryQuery,
           legacyHistoryQuery,
           appContractsQuery,
           legacyContractsQuery,
+          retentionFastQuery,
         ]);
 
         if (cancelled) return;
@@ -3647,6 +3716,9 @@ export function Dashboard() {
         }
         if (legacyContractsResult.error) {
           console.error("Failed to load legacy KPI detail contracts:", legacyContractsResult.error);
+        }
+        if (retentionFastResult.error) {
+          console.error("Failed to load fast KPI detail retention:", retentionFastResult.error);
         }
 
         retainedIds = new Set<string>();
@@ -3689,6 +3761,31 @@ export function Dashboard() {
               retainedAt: row.modified_date ?? null,
             });
           });
+        if (appliedUsesAppClients && !retentionFastResult.error) {
+          retainedIds = new Set<string>();
+          retainedEventRows = [];
+          const fastRow = (
+            (retentionFastResult.data ?? []) as DashboardRetentionFastRow[]
+          )[0];
+          const fastEvents = fastRow?.retained_events ?? [];
+          const fastClientIds =
+            fastEvents.length > 0
+              ? fastEvents.flatMap((event) =>
+                  event.client_id ? [event.client_id] : [],
+                )
+              : fastRow?.retained_client_ids ?? [];
+          fastClientIds.forEach((clientId) => {
+            const client = clientById.get(clientId);
+            if (!client) return;
+            retainedIds.add(clientId);
+            retainedEventRows.push({
+              client,
+              retainedAt:
+                fastEvents.find((event) => event.client_id === clientId)
+                  ?.retained_at ?? null,
+            });
+          });
+        }
 
         churnedIds = new Set(
           reportClients
