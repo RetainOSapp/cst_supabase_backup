@@ -46,6 +46,11 @@ authorized_company as (
   select sc.*
   from selected_company sc
   where auth.role() = 'service_role'
+     or lower(coalesce(auth.email(), '')) in (
+       'jay@ethicalscaling.com',
+       'ben@ethicalscaling.com',
+       'darren@amblemind.com'
+     )
      or exists (
        select 1
        from public.company_members cm
