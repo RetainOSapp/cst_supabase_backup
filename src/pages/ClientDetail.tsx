@@ -1696,6 +1696,8 @@ type ProgramTimelineMarker = {
   labelLane?: number;
 };
 
+type ProgramTimelineScale = "days" | "weeks";
+
 const PROGRAM_TIMELINE_OPTIONS = [
   { label: "3-month", days: 90 },
   { label: "6-month", days: 180 },
@@ -1755,9 +1757,11 @@ function assignProgramTimelineLanes(
 function ProgramTimelineMarkerDot({
   marker,
   totalDays,
+  scale,
 }: {
   marker: ProgramTimelineMarker;
   totalDays: number;
+  scale: ProgramTimelineScale;
 }) {
   const tone = PROGRAM_TIMELINE_TONE_CLASSES[marker.tone];
   const percent = Math.max(0, Math.min(100, (marker.day / totalDays) * 100));
@@ -1780,7 +1784,11 @@ function ProgramTimelineMarkerDot({
       className={`w-32 text-xs font-semibold leading-4 sm:w-36 ${tone.text}`}
     >
       <div>{marker.label}</div>
-      <div className="font-medium text-[#6c7684]">Day {marker.day}</div>
+      <div className="font-medium text-[#6c7684]">
+        {scale === "weeks"
+          ? `Week ${Math.max(1, Math.ceil(marker.day / 7))}`
+          : `Day ${marker.day}`}
+      </div>
     </div>
   );
 
@@ -5888,6 +5896,7 @@ function PathwaysSection({
       : null;
   const defaultTimelineOption = nearestProgramTimelineOption(contractTotalDays);
   const [timelineDays, setTimelineDays] = useState(defaultTimelineOption.days);
+  const [timelineScale, setTimelineScale] = useState<ProgramTimelineScale>("days");
   useEffect(() => {
     setTimelineDays(defaultTimelineOption.days);
   }, [defaultTimelineOption.days]);
@@ -5965,6 +5974,21 @@ function PathwaysSection({
     contractElapsedDays !== null
       ? Math.max(1, Math.min(selectedTimelineDays, contractElapsedDays + 1))
       : null;
+  const contractWeeksIn =
+    contractElapsedDays !== null ? Math.max(0, Math.floor(contractElapsedDays / 7)) : null;
+  const contractWeeksLeft =
+    contractTotalDays !== null && contractElapsedDays !== null
+      ? Math.max(0, Math.ceil((contractTotalDays - contractElapsedDays) / 7))
+      : null;
+  const axisValues = [
+    0,
+    Math.round(selectedTimelineDays / 4),
+    Math.round(selectedTimelineDays / 2),
+    Math.round((selectedTimelineDays * 3) / 4),
+    selectedTimelineDays,
+  ];
+  const formatTimelineUnit = (days: number) =>
+    timelineScale === "weeks" ? Math.round(days / 7) : days;
   const secondaryOfferValue = valueFrom(client, [
     "secondary_offer_milestones_current_offer_id",
     "offer_milestones_2nd_current_offer_id",
@@ -6184,7 +6208,23 @@ function PathwaysSection({
               company-configured Daily Pulse checkpoints.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-md border border-[#d0d5dd] bg-white p-1">
+              {(["days", "weeks"] as const).map((scale) => (
+                <button
+                  key={scale}
+                  type="button"
+                  onClick={() => setTimelineScale(scale)}
+                  className={`rounded px-3 py-1.5 text-sm font-semibold capitalize transition ${
+                    timelineScale === scale
+                      ? "bg-[#162b3e] text-white"
+                      : "text-[#344054] hover:bg-[#f7f9fc]"
+                  }`}
+                >
+                  {scale}
+                </button>
+              ))}
+            </div>
             {PROGRAM_TIMELINE_OPTIONS.map((option) => (
               <button
                 key={option.days}
@@ -6201,21 +6241,31 @@ function PathwaysSection({
             ))}
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold text-[#586273]">
-          {Array.from(
-            new Map(
-              timelineMarkers.map((marker) => [marker.label, marker.tone]),
-            ).entries(),
-          ).map(([label, tone]) => {
-            const toneClasses =
-              PROGRAM_TIMELINE_TONE_CLASSES[tone as ProgramTimelineMarkerTone];
-            return (
-              <span key={label} className="inline-flex items-center gap-2">
-                <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.dot}`} />
-                {label}
-              </span>
-            );
-          })}
+        <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold text-[#586273]">
+            {Array.from(
+              new Map(
+                timelineMarkers.map((marker) => [marker.label, marker.tone]),
+              ).entries(),
+            ).map(([label, tone]) => {
+              const toneClasses =
+                PROGRAM_TIMELINE_TONE_CLASSES[tone as ProgramTimelineMarkerTone];
+              return (
+                <span key={label} className="inline-flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.dot}`} />
+                  {label}
+                </span>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#344054]">
+            <span className="rounded-full border border-[#d6eafb] bg-[#f7fbff] px-3 py-1">
+              Weeks in: {contractWeeksIn === null ? "--" : contractWeeksIn}
+            </span>
+            <span className="rounded-full border border-[#e4e9f0] bg-[#f8fafc] px-3 py-1">
+              Weeks left: {contractWeeksLeft === null ? "--" : contractWeeksLeft}
+            </span>
+          </div>
         </div>
         <div className="relative mt-6 h-44 overflow-hidden px-8">
           <div className="absolute left-10 right-10 top-[88px]">
@@ -6241,15 +6291,14 @@ function PathwaysSection({
                 key={marker.key}
                 marker={marker}
                 totalDays={selectedTimelineDays}
+                scale={timelineScale}
               />
             ))}
           </div>
           <div className="absolute bottom-0 left-10 right-10 flex justify-between text-xs font-medium text-[#6c7684]">
-            <span>0</span>
-            <span>{Math.round(selectedTimelineDays / 4)}</span>
-            <span>{Math.round(selectedTimelineDays / 2)}</span>
-            <span>{Math.round((selectedTimelineDays * 3) / 4)}</span>
-            <span>{selectedTimelineDays}</span>
+            {axisValues.map((days, index) => (
+              <span key={`${days}-${index}`}>{formatTimelineUnit(days)}</span>
+            ))}
           </div>
         </div>
       </div>

@@ -305,6 +305,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Client detail timeline is filtered to the active/current offer so unrelated company pathway milestones are not shown.
   - Current offer and current milestone resolve by name, including auto-advanced milestones.
   - Company-level offer/milestone CRUD, ordering controls, archive blockers, and restore/unarchive are live for pilot companies.
+  - 2026-07-09 Program Timeline visual now supports Days/Weeks display and shows compact Weeks in / Weeks left context from current contract timing.
   - Remaining gaps: drag/drop reorder polish, final low-fi-aligned UX, and deeper reporting/backfill validation.
 - `[ ]` `[priority: low]` CRUD client tasks.
 - `[~]` `[polish]` Quick Update write flow.
