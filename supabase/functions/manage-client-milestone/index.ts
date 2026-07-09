@@ -17,6 +17,7 @@ const ACTIONS = new Set([
   "complete_milestone",
   "start_secondary_milestone",
   "complete_secondary_milestone",
+  "update_milestone_completion",
 ]);
 
 function jsonResponse(body: unknown, status = 200) {
@@ -487,6 +488,93 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (action === "update_milestone_completion") {
+      const requestedMilestoneId = cleanText(body.milestoneId);
+      const completionDate = normalizeDate(body.completionDate, now);
+      const pathwayLane =
+        cleanText(body.pathwayLane) === "secondary" ? "secondary" : "primary";
+
+      if (!requestedMilestoneId) {
+        return jsonResponse({ error: "Missing milestone id." }, 400);
+      }
+      if (!completionDate) {
+        return jsonResponse({ error: "Add a valid completion date." }, 400);
+      }
+
+      const { data: existingProgress, error: existingError } = await supabase
+        .from("client_milestones")
+        .select("*")
+        .eq("client_id", clientLegacyId)
+        .eq("milestone_id", requestedMilestoneId)
+        .is("archived_at", null)
+        .maybeSingle();
+
+      if (existingError) throw existingError;
+      if (!existingProgress || !existingProgress.completion_date) {
+        return jsonResponse(
+          { error: "Complete this milestone before editing completion details." },
+          400,
+        );
+      }
+
+      const nextDurationDays = daysBetween(
+        (existingProgress.start_date as string | null | undefined) ?? null,
+        completionDate,
+      );
+      const nextTimeToHitDays = daysBetween(
+        (client.client_age_date_onboarded as string | null | undefined) ?? null,
+        completionDate,
+      );
+      const nextNotes = nullableText(body.notes);
+      const { data: progressRow, error: updateError } = await supabase
+        .from("client_milestones")
+        .update({
+          completion_date: completionDate,
+          duration_days: nextDurationDays,
+          time_to_hit_days: nextTimeToHitDays,
+          notes: nextNotes,
+          metadata: {
+            ...((existingProgress.metadata as Record<string, unknown> | null) ?? {}),
+            actor_role: actor.role,
+            latest_action: action,
+            pathway_lane: pathwayLane,
+            updated_in: "retainos_milestone_completion_edit",
+          },
+        })
+        .eq("id", existingProgress.id)
+        .select("*")
+        .single();
+
+      if (updateError) throw updateError;
+
+      await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: userData.user.id,
+        actor_member_id: actor.memberId,
+        event_type: "client_milestone_completion_updated",
+        source: "client_milestone",
+        entity_table: "client_milestones",
+        entity_id: progressRow.id,
+        legacy_glide_row_id: progressRow.glide_row_id,
+        title: "Milestone completion updated",
+        summary: "Updated completed milestone date or notes.",
+        before_data: existingProgress,
+        after_data: progressRow,
+        metadata: {
+          actor_role: actor.role,
+          action,
+          pathway_lane: pathwayLane,
+          client_id: client.id,
+          selected_milestone_id: requestedMilestoneId,
+        },
+      });
+
+      return jsonResponse({
+        ok: true,
+        clientMilestone: progressRow,
+      });
+    }
+
     if (action === "clear_secondary_pathway") {
       const beforeSecondary = {
         offer_id: client.secondary_offer_milestones_current_offer_id ?? null,
@@ -696,6 +784,7 @@ Deno.serve(async (req) => {
         isComplete
           ? actor.name
           : existingProgress?.completed_by_name ?? null,
+      notes: nullableText(body.notes) ?? existingProgress?.notes ?? null,
       metadata: {
         ...(existingProgress?.metadata ?? {}),
         actor_role: actor.role,

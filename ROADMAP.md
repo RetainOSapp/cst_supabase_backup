@@ -57,6 +57,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-02 QA passed: Secondary Pathway expanded progress now has its own Start/Complete Secondary Milestone actions. `manage-client-milestone` supports secondary start/complete actions and updates the secondary current fields instead of the main pathway.
 - `[x]` Milestone-completed task template QA passed.
   - 2026-07-03 Jay QA passed: primary pathway milestone completion can auto-create matching template tasks.
+  - 2026-07-09 polish: completed Client Detail pathway milestones can edit completion date/notes without replaying completion side effects; milestone completion notes now persist on `client_milestones`.
 - `[~]` `[qa]` MM pathway/archive cleanup retest.
   - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule. Jay should retest archiving an unused MM pathway and an unused MM milestone.
 - `[x]` Moves Method webhook setup dry run.

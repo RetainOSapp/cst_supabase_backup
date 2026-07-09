@@ -114,12 +114,14 @@ type ClientMilestoneRow = Record<string, unknown> & {
   completion_date?: string | null;
   duration_days?: number | string | null;
   time_to_hit_days?: number | string | null;
+  notes?: string | null;
 };
 type MilestoneActionKind =
   | "start_milestone"
   | "complete_milestone"
   | "start_secondary_milestone"
-  | "complete_secondary_milestone";
+  | "complete_secondary_milestone"
+  | "update_milestone_completion";
 type OfferMilestoneRow = Record<string, unknown> & {
   glide_row_id?: string | null;
   offer_id?: string | null;
@@ -4116,6 +4118,142 @@ function MilestoneActionModal({
   );
 }
 
+function MilestoneCompletionEditModal({
+  client,
+  progress,
+  milestoneName,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  progress: ClientMilestoneRow;
+  milestoneName: string;
+  onClose: () => void;
+  onSaved: (milestone: ClientMilestoneRow) => void;
+}) {
+  const [completionDate, setCompletionDate] = useState(
+    dateInputValue(progress.completion_date) || todayInputValue(),
+  );
+  const [notes, setNotes] = useState(textInputValue(progress.notes));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-milestone",
+      {
+        body: {
+          action: "update_milestone_completion",
+          clientLegacyId: client.glide_row_id,
+          milestoneId: progress.milestone_id,
+          pathwayLane: clientMilestoneLane(progress),
+          completionDate,
+          notes,
+        },
+      },
+    );
+
+    if (error || data?.error) {
+      setSaving(false);
+      setSaveError(data?.error ?? error?.message ?? "Could not update milestone.");
+      return;
+    }
+    if (data?.clientMilestone) {
+      onSaved(data.clientMilestone as ClientMilestoneRow);
+      setSaving(false);
+      onClose();
+      return;
+    }
+    setSaving(false);
+    setSaveError("RetainOS saved no milestone update.");
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close milestone completion editor"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Edit Completed Milestone
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">{milestoneName}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 px-5 py-5">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Completion Date
+              </span>
+              <input
+                type="date"
+                value={completionDate}
+                onChange={(event) => setCompletionDate(event.target.value)}
+                required
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Notes
+              </span>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={4}
+                disabled={saving}
+                placeholder="Optional context for this completion"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:bg-gray-50"
+              />
+            </label>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Milestone"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function PathwayChangeModal({
   client,
   offers,
@@ -5516,6 +5654,7 @@ function PathwaysSection({
   onCompleteMilestone,
   onStartSecondaryMilestone,
   onCompleteSecondaryMilestone,
+  onEditCompletedMilestone,
   onChangePathway,
 }: {
   client: ClientRow;
@@ -5531,6 +5670,7 @@ function PathwaysSection({
   onCompleteMilestone: (progress: ClientMilestoneRow | null) => void;
   onStartSecondaryMilestone: (progress: ClientMilestoneRow | null) => void;
   onCompleteSecondaryMilestone: (progress: ClientMilestoneRow | null) => void;
+  onEditCompletedMilestone: (progress: ClientMilestoneRow) => void;
   onChangePathway: () => void;
 }) {
   const effectiveCurrent = deriveCurrentPathwayContext(
@@ -6219,12 +6359,30 @@ function PathwaysSection({
                                 Start: {formatDate(progress?.start_date)} ·
                                 Completed: {formatDate(progress?.completion_date)}
                               </div>
+                              {isPresent(progress?.notes) ? (
+                                <p className="mt-2 text-xs text-gray-600">
+                                  {displayValue(progress?.notes)}
+                                </p>
+                              ) : null}
                             </div>
-                            <span
-                              className={`w-fit rounded-full border px-2 py-0.5 text-xs font-medium ${milestoneStatusClasses(status)}`}
-                            >
-                              {status}
-                            </span>
+                            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                              <span
+                                className={`w-fit rounded-full border px-2 py-0.5 text-xs font-medium ${milestoneStatusClasses(status)}`}
+                              >
+                                {status}
+                              </span>
+                              {canAdvanceMilestones &&
+                              progress &&
+                              isPresent(progress.completion_date) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditCompletedMilestone(progress)}
+                                  className="rounded-full border border-[#d6eafb] px-2 py-0.5 text-xs font-semibold text-[#2b79c4] hover:bg-[#f7fbff]"
+                                >
+                                  Edit
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       );
@@ -6301,12 +6459,30 @@ function PathwaysSection({
                         : ""}
                       {isPresent(targetDays) ? ` · Target ${targetDays} days` : ""}
                     </div>
+                    {isPresent(progress?.notes) ? (
+                      <p className="mt-2 text-xs text-gray-600">
+                        {displayValue(progress?.notes)}
+                      </p>
+                    ) : null}
                   </div>
-                  <span
-                    className={`w-fit rounded-full border px-2 py-0.5 text-xs font-medium ${milestoneStatusClasses(status)}`}
-                  >
-                    {status}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <span
+                      className={`w-fit rounded-full border px-2 py-0.5 text-xs font-medium ${milestoneStatusClasses(status)}`}
+                    >
+                      {status}
+                    </span>
+                    {canAdvanceMilestones &&
+                    progress &&
+                    isPresent(progress.completion_date) ? (
+                      <button
+                        type="button"
+                        onClick={() => onEditCompletedMilestone(progress)}
+                        className="rounded-full border border-[#d6eafb] px-2 py-0.5 text-xs font-semibold text-[#2b79c4] hover:bg-[#f7fbff]"
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
               );
@@ -7233,6 +7409,8 @@ export function ClientDetail() {
     action: MilestoneActionKind;
     progress: ClientMilestoneRow | null;
   } | null>(null);
+  const [editingMilestoneCompletion, setEditingMilestoneCompletion] =
+    useState<ClientMilestoneRow | null>(null);
   const [changingPathway, setChangingPathway] = useState(false);
   useEffect(() => {
     if (!clientId) return;
@@ -8110,6 +8288,9 @@ export function ClientDetail() {
               progress,
             })
           }
+          onEditCompletedMilestone={(progress) =>
+            setEditingMilestoneCompletion(progress)
+          }
           onChangePathway={() => setChangingPathway(true)}
         />
       ) : activeTab === "outcomes" ? (
@@ -8305,6 +8486,20 @@ export function ClientDetail() {
             if (event) {
               setHistoryEvents((current) => [event, ...current].slice(0, 25));
             }
+          }}
+        />
+      ) : null}
+      {editingMilestoneCompletion ? (
+        <MilestoneCompletionEditModal
+          client={client}
+          progress={editingMilestoneCompletion}
+          milestoneName={displayValue(
+            editingMilestoneCompletion.milestone_id,
+            displayLookup,
+          )}
+          onClose={() => setEditingMilestoneCompletion(null)}
+          onSaved={(milestone) => {
+            upsertMilestone(milestone);
           }}
         />
       ) : null}
