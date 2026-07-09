@@ -1,7 +1,7 @@
 # Project Memory
 
-Fast startup router for RetainOS. Keep this file under 150 lines.
-Feature status belongs in `ROADMAP.md`; historical logs belong in `MEMORY_ARCHIVE.md`; scoped work belongs in dedicated docs.
+Fast startup router for RetainOS. Keep under 150 lines with only current operational facts, dirty-work warnings, deploy/env notes, and the latest 1-3 active checkpoints.
+Feature status belongs in `ROADMAP.md`; historical logs move verbatim to `MEMORY_ARCHIVE.md`; scoped runbooks/checklists belong in dedicated docs.
 
 ## Start Here
 

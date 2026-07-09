@@ -7,7 +7,7 @@ session needs must land in these files:
 | File | Purpose |
 | --- | --- |
 | `ROADMAP.md` | What shipped, what is `[~]` open and why (reason tags), what is next. |
-| `MEMORY.md` | Dated session checkpoints, operational facts, environment/deploy notes. |
+| `MEMORY.md` | Current operational facts, dirty-work warnings, deploy/env notes, and the latest 1-3 active checkpoints. Keep under 150 lines. |
 | `ARCHITECTURE_MAP.md` | Distilled Graphify architecture summary. |
 
 ## Start of session
@@ -20,14 +20,15 @@ session needs must land in these files:
 
 ## End of session
 
-1. Append a dated section to `MEMORY.md` (`## <Topic> - YYYY-MM-DD`) covering:
-   what changed, exact files, anything deployed, open follow-ups, and any
-   intentionally uncommitted work (flag it `DO NOT COMMIT` with the unlock
-   condition).
+1. Keep `MEMORY.md` under 150 lines. Add only durable operational facts,
+   dirty-work warnings, deploy/env notes, or the latest 1-3 active checkpoints.
+   Move older session logs to `MEMORY_ARCHIVE.md` verbatim, append-only. Move
+   feature status to `ROADMAP.md`; move detailed runbooks/checklists to
+   dedicated docs. Do not delete history; archive it.
 2. Update `ROADMAP.md` statuses you affected. Follow its status key: `[~]`
    items must carry reason tags; only Jay's QA promotes `[~]` to `[x]`.
-3. Append and promote — do not rewrite or delete the other agent's entries.
-   If an old entry is wrong, add a dated correction under it.
+3. Append and promote across the right files. Do not rewrite or delete the
+   other agent's history; if an old entry is wrong, add a dated correction.
 
 ## Hard rules
 
