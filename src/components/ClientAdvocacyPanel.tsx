@@ -30,6 +30,15 @@ function statusClass(status: string) {
   return "border-[#dbe3ee] bg-white text-[#586273]";
 }
 
+function pendingLabel(asked: number, received: number) {
+  const parts = [];
+  if (asked > 0) parts.push(`${asked} ask${asked === 1 ? "" : "s"}`);
+  if (received > 0) {
+    parts.push(`${received} received win${received === 1 ? "" : "s"}`);
+  }
+  return parts.join(" and ");
+}
+
 export function ClientAdvocacyPanel({
   client,
   drafts,
@@ -119,7 +128,7 @@ export function ClientAdvocacyPanel({
                   }
                   className="rounded-full border border-[#cbd2dc] bg-[#f7f9fc] px-3 py-1.5 text-xs font-semibold text-[#364152] hover:bg-white disabled:opacity-50"
                 >
-                  Add ask
+                  Mark asked
                 </button>
                 <button
                   type="button"
@@ -132,7 +141,7 @@ export function ClientAdvocacyPanel({
                   }
                   className="rounded-full border border-[#34b389] bg-[#e7f6f0] px-3 py-1.5 text-xs font-semibold text-[#2a9272] hover:bg-white disabled:opacity-50"
                 >
-                  Add received
+                  Mark received
                 </button>
                 {draft.asked > 0 ? (
                   <button
@@ -144,9 +153,9 @@ export function ClientAdvocacyPanel({
                         asked: Math.max(0, current.asked - 1),
                       }))
                     }
-                    className="rounded-full border border-[#e4e9f0] bg-white px-2 py-1.5 text-xs font-semibold text-[#6c7684] hover:bg-[#f7f9fc] disabled:opacity-50"
+                    className="rounded-full border border-[#e4e9f0] bg-white px-3 py-1.5 text-xs font-semibold text-[#6c7684] hover:bg-[#f7f9fc] disabled:opacity-50"
                   >
-                    Ask -1
+                    Undo asked
                   </button>
                 ) : null}
                 {draft.received > 0 ? (
@@ -159,18 +168,16 @@ export function ClientAdvocacyPanel({
                         received: Math.max(0, current.received - 1),
                       }))
                     }
-                    className="rounded-full border border-[#e4e9f0] bg-white px-2 py-1.5 text-xs font-semibold text-[#6c7684] hover:bg-[#f7f9fc] disabled:opacity-50"
+                    className="rounded-full border border-[#e4e9f0] bg-white px-3 py-1.5 text-xs font-semibold text-[#6c7684] hover:bg-[#f7f9fc] disabled:opacity-50"
                   >
-                    Received -1
+                    Undo received
                   </button>
                 ) : null}
               </div>
 
               {pendingTotal > 0 ? (
                 <div className="mt-3 rounded-md border border-[#dbe3ee] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#364152]">
-                  Pending: {draft.asked > 0 ? `Asked x${draft.asked}` : null}
-                  {draft.asked > 0 && draft.received > 0 ? " · " : null}
-                  {draft.received > 0 ? `Received x${draft.received}` : null}
+                  Will save: {pendingLabel(draft.asked, draft.received)}
                 </div>
               ) : null}
 
