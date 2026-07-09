@@ -499,11 +499,6 @@ Deno.serve(async (req) => {
       body.customFields,
     );
 
-    const advocacySummaryUpdates =
-      advocacyEvents.length > 0
-        ? await refreshAdvocacySummary(supabase, company.id, clientLegacyId)
-        : {};
-
     const nextOutcomes: Record<string, unknown> = {
       outcomes_success_value: successStatus,
       outcomes_success_value_for_filtering: successStatus,
@@ -511,7 +506,6 @@ Deno.serve(async (req) => {
       outcomes_progress_for_filtering: progressStatus,
       outcomes_buy_in_value: buyInStatus,
       outcomes_buy_in_for_filtering: buyInStatus,
-      ...advocacySummaryUpdates,
     };
 
     if (
@@ -543,7 +537,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "No outcome changes to save." }, 400);
     }
 
-    const { data: updatedClient, error: updateError } = changes.length
+    let { data: updatedClient, error: updateError } = changes.length
       ? await supabase
           .from("clients")
           .update(nextOutcomes)
@@ -603,7 +597,7 @@ Deno.serve(async (req) => {
         .select("*")
         .single();
       if (refreshedError) throw refreshedError;
-      Object.assign(updatedClient, refreshedClient);
+      updatedClient = refreshedClient;
     }
 
     const { data: event, error: historyError } = await supabase
