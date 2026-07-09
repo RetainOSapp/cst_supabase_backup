@@ -4733,16 +4733,12 @@ function FieldGrid({
   programChoices,
   relationLookup,
   latestRecordingUrl,
-  canEditNorthStar = false,
-  onEditNorthStar,
 }: {
   fields: [string, string[]][];
   client: ClientRow;
   programChoices: ProgramChoice[];
   relationLookup?: Map<string, string>;
   latestRecordingUrl?: string | null;
-  canEditNorthStar?: boolean;
-  onEditNorthStar?: () => void;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -4751,19 +4747,8 @@ function FieldGrid({
           key={label}
           className="rounded-md border border-[#e4e9f0] bg-[#f7f9fc] px-4 py-4"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[11px] font-semibold uppercase text-[#586273]">
-              {label}
-            </div>
-            {label === "North Star" && canEditNorthStar && onEditNorthStar ? (
-              <button
-                type="button"
-                onClick={onEditNorthStar}
-                className="rounded-full border border-[#cbd2dc] bg-white px-2.5 py-1 text-xs font-semibold text-[#364152] hover:border-[#3b82f6] hover:text-[#1d4ed8] cursor-pointer"
-              >
-                Edit
-              </button>
-            ) : null}
+          <div className="text-[11px] font-semibold uppercase text-[#586273]">
+            {label}
           </div>
           <div className="mt-2 text-sm font-medium text-[#162b3e]">
             {label === "Status" ? (
@@ -8187,8 +8172,6 @@ export function ClientDetail() {
               latestRecordingUrl={
                 activeTab === "program" ? latestFathomRecordingUrl : null
               }
-              canEditNorthStar={activeTab === "program" && canEditProfile}
-              onEditNorthStar={() => setEditingProfile(true)}
             />
           </div>
           {activeTab === "details" ? <ClientExternalLinksSection client={client} /> : null}
