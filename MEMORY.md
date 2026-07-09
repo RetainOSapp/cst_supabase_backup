@@ -140,4 +140,4 @@ For historical context:
 
 ## MM Advocacy Dashboard Fallback - 2026-07-08
 
-- Dashboard Advocacy & Growth now counts migrated client summary advocacy dates as fallback rows when historical `client_advocacy_events` are missing.
+- Dashboard Advocacy & Growth counts migrated client summary advocacy dates as fallback rows; MM-only backfill `20260709100000_backfill_missing_advocacy_events_from_clients.sql` was applied live.
