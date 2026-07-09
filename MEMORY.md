@@ -144,4 +144,4 @@ For historical context:
 
 ## Call AI Reconciliation Page - 2026-07-09
 
-- `/call-ai` is the V1 home for unmatched Fathom/call-summary reconciliation; Support can match/retry/ignore via deployed `manage-integration-review`.
+- `/call-ai` is the V1 home for unmatched Fathom/call-summary reconciliation; Support can match/retry/ignore, and manual matches learn the event email into Email 2/3 when a slot is open.

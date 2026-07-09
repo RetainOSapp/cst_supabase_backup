@@ -63,6 +63,17 @@ function clientMatchesEmail(client: JsonRecord, email: string) {
   return clientEmailValues(client).includes(normalized);
 }
 
+function eventClientEmail(event: JsonRecord) {
+  const payload = getPayload(event);
+  const metadata = getMetadata(event);
+  return normalizeEmail(
+    metadata.client_email ??
+      payload.client_email ??
+      payload.clientEmail ??
+      payload.email,
+  );
+}
+
 function parseAllowlist(value: string | undefined) {
   return new Set(
     (value ?? "")
@@ -149,6 +160,66 @@ function compactObject(value: JsonRecord) {
 
 function isManualMatch(matchedBy: string) {
   return matchedBy === "manual_client_id" || matchedBy === "manual_legacy_client_id";
+}
+
+async function learnClientEmailFromManualMatch(
+  supabase: SupabaseClient,
+  company: JsonRecord,
+  event: JsonRecord,
+  client: JsonRecord,
+  matchedBy: string,
+  actorEmail: string,
+) {
+  if (!isManualMatch(matchedBy)) return null;
+
+  const learnedEmail = eventClientEmail(event);
+  if (!learnedEmail || clientMatchesEmail(client, learnedEmail)) return null;
+
+  const updateColumn =
+    !normalizeEmail(client.client_email_secondary)
+      ? "client_email_secondary"
+      : !normalizeEmail(client.client_email_tertiary)
+        ? "client_email_tertiary"
+        : null;
+
+  if (!updateColumn) return null;
+
+  const { data: updatedClient, error } = await supabase
+    .from("clients")
+    .update({ [updateColumn]: learnedEmail })
+    .eq("id", client.id)
+    .select("id, client_email_secondary, client_email_tertiary")
+    .single();
+  if (error) throw error;
+
+  await supabase.from("app_audit_events").insert({
+    company_id: company.id,
+    event_type: "client_alternate_email_learned",
+    source: cleanText(event.provider) || "integration",
+    entity_table: "clients",
+    entity_id: client.id,
+    legacy_glide_row_id: client.glide_row_id,
+    title: "Alternate client email learned from manual integration match",
+    summary: `Added ${learnedEmail} to ${client.client_name ?? "client"} after manual Call AI match.`,
+    before_data: {
+      client_email_secondary: client.client_email_secondary ?? null,
+      client_email_tertiary: client.client_email_tertiary ?? null,
+    },
+    after_data: {
+      client_email_secondary: updatedClient.client_email_secondary ?? null,
+      client_email_tertiary: updatedClient.client_email_tertiary ?? null,
+    },
+    metadata: {
+      integration_intake_event_id: event.id,
+      learned_email: learnedEmail,
+      updated_column: updateColumn,
+      reviewed_by: actorEmail,
+      matched_by: matchedBy,
+    },
+  });
+
+  client[updateColumn] = learnedEmail;
+  return { email: learnedEmail, column: updateColumn };
 }
 
 function changedFields(before: JsonRecord, after: JsonRecord) {
@@ -830,6 +901,14 @@ Deno.serve(async (req) => {
       event,
       action === "match" ? clientId : null,
     );
+    const learnedEmail = await learnClientEmailFromManualMatch(
+      supabase,
+      company,
+      event,
+      client,
+      matchedBy,
+      actorEmail,
+    );
 
     if (String(event.integration_type) === "call_summary_next_steps") {
       const result = await applyCallSummary(
@@ -840,7 +919,7 @@ Deno.serve(async (req) => {
         matchedBy,
         actorEmail,
       );
-      return jsonResponse({ ok: true, ...result });
+      return jsonResponse({ ok: true, learnedEmail, ...result });
     }
 
     if (String(event.integration_type) === "client_update") {
@@ -852,7 +931,7 @@ Deno.serve(async (req) => {
         matchedBy,
         actorEmail,
       );
-      return jsonResponse({ ok: true, ...result });
+      return jsonResponse({ ok: true, learnedEmail, ...result });
     }
 
     throw new ReviewValidationError(
