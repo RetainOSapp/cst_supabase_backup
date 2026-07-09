@@ -878,8 +878,8 @@ Use this section to connect feature work into operational flows. A feature is no
 ### Task Manager Flow
 
 - `[x]` Task can be created from company-level context.
-- `[~]` `[polish]` Task can be created from client profile context.
-  - Current v1 creates from top-level Tasks with an optional client link; direct Client Detail create button is still future.
+- `[~]` `[qa]` Task can be created from client profile context.
+  - 2026-07-09 implementation: Client Detail > Tasks now has a New Task button for app-owned clients, creates a client-linked task through `manage-client-task`, and refreshes the task list/history after save. Awaiting Jay/MM QA.
 - `[x]` Task can be assigned to team members with due date and priority/status.
 - `[x]` Task appears in the global Task Manager and client profile when linked to a client.
 - `[x]` Task can be auto-created when a primary pathway milestone is completed.

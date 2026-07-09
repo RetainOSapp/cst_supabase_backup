@@ -171,6 +171,15 @@ type ClientTaskRow = Record<string, unknown> & {
   status_value?: string | null;
   external_link?: string | null;
 };
+type TaskStatus = "todo" | "in-progress" | "waiting" | "done" | "dismissed" | "archived";
+const TASK_STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
+  { value: "todo", label: "To Do" },
+  { value: "in-progress", label: "In Progress" },
+  { value: "waiting", label: "Waiting" },
+  { value: "done", label: "Done" },
+  { value: "dismissed", label: "Dismissed" },
+  { value: "archived", label: "Archived" },
+];
 type ClientHistoryEventRow = Record<string, unknown> & {
   id: string;
   legacy_client_glide_row_id?: string | null;
@@ -1243,7 +1252,10 @@ function outcomeChoicesFromDefinitions(rows: Record<string, unknown>[] | null | 
   }
   return choices;
 }
-async function functionErrorMessage(error: unknown) {
+async function functionErrorMessage(
+  error: unknown,
+  fallback = "Unable to save changes.",
+) {
   if (error && typeof error === "object" && "context" in error) {
     const context = (error as { context?: unknown }).context;
     if (context instanceof Response) {
@@ -1259,7 +1271,7 @@ async function functionErrorMessage(error: unknown) {
       }
     }
   }
-  return error instanceof Error ? error.message : "Unable to save outcomes.";
+  return error instanceof Error ? error.message : fallback;
 }
 function escapeHtml(value: string) {
   return value
@@ -6502,9 +6514,327 @@ function taskStatusClasses(status: unknown) {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (key === "in-progress" || key === "in progress")
     return "border-blue-200 bg-blue-50 text-blue-700";
+  if (key === "waiting")
+    return "border-purple-200 bg-purple-50 text-purple-700";
+  if (key === "dismissed" || key === "archived")
+    return "border-slate-200 bg-slate-100 text-slate-700";
   if (key === "todo" || key === "to do")
     return "border-amber-200 bg-amber-50 text-amber-700";
   return "border-gray-200 bg-gray-50 text-gray-600";
+}
+
+function taskStatusKey(value: unknown): TaskStatus {
+  const key = displayValue(value).toLowerCase();
+  if (key === "in progress" || key === "in-progress" || key === "in_progress")
+    return "in-progress";
+  if (key === "complete" || key === "completed" || key === "done") return "done";
+  if (key === "waiting") return "waiting";
+  if (key === "dismissed") return "dismissed";
+  if (key === "archived") return "archived";
+  return "todo";
+}
+
+function taskStatusLabel(value: unknown) {
+  const key = taskStatusKey(value);
+  return TASK_STATUS_OPTIONS.find((option) => option.value === key)?.label ?? "To Do";
+}
+
+function taskDueBadge(task: ClientTaskRow) {
+  if (isClosedTask(task) || !task.task_due_date) return null;
+  const due = dateFromValue(task.task_due_date);
+  if (!due) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  const diffDays = Math.round(
+    (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+  );
+  if (diffDays < 0) {
+    return {
+      label: "Overdue",
+      className: "border-red-200 bg-red-50 text-red-700",
+    };
+  }
+  if (diffDays === 0) {
+    return {
+      label: "Due today",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+  if (diffDays <= 3) {
+    return {
+      label: `Due in ${diffDays}d`,
+      className: "border-blue-200 bg-blue-50 text-blue-700",
+    };
+  }
+  return null;
+}
+
+function ClientTaskModal({
+  client,
+  teamMembers,
+  assignedTeamMemberId,
+  onClose,
+  onSaved,
+}: {
+  client: ClientRow;
+  teamMembers: TeamMember[];
+  assignedTeamMemberId: string;
+  onClose: () => void;
+  onSaved: (task: ClientTaskRow, event: ClientHistoryEventRow | null) => void;
+}) {
+  const [taskName, setTaskName] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
+  const [assignedToId, setAssignedToId] = useState(
+    client.csm_team_member_id || assignedTeamMemberId || "",
+  );
+  const [taskDueDate, setTaskDueDate] = useState("");
+  const [priority, setPriority] = useState("");
+  const [statusValue, setStatusValue] = useState<TaskStatus>("todo");
+  const [externalLink, setExternalLink] = useState("");
+  const [recurringIsRecurring, setRecurringIsRecurring] = useState(false);
+  const [recurringIntervalDays, setRecurringIntervalDays] = useState(7);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const companyGlideId =
+    typeof client.company_glide_row_id === "string" && client.company_glide_row_id
+      ? client.company_glide_row_id
+      : "";
+  const availableTeamMembers = teamMembers.filter(
+    (member) =>
+      member.is_archived !== true && member.role_hide_from_csm_list !== true,
+  );
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    if (!companyGlideId) {
+      setSaveError("Missing company id.");
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+
+    const { data, error } = await supabase.functions.invoke("manage-client-task", {
+      body: {
+        action: "create",
+        companyGlideId,
+        clientId: client.glide_row_id,
+        taskName,
+        taskDescription,
+        assignedToId,
+        taskDueDate,
+        priority,
+        statusValue,
+        externalLink,
+        recurringIsRecurring,
+        recurringIntervalDays,
+      },
+    });
+
+    setSaving(false);
+    if (error || data?.error) {
+      setSaveError(
+        data?.error ?? (await functionErrorMessage(error, "Failed to create task.")),
+      );
+      return;
+    }
+    if (data?.task) {
+      onSaved(
+        data.task as ClientTaskRow,
+        (data.event as ClientHistoryEventRow | undefined) ?? null,
+      );
+      onClose();
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close new task"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 cursor-pointer"
+      />
+      <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">New Client Task</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Create a task linked to {displayValue(client.client_name)}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 cursor-pointer"
+          >
+            <span className="sr-only">Close</span>
+            <span className="text-xl leading-none">x</span>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2">
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Task Name
+              </span>
+              <input
+                value={taskName}
+                onChange={(event) => setTaskName(event.target.value)}
+                required
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Description
+              </span>
+              <textarea
+                value={taskDescription}
+                onChange={(event) => setTaskDescription(event.target.value)}
+                rows={4}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Assigned To
+              </span>
+              <select
+                value={assignedToId}
+                onChange={(event) => setAssignedToId(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                <option value="">Unassigned</option>
+                {availableTeamMembers.map((member) => (
+                  <option key={member.glide_row_id} value={member.glide_row_id}>
+                    {member.name ?? member.glide_row_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Due Date
+              </span>
+              <input
+                type="date"
+                value={taskDueDate}
+                onChange={(event) => setTaskDueDate(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Priority
+              </span>
+              <select
+                value={priority}
+                onChange={(event) => setPriority(event.target.value)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                <option value="">Not set</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                Status
+              </span>
+              <select
+                value={statusValue}
+                onChange={(event) => setStatusValue(event.target.value as TaskStatus)}
+                disabled={saving}
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              >
+                {TASK_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                External Link
+              </span>
+              <input
+                value={externalLink}
+                onChange={(event) => setExternalLink(event.target.value)}
+                disabled={saving}
+                placeholder="Optional"
+                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+              />
+            </label>
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 md:col-span-2">
+              <label className="flex items-start gap-3 text-sm font-semibold text-gray-800">
+                <input
+                  type="checkbox"
+                  checked={recurringIsRecurring}
+                  onChange={(event) => setRecurringIsRecurring(event.target.checked)}
+                  disabled={saving}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                />
+                <span>
+                  Recurring task
+                  <span className="mt-1 block text-xs font-normal text-gray-500">
+                    When this task is completed, RetainOS creates the next one.
+                  </span>
+                </span>
+              </label>
+              {recurringIsRecurring ? (
+                <label className="mt-3 block max-w-xs">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                    Every Days
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={recurringIntervalDays}
+                    onChange={(event) =>
+                      setRecurringIntervalDays(Number(event.target.value) || 7)
+                    }
+                    disabled={saving}
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                  />
+                </label>
+              ) : null}
+            </div>
+            {saveError ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">
+                {saveError}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
+            >
+              {saving ? "Saving..." : "Create Task"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 function TaskCard({
@@ -6520,27 +6850,35 @@ function TaskCard({
   const createdBy = task.created_by_id
     ? (teamMemberNameById.get(task.created_by_id) ?? task.created_by_id)
     : "--";
+  const dueSignal = taskDueBadge(task);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <article className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:border-[#d6eafb]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-gray-900">
+          <h2 className="line-clamp-2 text-sm font-semibold leading-5 text-gray-900">
             {displayValue(task.task_name)}
           </h2>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span
               className={`rounded-full border px-2 py-0.5 text-xs font-medium ${taskStatusClasses(task.status_value)}`}
             >
-              {displayValue(task.status_value)}
+              {taskStatusLabel(task.status_value)}
             </span>
             {isPresent(task.priority) && (
               <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700">
                 {displayValue(task.priority)}
               </span>
             )}
+            {dueSignal ? (
+              <span
+                className={`rounded-full border px-2 py-0.5 text-xs font-medium ${dueSignal.className}`}
+              >
+                {dueSignal.label}
+              </span>
+            ) : null}
             {task.recurring_is_recurring === true && (
-              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+              <span className="rounded-full border border-[#CBD2DC] bg-[#F7F9FC] px-2 py-0.5 text-xs font-medium text-[#586273]">
                 Recurring
               </span>
             )}
@@ -6559,12 +6897,12 @@ function TaskCard({
       </div>
 
       {isPresent(task.task_description) && (
-        <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+        <div className="mt-3 rounded-md border border-gray-100 bg-gray-50/70 px-3 py-2 text-sm text-gray-700">
           <RichValue value={task.task_description} />
         </div>
       )}
 
-      <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-2 text-sm md:grid-cols-3">
         <ContractField label="Due" value={formatDate(task.task_due_date)} />
         <ContractField label="Assigned To" value={assignedTo} />
         <ContractField label="Created By" value={createdBy} />
@@ -6575,7 +6913,7 @@ function TaskCard({
           value={formatDateTime(task.task_last_updated_date)}
         />
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -6593,33 +6931,54 @@ function isClosedTask(task: ClientTaskRow) {
 function TasksSection({
   tasks,
   teamMemberNameById,
+  canCreateTask,
+  onCreateTask,
 }: {
   tasks: ClientTaskRow[];
   teamMemberNameById: Map<string, string>;
+  canCreateTask: boolean;
+  onCreateTask: () => void;
 }) {
   const [showClosedTasks, setShowClosedTasks] = useState(false);
   const openTasks = tasks.filter((task) => !isClosedTask(task));
   const closedTasks = tasks.filter(isClosedTask);
 
-  if (tasks.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
-        No task rows found for this client.
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
-      <div className="space-y-3">
-        {(openTasks.length > 0 ? openTasks : closedTasks.slice(0, 1)).map((task) => (
-          <TaskCard
-            key={task.glide_row_id ?? task.task_name ?? "task"}
-            task={task}
-            teamMemberNameById={teamMemberNameById}
-          />
-        ))}
+      <div className="flex flex-col gap-3 rounded-lg border border-[#e4e9f0] bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+            Client Tasks
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            {openTasks.length} open · {closedTasks.length} closed
+          </p>
+        </div>
+        {canCreateTask ? (
+          <button
+            type="button"
+            onClick={onCreateTask}
+            className="retainos-button-primary cursor-pointer px-4 py-2 text-sm"
+          >
+            New Task
+          </button>
+        ) : null}
       </div>
+      {tasks.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
+          No task rows found for this client.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {(openTasks.length > 0 ? openTasks : closedTasks.slice(0, 1)).map((task) => (
+            <TaskCard
+              key={task.glide_row_id ?? task.task_name ?? "task"}
+              task={task}
+              teamMemberNameById={teamMemberNameById}
+            />
+          ))}
+        </div>
+      )}
       {closedTasks.length > (openTasks.length > 0 ? 0 : 1) && (
         <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
           <button
@@ -7401,6 +7760,7 @@ export function ClientDetail() {
   const [editingOutcomes, setEditingOutcomes] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
   const [creatingContract, setCreatingContract] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(false);
   const [editingContract, setEditingContract] = useState<ContractRow | null>(null);
   const [archivingContractId, setArchivingContractId] = useState<string | null>(null);
   const [deletingClient, setDeletingClient] = useState(false);
@@ -8243,7 +8603,12 @@ export function ClientDetail() {
         </nav>
       </div>
       {activeTab === "tasks" ? (
-        <TasksSection tasks={tasks} teamMemberNameById={teamMemberNameById} />
+        <TasksSection
+          tasks={tasks}
+          teamMemberNameById={teamMemberNameById}
+          canCreateTask={Boolean(isAppOwnedClient && capabilities.canAccessTasks)}
+          onCreateTask={() => setCreatingTask(true)}
+        />
       ) : activeTab === "history" ? (
         <HistorySection
           events={historyEvents}
@@ -8397,6 +8762,26 @@ export function ClientDetail() {
           onSaved={(updatedClient, event, customFieldChanges) => {
             setClient(updatedClient);
             applyCustomFieldChanges(customFieldChanges);
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
+      {creatingTask ? (
+        <ClientTaskModal
+          client={client}
+          teamMembers={teamMembers}
+          assignedTeamMemberId={teamMemberId}
+          onClose={() => setCreatingTask(false)}
+          onSaved={(task, event) => {
+            setTasks((current) =>
+              [task, ...current].sort((a, b) => {
+                const aDue = dateFromValue(a.task_due_date)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+                const bDue = dateFromValue(b.task_due_date)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+                return aDue - bDue;
+              }),
+            );
             if (event) {
               setHistoryEvents((current) => [event, ...current].slice(0, 25));
             }
