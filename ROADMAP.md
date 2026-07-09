@@ -1185,7 +1185,7 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[x]` Program/status filters with shared visual mapping.
 - `[x]` CSM and secondary assignee filters.
 - `[x]` Offer filter from `backup_company_offers`.
-- `[x]` Server-side sorting by client name, onboarded date, and renewal date.
+- `[x]` Server-side sorting by client name, onboarded date, renewal date, weeks in, and weeks left.
 - `[x]` CSM users only see assigned clients, including secondary assignee matches.
 - `[x]` Viewer role hides Quick Update.
 

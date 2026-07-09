@@ -46,7 +46,9 @@ type SortField =
   | "onboarded"
   | "renewal"
   | "last_contact"
-  | "next_contact";
+  | "next_contact"
+  | "weeks_in_program"
+  | "weeks_left";
 type SortDirection = "asc" | "desc";
 type ClientRow = Record<string, unknown> & {
   glide_row_id: string;
@@ -368,7 +370,9 @@ function readClientsCache(): ClientsCacheState | null {
         parsed.sortField === "onboarded" ||
         parsed.sortField === "renewal" ||
         parsed.sortField === "last_contact" ||
-        parsed.sortField === "next_contact"
+        parsed.sortField === "next_contact" ||
+        parsed.sortField === "weeks_in_program" ||
+        parsed.sortField === "weeks_left"
           ? parsed.sortField
           : "client_name",
       sortDirection: parsed.sortDirection === "desc" ? "desc" : "asc",
@@ -575,10 +579,23 @@ const clientListColumnWidths: Record<ClientListColumnKey, string> = {
 
 function sortColumnFor(field: SortField) {
   if (field === "onboarded") return "client_age_date_onboarded";
+  if (field === "weeks_in_program") return "client_age_date_onboarded";
   if (field === "renewal") return "current_contract_end_date_for_filtering";
+  if (field === "weeks_left") return "current_contract_end_date_for_filtering";
   if (field === "last_contact") return "csm_date_of_last_contact";
   if (field === "next_contact") return "csm_date_of_next_contact";
   return "client_name";
+}
+
+function sortDirectionLabel(field: SortField, direction: SortDirection) {
+  if (field === "client_name") return direction === "asc" ? "A-Z" : "Z-A";
+  if (field === "weeks_in_program") {
+    return direction === "asc" ? "Most weeks" : "Least weeks";
+  }
+  if (field === "weeks_left") {
+    return direction === "asc" ? "Least weeks" : "Most weeks";
+  }
+  return direction === "asc" ? "Oldest first" : "Newest first";
 }
 
 function normalizeKey(value: string) {
@@ -5058,7 +5075,9 @@ export function Clients() {
                 >
                   <option value="client_name">Client name</option>
                   <option value="onboarded">Onboarded date</option>
+                  <option value="weeks_in_program">Weeks in</option>
                   <option value="renewal">Renewal date</option>
+                  <option value="weeks_left">Weeks left</option>
                   <option value="last_contact">Last contact</option>
                   <option value="next_contact">Next contact</option>
                 </select>
@@ -5072,13 +5091,7 @@ export function Clients() {
                   }}
                   className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm font-semibold text-[#586273] hover:bg-[#f7f9fc] hover:text-[#162b3e]"
                 >
-                  {sortField === "client_name"
-                    ? sortDirection === "asc"
-                      ? "A-Z"
-                      : "Z-A"
-                    : sortDirection === "asc"
-                      ? "Oldest first"
-                      : "Newest first"}
+                  {sortDirectionLabel(sortField, sortDirection)}
                 </button>
                 <label
                   htmlFor="clients-page-size"
