@@ -206,29 +206,6 @@ const DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS = 4;
 
 type SettingsNotificationPreference = NotificationPreference;
 
-interface IntegrationIntakeEventRow {
-  id: string;
-  integration_type: string;
-  provider: string | null;
-  external_event_id: string | null;
-  status: "received" | "processed" | "needs_review" | "failed" | "ignored";
-  match_status: "unmatched" | "matched" | "ambiguous";
-  error_message: string | null;
-  payload: Record<string, unknown> | null;
-  metadata: Record<string, unknown> | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface IntegrationReviewClientOption {
-  id: string;
-  glide_row_id: string | null;
-  client_name: string | null;
-  client_business: string | null;
-  client_email: string | null;
-  program_status_value: string | null;
-}
-
 interface IntegrationTokenRow {
   id: string;
   integration_type: string;
@@ -292,20 +269,7 @@ function formatDateTime(value: string | null | undefined) {
   });
 }
 
-function integrationValue(
-  event: IntegrationIntakeEventRow,
-  keys: string[],
-): string | null {
-  for (const source of [event.metadata, event.payload]) {
-    for (const key of keys) {
-      const value = source?.[key];
-      if (typeof value === "string" && value.trim()) return value.trim();
-    }
-  }
-  return null;
-}
-
-function normalizeIntegrationClientStatus(value: string | null | undefined) {
+function normalizeClientStatus(value: string | null | undefined) {
   return String(value ?? "")
     .trim()
     .toLowerCase()
@@ -315,12 +279,7 @@ function normalizeIntegrationClientStatus(value: string | null | undefined) {
 const ACTIVE_CLIENT_STATUSES = new Set(["front-end", "back-end"]);
 
 function isActiveClientStatus(value: string | null | undefined) {
-  return ACTIVE_CLIENT_STATUSES.has(normalizeIntegrationClientStatus(value));
-}
-
-function isMatchableIntegrationClient(client: IntegrationReviewClientOption) {
-  const status = normalizeIntegrationClientStatus(client.program_status_value);
-  return status !== "off-boarded" && status !== "offboarded";
+  return ACTIVE_CLIENT_STATUSES.has(normalizeClientStatus(value));
 }
 
 function roleLabel(member: TeamRow) {
@@ -3918,8 +3877,6 @@ function CompanySettingsSetup({
   taskTemplateOffers,
   taskTemplateMilestones,
   teamMembers,
-  integrationEvents,
-  integrationEventsLoading,
   integrationTokens,
   integrationTokensLoading,
   canManageTokens,
@@ -3935,8 +3892,6 @@ function CompanySettingsSetup({
   taskTemplateOffers: CompanyOfferRow[];
   taskTemplateMilestones: CompanyOfferMilestoneRow[];
   teamMembers: TeamRow[];
-  integrationEvents: IntegrationIntakeEventRow[];
-  integrationEventsLoading: boolean;
   integrationTokens: IntegrationTokenRow[];
   integrationTokensLoading: boolean;
   canManageTokens: boolean;
@@ -3952,22 +3907,6 @@ function CompanySettingsSetup({
   const [saved, setSaved] = useState(false);
   const [taskTemplateModalOpen, setTaskTemplateModalOpen] = useState(false);
   const [contractTemplateModalOpen, setContractTemplateModalOpen] = useState(false);
-  const [eventClientSelections, setEventClientSelections] = useState<
-    Record<string, string>
-  >({});
-  const [eventClientSearches, setEventClientSearches] = useState<
-    Record<string, string>
-  >({});
-  const [eventClientOptions, setEventClientOptions] = useState<
-    Record<string, IntegrationReviewClientOption[]>
-  >({});
-  const [eventClientSearchLoading, setEventClientSearchLoading] = useState<
-    Record<string, boolean>
-  >({});
-  const [eventClientSearchMessages, setEventClientSearchMessages] = useState<
-    Record<string, string>
-  >({});
-  const [reviewAction, setReviewAction] = useState<string | null>(null);
   const [tokenAction, setTokenAction] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState({
     integrationType: "call_summary_next_steps",
@@ -4054,120 +3993,6 @@ function CompanySettingsSetup({
   const selectedClientListColumns = clientListColumns(draft);
   const selectedProgramStatusLabels = programStatusLabels(draft);
 
-  async function handleIntegrationReviewAction(
-    eventId: string,
-    action: "match" | "retry" | "ignore",
-  ) {
-    if (!canManage || reviewAction) return;
-    const selectedClientId = eventClientSelections[eventId] ?? "";
-    if (action === "match" && !selectedClientId) {
-      setError("Choose a client before matching this event.");
-      setSaved(false);
-      return;
-    }
-    setReviewAction(`${eventId}:${action}`);
-    setError(null);
-    setSaved(false);
-    const { data, error: invokeError } = await supabase.functions.invoke(
-      "manage-integration-review",
-      {
-        body: {
-          action,
-          companyLegacyId,
-          eventId,
-          clientId: selectedClientId || undefined,
-        },
-      },
-    );
-    setReviewAction(null);
-    if (invokeError) {
-      setError(invokeError.message);
-      return;
-    }
-    if (data?.error) {
-      setError(data.error);
-      return;
-    }
-    setSaved(true);
-    setEventClientSelections((current) => {
-      const next = { ...current };
-      delete next[eventId];
-      return next;
-    });
-    onReload();
-  }
-
-  function integrationClientLabel(client: IntegrationReviewClientOption) {
-    const label =
-      client.client_name ||
-      client.client_business ||
-      client.client_email ||
-      client.id;
-    const detail = [
-      client.client_email,
-      client.program_status_value ? client.program_status_value : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    return detail ? `${label} — ${detail}` : label;
-  }
-
-  function integrationSearchTerm(value: string) {
-    return value.trim().replace(/[,%]/g, " ");
-  }
-
-  async function handleIntegrationClientSearch(eventId: string) {
-    const query = integrationSearchTerm(eventClientSearches[eventId] ?? "");
-    if (query.length < 2) {
-      setEventClientOptions((current) => ({ ...current, [eventId]: [] }));
-      setEventClientSearchMessages((current) => ({
-        ...current,
-        [eventId]: "Type at least 2 characters to search clients.",
-      }));
-      return;
-    }
-
-    setEventClientSearchLoading((current) => ({ ...current, [eventId]: true }));
-    setEventClientSearchMessages((current) => ({ ...current, [eventId]: "" }));
-
-    const pattern = `%${query}%`;
-    const { data, error: searchError } = await supabase
-      .from("clients")
-      .select(
-        "id, glide_row_id, client_name, client_business, client_email, program_status_value",
-      )
-      .eq("company_glide_row_id", companyLegacyId)
-      .is("archived_at", null)
-      .or(
-        `client_name.ilike.${pattern},client_email.ilike.${pattern},client_business.ilike.${pattern}`,
-      )
-      .order("client_name", { ascending: true })
-      .limit(20);
-
-    setEventClientSearchLoading((current) => ({ ...current, [eventId]: false }));
-
-    if (searchError) {
-      setEventClientOptions((current) => ({ ...current, [eventId]: [] }));
-      setEventClientSearchMessages((current) => ({
-        ...current,
-        [eventId]: searchError.message,
-      }));
-      return;
-    }
-
-    const options = ((data ?? []) as IntegrationReviewClientOption[]).filter(
-      isMatchableIntegrationClient,
-    );
-    setEventClientOptions((current) => ({ ...current, [eventId]: options }));
-    setEventClientSearchMessages((current) => ({
-      ...current,
-      [eventId]:
-        options.length > 0
-          ? `${options.length} result${options.length === 1 ? "" : "s"} found.`
-          : "No clients found. Try a different name or email.",
-    }));
-  }
-
   async function handleIntegrationTokenAction(
     action: "create" | "revoke" | "revoke_all",
     tokenId?: string,
@@ -4228,7 +4053,6 @@ function CompanySettingsSetup({
   const activeIntegrationTokens = integrationTokens.filter(
     (token) => token.status === "active",
   );
-  const hasOpenIntegrationEvents = integrationEvents.length > 0;
 
   return (
     <div className="mt-6 space-y-6">
@@ -4801,242 +4625,23 @@ function CompanySettingsSetup({
         />
       ) : null}
 
-      <details
-        open={hasOpenIntegrationEvents}
-        className="overflow-hidden rounded-lg border border-[#e4e9f0] bg-white"
-      >
-        <summary className="cursor-pointer list-none border-b border-[#e4e9f0] px-5 py-4 [&::-webkit-details-marker]:hidden">
-          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-[#101828]">
-                Integration review queue
-              </h3>
-              <p className="mt-1 text-xs text-[#667085]">
-                Operations inbox for webhook events that need human review. This
-                sits here temporarily until integrations get their own operating
-                area.
-              </p>
-            </div>
-            <span className="w-fit rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-              {integrationEvents.length} open
-            </span>
+      <section className="rounded-lg border border-[#e4e9f0] bg-white px-5 py-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-[#101828]">Call AI</h3>
+            <p className="mt-1 text-xs text-[#667085]">
+              Unmatched Fathom and call-summary reconciliation now lives in the
+              dedicated Call AI workspace.
+            </p>
           </div>
-        </summary>
-        {source === "mirror" ? (
-          <div className="px-5 py-4 text-sm text-[#667085]">
-            Integration review is available once this company is running on
-            RetainOS app-owned data.
-          </div>
-        ) : integrationEventsLoading ? (
-          <div className="px-5 py-4 text-sm text-[#667085]">
-            Loading integration events...
-          </div>
-        ) : integrationEvents.length === 0 ? (
-          <div className="px-5 py-4 text-sm text-[#667085]">
-            No unmatched or ambiguous webhook events need review.
-          </div>
-        ) : (
-          <div className="divide-y divide-[#e4e9f0]">
-            {integrationEvents.map((event) => {
-              const clientEmail = integrationValue(event, [
-                "client_email",
-                "clientEmail",
-                "email",
-              ]);
-              const title = integrationValue(event, ["title", "meeting_title"]);
-              const summary = integrationValue(event, [
-                "summary",
-                "notes",
-                "next_steps",
-                "nextSteps",
-              ]);
-              const recordingUrl = integrationValue(event, [
-                "recording_url",
-                "recordingUrl",
-                "url",
-              ]);
-              const selectedClientId = eventClientSelections[event.id] ?? "";
-              const actionBusy = reviewAction?.startsWith(`${event.id}:`) ?? false;
-              const clientSearch = eventClientSearches[event.id] ?? "";
-              const clientOptions = eventClientOptions[event.id] ?? [];
-              const clientSearchLoading =
-                eventClientSearchLoading[event.id] === true;
-              const clientSearchMessage =
-                eventClientSearchMessages[event.id] ?? "";
-              return (
-                <article key={event.id} className="px-5 py-4">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold text-[#101828]">
-                          {title || clientEmail || "Webhook event"}
-                        </span>
-                        <span className="rounded-full border border-[#d0d5dd] bg-[#f8fafc] px-2 py-0.5 text-[11px] font-semibold uppercase text-[#586273]">
-                          {event.provider || "unknown"}
-                        </span>
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${
-                            event.match_status === "ambiguous"
-                              ? "border-orange-200 bg-orange-50 text-orange-700"
-                              : "border-amber-200 bg-amber-50 text-amber-800"
-                          }`}
-                        >
-                          {event.match_status}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-[#667085]">
-                        Received {formatDateTime(event.created_at)}
-                        {event.external_event_id
-                          ? ` · External ID ${event.external_event_id}`
-                          : ""}
-                      </p>
-                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
-                        {event.integration_type.replaceAll("_", " ")}
-                      </p>
-                      <p className="mt-2 text-sm text-[#344054]">
-                        {event.error_message || "Needs manual review before writing."}
-                      </p>
-                    </div>
-                    {recordingUrl ? (
-                      <a
-                        href={recordingUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="retainos-button-secondary w-fit px-3 py-2 text-sm"
-                      >
-                        Open recording
-                      </a>
-                    ) : null}
-                  </div>
-                  <dl className="mt-3 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-md bg-[#f7f9fc] px-3 py-2">
-                      <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#667085]">
-                        Client email
-                      </dt>
-                      <dd className="mt-1 break-words text-sm text-[#101828]">
-                        {clientEmail || "--"}
-                      </dd>
-                    </div>
-                    <div className="rounded-md bg-[#f7f9fc] px-3 py-2 md:col-span-2">
-                      <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#667085]">
-                        Summary preview
-                      </dt>
-                      <dd className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-[#101828]">
-                        {summary || "--"}
-                      </dd>
-                    </div>
-                  </dl>
-                  {canManage ? (
-                    <div className="mt-4 rounded-lg border border-[#e4e9f0] bg-[#fbfcfe] p-3">
-                      <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-end">
-                        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
-                          Search client
-                          <div className="mt-1 flex gap-2">
-                            <input
-                              type="search"
-                              value={clientSearch}
-                              disabled={actionBusy || clientSearchLoading}
-                              placeholder="Type name or email"
-                              onChange={(inputEvent) => {
-                                const value = inputEvent.target.value;
-                                setEventClientSearches((current) => ({
-                                  ...current,
-                                  [event.id]: value,
-                                }));
-                                setEventClientSelections((current) => {
-                                  const next = { ...current };
-                                  delete next[event.id];
-                                  return next;
-                                });
-                              }}
-                              onKeyDown={(keyEvent) => {
-                                if (keyEvent.key === "Enter") {
-                                  keyEvent.preventDefault();
-                                  void handleIntegrationClientSearch(event.id);
-                                }
-                              }}
-                              className="block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
-                            />
-                            <button
-                              type="button"
-                              disabled={actionBusy || clientSearchLoading}
-                              onClick={() =>
-                                void handleIntegrationClientSearch(event.id)
-                              }
-                              className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {clientSearchLoading ? "Searching..." : "Search"}
-                            </button>
-                          </div>
-                          <select
-                            value={selectedClientId}
-                            disabled={actionBusy || clientSearchLoading}
-                            onChange={(selectEvent) =>
-                              setEventClientSelections((current) => ({
-                                ...current,
-                                [event.id]: selectEvent.target.value,
-                              }))
-                            }
-                            className="mt-2 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
-                          >
-                            <option value="">
-                              {clientOptions.length > 0
-                                ? "Choose from search results..."
-                                : "Search first"}
-                            </option>
-                            {clientOptions.map((client) => (
-                              <option key={client.id} value={client.id}>
-                                {integrationClientLabel(client)}
-                              </option>
-                            ))}
-                          </select>
-                          {clientSearchMessage ? (
-                            <p className="mt-1 text-xs normal-case tracking-normal text-[#667085]">
-                              {clientSearchMessage}
-                            </p>
-                          ) : null}
-                        </label>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={actionBusy || !selectedClientId}
-                            onClick={() =>
-                              handleIntegrationReviewAction(event.id, "match")
-                            }
-                            className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Match to client
-                          </button>
-                          <button
-                            type="button"
-                            disabled={actionBusy}
-                            onClick={() =>
-                              handleIntegrationReviewAction(event.id, "retry")
-                            }
-                            className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Retry apply
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={actionBusy}
-                          onClick={() =>
-                            handleIntegrationReviewAction(event.id, "ignore")
-                          }
-                          className="w-fit rounded-full border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-semibold text-[#586273] shadow-sm transition hover:border-[#98a2b3] hover:text-[#101828] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Ignore
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </details>
+          <Link
+            to="/call-ai"
+            className="retainos-button-secondary w-fit px-4 py-2 text-sm"
+          >
+            Open Call AI
+          </Link>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-[#e4e9f0] bg-white">
         <div className="border-b border-[#e4e9f0] px-5 py-4">
@@ -5343,9 +4948,6 @@ export function SaasClientDetail({
   const [notificationPreferences, setNotificationPreferences] = useState<
     SettingsNotificationPreference[]
   >(mergeNotificationPreferences(null));
-  const [integrationReviewEvents, setIntegrationReviewEvents] = useState<
-    IntegrationIntakeEventRow[]
-  >([]);
   const [integrationTokens, setIntegrationTokens] = useState<IntegrationTokenRow[]>(
     [],
   );
@@ -5357,7 +4959,6 @@ export function SaasClientDetail({
   const [taskTemplateMilestones, setTaskTemplateMilestones] = useState<
     CompanyOfferMilestoneRow[]
   >([]);
-  const [integrationReviewLoading, setIntegrationReviewLoading] = useState(false);
   const [integrationTokensLoading, setIntegrationTokensLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsReloadKey, setSettingsReloadKey] = useState(0);
@@ -5752,7 +5353,6 @@ export function SaasClientDetail({
 
     async function loadSettings() {
       setSettingsLoading(true);
-      setIntegrationReviewLoading(true);
       setIntegrationTokensLoading(true);
       const { data: appCompany } = await supabase
         .from("companies")
@@ -5765,7 +5365,6 @@ export function SaasClientDetail({
         const [
           settingsResult,
           preferencesResult,
-          integrationResult,
           integrationTokensResult,
           taskTemplatesResult,
           contractTemplatesResult,
@@ -5785,15 +5384,6 @@ export function SaasClientDetail({
             .eq("company_id", appCompany.id)
             .is("member_id", null)
             .is("role", null),
-          supabase
-            .from("integration_intake_events")
-            .select(
-              "id, integration_type, provider, external_event_id, status, match_status, error_message, payload, metadata, created_at, updated_at",
-            )
-            .eq("company_id", appCompany.id)
-            .in("status", ["needs_review", "failed"])
-            .order("created_at", { ascending: false })
-            .limit(12),
           isSuperAdmin
             ? supabase.functions.invoke("manage-integration-token", {
                 body: {
@@ -5846,17 +5436,6 @@ export function SaasClientDetail({
             preferencesResult.error,
           );
           setNotificationPreferences(mergeNotificationPreferences(null));
-        }
-        if (!integrationResult.error) {
-          setIntegrationReviewEvents(
-            (integrationResult.data ?? []) as IntegrationIntakeEventRow[],
-          );
-        } else {
-          console.error(
-            "Failed to load integration review events:",
-            integrationResult.error,
-          );
-          setIntegrationReviewEvents([]);
         }
         if (!integrationTokensResult.error && integrationTokensResult.data?.tokens) {
           setIntegrationTokens(
@@ -5912,7 +5491,6 @@ export function SaasClientDetail({
           );
           setTaskTemplateMilestones([]);
         }
-        setIntegrationReviewLoading(false);
         setIntegrationTokensLoading(false);
         if (!settingsResult.error && settingsResult.data) {
           const loadedSettings = settingsResult.data as CompanySettingsRow;
@@ -5939,13 +5517,11 @@ export function SaasClientDetail({
 
       setCompanySettings(defaultCompanySettings(company));
       setNotificationPreferences(mergeNotificationPreferences(null));
-      setIntegrationReviewEvents([]);
       setIntegrationTokens([]);
       setTaskTemplates([]);
       setContractTemplates([]);
       setTaskTemplateOffers([]);
       setTaskTemplateMilestones([]);
-      setIntegrationReviewLoading(false);
       setIntegrationTokensLoading(false);
       setSettingsSource("mirror");
       setSettingsLoading(false);
@@ -6355,8 +5931,6 @@ export function SaasClientDetail({
             taskTemplateOffers={taskTemplateOffers}
             taskTemplateMilestones={taskTemplateMilestones}
             teamMembers={teamMembers}
-            integrationEvents={integrationReviewEvents}
-            integrationEventsLoading={integrationReviewLoading}
             integrationTokens={integrationTokens}
             integrationTokensLoading={integrationTokensLoading}
             canManageTokens={isSuperAdmin && settingsSource === "app_owned"}

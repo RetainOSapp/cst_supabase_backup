@@ -1108,6 +1108,7 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 
 - `[x]` Call AI unmatched recording reconciliation page for SuperAdmin, Director, and Support.
   - V1 route: `/call-ai`; focused on unmatched Fathom/call-summary events, client search, match/retry/ignore, and recording links. Full transcript analysis remains later.
+  - 2026-07-10 follow-up: Admin Hub no longer carries a duplicate reconciliation queue; Company Settings links to the dedicated Call AI workspace as the single operating surface.
 - `[ ]` Add new call transcript to analyze for SuperAdmin, Director, and Support.
 - `[ ]` View past analyzed meetings for SuperAdmin, Director, and Support.
 - `[ ]` Share call analysis with team for SuperAdmin, Director, and Support.
