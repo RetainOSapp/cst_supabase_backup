@@ -88,6 +88,17 @@ function taskMetadata(task: Record<string, unknown>) {
     : {};
 }
 
+function normalizeProgramStatus(value: unknown) {
+  return cleanText(value)
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+}
+
+function isActiveClientStatus(value: unknown) {
+  const status = normalizeProgramStatus(value);
+  return status === "front-end" || status === "back-end";
+}
+
 function normalizeStatus(value: unknown) {
   const text = cleanText(value).toLowerCase();
   if (!text) return null;
@@ -381,7 +392,20 @@ Deno.serve(async (req) => {
           365,
         );
         const nextDueDate = addDaysIso(task.task_due_date, intervalDays);
-        if (nextDueDate) {
+        let recurringClientIsActive = true;
+        if (task.client_id) {
+          const { data: linkedClient, error: linkedClientError } = await supabase
+            .from("clients")
+            .select("program_status_value")
+            .eq("company_id", company.id)
+            .eq("glide_row_id", task.client_id)
+            .maybeSingle();
+          if (linkedClientError) throw linkedClientError;
+          recurringClientIsActive = isActiveClientStatus(
+            linkedClient?.program_status_value,
+          );
+        }
+        if (nextDueDate && recurringClientIsActive) {
           const { data: createdNextTask, error: nextTaskError } = await supabase
             .from("client_tasks")
             .insert({

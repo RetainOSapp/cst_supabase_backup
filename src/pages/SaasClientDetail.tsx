@@ -158,6 +158,8 @@ interface CompanyTaskTemplateRow {
   assign_to_type: "assigned_csm" | "director" | "support" | "specific_member" | "unassigned";
   assigned_member_legacy_id?: string | null;
   due_offset_days: number;
+  recurring_is_recurring?: boolean | null;
+  recurring_interval_days?: number | null;
   priority?: string | null;
   status_value: "todo" | "in-progress" | "waiting" | "done" | "dismissed" | "archived";
   is_enabled: boolean;
@@ -2898,6 +2900,8 @@ function TaskTemplatesModal({
     assign_to_type: "assigned_csm",
     assigned_member_legacy_id: "",
     due_offset_days: 0,
+    recurring_is_recurring: false,
+    recurring_interval_days: 56,
     priority: "",
     status_value: "todo",
     is_enabled: true,
@@ -3031,6 +3035,8 @@ function TaskTemplatesModal({
       assign_to_type: "assigned_csm",
       assigned_member_legacy_id: "",
       due_offset_days: 0,
+      recurring_is_recurring: false,
+      recurring_interval_days: 56,
       priority: "",
       status_value: "todo",
       is_enabled: true,
@@ -3047,6 +3053,8 @@ function TaskTemplatesModal({
       applies_to_milestone_id: template.applies_to_milestone_id ?? "",
       assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
       priority: template.priority ?? "",
+      recurring_is_recurring: template.recurring_is_recurring === true,
+      recurring_interval_days: template.recurring_interval_days ?? 56,
       position: template.position ?? 0,
     });
     setError(null);
@@ -3070,6 +3078,8 @@ function TaskTemplatesModal({
       applies_to_milestone_id: template.applies_to_milestone_id ?? "",
       assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
       priority: template.priority ?? "",
+      recurring_is_recurring: template.recurring_is_recurring === true,
+      recurring_interval_days: template.recurring_interval_days ?? 56,
       position: nextPosition,
     });
     setError(null);
@@ -3095,6 +3105,8 @@ function TaskTemplatesModal({
           assignToType: draft.assign_to_type,
           assignedMemberLegacyId: draft.assigned_member_legacy_id || null,
           dueOffsetDays: draft.due_offset_days,
+          recurringIsRecurring: draft.recurring_is_recurring === true,
+          recurringIntervalDays: draft.recurring_interval_days ?? 56,
           priority: draft.priority || null,
           statusValue: draft.status_value,
           isEnabled: draft.is_enabled,
@@ -3182,6 +3194,9 @@ function TaskTemplatesModal({
                           {templateTriggerLabel(template)}{" "}
                           · due in {template.due_offset_days} day
                           {template.due_offset_days === 1 ? "" : "s"}
+                          {template.recurring_is_recurring
+                            ? ` · repeats every ${template.recurring_interval_days ?? 56} days`
+                            : ""}
                         </p>
                         {template.trigger_type === "milestone_completed" ? (
                           <p className="mt-1 text-xs text-[#667085]">
@@ -3435,6 +3450,50 @@ function TaskTemplatesModal({
                   className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
                 />
               </label>
+              <div className="rounded-md border border-[#d9e2ec] bg-[#f8fafc] p-4 sm:col-span-2">
+                <label className="flex items-start gap-3 text-sm font-semibold text-[#101828]">
+                  <input
+                    type="checkbox"
+                    checked={draft.recurring_is_recurring === true}
+                    disabled={disabled || saving}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        recurring_is_recurring: event.target.checked,
+                        recurring_interval_days:
+                          current.recurring_interval_days ?? 56,
+                      }))
+                    }
+                    className="mt-1 h-4 w-4 rounded border-[#d0d5dd] text-[#2f73b8]"
+                  />
+                  <span>
+                    Recurring task
+                    <span className="mt-1 block text-xs font-normal text-[#667085]">
+                      When a recurring client task is completed, RetainOS creates the
+                      next one while the client is Front End or Back End.
+                    </span>
+                  </span>
+                </label>
+                <label className="mt-3 block text-sm font-medium text-[#344054]">
+                  Repeat every X days
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    disabled={
+                      disabled || saving || draft.recurring_is_recurring !== true
+                    }
+                    value={draft.recurring_interval_days ?? 56}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        recurring_interval_days: Number(event.target.value) || 56,
+                      }))
+                    }
+                    className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                  />
+                </label>
+              </div>
               <label className="block text-sm font-medium text-[#344054]">
                 Priority
                 <select
@@ -5746,7 +5805,7 @@ export function SaasClientDetail({
           supabase
             .from("company_task_templates")
             .select(
-              "id, name, description, trigger_type, applies_to_offer_id, applies_to_milestone_id, assign_to_type, assigned_member_legacy_id, due_offset_days, priority, status_value, is_enabled, position, metadata, archived_at",
+              "id, name, description, trigger_type, applies_to_offer_id, applies_to_milestone_id, assign_to_type, assigned_member_legacy_id, due_offset_days, recurring_is_recurring, recurring_interval_days, priority, status_value, is_enabled, position, metadata, archived_at",
             )
             .eq("company_id", appCompany.id)
             .is("archived_at", null)

@@ -807,6 +807,10 @@ Deno.serve(async (req) => {
         if (!TASK_STATUSES.has(normalizedStatus)) {
           return jsonResponse({ error: "Choose a valid task template status." }, 400);
         }
+        const recurringIsRecurring = Boolean(body.recurringIsRecurring);
+        const recurringIntervalDays = recurringIsRecurring
+          ? requiredBoundedInteger(body.recurringIntervalDays, 56, 1, 365)
+          : null;
 
         const assignedMemberLegacyId =
           assignToType === "specific_member" ? nullableText(body.assignedMemberLegacyId) : null;
@@ -877,6 +881,8 @@ Deno.serve(async (req) => {
           assign_to_type: assignToType,
           assigned_member_legacy_id: assignedMemberLegacyId,
           due_offset_days: requiredBoundedInteger(body.dueOffsetDays, 0, 0, 365),
+          recurring_is_recurring: recurringIsRecurring,
+          recurring_interval_days: recurringIntervalDays,
           priority: nullableText(body.priority),
           status_value: normalizedStatus,
           is_enabled: body.isEnabled === false ? false : true,

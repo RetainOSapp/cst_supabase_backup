@@ -146,3 +146,5 @@ For historical context:
 ## Call AI Reconciliation Page - 2026-07-09
 
 - `/call-ai` is the V1 home for unmatched Fathom/call-summary reconciliation; Support can match/retry/ignore, and manual matches learn the event email into Email 2/3 when a slot is open.
+## Recurring Task Templates - 2026-07-10
+- Added recurring fields to `company_task_templates`, Task Templates UI, manual presets, client/milestone template task creation, and active-client-only recurrence guard in `manage-client-task`; build passed and functions deployed.

@@ -208,6 +208,11 @@ async function createTasksFromClientTemplates({
       const taskName = renderAutoTaskName(template, client);
       if (!taskName) continue;
       const dueOffsetDays = Number(template.due_offset_days ?? 0);
+      const recurringIntervalDays = Number(template.recurring_interval_days ?? 56);
+      const recurringIsRecurring =
+        template.recurring_is_recurring === true &&
+        Number.isFinite(recurringIntervalDays) &&
+        recurringIntervalDays >= 1;
       const taskDueDate = addDaysIso(
         (client.client_age_date_onboarded as string | null | undefined) ?? null,
         Number.isFinite(dueOffsetDays) ? dueOffsetDays : 0,
@@ -228,10 +233,20 @@ async function createTasksFromClientTemplates({
           assigned_to_id: assignedToId,
           priority: template.priority ?? null,
           status_value: template.status_value ?? "todo",
+          recurring_is_recurring: recurringIsRecurring,
           metadata: {
             created_in: source,
             task_template_id: template.id,
             task_template_name: template.name,
+            ...(recurringIsRecurring
+              ? {
+                  recurring_interval_days: Math.min(
+                    365,
+                    Math.max(1, Math.round(recurringIntervalDays)),
+                  ),
+                  recurring_source: "task_template",
+                }
+              : {}),
           },
         })
         .select("*")

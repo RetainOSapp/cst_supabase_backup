@@ -62,11 +62,13 @@ interface TaskTemplateRow {
   id: string;
   name: string;
   description: string | null;
-  trigger_type: "manual" | "client_created";
+  trigger_type: "manual" | "client_created" | "milestone_completed";
   applies_to_offer_id: string | null;
   assign_to_type: "assigned_csm" | "director" | "support" | "specific_member" | "unassigned";
   assigned_member_legacy_id: string | null;
   due_offset_days: number;
+  recurring_is_recurring: boolean | null;
+  recurring_interval_days: number | null;
   priority: string | null;
   status_value: TaskStatus;
   is_enabled: boolean;
@@ -740,7 +742,8 @@ function NewTaskModal({
     setPriority(template.priority ?? "");
     setStatusValue(taskStatusKey(template.status_value));
     setTaskDueDate(dateAfterToday(template.due_offset_days));
-    setRecurringIsRecurring(false);
+    setRecurringIsRecurring(template.recurring_is_recurring === true);
+    setRecurringIntervalDays(template.recurring_interval_days ?? 56);
     if (template.assign_to_type === "specific_member") {
       setAssignedToId(template.assigned_member_legacy_id ?? "");
     } else if (template.assign_to_type === "assigned_csm") {
@@ -1386,7 +1389,7 @@ export function Tasks() {
       const { data, error } = await supabase
         .from("company_task_templates")
         .select(
-          "id, name, description, trigger_type, applies_to_offer_id, assign_to_type, assigned_member_legacy_id, due_offset_days, priority, status_value, is_enabled",
+          "id, name, description, trigger_type, applies_to_offer_id, assign_to_type, assigned_member_legacy_id, due_offset_days, recurring_is_recurring, recurring_interval_days, priority, status_value, is_enabled",
         )
         .eq("company_id", appCompany.id)
         .eq("trigger_type", "manual")

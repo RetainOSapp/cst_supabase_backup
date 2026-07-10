@@ -313,6 +313,11 @@ async function createTasksFromMilestoneTemplates({
       const taskName = renderAutoTaskName(template, context);
       if (!taskName) continue;
       const dueOffsetDays = Number(template.due_offset_days ?? 0);
+      const recurringIntervalDays = Number(template.recurring_interval_days ?? 56);
+      const recurringIsRecurring =
+        template.recurring_is_recurring === true &&
+        Number.isFinite(recurringIntervalDays) &&
+        recurringIntervalDays >= 1;
       const taskDueDate = addDaysIso(
         completionDate,
         Number.isFinite(dueOffsetDays) ? dueOffsetDays : 0,
@@ -333,6 +338,7 @@ async function createTasksFromMilestoneTemplates({
           assigned_to_id: assignedToId,
           priority: template.priority ?? null,
           status_value: template.status_value ?? "todo",
+          recurring_is_recurring: recurringIsRecurring,
           metadata: {
             created_in: "milestone_completed_template",
             task_template_id: templateId,
@@ -345,6 +351,15 @@ async function createTasksFromMilestoneTemplates({
             trigger_milestone_name: milestone.name,
             trigger_completion_date: completionDate,
             client_milestone_id: progressId || null,
+            ...(recurringIsRecurring
+              ? {
+                  recurring_interval_days: Math.min(
+                    365,
+                    Math.max(1, Math.round(recurringIntervalDays)),
+                  ),
+                  recurring_source: "task_template",
+                }
+              : {}),
           },
         })
         .select("*")
