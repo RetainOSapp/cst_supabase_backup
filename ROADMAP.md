@@ -200,7 +200,7 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - 2026-06-16 Jay QA follow-up: Admin archive failures now surface affected-client details instead of the generic Edge Function non-2xx wrapper; Quick Update pathway completion now mirrors the Client Detail flow with next/another milestone start controls; empty Contract / Program Timing cards are hidden when timing is unavailable.
   - 2026-06-16 final QA follow-up: archive affected-client sampling now uses app-owned `client_business`, non-Error Supabase throws surface their message, and Quick Update defaults `Milestone To Start` to the next milestone in line.
   - Complete for V1/polish. Drag/drop reorder, hard-delete cleanup, and contract-page cleanup are separate later scopes.
-  - 2026-06-20 secondary pathway support is live for app-owned pilot/migrated clients: company setting gate, client secondary offer/milestone fields, Client Detail Pathways summary, modal set/clear flow, and history/audit events. Awaiting Jay QA before treating the resource as publish-ready.
+  - 2026-06-20 secondary pathway support is live for app-owned pilot/migrated clients: company setting gate, client secondary offer/milestone fields, Client Detail Pathways summary, modal set/clear flow, and history/audit events. Jay QA passed before MM rollout.
   - 2026-06-20 resource audit confirmed this covers the old "Customize Milestones and Offers" Glide workflow; `customize-milestones-offers` draft now documents the RetainOS Pathways & Milestones flow, archive/restore guardrails, and up/down reorder controls.
   - 2026-07-03 MM archive cleanup fix: archive blockers and usage counts now define active clients as Front End / Back End only and include secondary pathway/milestone usage, so unused MM pathways can be archived safely while secondary-attached pathways remain protected.
 - `[x]` Deploy final Pathways & Milestones closure fixes.
@@ -272,11 +272,11 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-10: reconciliation now reports active-client contract coverage, renewal date source/confidence, latest mirrored-contract summary mismatches, active clients missing app-owned contract history, active clients missing all contract history, and active clients missing current renewal dates.
   - 2026-06-15 Jay QA passed create/edit/archive/delete, contract filters, and duration/date calculation polish.
   - 2026-06-17 Ali sanity pass found no Glide contract leakage. `manage-client-contract` now writes calculated end/filtering dates into the client summary when a contract uses start date + expected duration days; four Ethical Scaling pilot summaries were repaired, including Ali Back End.
-- `[~]` `[qa]` `[priority: medium]` Contract/Renewal V2.
+- `[~]` `[polish]` `[priority: medium]` Contract/Renewal V2.
   - 2026-06-17 Ali's remaining confusing Contract tab state is duplicate app-owned QA-created contract rows, not a source-of-truth/backfill failure.
   - Optional cleanup: use the SuperAdmin delete action for duplicate QA/test contracts when Jay wants demo data tidied.
   - When a manually created or webhook-created client is missing contract info, remind/ensure the contract is added.
-  - 2026-07-06 Contract Templates V1 shipped for app-owned companies: Admin Hub > Company Settings can define one active initial-contract template per primary pathway; manual New Client and Zapier client-create auto-create a contract from the pathway template only when explicit contract fields are not provided. Awaiting Jay/Ben QA with MM Inner Circle 3/6/12 month templates.
+  - 2026-07-06 Contract Templates V1 shipped for app-owned companies: Admin Hub > Company Settings can define one active initial-contract template per primary pathway; manual New Client and Zapier client-create auto-create a contract from the pathway template only when explicit contract fields are not provided. Jay/Ben visual QA passed for the V1 shape; remaining work is richer multi-contract/LTV polish.
   - 2026-07-08 launch polish: Contract Type was removed from Client Detail create/edit/display UI as redundant label noise; existing metadata is preserved for compatibility.
   - Richer multi-contract/LTV reporting.
   - High-fidelity renewal UX.
@@ -366,7 +366,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
 - `[~]` `[polish]` Client history/change log.
   - Client Detail now has a pilot `History` tab for RetainOS Quick Update events.
   - 2026-07-06 MM launch hotfix: Client Detail > History now merges legacy CST `backup_company_clients_history` rows with RetainOS app-owned history events, so migrated clients can see previous Next Steps / call-history context from the CST mirror. Added a Calls filter, CST history badge, clickable links, and long-entry Read more expansion.
-  - 2026-07-06 MM follow-up: Client Detail > History now has controlled row actions for Change date and Delete history entry across RetainOS app-owned history and imported CST mirror rows. Server-side role/assignment checks and app audit events are wired through `manage-client-history`; awaiting Jay QA before promoting this slice.
+  - 2026-07-06 MM follow-up: Client Detail > History now has controlled row actions for Change date and Delete history entry across RetainOS app-owned history and imported CST mirror rows. Server-side role/assignment checks and app audit events are wired through `manage-client-history`; Jay QA passed.
   - 2026-07-06 MM health-score history follow-up: imported CST Success, Progress, Buy In, health, and outcome history rows are now classified into the Health Scores filter and the client history load keeps a deeper CST history window so older score rows are not hidden behind call/Next Steps volume.
   - 2026-07-06 MM Caroline Anthony fix: when CST did not provide a discrete history row but did provide current outcome values plus dates on the migrated client record, History now synthesizes migrated Health Scores entries from those fields.
 
@@ -467,17 +467,17 @@ Next session lock:
   - New Task v1 creates app-owned `client_tasks` through `manage-client-task`.
   - 2026-06-18 Tasks V1.5 pass adds app-owned task edit, status updates, complete/reopen, dismiss/archive, task detail modal, and native drag/drop board columns. SQL migration for `task_updated` history events was applied and Jay deployed `manage-client-task`.
   - Jay QA passed company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` after the follow-up `in-progress`/`in_progress` normalization fix.
-  - 2026-06-18 Task Templates + Urgency V1 added `company_task_templates`, Company Settings template modal, manual New Task template picker, new-client auto-create hooks in `manage-client-create` and `zapier-create-client`, due today/due soon/overdue board signals, and Daily Pulse `task_due` section. SQL migration applied; `manage-company-customization`, `manage-client-create`, and `zapier-create-client` deployed. Awaiting Jay QA.
+  - 2026-06-18 Task Templates + Urgency V1 added `company_task_templates`, Company Settings template modal, manual New Task template picker, new-client auto-create hooks in `manage-client-create` and `zapier-create-client`, due today/due soon/overdue board signals, and Daily Pulse `task_due` section. SQL migration applied; `manage-company-customization`, `manage-client-create`, and `zapier-create-client` deployed. Jay QA passed.
   - 2026-06-20 QA follow-up deployed `manage-client-create` and `zapier-create-client` again so auto-created task names render `{client_name}` / `{client}` or append the client name by default. Tasks list view now groups by status and supports drag/drop like board view.
   - 2026-06-20 automation/recurring follow-up deployed `manage-client-task` and `manage-client-profile`: client CSM assignment claims open unassigned client tasks, and recurring tasks create the next occurrence when completed. Tasks board/list got soft status lane colors from the RetainOS palette.
   - 2026-06-20 custom reminder audit: RetainOS should model custom client reminders as client-linked tasks with due dates, not a separate CST-style reminder object. Optional later UX: Quick Update shortcut that creates a client-linked task/reminder.
-  - 2026-07-03 milestone-template V1: Task Templates can now use `When milestone is completed` for primary pathway milestones only. Admin selects Pathway + Milestone, due offset, assignment, priority, and status; `manage-client-milestone` creates matching tasks after primary milestone completion with duplicate protection. Awaiting Jay QA.
+  - 2026-07-03 milestone-template V1: Task Templates can now use `When milestone is completed` for primary pathway milestones only. Admin selects Pathway + Milestone, due offset, assignment, priority, and status; `manage-client-milestone` creates matching tasks after primary milestone completion with duplicate protection. Jay QA passed.
   - 2026-07-06 MM launch hotfix: Tasks board/list now resolves linked clients by app-owned client UUID, legacy Glide client id, known imported metadata/source-snapshot keys, and the loaded company roster. Follow-up hotfix uses CST mirror clients as label-only fallback for the known MM imported tasks whose legacy client links were unresolved at task backfill; unrecoverable imported client links show `Imported client task` and true company-level tasks show `Company task`, without restoring mirror writes.
-  - 2026-07-10 recurring template follow-up: Task Templates can mark created tasks as recurring with a repeat interval. Manual presets, new-client templates, Zapier client-created templates, and milestone-completed templates preserve the recurring rule; next occurrences stop auto-creating once the linked client is no longer Front End or Back End. SQL migration applied; `manage-company-customization`, `manage-client-create`, `zapier-create-client`, `manage-client-milestone`, and `manage-client-task` deployed. Awaiting Jay QA.
+  - 2026-07-10 recurring template follow-up: Task Templates can mark created tasks as recurring with a repeat interval. Manual presets, new-client templates, Zapier client-created templates, and milestone-completed templates preserve the recurring rule; next occurrences stop auto-creating once the linked client is no longer Front End or Back End. SQL migration applied; `manage-company-customization`, `manage-client-create`, `zapier-create-client`, `manage-client-milestone`, and `manage-client-task` deployed. Jay QA passed after priority layout polish.
   - Remaining later gaps after this QA: comments, attachments, realtime, richer notifications.
 - `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
-- `[~]` `[qa]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
-  - Due-state board badges and Daily Pulse task_due visibility are implemented and awaiting Jay QA. Email/push/inbox delivery remains future.
+- `[~]` `[polish]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
+  - Due-state board badges, assignments, Daily Pulse task visibility, recurring tasks, and status movement have passed launch QA. Email/push/inbox delivery remains future notification scope.
 - `[~]` `[polish]` CSM Reports list view and filters.
   - Standalone `/csm-reports` page exists for SuperAdmin, Director, and Support.
   - V1 filters: company, CSM, Today, last 7/14/30 days, and custom date range.
@@ -838,7 +838,7 @@ Use this section to connect feature work into operational flows. A feature is no
 - `[ ]` `[priority: high]` New client can be imported from CSV with preview and validation.
 - `[ ]` `[priority: high]` New client can be created from Zapier with required `company_id`.
 - `[~]` `[polish]` `[priority: medium]` Client can be assigned to company, offer, pathway, milestone, CSM, and optional group/cohort.
-  - 2026-06-20 Secondary Assignee is live for app-owned pilot/migrated clients when the company feature gate is enabled: create/edit UI, server validation, CSM access scope, Clients/Dashboard filters, and draft resource. Awaiting Jay QA before promoting.
+  - 2026-06-20 Secondary Assignee is live for app-owned pilot/migrated clients when the company feature gate is enabled: create/edit UI, server validation, CSM access scope, Clients/Dashboard filters, and draft resource. Jay QA passed before MM rollout.
   - 2026-06-20 CSM assignment resource audit added an `Unassigned` Clients CSM filter and documented the RetainOS flow for assigning automation-created or manually created clients that still need an owner.
 - `[~]` `[polish]` Client setup captures contract details, start date, end/renewal logic, and external links.
   - New Contract v1 covers this for app-owned pilot/migrated clients from Client Detail > Contract.
@@ -856,11 +856,11 @@ Use this section to connect feature work into operational flows. A feature is no
   - 2026-07-02 Loom polish: Quick Update context cards truncate long North Star / Next Steps automation text and open the full rich text in a simple read-only modal from `Read more`.
 - `[~]` `[polish]` Quick Update writes to client history/change log.
   - Pilot writes app-owned `client_history_events`.
-- `[~]` `[qa]` Global client note search across profiles.
+- `[~]` `[polish]` Global client note search across profiles.
   - 2026-06-21 added Clients > Notes mode backed by `search_client_notes`.
   - Searches current Next Steps, app-owned client history notes/next steps/summaries/titles, and migrated legacy CST history values where available.
   - Respects applied Clients filters before searching note content: client name, CSM, secondary assignee, status, offer, milestone, renewals, contact cadence, health/outcomes, and advocacy.
-  - Awaiting Jay QA for visual feel, result usefulness, and migration confidence on known old CST history examples.
+  - Needs later product validation for visual feel, result usefulness, and migration confidence on known old CST history examples before treating it as a prominent operating view.
 - `[~]` `[polish]` Quick Update refreshes profile upkeep scoring.
   - Quick Update history events now feed Dashboard Profile Upkeep Score v1.
 - `[ ]` `[priority: medium]` Quick Update changes flow into dashboard KPIs, CSM Reports, alerts, and AI/reporting inputs.
@@ -881,8 +881,8 @@ Use this section to connect feature work into operational flows. A feature is no
 ### Task Manager Flow
 
 - `[x]` Task can be created from company-level context.
-- `[~]` `[qa]` Task can be created from client profile context.
-  - 2026-07-09 implementation: Client Detail > Tasks now has a New Task button for app-owned clients, creates a client-linked task through `manage-client-task`, and refreshes the task list/history after save. Awaiting Jay/MM QA.
+- `[x]` Task can be created from client profile context.
+  - 2026-07-09 implementation: Client Detail > Tasks now has a New Task button for app-owned clients, creates a client-linked task through `manage-client-task`, and refreshes the task list/history after save. Jay QA passed.
 - `[x]` Task can be assigned to team members with due date and priority/status.
 - `[x]` Task appears in the global Task Manager and client profile when linked to a client.
 - `[x]` Task can be auto-created when a primary pathway milestone is completed.
@@ -1083,20 +1083,20 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[ ]` Manage / edit program.
 - `[ ]` Update Outcomes.
 - `[ ]` See client update history.
-- `[~]` `[qa]` Update dates of last / next contact.
-  - 2026-07-06 MM launch hotfix: Clients list/card now have a one-click contacted button that writes Date of Last Contact through `manage-client-quick-update`; Company Settings has a Contact cadence automation toggle to set Date of Next Contact X days after the contacted action. Awaiting Jay QA on live MM.
+- `[x]` Update dates of last / next contact.
+  - 2026-07-06 MM launch hotfix: Clients list/card now have a one-click contacted button that writes Date of Last Contact through `manage-client-quick-update`; Company Settings has a Contact cadence automation toggle to set Date of Next Contact X days after the contacted action. Jay QA passed on live MM.
   - 2026-07-06 follow-up: the contacted button now uses the app blue treatment, manual Quick Update / Client Detail contact edits omit untouched date fields so the automation can apply safely, and Fathom/call-summary ingestion plus integration-review apply paths also set Date of Next Contact when the company automation is enabled.
   - 2026-07-06 Vince feedback: one-click contacted now patches the visible roster row and triggers the Clients list reload token so sorted/filtered lists update without a hard refresh; List/Card views now support 12, 25, 50, or 100 rows per page, plus numbered pagination with ellipses for jumping directly across large rosters.
   - 2026-07-07 Aaron feedback: one-click contacted now applies an immediate optimistic row update and uses per-client pending state so slow saves do not make the whole roster feel stuck.
-- `[~]` `[qa]` Track call attendance.
-  - 2026-07-06 MM launch build: added app-owned `client_call_attendance_events`, Attended/Missed controls and counts in Quick Update plus Client Detail > Program > Update Next Steps/Contact, and automatic Attended events when call-summary/next-steps ingestion matches a client. Awaiting Jay/MM QA on manual attended, manual missed, and next matched Fathom call.
+- `[x]` Track call attendance.
+  - 2026-07-06 MM launch build: added app-owned `client_call_attendance_events`, Attended/Missed controls and counts in Quick Update plus Client Detail > Program > Update Next Steps/Contact, and automatic Attended events when call-summary/next-steps ingestion matches a client. Jay QA passed for the launch implementation.
   - 2026-07-06 MM compatibility backfill: explicit CST `call-tracker` rows were backfilled into app-owned call attendance for Moves Method only (`✅ Call Attended` -> attended, `❌ Call Missed` -> missed; `🟣 Communication` intentionally remains history-only). Backfilled 9,619 attended and 398 missed rows with `source = cst_migration`.
-- `[~]` `[qa]` Edit Next Steps/contact directly from Client Detail > Program.
+- `[x]` Edit Next Steps/contact directly from Client Detail > Program.
   - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.
   - 2026-06-20 QA fix: modal passes `companyLegacyId`; History tab added Contract / Last Contact / Next Steps / Health Scores pills and search.
   - 2026-07-04 Moves Method Phase 4 QA polish: Client Detail > Program > Next Steps now truncates long rich text and opens the full value in a read-only `Read more` modal, matching Quick Update. Broad MM readback found no literal `0` in Program text/current contract-day fields; if Jay still sees `0`, capture a specific client example.
   - 2026-06-20 final polish: modal now also edits Date of Last Contact and Date of Next Contact.
-- `[~]` `[qa]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
+- `[x]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
 - `[ ]` Create, assign, and update client tasks.
 - `[ ]` View archived tasks in client context.
 - `[x]` Create / update contracts for client.
@@ -1382,15 +1382,14 @@ The current Glide model starts with Companies. Companies own team members, group
   - Pilot saves app-owned quick update events without changing mirrored client fields.
 - `[x]` Client Offboarding flow.
   - 2026-06-17 audit: current Client Detail UI uses `manage-client-status` to mark app-owned clients as `off-boarded`, save offboarded date/churn context, and write history/audit events; Jay QA passed with Josh Garvey assigned to Ben.
-  - 2026-06-20 RetainOS upgrade deployed: offboarding now uses an actual end date instead of save time, computes churn against current contract end, conditionally requires churn reason/notes, captures offer-fit, and stores an `offboarding` metadata packet. Jay QA is queued for this richer flow.
+  - 2026-06-20 RetainOS upgrade deployed: offboarding now uses an actual end date instead of save time, computes churn against current contract end, conditionally requires churn reason/notes, captures offer-fit, and stores an `offboarding` metadata packet. Jay QA passed.
   - `manage-client-offboard` is legacy unless intentionally revived.
 - `[~]` `[polish]` Client update history view.
   - Pilot view reads `client_history_events`; full Glide-style audit/change log is still future work.
-- `[~]` `[qa]` Track call attendance.
-  - 2026-07-06 MM launch build: call attendance now writes app-owned attended/missed events from Quick Update and Client Detail > Program, with Fathom-matched call summaries auto-recorded as attended. Awaiting Jay/MM QA before closure.
+- `[x]` Track call attendance.
+  - 2026-07-06 MM launch build: call attendance now writes app-owned attended/missed events from Quick Update and Client Detail > Program, with Fathom-matched call summaries auto-recorded as attended. Jay QA passed for the launch implementation.
 - `[~]` `[polish]` Task create/edit/complete/dismiss flows.
-  - 2026-06-18 local Tasks V1.5 pass adds edit/complete/reopen/dismiss/archive/status-drag behavior for app-owned companies.
-  - Needs `manage-client-task` deploy and Jay QA before closure.
+  - 2026-06-18 Tasks V1.5 pass adds edit/complete/reopen/dismiss/archive/status-drag behavior for app-owned companies. `manage-client-task` is deployed and launch QA passed; remaining task work is tracked as polish/new feature scope.
 - `[x]` Contract create/edit flow.
   - Create/edit/archive are live locally through `manage-client-contract`.
   - 2026-06-15 Jay QA passed create/edit/archive/delete, Contract tab filters, current-summary display cleanup, and expected duration/date calculation polish after successful Supabase deploys.
@@ -1439,7 +1438,7 @@ These formulas matter when RetainOS moves away from read-only Glide mirror field
   - Pilot v1: New Contract renewal/upsell flow includes a Mark Success checkbox.
 - `[ ]` Average Time to Success.
   - Formula: success marked yes date minus onboarded/date-added-to-app date.
-- `[~]` `[qa]` Average Time to Value / TTV.
+- `[~]` `[downstream]` Average Time to Value / TTV.
   - Admin Hub > Pathways & Milestones stores the active Time to Value milestone per pathway/offer.
   - Dashboard > Overview > Journey shows Avg. Time to Value, reached count, and configured TTV points.
   - Formula: TTV milestone completion date minus client onboarding/start date, averaged across clients who reached a configured active TTV milestone in the selected filters.
@@ -1854,11 +1853,11 @@ Use this section as the “what good looks like” checklist before migrating re
   - 2026-07-02 Loom polish: Client Detail > Outcomes custom fields are collapsed behind an expandable section with filled-field count; Quick Update custom fields are unchanged.
 - `[x]` Client profile supports up to three email addresses for integration matching.
   - 2026-06-20 added primary + two alternate email slots on app-owned clients. Call Summary / Next Steps, Client Update Webhook, New Client Webhook, and Integration Review matching now use all three while keeping ambiguous matches in review.
-- `[ ]` Client profile supports call attendance tracking.
+- `[x]` Client profile supports call attendance tracking.
 - `[ ]` Client profile supports progress and buy-in updates.
 - `[x]` Client profile supports testimonials, reviews, referrals, renewal/upsell asks, and related client outcomes.
   - 2026-06-21 build: added app-owned `client_advocacy_events`, client advocacy summary fields, Quick Update and Client Detail > Outcomes Advocacy & Growth panels, Dashboard > Overview Advocacy & Growth reporting, legacy Glide backfill, and generic company migration script mapping. Jay QA passed the Client Detail write, Dashboard Overview display/filters, and Quick Update order correction.
-  - 2026-06-21 Client Advocacy Triggers follow-up: Clients now has app-owned Review, Testimonial, Referral, and Renewal / Upsell status filters (`Any`, `Not asked`, `Asked`, `Received`) that combine with existing roster filters. Jay QA needed before treating the filter follow-up as fully passed.
+  - 2026-06-21 Client Advocacy Triggers follow-up: Clients now has app-owned Review, Testimonial, Referral, and Renewal / Upsell status filters (`Any`, `Not asked`, `Asked`, `Received`) that combine with existing roster filters. Treat further tuning as roster-filter polish unless Jay flags a current workflow issue.
   - 2026-06-21 filter UI polish: advanced Journey/Contract, Health/Outcomes, and Advocacy/Growth filters are now collapsible sections with active-count badges to reduce filter-panel bulk. Awaiting Jay visual QA.
 - `[ ]` Client profile supports notes and next steps updates at the CSM cadence.
 - `[ ]` Client profile stores next steps and profile updates into history.
