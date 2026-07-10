@@ -3450,6 +3450,26 @@ function TaskTemplatesModal({
                   className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
                 />
               </label>
+              <label className="block text-sm font-medium text-[#344054]">
+                Priority
+                <select
+                  disabled={disabled || saving}
+                  value={draft.priority ?? ""}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      priority: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                >
+                  <option value="">None</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </label>
               <div className="rounded-md border border-[#d9e2ec] bg-[#f8fafc] p-4 sm:col-span-2">
                 <label className="flex items-start gap-3 text-sm font-semibold text-[#101828]">
                   <input
@@ -3494,26 +3514,6 @@ function TaskTemplatesModal({
                   />
                 </label>
               </div>
-              <label className="block text-sm font-medium text-[#344054]">
-                Priority
-                <select
-                  disabled={disabled || saving}
-                  value={draft.priority ?? ""}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      priority: event.target.value,
-                    }))
-                  }
-                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
-                >
-                  <option value="">None</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
-              </label>
             </div>
             <SettingsFlag
               label="Template enabled"
