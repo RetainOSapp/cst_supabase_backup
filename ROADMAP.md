@@ -58,8 +58,9 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Milestone-completed task template QA passed.
   - 2026-07-03 Jay QA passed: primary pathway milestone completion can auto-create matching template tasks.
   - 2026-07-09 polish: completed Client Detail pathway milestones can edit completion date/notes without replaying completion side effects; milestone completion notes now persist on `client_milestones`.
-- `[~]` `[qa]` MM pathway/archive cleanup retest.
-  - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule. Jay should retest archiving an unused MM pathway and an unused MM milestone.
+- `[x]` MM pathway/archive cleanup retest.
+  - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule.
+  - 2026-07-11 Jay QA passed: unused MM pathways and milestones archive correctly.
 - `[x]` Moves Method webhook setup dry run.
   - 2026-07-02 readiness patch deployed: `zapier-create-client` accepts canonical `pathway_id`, optional `secondary_pathway_id` + `secondary_milestone_id`, and legacy `offer_id` / `secondary_offer_id` aliases. `webhook-update-client` accepts the same fields for a conditional second Zapier step. Both validate active app-owned company pathways/milestones and require Secondary Pathway to be enabled.
   - 2026-07-02 internal QA: Moves Method was seeded as an app-owned pilot shell only (`companies.id = 21586391-9a84-4072-9ae6-20436b27bea9`, legacy `wd7vy0vaQK2hgB3IRqy17w`) with 89 members, 16 pathways, 33 milestones, and zero migrated clients. Secondary Pathway and New Client Webhook settings are enabled.
