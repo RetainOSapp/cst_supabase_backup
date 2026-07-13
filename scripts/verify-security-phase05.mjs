@@ -24,6 +24,7 @@ const sources = new Map(
 const sharedAuth = fs.readFileSync("supabase/functions/_shared/auth.ts", "utf8");
 const sharedHttp = fs.readFileSync("supabase/functions/_shared/http.ts", "utf8");
 const functionConfig = fs.readFileSync("supabase/config.toml", "utf8");
+const prepareLogin = sources.get("prepare-login").source;
 const checks = [];
 
 function check(label, condition, detail = "") {
@@ -70,6 +71,106 @@ for (const name of ["webhook-update-client", "ingest-client-call-summary"]) {
     source.includes("isExisting") && source.includes("duplicate: true"),
   );
 }
+
+const clientUpdateWebhook = sources.get("webhook-update-client").source;
+check(
+  "client update webhook moves only stale received events to review",
+  clientUpdateWebhook.includes("INTAKE_STALE_AFTER_MS = 30 * 60 * 1000") &&
+    clientUpdateWebhook.includes("at most 400 seconds") &&
+    clientUpdateWebhook.includes("moveStaleReceivedEventToReview") &&
+    clientUpdateWebhook.includes('moved_to_review_reason: "stale_received_event"'),
+);
+check(
+  "client update stale-event transition is optimistic and has no auto replay",
+  clientUpdateWebhook.includes('.eq("status", "received")') &&
+    clientUpdateWebhook.includes('.eq("updated_at", event.updated_at)') &&
+    !clientUpdateWebhook.includes("claimRecoverableIntakeEvent"),
+);
+check(
+  "client update catch cannot regress a terminal intake status",
+  /error_message: message,[\s\S]{0,140}\.eq\("id", storedIntakeEvent\.id\)[\s\S]{0,80}\.eq\("status", "received"\)/.test(
+    clientUpdateWebhook,
+  ),
+);
+
+const callSummaryWebhook = sources.get("ingest-client-call-summary").source;
+check(
+  "call summary matching excludes archived clients without a five-row cap",
+  callSummaryWebhook.includes('.is("archived_at", null)') &&
+    !callSummaryWebhook.includes(".limit(5)") &&
+    callSummaryWebhook.includes("hasIlikeWildcard"),
+);
+check(
+  "call summary webhook moves only stale received events to review",
+  callSummaryWebhook.includes("INTAKE_STALE_AFTER_MS = 30 * 60 * 1000") &&
+    callSummaryWebhook.includes("moveStaleReceivedEventToReview") &&
+    callSummaryWebhook.includes('moved_to_review_reason: "stale_received_event"'),
+);
+check(
+  "call summary catch cannot regress a terminal intake status",
+  /error_message: error instanceof Error[\s\S]{0,180}\.eq\("id", storedIntakeEvent\.id\)[\s\S]{0,80}\.eq\("status", "received"\)/.test(
+    callSummaryWebhook,
+  ),
+);
+check(
+  "call summary audit completes before terminal intake status",
+  callSummaryWebhook.indexOf("const { error: auditError }") <
+    callSummaryWebhook.indexOf('status: "processed"') &&
+    callSummaryWebhook.includes("if (auditError) throw auditError"),
+);
+check(
+  "call summary checkpoints original client values before writes",
+  callSummaryWebhook.includes("processing_checkpoint") &&
+    callSummaryWebhook.includes("previous_next_steps: previousNextSteps") &&
+    callSummaryWebhook.indexOf("processing_checkpoint") <
+      callSummaryWebhook.indexOf('.from("clients")\n      .update({'),
+);
+check(
+  "call summary rejects malformed timestamps instead of silently using now",
+  callSummaryWebhook.includes("Invalid call timestamp") &&
+    callSummaryWebhook.includes("error instanceof RequestValidationError") &&
+    callSummaryWebhook.includes("isValidationError ? 400 : 500"),
+);
+
+const integrationReview = sources.get("manage-integration-review").source;
+const callSummaryReview = integrationReview.slice(
+  integrationReview.indexOf("async function applyCallSummary"),
+  integrationReview.indexOf("async function applyClientUpdate"),
+);
+check(
+  "integration review claims one operator with stale-claim recovery",
+  integrationReview.includes("claimReviewEvent") &&
+    integrationReview.includes("REVIEW_CLAIM_STALE_AFTER_MS = 30 * 60 * 1000") &&
+    integrationReview.includes('.eq("updated_at", event.updated_at)'),
+);
+check(
+  "integration review keeps claim-version ownership through terminal writes",
+  integrationReview.includes("function reviewClaimVersion") &&
+    integrationReview.includes("assertReviewClaimOwnership") &&
+    integrationReview.includes('.eq("updated_at", reviewClaimVersion(event))') &&
+    integrationReview.includes('.eq("updated_at", claimedReviewEventVersion)'),
+);
+check(
+  "call summary review reuses history and restores attendance",
+  callSummaryReview.includes("existingHistory") &&
+    callSummaryReview.includes("processingCheckpoint") &&
+    callSummaryReview.includes("existingAttendance") &&
+    callSummaryReview.includes('from("client_call_attendance_events")'),
+);
+check(
+  "call summary review reuses audit and closes intake last",
+  callSummaryReview.includes("existingAudit") &&
+    callSummaryReview.indexOf("existingAudit") <
+      callSummaryReview.indexOf('status: "processed"') &&
+    callSummaryReview.includes('.eq("status", "received")'),
+);
+check(
+  "integration review preserves attendee-list matching without unsafe email learning",
+  integrationReview.includes("function eventClientEmails") &&
+    integrationReview.includes("findClientsByEmails") &&
+    integrationReview.includes("hasIlikeWildcard") &&
+    integrationReview.includes("if (submittedEmails.length !== 1) return null"),
+);
 
 check(
   "live client-create contract and recurring-task behavior is preserved",
@@ -165,8 +266,29 @@ check(
 );
 check(
   "prepare-login uses the SuperAdmin registry and generic success",
-  sources.get("prepare-login").source.includes('from("retainos_super_admins")') &&
-    sources.get("prepare-login").source.includes("genericPreparedResponse"),
+  prepareLogin.includes('from("retainos_super_admins")') &&
+    prepareLogin.includes("genericPreparedResponse"),
+);
+check(
+  "prepare-login selects a real SuperAdmin registry column",
+  /from\("retainos_super_admins"\)[\s\S]{0,160}\.select\("email"\)[\s\S]{0,160}\.eq\("email", email\)/.test(
+    prepareLogin,
+  ),
+);
+check(
+  "prepare-login treats case-insensitive email matches as literals",
+  prepareLogin.includes(
+    'const POSTGREST_ILIKE_WILDCARDS = ["\\\\", "%", "_", "*"]',
+  ) &&
+    prepareLogin.includes("function hasIlikeWildcard") &&
+    (prepareLogin.match(
+      /hasIlikeWildcard\(email\)[\s\S]{0,120}\? baseQuery\.eq\("email", email\)[\s\S]{0,120}: baseQuery\.ilike\("email", email\)/g,
+    )?.length ?? 0) === 2,
+);
+check(
+  "prepare-login keeps valid-email internal failures generic",
+  (prepareLogin.match(/return genericPreparedResponse\(req\);/g)?.length ?? 0) === 5 &&
+    !/\b500\b/.test(prepareLogin),
 );
 for (const name of [
   "sync-glide",

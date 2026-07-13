@@ -13,6 +13,14 @@ function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+const POSTGREST_ILIKE_WILDCARDS = ["\\", "%", "_", "*"];
+
+function hasIlikeWildcard(value: string) {
+  return POSTGREST_ILIKE_WILDCARDS.some((character) =>
+    value.includes(character)
+  );
+}
+
 function jsonResponse(req: Request, body: unknown, status = 200) {
   return sharedJsonResponse(req, body, status);
 }
@@ -25,10 +33,13 @@ async function hasActiveAppMembership(
   supabase: SupabaseServiceClient,
   email: string,
 ) {
-  const { data, error } = await supabase
+  const baseQuery = supabase
     .from("company_members")
-    .select("id, status, company:companies!inner(id, migration_status)")
-    .ilike("email", email)
+    .select("id, status, company:companies!inner(id, migration_status)");
+  const emailQuery = hasIlikeWildcard(email)
+    ? baseQuery.eq("email", email)
+    : baseQuery.ilike("email", email);
+  const { data, error } = await emailQuery
     .eq("status", "active")
     .in("company.migration_status", ["pilot", "migrated"]);
 
@@ -41,10 +52,13 @@ async function hasActiveMirrorMembership(
   supabase: SupabaseServiceClient,
   email: string,
 ) {
-  const { data, error } = await supabase
+  const baseQuery = supabase
     .from("backup_company_team")
-    .select("glide_row_id, company_id, is_archived")
-    .ilike("email", email);
+    .select("glide_row_id, company_id, is_archived");
+  const emailQuery = hasIlikeWildcard(email)
+    ? baseQuery.eq("email", email)
+    : baseQuery.ilike("email", email);
+  const { data, error } = await emailQuery;
 
   if (error) throw error;
 
@@ -60,8 +74,8 @@ async function hasActiveSuperAdminEntry(
 ) {
   const { data, error } = await supabase
     .from("retainos_super_admins")
-    .select("id")
-    .ilike("email", email)
+    .select("email")
+    .eq("email", email)
     .eq("status", "active")
     .maybeSingle();
   if (error) throw error;
@@ -100,7 +114,7 @@ Deno.serve(async (req) => {
       }
     } catch (error) {
       console.error(error);
-      return jsonResponse(req, { error: "Could not prepare login right now." }, 500);
+      return genericPreparedResponse(req);
     }
 
     if (!isSuperAdmin && !hasActiveMembership) {
@@ -117,12 +131,12 @@ Deno.serve(async (req) => {
       !createError.message.toLowerCase().includes("already")
     ) {
       console.error(createError);
-      return jsonResponse(req, { error: "Could not prepare login right now." }, 500);
+      return genericPreparedResponse(req);
     }
 
     return genericPreparedResponse(req);
   } catch (error) {
     console.error(error);
-    return jsonResponse(req, { error: "Could not prepare login right now." }, 500);
+    return genericPreparedResponse(req);
   }
 });

@@ -8,6 +8,9 @@ import {
 } from "../_shared/http.ts";
 
 const ACTIVE_PROGRAM_STATUSES = new Set(["front-end", "back-end", "paused", "suspended"]);
+// Hosted Supabase Edge workers stop after at most 400 seconds. This buffer
+// ensures the original invocation is gone before an event moves to review.
+const INTAKE_STALE_AFTER_MS = 30 * 60 * 1000;
 
 type IntegrationSecretValidationResult =
   | {
@@ -21,6 +24,8 @@ type IntegrationSecretValidationResult =
       error: string;
       status: number;
     };
+
+class RequestValidationError extends Error {}
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -45,6 +50,10 @@ function pickPayloadFields(body: Record<string, unknown>, keys: string[]) {
 
 function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
+}
+
+function hasIlikeWildcard(value: string) {
+  return ["\\", "%", "_", "*"].some((character) => value.includes(character));
 }
 
 function normalizeEmailList(value: unknown): string[] {
@@ -105,13 +114,16 @@ async function findClientsByEmails(
   ].slice(0, 25);
   const queries = normalizedEmails.flatMap((email) =>
     ["client_email", "client_email_secondary", "client_email_tertiary"].map(
-      (column) =>
-        supabase
+      (column) => {
+        let query = supabase
           .from("clients")
           .select(clientSelect)
-          .eq("company_id", companyId)
-          .ilike(column, email)
-          .limit(5),
+          .eq("company_id", companyId);
+        query = hasIlikeWildcard(email)
+          ? query.eq(column, email)
+          : query.ilike(column, email);
+        return query.is("archived_at", null);
+      },
     )
   );
   const results = await Promise.all(queries);
@@ -179,7 +191,10 @@ function parseDateTime(value: unknown) {
   const text = cleanText(value);
   if (!text) return new Date().toISOString();
   const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+  if (Number.isNaN(date.getTime())) {
+    throw new RequestValidationError(`Invalid call timestamp: ${text}`);
+  }
+  return date.toISOString();
 }
 
 function metadataRecord(value: unknown) {
@@ -368,6 +383,48 @@ async function upsertIntakeEvent(
   return { event: data, isExisting: false };
 }
 
+async function moveStaleReceivedEventToReview(
+  supabase: ReturnType<typeof createClient>,
+  event: Record<string, unknown>,
+) {
+  if (event.status !== "received" || !event.updated_at) return null;
+  const updatedAt = new Date(String(event.updated_at));
+  if (
+    Number.isNaN(updatedAt.getTime()) ||
+    Date.now() - updatedAt.getTime() < INTAKE_STALE_AFTER_MS
+  ) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("integration_intake_events")
+    .update({
+      status: "failed",
+      error_message:
+        "Webhook processing did not finish. Review this event before retrying.",
+      metadata: {
+        ...metadataRecord(event.metadata),
+        moved_to_review_at: new Date().toISOString(),
+        moved_to_review_reason: "stale_received_event",
+      },
+    })
+    .eq("id", event.id)
+    .eq("status", "received")
+    .eq("updated_at", event.updated_at)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data as Record<string, unknown>;
+
+  const { data: current, error: currentError } = await supabase
+    .from("integration_intake_events")
+    .select("*")
+    .eq("id", event.id)
+    .single();
+  if (currentError) throw currentError;
+  return current as Record<string, unknown>;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return optionsResponse(
@@ -533,7 +590,7 @@ Deno.serve(async (req) => {
       intakePayload,
       externalEventId,
     );
-    const intakeEvent = intakeResult?.event;
+    let intakeEvent = intakeResult?.event as Record<string, unknown> | null;
     storedIntakeEvent = intakeEvent as Record<string, unknown> | null;
 
     if (!intakeEvent) {
@@ -541,6 +598,27 @@ Deno.serve(async (req) => {
         { error: "Unable to store integration intake event." },
         500,
       );
+    }
+
+    if (intakeResult.isExisting && intakeEvent.status === "received") {
+      const staleEvent = await moveStaleReceivedEventToReview(
+        supabase,
+        intakeEvent as Record<string, unknown>,
+      );
+      if (staleEvent) {
+        const staleStatus = String(staleEvent.status ?? "");
+        const isProcessed = staleStatus === "processed";
+        return respond(
+          {
+            ok: isProcessed,
+            duplicate: true,
+            inProgress: staleStatus === "received",
+            needsReview: ["failed", "needs_review"].includes(staleStatus),
+            event: staleEvent,
+          },
+          isProcessed ? 200 : 202,
+        );
+      }
     }
 
     if (intakeResult.isExisting) {
@@ -589,7 +667,7 @@ Deno.serve(async (req) => {
           match_status: matchStatus,
           error_message: errorMessage,
           metadata: {
-            ...(intakeEvent.metadata ?? {}),
+            ...metadataRecord(intakeEvent.metadata),
             total_matches: clientRows.length,
             active_matches: activeClients.length,
             submitted_client_emails: clientEmails,
@@ -622,6 +700,27 @@ Deno.serve(async (req) => {
       company.id,
       startedAt,
     );
+
+    const { data: checkpointedEvent, error: checkpointError } = await supabase
+      .from("integration_intake_events")
+      .update({
+        metadata: {
+          ...metadataRecord(intakeEvent.metadata),
+          processing_checkpoint: {
+            previous_next_steps: previousNextSteps,
+            previous_last_contact_at: previousLastContact,
+            previous_next_contact_at: previousNextContact,
+            checkpointed_at: new Date().toISOString(),
+          },
+        },
+      })
+      .eq("id", intakeEvent.id)
+      .eq("status", "received")
+      .select("*")
+      .single();
+    if (checkpointError) throw checkpointError;
+    intakeEvent = checkpointedEvent as Record<string, unknown>;
+    storedIntakeEvent = intakeEvent;
 
     const { data: updatedClient, error: updateClientError } = await supabase
       .from("clients")
@@ -708,31 +807,7 @@ Deno.serve(async (req) => {
       .single();
     if (callAttendanceError) throw callAttendanceError;
 
-    const { data: processedEvent, error: processedError } = await supabase
-      .from("integration_intake_events")
-      .update({
-        status: "processed",
-        match_status: "matched",
-        matched_client_id: client.id,
-        matched_legacy_client_glide_row_id: client.glide_row_id,
-        matched_by: "client_email",
-        error_message: null,
-        processed_at: new Date().toISOString(),
-        metadata: {
-          ...(intakeEvent.metadata ?? {}),
-          history_event_id: historyEvent.id,
-          call_attendance_event_id: callAttendanceEvent.id,
-          previous_next_steps: previousNextSteps,
-          previous_last_contact_at: previousLastContact,
-          previous_next_contact_at: previousNextContact,
-        },
-      })
-      .eq("id", intakeEvent.id)
-      .select("*")
-      .single();
-    if (processedError) throw processedError;
-
-    await supabase.from("app_audit_events").insert({
+    const { error: auditError } = await supabase.from("app_audit_events").insert({
       company_id: company.id,
       event_type: "call_summary_next_steps_processed",
       source: provider,
@@ -752,13 +827,39 @@ Deno.serve(async (req) => {
         csm_date_of_next_contact: updatedClient.csm_date_of_next_contact,
       },
       metadata: {
-        integration_intake_event_id: processedEvent.id,
+        integration_intake_event_id: intakeEvent.id,
         history_event_id: historyEvent.id,
         call_attendance_event_id: callAttendanceEvent.id,
         provider,
         external_event_id: externalEventId,
       },
     });
+    if (auditError) throw auditError;
+
+    const { data: processedEvent, error: processedError } = await supabase
+      .from("integration_intake_events")
+      .update({
+        status: "processed",
+        match_status: "matched",
+        matched_client_id: client.id,
+        matched_legacy_client_glide_row_id: client.glide_row_id,
+        matched_by: "client_email",
+        error_message: null,
+        processed_at: new Date().toISOString(),
+        metadata: {
+          ...metadataRecord(intakeEvent.metadata),
+          history_event_id: historyEvent.id,
+          call_attendance_event_id: callAttendanceEvent.id,
+          previous_next_steps: previousNextSteps,
+          previous_last_contact_at: previousLastContact,
+          previous_next_contact_at: previousNextContact,
+        },
+      })
+      .eq("id", intakeEvent.id)
+      .eq("status", "received")
+      .select("*")
+      .single();
+    if (processedError) throw processedError;
 
     return respond({
       ok: true,
@@ -776,8 +877,17 @@ Deno.serve(async (req) => {
           status: "failed",
           error_message: error instanceof Error ? error.message : "Unexpected error",
         })
-        .eq("id", storedIntakeEvent.id);
+        .eq("id", storedIntakeEvent.id)
+        .eq("status", "received");
     }
-    return respond({ error: "Unexpected call summary ingestion error." }, 500);
+    const isValidationError = error instanceof RequestValidationError;
+    return respond(
+      {
+        error: isValidationError
+          ? error.message
+          : "Unexpected call summary ingestion error.",
+      },
+      isValidationError ? 400 : 500,
+    );
   }
 });

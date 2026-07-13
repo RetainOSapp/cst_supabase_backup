@@ -68,6 +68,9 @@ const CLIENT_UPDATE_REVIEW_PAYLOAD_KEYS = [
   "custom_fields",
   "customFields",
 ] as const;
+// Hosted Supabase Edge workers stop after at most 400 seconds. This buffer
+// ensures the original invocation is gone before an event moves to review.
+const INTAKE_STALE_AFTER_MS = 30 * 60 * 1000;
 
 type SupabaseClient = ReturnType<typeof createClient>;
 type JsonRecord = Record<string, unknown>;
@@ -253,6 +256,12 @@ function compactObject(value: JsonRecord) {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined && item !== ""),
   );
+}
+
+function recordValue(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
 }
 
 function changedFields(before: JsonRecord, after: JsonRecord) {
@@ -465,6 +474,48 @@ async function upsertIntakeEvent(
     .single();
   if (error) throw error;
   return { event: data, isExisting: false };
+}
+
+async function moveStaleReceivedEventToReview(
+  supabase: SupabaseClient,
+  event: JsonRecord,
+) {
+  if (event.status !== "received" || !event.updated_at) return null;
+  const updatedAt = new Date(String(event.updated_at));
+  if (
+    Number.isNaN(updatedAt.getTime()) ||
+    Date.now() - updatedAt.getTime() < INTAKE_STALE_AFTER_MS
+  ) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("integration_intake_events")
+    .update({
+      status: "failed",
+      error_message:
+        "Webhook processing did not finish. Review this event before retrying.",
+      metadata: {
+        ...recordValue(event.metadata),
+        moved_to_review_at: new Date().toISOString(),
+        moved_to_review_reason: "stale_received_event",
+      },
+    })
+    .eq("id", event.id)
+    .eq("status", "received")
+    .eq("updated_at", event.updated_at)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data as JsonRecord;
+
+  const { data: current, error: currentError } = await supabase
+    .from("integration_intake_events")
+    .select("*")
+    .eq("id", event.id)
+    .single();
+  if (currentError) throw currentError;
+  return current as JsonRecord;
 }
 
 async function resolveAssignableMember(
@@ -787,6 +838,27 @@ Deno.serve(async (req) => {
         { error: "Unable to store integration intake event." },
         500,
       );
+    }
+
+    if (intakeResult.isExisting && intakeEvent.status === "received") {
+      const staleEvent = await moveStaleReceivedEventToReview(
+        supabase,
+        intakeEvent as JsonRecord,
+      );
+      if (staleEvent) {
+        const staleStatus = String(staleEvent.status ?? "");
+        const isProcessed = staleStatus === "processed";
+        return respond(
+          {
+            ok: isProcessed,
+            duplicate: true,
+            inProgress: staleStatus === "received",
+            needsReview: ["failed", "needs_review"].includes(staleStatus),
+            event: staleEvent,
+          },
+          isProcessed ? 200 : 202,
+        );
+      }
     }
 
     if (intakeResult.isExisting) {
@@ -1155,7 +1227,8 @@ Deno.serve(async (req) => {
           status: "failed",
           error_message: message,
         })
-        .eq("id", storedIntakeEvent.id);
+        .eq("id", storedIntakeEvent.id)
+        .eq("status", "received");
     }
     const isValidationError = error instanceof RequestValidationError;
     return respond(

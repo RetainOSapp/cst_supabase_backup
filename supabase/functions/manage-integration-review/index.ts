@@ -28,6 +28,9 @@ const CLIENT_UPDATE_FIELDS = [
   "offer_milestones_current_offer_id",
   "csm_team_member_id",
 ] as const;
+// Hosted Supabase Edge workers stop after at most 400 seconds. This buffer
+// ensures an abandoned operator claim is safe to return to review.
+const REVIEW_CLAIM_STALE_AFTER_MS = 30 * 60 * 1000;
 
 type SupabaseClient = SupabaseServiceClient;
 type JsonRecord = Record<string, unknown>;
@@ -51,6 +54,32 @@ function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
 
+function hasIlikeWildcard(value: string) {
+  return ["\\", "%", "_", "*"].some((character) => value.includes(character));
+}
+
+function normalizeEmailList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return [
+      ...new Set(
+        value
+          .flatMap((item) => normalizeEmailList(item))
+          .filter((email) => email.includes("@")),
+      ),
+    ].slice(0, 25);
+  }
+  const text = normalizeEmail(value);
+  if (!text) return [];
+  return [
+    ...new Set(
+      text
+        .split(/[;,\n]/)
+        .map((item) => item.trim())
+        .filter((email) => email.includes("@")),
+    ),
+  ].slice(0, 25);
+}
+
 function clientEmailValues(client: JsonRecord) {
   return [
     normalizeEmail(client.client_email),
@@ -65,15 +94,29 @@ function clientMatchesEmail(client: JsonRecord, email: string) {
   return clientEmailValues(client).includes(normalized);
 }
 
-function eventClientEmail(event: JsonRecord) {
+function clientMatchesAnyEmail(client: JsonRecord, emails: string[]) {
+  const submitted = new Set(emails.map(normalizeEmail).filter(Boolean));
+  return clientEmailValues(client).some((email) => submitted.has(email));
+}
+
+function eventClientEmails(event: JsonRecord) {
   const payload = getPayload(event);
   const metadata = getMetadata(event);
-  return normalizeEmail(
-    metadata.client_email ??
+  return normalizeEmailList(
+    metadata.client_emails ??
+      metadata.client_email ??
       payload.client_email ??
       payload.clientEmail ??
-      payload.email,
+      payload.email ??
+      payload.attendee_emails ??
+      payload.attendeeEmails ??
+      payload.invitee_emails ??
+      payload.inviteeEmails,
   );
+}
+
+function eventClientEmail(event: JsonRecord) {
+  return eventClientEmails(event)[0] ?? "";
 }
 
 async function findClientsByEmail(
@@ -87,14 +130,16 @@ async function findClientsByEmail(
 
   const results = await Promise.all(
     ["client_email", "client_email_secondary", "client_email_tertiary"].map(
-      (column) =>
-        supabase
+      (column) => {
+        let query = supabase
           .from("clients")
           .select(clientSelect)
-          .eq("company_id", companyId)
-          .ilike(column, normalizedEmail)
-          .is("archived_at", null)
-          .limit(5),
+          .eq("company_id", companyId);
+        query = hasIlikeWildcard(normalizedEmail)
+          ? query.eq(column, normalizedEmail)
+          : query.ilike(column, normalizedEmail);
+        return query.is("archived_at", null);
+      },
     ),
   );
   const clients = new Map<string, JsonRecord>();
@@ -107,6 +152,24 @@ async function findClientsByEmail(
         clients.set(String(client.id), client);
       }
     }
+  }
+  return [...clients.values()];
+}
+
+async function findClientsByEmails(
+  supabase: SupabaseClient,
+  companyId: string,
+  clientSelect: string,
+  emails: string[],
+) {
+  const matches = await Promise.all(
+    emails.slice(0, 25).map((email) =>
+      findClientsByEmail(supabase, companyId, clientSelect, email)
+    ),
+  );
+  const clients = new Map<string, JsonRecord>();
+  for (const rows of matches) {
+    for (const client of rows) clients.set(String(client.id), client);
   }
   return [...clients.values()];
 }
@@ -203,7 +266,9 @@ async function learnClientEmailFromManualMatch(
 ) {
   if (!isManualMatch(matchedBy)) return null;
 
-  const learnedEmail = eventClientEmail(event);
+  const submittedEmails = eventClientEmails(event);
+  if (submittedEmails.length !== 1) return null;
+  const learnedEmail = submittedEmails[0];
   if (!learnedEmail || clientMatchesEmail(client, learnedEmail)) return null;
 
   const updateColumn =
@@ -333,11 +398,96 @@ async function loadReviewEvent(
     .select("*")
     .eq("id", eventId)
     .eq("company_id", companyId)
-    .in("status", ["needs_review", "failed"])
+    .in("status", ["needs_review", "failed", "received"])
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new ReviewValidationError("Review event is not open.");
+  if (data.status === "received") {
+    const updatedAt = new Date(String(data.updated_at ?? ""));
+    if (
+      Number.isNaN(updatedAt.getTime()) ||
+      Date.now() - updatedAt.getTime() < REVIEW_CLAIM_STALE_AFTER_MS
+    ) {
+      throw new ReviewValidationError("This event is already being reviewed.");
+    }
+    const { data: recovered, error: recoverError } = await supabase
+      .from("integration_intake_events")
+      .update({
+        status: "failed",
+        error_message: "A previous review attempt did not finish.",
+        metadata: {
+          ...getMetadata(data as JsonRecord),
+          review_claim_recovered_at: new Date().toISOString(),
+        },
+      })
+      .eq("id", data.id)
+      .eq("status", "received")
+      .eq("updated_at", data.updated_at)
+      .select("*")
+      .maybeSingle();
+    if (recoverError) throw recoverError;
+    if (!recovered) {
+      throw new ReviewValidationError("This event is already being reviewed.");
+    }
+    return recovered as JsonRecord;
+  }
   return data as JsonRecord;
+}
+
+async function claimReviewEvent(
+  supabase: SupabaseClient,
+  event: JsonRecord,
+  action: string,
+  actorEmail: string,
+) {
+  const { data, error } = await supabase
+    .from("integration_intake_events")
+    .update({
+      status: "received",
+      error_message: null,
+      metadata: {
+        ...getMetadata(event),
+        review_claimed_at: new Date().toISOString(),
+        review_claimed_by: actorEmail,
+        review_claimed_action: action,
+      },
+    })
+    .eq("id", event.id)
+    .eq("status", event.status)
+    .eq("updated_at", event.updated_at)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ReviewValidationError("This event is already being reviewed.");
+  return data as JsonRecord;
+}
+
+function reviewClaimVersion(event: JsonRecord) {
+  // The database-generated updated_at value is the claim version. Every event
+  // transition must still own this exact version, so an older worker cannot
+  // close or fail a claim recovered by a newer operator.
+  const updatedAt = cleanText(event.updated_at);
+  if (!updatedAt) {
+    throw new ReviewValidationError("This review claim has no ownership version.");
+  }
+  return updatedAt;
+}
+
+async function assertReviewClaimOwnership(
+  supabase: SupabaseClient,
+  event: JsonRecord,
+) {
+  const { data, error } = await supabase
+    .from("integration_intake_events")
+    .select("id")
+    .eq("id", event.id)
+    .eq("status", "received")
+    .eq("updated_at", reviewClaimVersion(event))
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new ReviewValidationError("This review claim is no longer active.");
+  }
 }
 
 async function findClientForEvent(
@@ -386,12 +536,8 @@ async function findClientForEvent(
     };
   }
 
-  const clientEmail = normalizeEmail(
-    metadata.client_email ??
-      payload.client_email ??
-      payload.clientEmail ??
-      payload.email,
-  );
+  const clientEmails = eventClientEmails(event);
+  const clientEmail = clientEmails[0] ?? "";
   const requestedClientId = cleanText(payload.client_id) || cleanText(payload.clientId);
 
   if (requestedClientId) {
@@ -402,9 +548,9 @@ async function findClientForEvent(
       .eq("id", requestedClientId)
       .is("archived_at", null);
     if (error) throw error;
-    const rows = clientEmail
+    const rows = clientEmails.length > 0
       ? (data ?? []).filter(
-          (client) => clientMatchesEmail(client, clientEmail),
+          (client) => clientMatchesAnyEmail(client, clientEmails),
         )
       : data ?? [];
     if (rows.length === 1) {
@@ -416,11 +562,11 @@ async function findClientForEvent(
     throw new ReviewValidationError("This event has no client email to retry.");
   }
 
-  const emailMatches = await findClientsByEmail(
+  const emailMatches = await findClientsByEmails(
     supabase,
     companyId,
     clientSelect,
-    clientEmail,
+    clientEmails,
   );
   const rows = emailMatches.filter((client) =>
     ACTIVE_PROGRAM_STATUSES.has(
@@ -433,7 +579,7 @@ async function findClientForEvent(
       matchStatus === "ambiguous"
         ? "Multiple matching active clients were found for this email."
         : "No active client matched this email.";
-    await supabase
+    const { data: reviewEvent, error: reviewError } = await supabase
       .from("integration_intake_events")
       .update({
         status: "needs_review",
@@ -442,11 +588,20 @@ async function findClientForEvent(
         metadata: {
           ...metadata,
           retry_checked_at: new Date().toISOString(),
+          submitted_client_emails: clientEmails,
           active_matches: rows.length,
           total_matches: emailMatches.length,
         },
       })
-      .eq("id", event.id);
+      .eq("id", event.id)
+      .eq("status", "received")
+      .eq("updated_at", reviewClaimVersion(event))
+      .select("id")
+      .maybeSingle();
+    if (reviewError) throw reviewError;
+    if (!reviewEvent) {
+      throw new ReviewValidationError("This review claim is no longer active.");
+    }
     throw new ReviewValidationError(errorMessage);
   }
 
@@ -515,6 +670,8 @@ async function applyCallSummary(
   matchedBy: string,
   actorEmail: string,
 ) {
+  await assertReviewClaimOwnership(supabase, event);
+
   const payload = getPayload(event);
   const metadata = getMetadata(event);
   const provider = cleanText(event.provider) || "integration";
@@ -536,9 +693,32 @@ async function applyCallSummary(
       metadata.started_at,
     false,
   );
-  const previousNextSteps = client.next_steps_value ?? null;
-  const previousLastContact = client.csm_date_of_last_contact ?? null;
-  const previousNextContact = client.csm_date_of_next_contact ?? null;
+  const { data: existingHistory, error: existingHistoryError } = await supabase
+    .from("client_history_events")
+    .select("*")
+    .eq("company_id", company.id)
+    .eq("legacy_client_glide_row_id", client.glide_row_id)
+    .eq("event_type", "call_summary_webhook")
+    .eq("metadata->>integration_intake_event_id", String(event.id))
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingHistoryError) throw existingHistoryError;
+  const existingHistoryMetadata = getMetadata((existingHistory ?? {}) as JsonRecord);
+  const processingCheckpoint = metadataRecord(metadata.processing_checkpoint);
+  const previousNextSteps = existingHistory
+    ? (existingHistoryMetadata.previous_next_steps ?? null)
+    : (processingCheckpoint.previous_next_steps ?? client.next_steps_value ?? null);
+  const previousLastContact = existingHistory
+    ? (existingHistoryMetadata.previous_last_contact_at ?? null)
+    : (processingCheckpoint.previous_last_contact_at ??
+      client.csm_date_of_last_contact ??
+      null);
+  const previousNextContact = existingHistory
+    ? (existingHistoryMetadata.previous_next_contact_at ?? null)
+    : (processingCheckpoint.previous_next_contact_at ??
+      client.csm_date_of_next_contact ??
+      null);
   const recordingUrl =
     nullableText(payload.recording_url) ??
     nullableText(payload.recordingUrl) ??
@@ -560,59 +740,147 @@ async function applyCallSummary(
     .single();
   if (updateClientError) throw updateClientError;
 
-  const { data: historyEvent, error: historyError } = await supabase
-    .from("client_history_events")
-    .insert({
+  let historyEvent = existingHistory as JsonRecord | null;
+  if (!historyEvent) {
+    const { data, error: historyError } = await supabase
+      .from("client_history_events")
+      .insert({
+        company_id: company.id,
+        legacy_client_glide_row_id: client.glide_row_id,
+        event_type: "call_summary_webhook",
+        source: provider,
+        title: `Call summary added for ${client.client_name ?? "client"}`,
+        summary,
+        next_steps: summary,
+        last_contact_at: startedAt,
+        next_contact_at: nextContactAt,
+        notes: summary,
+        metadata: {
+          integration_intake_event_id: event.id,
+          provider,
+          external_event_id: externalEventId,
+          client_email: eventClientEmail(event),
+          submitted_client_emails: eventClientEmails(event),
+          recording_url: recordingUrl,
+          title: nullableText(payload.title) ?? nullableText(metadata.title),
+          previous_next_steps: previousNextSteps,
+          previous_last_contact_at: previousLastContact,
+          previous_next_contact_at: previousNextContact,
+          reviewed_by: actorEmail,
+          reviewed_action: isManualMatch(matchedBy) ? "manual_match" : "retry_apply",
+        },
+        payload: {
+          integration_type: "call_summary_next_steps",
+          submitted_payload: pickPayloadFields(payload, [
+            "provider",
+            "external_event_id",
+            "externalEventId",
+            "external_call_id",
+            "externalCallId",
+            "call_id",
+            "callId",
+            "recording_url",
+            "recordingUrl",
+            "url",
+            "title",
+          ]),
+          recording_url: recordingUrl,
+          title: nullableText(payload.title) ?? nullableText(metadata.title),
+          started_at: startedAt,
+        },
+      })
+      .select("*")
+      .single();
+    if (historyError) throw historyError;
+    historyEvent = data as JsonRecord;
+  }
+
+  const { data: existingAttendance, error: existingAttendanceError } = await supabase
+    .from("client_call_attendance_events")
+    .select("*")
+    .eq("company_id", company.id)
+    .eq("client_id", client.id)
+    .eq("integration_intake_event_id", event.id)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingAttendanceError) throw existingAttendanceError;
+  let callAttendanceEvent = existingAttendance as JsonRecord | null;
+  if (!callAttendanceEvent) {
+    const { data, error: attendanceError } = await supabase
+      .from("client_call_attendance_events")
+      .insert({
+        company_id: company.id,
+        client_id: client.id,
+        client_legacy_id: client.glide_row_id,
+        company_legacy_id: company.legacy_glide_row_id,
+        attendance_status: "attended",
+        occurred_at: startedAt ?? new Date().toISOString(),
+        source: provider,
+        notes: summary,
+        history_event_id: historyEvent.id,
+        integration_intake_event_id: event.id,
+        metadata: {
+          provider,
+          external_event_id: externalEventId,
+          client_email: eventClientEmail(event),
+          submitted_client_emails: eventClientEmails(event),
+          reviewed_by: actorEmail,
+          auto_recorded_from: "integration_review",
+        },
+      })
+      .select("*")
+      .single();
+    if (attendanceError) throw attendanceError;
+    callAttendanceEvent = data as JsonRecord;
+  }
+
+  const { data: existingAudit, error: existingAuditError } = await supabase
+    .from("app_audit_events")
+    .select("id")
+    .eq("company_id", company.id)
+    .eq("legacy_glide_row_id", client.glide_row_id)
+    .in("event_type", [
+      "call_summary_next_steps_processed",
+      "call_summary_next_steps_reviewed",
+    ])
+    .eq("metadata->>integration_intake_event_id", String(event.id))
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingAuditError) throw existingAuditError;
+  if (!existingAudit) {
+    const { error: auditError } = await supabase.from("app_audit_events").insert({
       company_id: company.id,
-      legacy_client_glide_row_id: client.glide_row_id,
-      event_type: "call_summary_webhook",
+      event_type: "call_summary_next_steps_reviewed",
       source: provider,
-      title: `Call summary added for ${client.client_name ?? "client"}`,
-      summary,
-      next_steps: summary,
-      last_contact_at: startedAt,
-      next_contact_at: nextContactAt,
-      notes: summary,
+      entity_table: "clients",
+      entity_id: client.id,
+      legacy_glide_row_id: client.glide_row_id,
+      title: "Integration review event applied",
+      summary: `Updated next steps for ${client.client_name ?? "client"}.`,
+      before_data: {
+        next_steps_value: previousNextSteps,
+        csm_date_of_last_contact: previousLastContact,
+        csm_date_of_next_contact: previousNextContact,
+      },
+      after_data: {
+        next_steps_value: updatedClient.next_steps_value,
+        csm_date_of_last_contact: updatedClient.csm_date_of_last_contact,
+        csm_date_of_next_contact: updatedClient.csm_date_of_next_contact,
+      },
       metadata: {
         integration_intake_event_id: event.id,
+        history_event_id: historyEvent.id,
+        call_attendance_event_id: callAttendanceEvent.id,
         provider,
         external_event_id: externalEventId,
-        client_email:
-          metadata.client_email ??
-          payload.client_email ??
-          payload.clientEmail ??
-          payload.email,
-        recording_url: recordingUrl,
-        title: nullableText(payload.title) ?? nullableText(metadata.title),
-        previous_next_steps: previousNextSteps,
-        previous_last_contact_at: previousLastContact,
-        previous_next_contact_at: previousNextContact,
         reviewed_by: actorEmail,
-        reviewed_action: isManualMatch(matchedBy) ? "manual_match" : "retry_apply",
+        matched_by: matchedBy,
       },
-      payload: {
-        integration_type: "call_summary_next_steps",
-        submitted_payload: pickPayloadFields(payload, [
-          "provider",
-          "external_event_id",
-          "externalEventId",
-          "external_call_id",
-          "externalCallId",
-          "call_id",
-          "callId",
-          "recording_url",
-          "recordingUrl",
-          "url",
-          "title",
-        ]),
-        recording_url: recordingUrl,
-        title: nullableText(payload.title) ?? nullableText(metadata.title),
-        started_at: startedAt,
-      },
-    })
-    .select("*")
-    .single();
-  if (historyError) throw historyError;
+    });
+    if (auditError) throw auditError;
+  }
 
   const { data: processedEvent, error: processedError } = await supabase
     .from("integration_intake_events")
@@ -625,8 +893,9 @@ async function applyCallSummary(
       error_message: null,
       processed_at: new Date().toISOString(),
       metadata: {
-        ...metadata,
+        ...getMetadata(event),
         history_event_id: historyEvent.id,
+        call_attendance_event_id: callAttendanceEvent.id,
         previous_next_steps: previousNextSteps,
         previous_last_contact_at: previousLastContact,
         previous_next_contact_at: previousNextContact,
@@ -636,40 +905,18 @@ async function applyCallSummary(
       },
     })
     .eq("id", event.id)
+    .eq("status", "received")
+    .eq("updated_at", reviewClaimVersion(event))
     .select("*")
     .single();
   if (processedError) throw processedError;
 
-  await supabase.from("app_audit_events").insert({
-    company_id: company.id,
-    event_type: "call_summary_next_steps_reviewed",
-    source: provider,
-    entity_table: "clients",
-    entity_id: client.id,
-    legacy_glide_row_id: client.glide_row_id,
-    title: "Integration review event applied",
-    summary: `Updated next steps for ${client.client_name ?? "client"}.`,
-    before_data: {
-      next_steps_value: previousNextSteps,
-      csm_date_of_last_contact: previousLastContact,
-      csm_date_of_next_contact: previousNextContact,
-    },
-    after_data: {
-      next_steps_value: updatedClient.next_steps_value,
-      csm_date_of_last_contact: updatedClient.csm_date_of_last_contact,
-      csm_date_of_next_contact: updatedClient.csm_date_of_next_contact,
-    },
-    metadata: {
-      integration_intake_event_id: processedEvent.id,
-      history_event_id: historyEvent.id,
-      provider,
-      external_event_id: externalEventId,
-      reviewed_by: actorEmail,
-      matched_by: matchedBy,
-    },
-  });
-
-  return { event: processedEvent, historyEvent, client: updatedClient };
+  return {
+    event: processedEvent,
+    historyEvent,
+    callAttendanceEvent,
+    client: updatedClient,
+  };
 }
 
 async function applyClientUpdate(
@@ -680,6 +927,8 @@ async function applyClientUpdate(
   matchedBy: string,
   actorEmail: string,
 ) {
+  await assertReviewClaimOwnership(supabase, event);
+
   const payload = getPayload(event);
   const metadata = getMetadata(event);
   const provider = cleanText(event.provider) || "integration";
@@ -857,6 +1106,8 @@ async function applyClientUpdate(
       },
     })
     .eq("id", event.id)
+    .eq("status", "received")
+    .eq("updated_at", reviewClaimVersion(event))
     .select("*")
     .single();
   if (processedError) throw processedError;
@@ -902,8 +1153,12 @@ Deno.serve(async (req) => {
     return jsonResponse(req, { error: "Method not allowed" }, 405);
   }
 
+  let supabase: SupabaseClient | null = null;
+  let claimedReviewEventId: string | null = null;
+  let claimedReviewEventVersion: string | null = null;
+
   try {
-    const supabase = createServiceClient();
+    supabase = createServiceClient();
     const token = getBearerToken(req);
     const actor = await requireAuthenticatedActor(supabase, token);
 
@@ -931,7 +1186,11 @@ Deno.serve(async (req) => {
 
     const actorEmail = normalizeEmail(actor.email);
     await assertCanReviewIntegrations(supabase, actor, company.id);
-    const event = await loadReviewEvent(supabase, company.id, eventId);
+    let event = await loadReviewEvent(supabase, company.id, eventId);
+    event = await claimReviewEvent(supabase, event, action, actorEmail);
+    claimedReviewEventId = String(event.id);
+    claimedReviewEventVersion = reviewClaimVersion(event);
+    await assertReviewClaimOwnership(supabase, event);
 
     if (action === "ignore") {
       const { data: ignoredEvent, error: ignoreError } = await supabase
@@ -948,6 +1207,8 @@ Deno.serve(async (req) => {
           },
         })
         .eq("id", event.id)
+        .eq("status", "received")
+        .eq("updated_at", reviewClaimVersion(event))
         .select("*")
         .single();
       if (ignoreError) throw ignoreError;
@@ -1003,6 +1264,17 @@ Deno.serve(async (req) => {
     const message = isValidationError || isAuthError
       ? error.message
       : "Unexpected integration review error.";
+    if (supabase && claimedReviewEventId && claimedReviewEventVersion) {
+      await supabase
+        .from("integration_intake_events")
+        .update({
+          status: "failed",
+          error_message: message,
+        })
+        .eq("id", claimedReviewEventId)
+        .eq("status", "received")
+        .eq("updated_at", claimedReviewEventVersion);
+    }
     return jsonResponse(
       req,
       { error: message },
