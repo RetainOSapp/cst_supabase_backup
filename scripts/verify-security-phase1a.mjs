@@ -284,7 +284,9 @@ check(
     dashboard.includes(
       "next.set(COMPANY_QUERY_KEY, effectiveCompanyId);",
     ) &&
-    (dashboard.match(/!capabilities\.canUseCompanySwitcher/g) ?? []).length >= 2,
+    dashboard.includes("const initialDashboardFilters = () => {") &&
+    dashboard.includes("readStoredDashboardFilters(fromUrl.companyId) ?? fromUrl") &&
+    (dashboard.match(/!capabilities\.canUseCompanySwitcher/g) ?? []).length >= 1,
 );
 check(
   "non-switcher company inventory queries are scoped to the resolved company",

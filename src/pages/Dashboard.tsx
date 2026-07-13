@@ -4198,6 +4198,7 @@ export function Dashboard() {
         programDistribution: [],
         buyInDistribution: [],
         progressDistribution: [],
+        churnReasonDistribution: [],
         clientsByJourney: [],
         journeyMilestoneIds: [],
         tasksByStatus: [],
@@ -4240,6 +4241,7 @@ export function Dashboard() {
             programDistribution: [],
             buyInDistribution: [],
             progressDistribution: [],
+            churnReasonDistribution: [],
             clientsByJourney: [],
             journeyMilestoneIds: [],
             tasksByStatus: [],
@@ -4267,6 +4269,7 @@ export function Dashboard() {
           programDistribution: chartRows("program"),
           buyInDistribution: chartRows("buy_in"),
           progressDistribution: chartRows("progress"),
+          churnReasonDistribution: chartRows("churn_reason"),
           clientsByJourney: chartRows(
             appliedFilters.offerId ? "milestone" : "pathway",
           ),
