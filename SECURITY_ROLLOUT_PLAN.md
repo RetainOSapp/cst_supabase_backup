@@ -270,10 +270,14 @@ Scope:
   rollback baseline `17c3023`. It preserves current Dashboard filter and chart
   behavior while adding DB-resolved account authority, Viewer boundaries, and
   actor-scoped aggregate reads. Phase 1A checks pass 37/37, Phase 1B checks pass
-  50/50, and the production build passes.
-- Mandatory forward order remains: deploy frontend; complete role smoke QA;
-  explicitly apply `20260713020500`; then separately apply and QA `21000`,
-  `22000`, `22500`, and `23000`. Do not batch these steps.
+  52/52, and the production build passes. Independent review found that the
+  current-main churn-reason chart postdated the original aggregate slice, so
+  additive compatibility migration `20260713020200` and its exact rollback are
+  now required before the frontend deploy.
+- Mandatory forward order is: apply additive churn aggregate `20260713020200`;
+  deploy frontend; complete role smoke QA; explicitly apply `20260713020500`;
+  then separately apply and QA `21000`, `22000`, `22500`, and `23000`. Do not
+  batch these steps.
 
 QA:
 

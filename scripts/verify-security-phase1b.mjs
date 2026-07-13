@@ -7,6 +7,10 @@ const aggregatePath = path.join(
   root,
   "supabase/migrations/20260713020000_security_phase1b_dashboard_aggregates.sql",
 );
+const churnAggregatePath = path.join(
+  root,
+  "supabase/migrations/20260713020200_security_phase1b_churn_reason_aggregate.sql",
+);
 const releaseGatePath = path.join(
   root,
   "supabase/release-gates/20260713020500_security_phase1b_frontend_verified.sql",
@@ -30,6 +34,10 @@ const lockdownPath = path.join(
 const aggregateRollbackPath = path.join(
   root,
   "supabase/rollbacks/20260713020000_security_phase1b_dashboard_aggregates.sql",
+);
+const churnAggregateRollbackPath = path.join(
+  root,
+  "supabase/rollbacks/20260713020200_security_phase1b_churn_reason_aggregate.sql",
 );
 const releaseGateRollbackPath = path.join(
   root,
@@ -59,12 +67,14 @@ const dashboardPath = path.join(root, "src/pages/Dashboard.tsx");
 
 for (const file of [
   aggregatePath,
+  churnAggregatePath,
   releaseGatePath,
   companyPath,
   clientPath,
   policyQaGatePath,
   lockdownPath,
   aggregateRollbackPath,
+  churnAggregateRollbackPath,
   releaseGateRollbackPath,
   releaseGateRunnerPath,
   companyRollbackPath,
@@ -80,12 +90,17 @@ for (const file of [
 }
 
 const aggregate = fs.readFileSync(aggregatePath, "utf8");
+const churnAggregate = fs.readFileSync(churnAggregatePath, "utf8");
 const releaseGate = fs.readFileSync(releaseGatePath, "utf8");
 const company = fs.readFileSync(companyPath, "utf8");
 const client = fs.readFileSync(clientPath, "utf8");
 const policyQaGate = fs.readFileSync(policyQaGatePath, "utf8");
 const lockdown = fs.readFileSync(lockdownPath, "utf8");
 const aggregateRollback = fs.readFileSync(aggregateRollbackPath, "utf8");
+const churnAggregateRollback = fs.readFileSync(
+  churnAggregateRollbackPath,
+  "utf8",
+);
 const releaseGateRollback = fs.readFileSync(releaseGateRollbackPath, "utf8");
 const releaseGateRunner = fs.readFileSync(releaseGateRunnerPath, "utf8");
 const companyRollback = fs.readFileSync(companyRollbackPath, "utf8");
@@ -133,7 +148,9 @@ function policyBody(sql, name) {
 check(
   "Phase 1B slices enforce their rollout order",
   aggregate.includes("where rollout.version = '20260713010000'") &&
-    releaseGate.includes("where rollout.version = '20260713020000'") &&
+    churnAggregate.includes("where rollout.version = '20260713020000'") &&
+    releaseGate.includes("'20260713020000'") &&
+    releaseGate.includes("'20260713020200'") &&
     company.includes("where rollout.version = '20260713020500'") &&
     client.includes("where rollout.version = '20260713021000'") &&
     policyQaGate.includes("where rollout.version = '20260713021000'") &&
@@ -141,6 +158,30 @@ check(
     lockdown.includes("where rollout.version = '20260713020500'") &&
     lockdown.includes("where rollout.version = '20260713022000'") &&
     lockdown.includes("where rollout.version = '20260713022500'"),
+);
+
+const churnReasonAggregate = functionBody(
+  churnAggregate,
+  "dashboard_churn_reason_rollup_actor_scoped",
+);
+check(
+  "churn reason RPC is actor-scoped and returns aggregates only",
+  churnReasonAggregate.includes("stable") &&
+    churnReasonAggregate.includes("security definer") &&
+    churnReasonAggregate.includes("set search_path = ''") &&
+    churnReasonAggregate.includes("dashboard_authorized_app_clients(") &&
+    churnReasonAggregate.includes("'churn_reason'::text") &&
+    churnReasonAggregate.includes("count(*)::bigint") &&
+    !churnReasonAggregate.includes("client_name") &&
+    !churnReasonAggregate.includes("client_email"),
+);
+check(
+  "churn reason aggregate is reversible before the frontend gate",
+  churnAggregateRollback.includes(
+    "drop function if exists public.dashboard_churn_reason_rollup_actor_scoped",
+  ) &&
+    churnAggregateRollback.includes("'20260713020500'") &&
+    aggregateRollback.includes("'20260713020200'"),
 );
 check(
   "frontend release gate is manual, production-guarded, and outside migrations",
@@ -421,6 +462,8 @@ check(
 check(
   "Viewer app-owned charts use bucket rollups and retain no raw rows",
   dashboard.includes('"dashboard_chart_rollups_actor_scoped"') &&
+    dashboard.includes('"dashboard_churn_reason_rollup_actor_scoped"') &&
+    dashboard.includes('churnReasonDistribution: chartRows("churn_reason")') &&
     dashboard.includes("!canUseDashboardDrilldowns && appliedUsesAppClients") &&
     dashboard.includes("setChartClients([])") &&
     dashboard.includes("setProfileUpkeep(null)"),

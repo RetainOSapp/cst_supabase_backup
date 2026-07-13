@@ -4217,26 +4217,31 @@ export function Dashboard() {
       setChartsLoading(true);
 
       if (!canUseDashboardDrilldowns && appliedUsesAppClients) {
-        const { data, error } = await supabase.rpc(
-          "dashboard_chart_rollups_actor_scoped",
-          {
-            p_company_id: rpcFilterParams.p_company_id,
-            p_csm_id: rpcFilterParams.p_csm_id,
-            p_secondary_assignee_id:
-              rpcFilterParams.p_secondary_assignee_id,
-            p_program_values: rpcFilterParams.p_program_values,
-            p_offer_id: rpcFilterParams.p_offer_id,
-            p_client_start_date_from:
-              rpcFilterParams.p_client_start_date_from,
-            p_client_start_date_to: rpcFilterParams.p_client_start_date_to,
-            p_date_range_end: rpcFilterParams.p_date_range_end,
-          },
-        );
+        const chartRpcParams = {
+          p_company_id: rpcFilterParams.p_company_id,
+          p_csm_id: rpcFilterParams.p_csm_id,
+          p_secondary_assignee_id: rpcFilterParams.p_secondary_assignee_id,
+          p_program_values: rpcFilterParams.p_program_values,
+          p_offer_id: rpcFilterParams.p_offer_id,
+          p_client_start_date_from: rpcFilterParams.p_client_start_date_from,
+          p_client_start_date_to: rpcFilterParams.p_client_start_date_to,
+          p_date_range_end: rpcFilterParams.p_date_range_end,
+        };
+        const [chartResult, churnReasonResult] = await Promise.all([
+          supabase.rpc("dashboard_chart_rollups_actor_scoped", chartRpcParams),
+          supabase.rpc(
+            "dashboard_churn_reason_rollup_actor_scoped",
+            chartRpcParams,
+          ),
+        ]);
 
         if (cancelled) return;
 
-        if (error) {
-          console.error("Failed to load Viewer Dashboard charts:", error);
+        if (chartResult.error || churnReasonResult.error) {
+          console.error("Failed to load Viewer Dashboard charts:", {
+            charts: chartResult.error,
+            churnReasons: churnReasonResult.error,
+          });
           setChartData({
             programDistribution: [],
             buyInDistribution: [],
@@ -4254,7 +4259,10 @@ export function Dashboard() {
           return;
         }
 
-        const rows = (data ?? []) as DashboardChartRollupRow[];
+        const rows = [
+          ...(chartResult.data ?? []),
+          ...(churnReasonResult.data ?? []),
+        ] as DashboardChartRollupRow[];
         const chartRows = (metric: string): ChartDatum[] =>
           rows
             .filter((row) => row.metric === metric)

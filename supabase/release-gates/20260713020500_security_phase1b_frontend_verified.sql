@@ -5,12 +5,15 @@
 do $$
 begin
   if to_regclass('public.security_rollout_history') is null
-    or not exists (
-      select 1
+    or 2 <> (
+      select count(*)
       from public.security_rollout_history rollout
-      where rollout.version = '20260713020000'
+      where rollout.version in (
+        '20260713020000',
+        '20260713020200'
+      )
     ) then
-    raise exception 'Phase 1B aggregate authority must be applied first';
+    raise exception 'Phase 1B Dashboard aggregate authority must be applied first';
   end if;
 
   if exists (
