@@ -520,6 +520,16 @@ Consolidation release candidate 2026-07-13:
   The candidate is ready for a separately approved merge/push. No merge, push,
   or deployment occurred during consolidation.
 
+Production source closure 2026-07-13:
+
+- Jay approved the release and the seven-commit consolidation was fast-forwarded
+  to production `main` through `e4cda12`.
+- Vercel completed successfully. Live app, login, and production asset returned
+  200; the deployed bundle contains the DB-resolved account and actor-scoped
+  Dashboard paths and contains neither Beacon nor Anthropic client code.
+- The rollout is closed except intentionally deferred Phase 1C/final mirror
+  retirement and the separately tracked medium-priority audit follow-ups.
+
 ## Launch Gate
 
 Each production phase can proceed only when:
