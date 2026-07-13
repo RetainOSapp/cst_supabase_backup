@@ -4263,21 +4263,27 @@ export function Dashboard() {
           ...(chartResult.data ?? []),
           ...(churnReasonResult.data ?? []),
         ] as DashboardChartRollupRow[];
-        const chartRows = (metric: string): ChartDatum[] =>
-          rows
+        const chartRows = (
+          metric: string,
+          sortByValue = true,
+        ): ChartDatum[] => {
+          const matchingRows = rows
             .filter((row) => row.metric === metric)
             .map((row) => ({
               key: row.bucket_key,
               label: row.bucket_label,
               value: Number(row.value ?? 0),
-            }))
-            .sort((left, right) => right.value - left.value);
+            }));
+          return sortByValue
+            ? matchingRows.sort((left, right) => right.value - left.value)
+            : matchingRows;
+        };
 
         setChartData({
           programDistribution: chartRows("program"),
           buyInDistribution: chartRows("buy_in"),
           progressDistribution: chartRows("progress"),
-          churnReasonDistribution: chartRows("churn_reason"),
+          churnReasonDistribution: chartRows("churn_reason", false),
           clientsByJourney: chartRows(
             appliedFilters.offerId ? "milestone" : "pathway",
           ),

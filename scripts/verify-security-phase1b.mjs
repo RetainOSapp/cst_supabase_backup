@@ -461,9 +461,11 @@ check(
 );
 check(
   "Viewer app-owned charts use bucket rollups and retain no raw rows",
-  dashboard.includes('"dashboard_chart_rollups_actor_scoped"') &&
+    dashboard.includes('"dashboard_chart_rollups_actor_scoped"') &&
     dashboard.includes('"dashboard_churn_reason_rollup_actor_scoped"') &&
-    dashboard.includes('churnReasonDistribution: chartRows("churn_reason")') &&
+    dashboard.includes(
+      'churnReasonDistribution: chartRows("churn_reason", false)',
+    ) &&
     dashboard.includes("!canUseDashboardDrilldowns && appliedUsesAppClients") &&
     dashboard.includes("setChartClients([])") &&
     dashboard.includes("setProfileUpkeep(null)"),
