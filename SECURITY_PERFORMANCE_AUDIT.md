@@ -394,3 +394,48 @@ webhook fallback (H4).
       items and the anon-executable `SECURITY DEFINER` warnings are gone.
 - [ ] No `sk-ant-` literal in any deployed bundle; Beacon works via Edge Function.
 - [ ] First-load JS for `/dashboard` < 250 KB (measure in build output).
+
+---
+
+## 6. Production advisor classification - 2026-07-13
+
+Current production Advisor results after Phases 0, 0.5, 1A, 1B, and immediate
+1D:
+
+- Security Advisor: **0 errors**, 28 warnings, 6 info suggestions.
+- Performance Advisor: **0 errors**, 15 warnings, 40 info suggestions.
+
+The six Security info suggestions are intentional service-only tables with RLS
+enabled and no browser policy. With RLS enabled, no policy is fail-closed; these
+tables remain reachable only through trusted server/service paths.
+
+The 28 Security warnings classify as:
+
+- 3 mutable function search paths: actionable and included in local Phase 1E.
+- 1 anonymously executable legacy retention aggregate: actionable. Phase 1E
+  revokes anonymous access and replaces the browser-facing function with a
+  company/role/assignment-scoped wrapper.
+- 24 authenticated `SECURITY DEFINER` functions: intentional. These are policy
+  helpers, self-authority resolvers, actor-scoped Dashboard aggregates, or
+  guarded operational RPCs. They are executable because RLS/the frontend calls
+  them, and each resolves authority from the signed-in actor rather than trusting
+  a requested company. Moving policy helpers to a private schema may reduce
+  advisor noise later, but is not required to close tenant isolation.
+
+The 15 Performance warnings are fully addressed by local Phase 1E:
+
+- 13 redundant permissive `*_no_anon_access` policies all use `USING (false)`
+  and therefore never widened access. Removing them preserves the scoped read
+  policies and avoids evaluating a second inert policy on each query.
+- 2 indexes are byte-for-byte duplicates of retained indexes. Phase 1E drops
+  only the newer duplicate names and includes exact index recreation rollback.
+
+The 40 Performance info suggestions are unindexed foreign keys and unused-index
+candidates. They remain measured follow-up work: add an FK index only when the
+delete/join path needs it, and do not drop a merely unused index until production
+usage has been observed over a representative business cycle.
+
+Phase 1E source is local-only in
+`20260713025000_security_advisor_cleanup.sql` with an exact rollback and focused
+verifier. Production remains unchanged until a separate approval and
+transaction-only preflight pass.
