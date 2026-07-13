@@ -217,6 +217,12 @@ Status: **blocked from production** until role-aware app-owned policies,
 mirror-table policies, secure future `backup_*` policy creation, and mandatory
 role JWT verification are implemented and reviewed.
 
+**Dated correction - 2026-07-13:** Phase 1A authority is now deployed and its
+frontend boundaries are included in the current Phase 1B release candidate.
+Phase 1B additive aggregates (`20260713020000`) are deployed. App-owned read
+policy replacement remains stop-gated behind this frontend release, role smoke
+QA, and the manual `20260713020500` release gate.
+
 The original blanket Phase 1 draft is superseded and must not be applied. Build
 and release Phase 1 in four independently reviewed slices:
 
@@ -251,6 +257,23 @@ Scope:
   `is_retainos_super_admin()` used by the already-deployed Phase 0 notification
   policies. All current SuperAdmins are UUID-bound; Phase 1B will move the
   remaining policies to the bound helper after role QA proves parity.
+- Production Phase 1A checkpoint 2026-07-13: migration `20260713010000` is
+  applied. Disposable real-JWT verification passed 38/38 across SuperAdmin,
+  Director, Support, CSM, Viewer, and mirror-only CSM authority, followed by
+  zero-residue cleanup.
+- Production Phase 1B Wave 1 checkpoint 2026-07-13: additive aggregate migration
+  `20260713020000` is applied. Core counts, MM tokens/intake, anonymous denial,
+  and live HTTP health remained unchanged. No read policy or legacy RPC grant
+  changed.
+- Frontend release candidate checkpoint 2026-07-13: branch
+  `codex/security-phase1b-frontend-release` is based on production `main`
+  rollback baseline `17c3023`. It preserves current Dashboard filter and chart
+  behavior while adding DB-resolved account authority, Viewer boundaries, and
+  actor-scoped aggregate reads. Phase 1A checks pass 37/37, Phase 1B checks pass
+  50/50, and the production build passes.
+- Mandatory forward order remains: deploy frontend; complete role smoke QA;
+  explicitly apply `20260713020500`; then separately apply and QA `21000`,
+  `22000`, `22500`, and `23000`. Do not batch these steps.
 
 QA:
 
