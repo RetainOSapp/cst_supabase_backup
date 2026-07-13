@@ -4,12 +4,52 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 type GlideRow = Record<string, unknown>;
 
+const ALLOWED_TARGETS: Record<
+  string,
+  {
+    primaryKeyColumns: Set<string>;
+    dataColumns: Set<string>;
+  }
+> = {
+  // Legacy/reference sync endpoint. The primary sync flow uses sync-glide.
+  // Keep this narrow so the service role cannot be aimed at arbitrary tables.
+  glide_companies: {
+    primaryKeyColumns: new Set(["admin_access_id"]),
+    dataColumns: new Set(["data"]),
+  },
+};
+
 async function sha256Hex(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function extractBearerToken(req: Request): string | null {
+  const header = req.headers.get("Authorization") ?? "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+async function isAuthorized(req: Request, serviceRoleKey: string): Promise<boolean> {
+  const token = extractBearerToken(req);
+  if (!token) return false;
+  const [submittedHash, serviceHash] = await Promise.all([
+    sha256Hex(token),
+    sha256Hex(serviceRoleKey),
+  ]);
+  return timingSafeEqual(submittedHash, serviceHash);
 }
 
 function stableStringify(value: unknown): string {
@@ -84,10 +124,6 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const body = await req.json().catch(() => ({}));
-    const glideToken = typeof body.glideToken === "string" && body.glideToken.length > 0
-      ? body.glideToken
-      : Deno.env.get("GLIDE_API_TOKEN");
 
     if (!supabaseUrl || !serviceRoleKey) {
       return Response.json(
@@ -95,6 +131,16 @@ Deno.serve(async (req) => {
         { status: 500 },
       );
     }
+
+    if (!await isAuthorized(req, serviceRoleKey)) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const glideToken = typeof body.glideToken === "string" && body.glideToken.length > 0
+      ? body.glideToken
+      : Deno.env.get("GLIDE_API_TOKEN");
+
     if (!glideToken) {
       return Response.json(
         { error: "Missing GLIDE_API_TOKEN (set as Supabase secret)" },
@@ -110,6 +156,7 @@ Deno.serve(async (req) => {
     const targetPrimaryKeyColumn = String(body.targetPrimaryKeyColumn ?? "admin_access_id");
     const targetDataColumn = String(body.targetDataColumn ?? "data");
     const limit = body.limit != null ? Number(body.limit) : 500;
+    const allowedTarget = ALLOWED_TARGETS[targetTable];
 
     if (!glideTableId) {
       return Response.json(
@@ -117,8 +164,29 @@ Deno.serve(async (req) => {
         { status: 400 },
       );
     }
+    if (!allowedTarget) {
+      return Response.json(
+        { error: `Unsupported targetTable: ${targetTable}` },
+        { status: 400 },
+      );
+    }
+    if (!allowedTarget.primaryKeyColumns.has(targetPrimaryKeyColumn)) {
+      return Response.json(
+        { error: `Unsupported targetPrimaryKeyColumn for ${targetTable}` },
+        { status: 400 },
+      );
+    }
+    if (!allowedTarget.dataColumns.has(targetDataColumn)) {
+      return Response.json(
+        { error: `Unsupported targetDataColumn for ${targetTable}` },
+        { status: 400 },
+      );
+    }
     if (!Number.isFinite(limit) || limit <= 0) {
       return Response.json({ error: "Invalid limit" }, { status: 400 });
+    }
+    if (limit > 500) {
+      return Response.json({ error: "Limit must be 500 or lower" }, { status: 400 });
     }
 
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
