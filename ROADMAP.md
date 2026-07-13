@@ -1113,6 +1113,10 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[x]` Call AI unmatched recording reconciliation page for SuperAdmin, Director, and Support.
   - V1 route: `/call-ai`; focused on unmatched Fathom/call-summary events, client search, match/retry/ignore, and recording links. Full transcript analysis remains later.
   - 2026-07-10 follow-up: Admin Hub no longer carries a duplicate reconciliation queue; Company Settings links to the dedicated Call AI workspace as the single operating surface.
+- `[ ]` `[priority: medium]` Conversation AI (Slack analytics) V1.
+  - Scope: `retainos-conversation-ai-scope.md`.
+  - Read-only, weekly Slack channel analysis: ticket/request volume and resolution, response-time metrics, sentiment, silent-channel flags, and risk-language flags.
+  - Includes company-scoped Slack OAuth, encrypted token handling, source-agnostic conversation storage, scheduled sync, and a Conversation dashboard tab. No real-time events, Slack posting, task creation, or email ingestion in V1.
 - `[ ]` Add new call transcript to analyze for SuperAdmin, Director, and Support.
 - `[ ]` View past analyzed meetings for SuperAdmin, Director, and Support.
 - `[ ]` Share call analysis with team for SuperAdmin, Director, and Support.
