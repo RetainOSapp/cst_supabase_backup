@@ -98,14 +98,14 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
   const isSupport = role === "support";
   const isViewer = role === "viewer";
   const canWork = isSuperAdmin || isDirector || isCsm || isSupport;
-  const canSeeCompany = isSuperAdmin || isDirector || isCsm || isSupport || isViewer;
+  const canSeeClientData = isSuperAdmin || isDirector || isCsm || isSupport;
 
   return {
     canAccessSaasClients: isSuperAdmin,
     canAccessDashboard: isSuperAdmin || isDirector || isCsm || isSupport || isViewer,
     canAccessCsmReports: isSuperAdmin || isDirector || isSupport,
-    canAccessClients: canSeeCompany,
-    canAccessResources: canSeeCompany,
+    canAccessClients: canSeeClientData,
+    canAccessResources: canSeeClientData || isViewer,
     canAccessTasks: canWork,
     canAccessCallAi: isSuperAdmin || isDirector || isSupport,
     canAccessTables: isSuperAdmin,
@@ -118,7 +118,7 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
     canManageClientPathways: isSuperAdmin || isDirector,
     canViewDirectorNotes: isSuperAdmin || isDirector,
     canManageTeam: isSuperAdmin || isDirector,
-    canViewAllClients: isSuperAdmin || isDirector || isSupport || isViewer,
+    canViewAllClients: isSuperAdmin || isDirector || isSupport,
     canViewOnlyAssignedClients: isCsm,
     canViewCompanyDashboard: isSuperAdmin || isDirector || isSupport || isViewer,
   };

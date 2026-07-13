@@ -12,6 +12,9 @@ const rollbackPath = path.join(
   "supabase/rollbacks/20260713010000_security_phase1a_role_authority.sql",
 );
 const accountPath = path.join(root, "src/lib/accountContext.tsx");
+const dashboardPath = path.join(root, "src/pages/Dashboard.tsx");
+const appPath = path.join(root, "src/App.tsx");
+const headerPath = path.join(root, "src/components/Header.tsx");
 const supersededDraftPath = path.join(
   root,
   "supabase/migrations/20260705110000_security_phase1_tenant_rls.sql",
@@ -20,6 +23,9 @@ const supersededDraftPath = path.join(
 const migration = fs.readFileSync(migrationPath, "utf8");
 const rollback = fs.readFileSync(rollbackPath, "utf8");
 const account = fs.readFileSync(accountPath, "utf8");
+const dashboard = fs.readFileSync(dashboardPath, "utf8");
+const app = fs.readFileSync(appPath, "utf8");
+const header = fs.readFileSync(headerPath, "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -214,6 +220,93 @@ check(
     !account.includes('.from("backup_company_team")') &&
     account.includes("account.company_legacy_id") &&
     account.includes("account.team_member_id"),
+);
+check(
+  "Viewer cannot open or enumerate raw client views",
+  account.includes("canAccessClients: canSeeClientData") &&
+    account.includes(
+      "canViewAllClients: isSuperAdmin || isDirector || isSupport",
+    ) &&
+    !account.includes(
+      "canViewAllClients: isSuperAdmin || isDirector || isSupport || isViewer",
+    ),
+);
+check(
+  "Viewer keeps aggregate Dashboard and Resources access",
+  account.includes(
+    'canAccessDashboard: isSuperAdmin || isDirector || isCsm || isSupport || isViewer',
+  ) &&
+    account.includes("canAccessResources: canSeeClientData || isViewer") &&
+    account.includes(
+      "canViewCompanyDashboard: isSuperAdmin || isDirector || isSupport || isViewer",
+    ),
+);
+check(
+  "client routes and navigation use the Viewer-denied client capability",
+  [
+    'path="daily-pulse"',
+    'path="clients"',
+    'path="clients/:clientId"',
+    'path="groups"',
+  ].every((route) => app.includes(route)) &&
+    (app.match(/allowed=\{capabilities\.canAccessClients\}/g) ?? []).length >= 4 &&
+    [
+      '{ path: "/daily-pulse", label: "Daily Pulse", icon: "pulse" as const, show: capabilities.canAccessClients }',
+      '{ path: "/clients", label: "Clients", icon: "clients" as const, show: capabilities.canAccessClients }',
+      '{ path: "/groups", label: "Groups", icon: "groups" as const, show: capabilities.canAccessClients }',
+    ].every((entry) => header.includes(entry)),
+);
+check(
+  "Viewer dashboard drilldowns and detail fetches are disabled",
+  dashboard.includes("!canUseDashboardDrilldowns ||") &&
+    dashboard.includes(
+      "if (canUseDashboardDrilldowns) setTtvMilestonesOpen(true)",
+    ) &&
+    dashboard.includes(
+      "!canUseDashboardDrilldowns ||\n      !activeDetailKey ||",
+    ),
+);
+check(
+  "Viewer KPI loading uses aggregate RPCs instead of name-bearing client rows",
+  dashboard.includes(
+    "const shouldUseCanonicalKpis =\n        !canUseDashboardDrilldowns ||",
+  ) &&
+    dashboard.includes(
+      "if (cancelled || loadedCanonical || !canUseDashboardDrilldowns) return;",
+    ),
+);
+check(
+  "Viewer company scope ignores crafted URL company IDs before first render",
+  dashboard.includes("lockToFallbackCompany = false") &&
+    dashboard.includes(
+      "lockToFallbackCompany\n        ? fallbackCompanyId",
+    ) &&
+    dashboard.includes(
+      "if (canUseCompanySwitcher || !effectiveCompanyId) return;",
+    ) &&
+    dashboard.includes(
+      "next.set(COMPANY_QUERY_KEY, effectiveCompanyId);",
+    ) &&
+    (dashboard.match(/!capabilities\.canUseCompanySwitcher/g) ?? []).length >= 2,
+);
+check(
+  "non-switcher company inventory queries are scoped to the resolved company",
+  dashboard.includes(
+    'query = query.eq("glide_row_id", effectiveCompanyId);',
+  ) &&
+    dashboard.includes(
+      'appQuery = appQuery.eq("legacy_glide_row_id", effectiveCompanyId);',
+    ),
+);
+check(
+  "Viewer raw dashboard queries omit client identity and profile fields",
+  (dashboard.match(/\? DASHBOARD_CLIENT_IDENTITY_FIELDS/g) ?? []).length >= 4 &&
+    (dashboard.match(/\? DASHBOARD_CLIENT_PROFILE_FIELDS/g) ?? []).length >= 2 &&
+    dashboard.includes(
+      "canUseDashboardDrilldowns &&\n        appliedUsesAppClients &&",
+    ) &&
+    dashboard.includes("setChartClients(canUseDashboardDrilldowns ? clients : []);") &&
+    dashboard.includes("const reachedClients = canUseDashboardDrilldowns"),
 );
 
 console.log(`\n${passed}/${passed + failed} Phase 1A checks passed.`);

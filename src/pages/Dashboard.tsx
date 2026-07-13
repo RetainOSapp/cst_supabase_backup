@@ -430,6 +430,16 @@ type TtvProgressRow = {
   time_to_hit_days?: number | null;
 };
 
+const DASHBOARD_CLIENT_IDENTITY_FIELDS = ["client_name", "client_image"];
+const DASHBOARD_CLIENT_PROFILE_FIELDS = [
+  "next_steps_value",
+  "csm_date_of_last_contact",
+  "csm_date_of_next_contact",
+  "offer_milestones_current_milestone_change_date",
+  "outcomes_progress_date",
+  "outcomes_buy_in_date",
+];
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -565,10 +575,14 @@ function clearStoredDashboardFilters(companyId: string) {
 function dashboardFiltersFromSearchParams(
   searchParams: URLSearchParams,
   fallbackCompanyId = "",
+  lockToFallbackCompany = false,
 ): DashboardFilters {
   return {
     ...emptyDashboardFilters(),
-    companyId: searchParams.get(COMPANY_QUERY_KEY) ?? fallbackCompanyId,
+    companyId:
+      lockToFallbackCompany
+        ? fallbackCompanyId
+        : searchParams.get(COMPANY_QUERY_KEY) ?? fallbackCompanyId,
     csmId: searchParams.get(CSM_QUERY_KEY) ?? "",
     secondaryAssigneeId: searchParams.get(SECONDARY_ASSIGNEE_QUERY_KEY) ?? "",
     offerId: searchParams.get(OFFER_QUERY_KEY) ?? "",
@@ -1597,7 +1611,11 @@ export function Dashboard() {
     teamMemberId,
   } = useAccountContext();
   const initialDashboardFilters = () => {
-    const fromUrl = dashboardFiltersFromSearchParams(searchParams, effectiveCompanyId);
+    const fromUrl = dashboardFiltersFromSearchParams(
+      searchParams,
+      effectiveCompanyId,
+      !capabilities.canUseCompanySwitcher,
+    );
     return fromUrl.companyId ? readStoredDashboardFilters(fromUrl.companyId) ?? fromUrl : fromUrl;
   };
   const [pendingFilters, setPendingFilters] = useState(initialDashboardFilters);
@@ -1756,6 +1774,19 @@ export function Dashboard() {
       setActiveDashboardTab("overview");
     }
   }, [activeDashboardTab, capabilities.canTriggerAiInsights]);
+
+  useEffect(() => {
+    if (canUseCompanySwitcher || !effectiveCompanyId) return;
+    if (searchParams.get(COMPANY_QUERY_KEY) === effectiveCompanyId) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set(COMPANY_QUERY_KEY, effectiveCompanyId);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [canUseCompanySwitcher, effectiveCompanyId, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!effectiveCompanyId || effectiveCompanyId === pendingFilters.companyId) return;
@@ -2042,11 +2073,17 @@ export function Dashboard() {
       if (!canUseCompanySwitcher && effectiveCompanyId) {
         query = query.eq("glide_row_id", effectiveCompanyId);
       }
+      let appQuery = supabase
+        .from("companies")
+        .select(
+          "id, legacy_glide_row_id, name, migration_status, enable_secondary_assignee",
+        );
+      if (!canUseCompanySwitcher && effectiveCompanyId) {
+        appQuery = appQuery.eq("legacy_glide_row_id", effectiveCompanyId);
+      }
       const [backupResult, appResult] = await Promise.all([
         query,
-        supabase
-          .from("companies")
-          .select("id, legacy_glide_row_id, name, migration_status, enable_secondary_assignee"),
+        appQuery,
       ]);
 
       if (backupResult.error) {
@@ -2384,8 +2421,9 @@ export function Dashboard() {
         : "company_id";
       const clientSelect = [
         "glide_row_id",
-        "client_name",
-        "client_image",
+        ...(canUseDashboardDrilldowns
+          ? DASHBOARD_CLIENT_IDENTITY_FIELDS
+          : []),
         ...(appliedUsesAppClients ? ["company_glide_row_id"] : []),
         "csm_team_member_id",
         "csm_secondary_assignee_id",
@@ -2782,6 +2820,20 @@ export function Dashboard() {
 
       if (error) {
         console.error("Failed to load canonical dashboard KPIs:", error);
+        if (!canUseDashboardDrilldowns) {
+          setActiveClients(null);
+          setFrontEndClients(null);
+          setBackEndClients(null);
+          setOffBoardedClients(null);
+          setChurnedClientsCount(null);
+          setChurnPercentage(null);
+          setRetainedClients(null);
+          setRenewingClientsCount(null);
+          setRetentionPercentage(null);
+          setActiveRenewingClients(null);
+          setPrimaryKpiLoading(false);
+          setRetentionKpiLoading(false);
+        }
         return false;
       }
 
@@ -2869,12 +2921,13 @@ export function Dashboard() {
 
     void (async () => {
       const shouldUseCanonicalKpis =
-        !appliedUsesAppClients &&
-        (Boolean(appliedFilters.offerId) || appliedProgramValues.length > 1);
+        !canUseDashboardDrilldowns ||
+        (!appliedUsesAppClients &&
+          (Boolean(appliedFilters.offerId) || appliedProgramValues.length > 1));
 
       if (shouldUseCanonicalKpis) {
         const loadedCanonical = await loadCanonicalKpis();
-        if (cancelled || loadedCanonical) return;
+        if (cancelled || loadedCanonical || !canUseDashboardDrilldowns) return;
       }
 
       if (
@@ -2909,6 +2962,7 @@ export function Dashboard() {
     appliedAppCompany?.id,
     appliedUsesAppClients,
     appliedProgramValues,
+    canUseDashboardDrilldowns,
     reportVersion,
     rpcFilterParams,
     assignedTeamMemberId,
@@ -3203,8 +3257,9 @@ export function Dashboard() {
         .select(
           [
             "glide_row_id",
-            "client_name",
-            "client_image",
+            ...(canUseDashboardDrilldowns
+              ? DASHBOARD_CLIENT_IDENTITY_FIELDS
+              : []),
             "client_age_date_onboarded",
             "current_contract_start_date",
             "csm_team_member_id",
@@ -3347,19 +3402,21 @@ export function Dashboard() {
       });
 
       const dayValues = [...daysByClientId.values()];
-      const reachedClients = clients
-        .filter((client) => daysByClientId.has(client.glide_row_id))
-        .map((client) => ({
-          ...client,
-          client_name: client.client_name ?? null,
-          client_image: client.client_image ?? null,
-          csm_team_member_id: client.csm_team_member_id ?? null,
-          csm_secondary_assignee_id: null,
-          program_status_value: null,
-          outcomes_buy_in_for_filtering: null,
-          outcomes_progress_for_filtering: null,
-          offer_milestones_current_offer_id: null,
-        })) as ChartClientRow[];
+      const reachedClients = canUseDashboardDrilldowns
+        ? (clients
+            .filter((client) => daysByClientId.has(client.glide_row_id))
+            .map((client) => ({
+              ...client,
+              client_name: client.client_name ?? null,
+              client_image: client.client_image ?? null,
+              csm_team_member_id: client.csm_team_member_id ?? null,
+              csm_secondary_assignee_id: null,
+              program_status_value: null,
+              outcomes_buy_in_for_filtering: null,
+              outcomes_progress_for_filtering: null,
+              offer_milestones_current_offer_id: null,
+            })) as ChartClientRow[])
+        : [];
       setTtvMetric({
         averageDays:
           dayValues.length > 0
@@ -3392,12 +3449,17 @@ export function Dashboard() {
     appliedProgramValues,
     appliedShowSecondaryFilter,
     assignedTeamMemberId,
+    canUseDashboardDrilldowns,
     offers,
     reportVersion,
   ]);
 
   useEffect(() => {
-    if (!activeDetailKey || !appliedFilters.companyId) {
+    if (
+      !canUseDashboardDrilldowns ||
+      !activeDetailKey ||
+      !appliedFilters.companyId
+    ) {
       setDetailRows([]);
       setDetailTotalCount(0);
       setDetailLoading(false);
@@ -4018,6 +4080,7 @@ export function Dashboard() {
     appliedShowSecondaryFilter,
     appliedUsesAppClients,
     assignedTeamMemberId,
+    canUseDashboardDrilldowns,
     detailPage,
     detailRenewalSortDirection,
     detailSearch,
@@ -4060,15 +4123,16 @@ export function Dashboard() {
       const clientSelect = appliedUsesAppClients
         ? [
             "glide_row_id",
-            "client_name",
-            "client_image",
+            ...(canUseDashboardDrilldowns
+              ? DASHBOARD_CLIENT_IDENTITY_FIELDS
+              : []),
             "company_glide_row_id",
             "program_status_value",
             "outcomes_buy_in_for_filtering",
             "outcomes_progress_for_filtering",
-            "next_steps_value",
-            "csm_date_of_last_contact",
-            "csm_date_of_next_contact",
+            ...(canUseDashboardDrilldowns
+              ? DASHBOARD_CLIENT_PROFILE_FIELDS
+              : []),
             "offer_milestones_current_milestone_id",
             "offer_milestones_current_milestone_change_date",
             "outcomes_progress_date",
@@ -4081,14 +4145,15 @@ export function Dashboard() {
           ].join(", ")
         : [
             "glide_row_id",
-            "client_name",
-            "client_image",
+            ...(canUseDashboardDrilldowns
+              ? DASHBOARD_CLIENT_IDENTITY_FIELDS
+              : []),
             "program_status_value",
             "outcomes_buy_in_for_filtering",
             "outcomes_progress_for_filtering",
-            "next_steps_value",
-            "csm_date_of_last_contact",
-            "csm_date_of_next_contact",
+            ...(canUseDashboardDrilldowns
+              ? DASHBOARD_CLIENT_PROFILE_FIELDS
+              : []),
             "offer_milestones_current_milestone_id",
             "offer_milestones_current_milestone_change_date",
             "outcomes_progress_date",
@@ -4201,6 +4266,7 @@ export function Dashboard() {
         .filter(Boolean);
 
       if (
+        canUseDashboardDrilldowns &&
         appliedUsesAppClients &&
         appliedAppCompany?.id &&
         activeClientIdsForUpkeep.length > 0
@@ -4241,13 +4307,15 @@ export function Dashboard() {
         );
       });
       const tasks = ((taskRows ?? []) as ChartTaskRow[]);
-      setChartClients(clients);
+      setChartClients(canUseDashboardDrilldowns ? clients : []);
       setProfileUpkeep(
-        calculateProfileUpkeep(
-          clients,
-          profileUpkeepHistoryRows,
-          upkeepFreshnessStart,
-        ),
+        canUseDashboardDrilldowns
+          ? calculateProfileUpkeep(
+              clients,
+              profileUpkeepHistoryRows,
+              upkeepFreshnessStart,
+            )
+          : null,
       );
       setCapacityRows(
         availableTeamMembers
@@ -4446,6 +4514,7 @@ export function Dashboard() {
     activeDashboardTab,
     assignedTeamMemberId,
     availableTeamMembers,
+    canUseDashboardDrilldowns,
     shouldLoadDashboardCharts,
     teamMemberNameById,
     reportVersion,
@@ -4726,13 +4795,18 @@ export function Dashboard() {
               <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    if (!canUseDashboardDrilldowns) return;
                     setChartDetail({
                       title: "Avg. Time to Value: Reached",
                       rows: ttvMetric.reachedClients,
-                    })
+                    });
+                  }}
+                  disabled={
+                    !canUseDashboardDrilldowns ||
+                    ttvLoading ||
+                    ttvMetric.reachedCount === 0
                   }
-                  disabled={ttvLoading || ttvMetric.reachedCount === 0}
                   className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-left transition enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 disabled:cursor-default"
                 >
                   <div className="text-xs uppercase tracking-wider text-gray-500">
@@ -4744,8 +4818,14 @@ export function Dashboard() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTtvMilestonesOpen(true)}
-                  disabled={ttvLoading || ttvMetric.configuredMilestones === 0}
+                  onClick={() => {
+                    if (canUseDashboardDrilldowns) setTtvMilestonesOpen(true);
+                  }}
+                  disabled={
+                    !canUseDashboardDrilldowns ||
+                    ttvLoading ||
+                    ttvMetric.configuredMilestones === 0
+                  }
                   className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-left transition enabled:cursor-pointer enabled:hover:border-indigo-200 enabled:hover:bg-indigo-50 disabled:cursor-default"
                 >
                   <div className="text-xs uppercase tracking-wider text-gray-500">
