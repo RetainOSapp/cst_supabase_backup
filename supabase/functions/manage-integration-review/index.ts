@@ -365,10 +365,7 @@ async function assertCanReviewIntegrations(
     membership = emailMembership;
   }
 
-  if (
-    membership?.status === "active" &&
-    (membership.role === "director" || membership.role === "support")
-  ) {
+  if (membership?.status === "active" && membership.role === "director") {
     return membership.role as string;
   }
   throw new AuthError(
