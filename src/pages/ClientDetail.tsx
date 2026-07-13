@@ -4616,8 +4616,8 @@ function PathwayChangeModal({
               Change Pathway & Milestones
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Directors and Super Admins can change the active pathway and
-              milestone.
+              Super Admins, Directors, and assigned CSMs can change the active
+              pathway and milestone.
             </p>
           </div>
           <button

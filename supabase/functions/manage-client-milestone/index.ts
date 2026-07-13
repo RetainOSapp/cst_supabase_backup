@@ -481,9 +481,17 @@ Deno.serve(async (req) => {
     const isComplete = isCompleteAction(action);
     const isStart = isStartAction(action);
 
-    if (isPathwayChange && actor.role !== "super_admin" && actor.role !== "director") {
+    if (
+      isPathwayChange &&
+      actor.role !== "super_admin" &&
+      actor.role !== "director" &&
+      actor.role !== "csm"
+    ) {
       return jsonResponse(
-        { error: "Only Directors and Super Admins can change pathways." },
+        {
+          error:
+            "Only Super Admins, Directors, and assigned CSMs can change pathways.",
+        },
         403,
       );
     }

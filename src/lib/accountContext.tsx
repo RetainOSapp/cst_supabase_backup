@@ -115,7 +115,7 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
     canQuickUpdate: canWork,
     canEditClient: canWork,
     canAdvanceClientMilestones: isSuperAdmin || isDirector || isCsm,
-    canManageClientPathways: isSuperAdmin || isDirector,
+    canManageClientPathways: isSuperAdmin || isDirector || isCsm,
     canViewDirectorNotes: isSuperAdmin || isDirector,
     canManageTeam: isSuperAdmin || isDirector,
     canViewAllClients: isSuperAdmin || isDirector || isSupport,
