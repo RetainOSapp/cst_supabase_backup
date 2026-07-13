@@ -23,7 +23,7 @@ if (!branch || branch === "main") {
 }
 
 const changedFiles = args[0] === "--committed"
-  ? git("diff", "--name-only", "main...HEAD")
+  ? git("diff", "--name-only", "origin/main...HEAD")
   : git("diff", "--cached", "--name-only");
 const files = changedFiles ? changedFiles.split("\n").filter(Boolean) : [];
 

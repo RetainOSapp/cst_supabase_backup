@@ -27,6 +27,26 @@ after login smoke QA is ready.
   whether the address exists in RetainOS.
 - Existing MM webhooks continue to work after Auth setting changes.
 
+## Production Checkpoint - 2026-07-13
+
+- Secure email change remains enabled.
+- Secure password change is enabled.
+- Require-current-password remains disabled because RetainOS is OTP-first and
+  users may not have a password to supply.
+- Leaked-password protection is enabled.
+- Minimum password length is 12 with the strongest available uppercase,
+  lowercase, number, and symbol requirements.
+- Email OTP expiry remains 3,600 seconds and OTP length remains 8 digits.
+- CAPTCHA remains disabled until a supported provider is configured in the
+  RetainOS frontend; enabling the dashboard toggle alone would break login.
+- Jay saved the settings, logged out, requested a fresh login, and completed
+  login successfully. Production SuperAdmin OTP access is QA-approved.
+- Auth database connection allocation now uses 17% instead of a fixed 10
+  connections. On the current 60-connection instance this preserves the same
+  10-connection Auth capacity while allowing it to scale with compute size.
+- Jay saved the allocation change, logged out, and completed another fresh OTP
+  login successfully. The Auth settings and performance gates are closed.
+
 ## Rollback
 
 - If legitimate users cannot log in, revert only the Auth setting changed last

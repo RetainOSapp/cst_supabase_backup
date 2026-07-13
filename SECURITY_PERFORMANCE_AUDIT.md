@@ -385,12 +385,12 @@ webhook fallback (H4).
 
 ## 5. Verification checklist (prove each fix)
 
-- [ ] `POST /rest/v1/rpc/exec_sql` with anon key returns 403/permission denied.
-- [ ] `POST /functions/v1/sync-glide-table` with no/invalid auth returns 401.
-- [ ] Authenticated user of Company A gets 0 rows for Company B via
+- [x] `POST /rest/v1/rpc/exec_sql` with anon key returns 403/permission denied.
+- [x] `POST /functions/v1/sync-glide-table` with no/invalid auth returns 401.
+- [x] Authenticated user of Company A gets 0 rows for Company B via
       `GET /rest/v1/clients` and `/client_contracts`.
-- [ ] Anon `GET/DELETE /rest/v1/client_links` returns 401/permission denied.
-- [ ] Re-run Supabase advisors (security + performance): the ERROR-level RLS
+- [x] Anon `GET/DELETE /rest/v1/client_links` returns 401/permission denied.
+- [x] Re-run Supabase advisors (security + performance): the ERROR-level RLS
       items and the anon-executable `SECURITY DEFINER` warnings are gone.
 - [ ] No `sk-ant-` literal in any deployed bundle; Beacon works via Edge Function.
 - [ ] First-load JS for `/dashboard` < 250 KB (measure in build output).
@@ -399,30 +399,25 @@ webhook fallback (H4).
 
 ## 6. Production advisor classification - 2026-07-13
 
-Current production Advisor results after Phases 0, 0.5, 1A, 1B, and immediate
-1D:
+Current production Advisor results after Phases 0, 0.5, 1A, 1B, 1D, and 1E:
 
-- Security Advisor: **0 errors**, 28 warnings, 6 info suggestions.
-- Performance Advisor: **0 errors**, 15 warnings, 40 info suggestions.
+- Security Advisor: **0 errors**, 24 warnings, 6 info suggestions.
+- Performance Advisor: **0 errors**, 0 warnings, 40 info suggestions.
 
 The six Security info suggestions are intentional service-only tables with RLS
 enabled and no browser policy. With RLS enabled, no policy is fail-closed; these
 tables remain reachable only through trusted server/service paths.
 
-The 28 Security warnings classify as:
+The remaining 24 Security warnings are intentional authenticated
+`SECURITY DEFINER` functions. These are policy helpers, self-authority
+resolvers, actor-scoped Dashboard aggregates, or guarded operational RPCs.
+Each resolves authority from the signed-in actor rather than trusting a
+requested company. Moving policy helpers to a private schema may reduce advisor
+noise later, but is not required to close tenant isolation.
 
-- 3 mutable function search paths: actionable and included in local Phase 1E.
-- 1 anonymously executable legacy retention aggregate: actionable. Phase 1E
-  revokes anonymous access and replaces the browser-facing function with a
-  company/role/assignment-scoped wrapper.
-- 24 authenticated `SECURITY DEFINER` functions: intentional. These are policy
-  helpers, self-authority resolvers, actor-scoped Dashboard aggregates, or
-  guarded operational RPCs. They are executable because RLS/the frontend calls
-  them, and each resolves authority from the signed-in actor rather than trusting
-  a requested company. Moving policy helpers to a private schema may reduce
-  advisor noise later, but is not required to close tenant isolation.
-
-The 15 Performance warnings are fully addressed by local Phase 1E:
+Phase 1E resolved the four actionable Security warnings by pinning three mutable
+function search paths and revoking anonymous access to the legacy retention
+aggregate. It also resolved all 15 Performance warnings:
 
 - 13 redundant permissive `*_no_anon_access` policies all use `USING (false)`
   and therefore never widened access. Removing them preserves the scoped read
@@ -435,7 +430,7 @@ candidates. They remain measured follow-up work: add an FK index only when the
 delete/join path needs it, and do not drop a merely unused index until production
 usage has been observed over a representative business cycle.
 
-Phase 1E source is local-only in
-`20260713025000_security_advisor_cleanup.sql` with an exact rollback and focused
-verifier. Production remains unchanged until a separate approval and
-transaction-only preflight pass.
+Phase 1E is live and Jay-QAed. Its source is
+`20260713025000_security_advisor_cleanup.sql`, with an exact rollback and focused
+verifier. Production postflight passed, including scoped retention behavior,
+anonymous denial, equivalent-index preservation, and unchanged mirror reads.

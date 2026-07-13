@@ -217,12 +217,6 @@ Status: **blocked from production** until role-aware app-owned policies,
 mirror-table policies, secure future `backup_*` policy creation, and mandatory
 role JWT verification are implemented and reviewed.
 
-**Dated correction - 2026-07-13:** Phase 1A authority is now deployed and its
-frontend boundaries are included in the current Phase 1B release candidate.
-Phase 1B additive aggregates (`20260713020000`) are deployed. App-owned read
-policy replacement remains stop-gated behind this frontend release, role smoke
-QA, and the manual `20260713020500` release gate.
-
 The original blanket Phase 1 draft is superseded and must not be applied. Build
 and release Phase 1 in four independently reviewed slices:
 
@@ -257,27 +251,101 @@ Scope:
   `is_retainos_super_admin()` used by the already-deployed Phase 0 notification
   policies. All current SuperAdmins are UUID-bound; Phase 1B will move the
   remaining policies to the bound helper after role QA proves parity.
-- Production Phase 1A checkpoint 2026-07-13: migration `20260713010000` is
-  applied. Disposable real-JWT verification passed 38/38 across SuperAdmin,
-  Director, Support, CSM, Viewer, and mirror-only CSM authority, followed by
-  zero-residue cleanup.
-- Production Phase 1B Wave 1 checkpoint 2026-07-13: additive aggregate migration
-  `20260713020000` is applied. Core counts, MM tokens/intake, anonymous denial,
-  and live HTTP health remained unchanged. No read policy or legacy RPC grant
-  changed.
-- Frontend release candidate checkpoint 2026-07-13: branch
-  `codex/security-phase1b-frontend-release` is based on production `main`
-  rollback baseline `17c3023`. It preserves current Dashboard filter and chart
-  behavior while adding DB-resolved account authority, Viewer boundaries, and
-  actor-scoped aggregate reads. Phase 1A checks pass 37/37, Phase 1B checks pass
-  52/52, and the production build passes. Independent review found that the
-  current-main churn-reason chart postdated the original aggregate slice, so
-  additive compatibility migration `20260713020200` and its exact rollback are
-  now required before the frontend deploy.
-- Mandatory forward order is: apply additive churn aggregate `20260713020200`;
-  deploy frontend; complete role smoke QA; explicitly apply `20260713020500`;
-  then separately apply and QA `21000`, `22000`, `22500`, and `23000`. Do not
-  batch these steps.
+- Production checkpoint 2026-07-13: Jay approved and Phase 1A migration
+  `20260713010000` was applied with SHA-256
+  `5180a931f27b6b6fe5e86ecbf57fb18913a6e99ba69194b06d8eaa830e41d440`.
+  The migration changed no table policy. Disposable real-JWT verification
+  passed 38/38 across bound SuperAdmin, app Director/Support/CSM/Viewer, and
+  mirror-only CSM authority, including primary/secondary assignment,
+  cross-company denial, Viewer raw-client denial, app-before-mirror precedence,
+  and zero-residue cleanup. The browser `resolve_current_account()` consumer is
+  still local-only and needs a separate frontend release approval. Phase 1B-D
+  remain production-blocked until their own narrow policies and QA are ready.
+- Local frontend checkpoint 2026-07-13: commit `88608ba` on the clean QA
+  worktree passed all six role paths, 37/37 focused checks, the 101-module
+  build, adversarial Viewer company scoping, zero-residue cleanup, and final
+  independent review with no P0-P3 findings. Viewer now receives aggregate
+  Dashboard/Resources only in the UI, with no client routes, names, profile
+  history, drilldowns, row-level KPI fallback, or URL-selected foreign company.
+- Frontend production remains stop-gated. Phase 1B must authorize aggregate
+  Dashboard RPCs against the resolved actor/company and provide Viewer-safe
+  aggregate paths for metrics that still derive from client rows before broad
+  app-owned reads are removed. Shipping UI restrictions alone does not close
+  direct REST/RPC isolation.
+- Phase 1B local checkpoint 2026-07-13: clean commit `38817f0` is READY with
+  actor-scoped Dashboard aggregates, role/assignment-aware app-owned reads,
+  Viewer raw-row denial, source-resolution fail-closed behavior, exact guarded
+  rollbacks, and two manual release gates. Checks passed 50/50 Phase 1B, 37/37
+  Phase 1A, the 101-module build, deterministic SQL previews, and two final
+  independent READY reviews. Production is unchanged.
+- Mandatory forward order: apply additive `20260713020000`; deploy the frontend;
+  complete frontend role smoke QA; explicitly apply manual gate `20260713020500`;
+  apply and QA company policies `20260713021000`; apply and QA client policies
+  `20260713022000`; explicitly apply post-policy QA gate `20260713022500`; only
+  then apply legacy Dashboard RPC lockdown `20260713023000`. A batch apply is
+  designed to stop before policy replacement when the manual gate is absent.
+- Mandatory full rollback order: `23000`, `22500`, `22000`, `21000`, then
+  `20500`; redeploy Phase 1A frontend commit `88608ba`; finally roll back
+  additive aggregate slice `20000`. Each SQL rollback refuses unsafe ordering.
+- Production Wave 1 checkpoint 2026-07-13: Jay approved and additive aggregate
+  migration `20260713020000` is applied with SHA-256
+  `c0e39fa60405d53267cd13c6788f636ea6ba2aa885c974be64084bdd040bce1e`.
+  Postflight confirmed unchanged core counts, anonymous denial, fail-closed
+  unbound service calls, healthy MM tokens/intake, and live HTTP 200. No policy,
+  legacy-RPC grant, frontend, Auth, Edge Function, Git, or token changed.
+- STOP GATE: deploy and QA the `38817f0` frontend before applying manual gate
+  `20260713020500`. Do not apply `21000`, `22000`, `22500`, or `23000` yet.
+- Production Wave 1B/frontend correction 2026-07-13: current-main churn chart
+  parity required one additional aggregate-only RPC. Jay approved and migration
+  `20260713020200` is applied with SHA-256
+  `dd51ec58d6cf071738cf259bb13b5775cd7ceb08ffdb62d41f0fe8d97e26dc40`.
+  It changes no policy, returns no raw identity, denies anonymous execution, and
+  has an exact guarded rollback. The current-main-compatible frontend is live
+  at `d29fa95`; Vercel deployment `5425577967` succeeded and the production
+  bundle contains all actor-scoped RPC paths. Automated checks pass Phase 1A
+  37/37, Phase 1B 52/52, and the production build.
+- Updated STOP GATE: complete live role smoke QA before applying manual gate
+  `20260713020500`. Policy and lockdown slices `21000`-`23000` remain unapplied.
+  Frontend rollback baseline is `17c3023`; while `20500` is absent, roll back
+  `20200` before `20000` if the aggregate/frontend release must be reversed.
+- Production closure 2026-07-13: live role QA passed and temporary identities,
+  client, and child records were deleted with zero residue. Release gates
+  `20500`/`22500`, company policy slice `21000`, client policy slice `22000`,
+  and legacy Dashboard lockdown `23000` are applied in the required order.
+  Direct transaction-scoped RLS QA passed Director/Support company access,
+  primary/secondary-assigned CSM client graphs and self-assigned tasks,
+  unassigned/cross-company denial, Viewer raw-row denial, and automatic fixture
+  rollback. Final postflight found zero broad policies on covered Phase 1B
+  tables, browser denial on all three legacy KPI RPCs, authenticated-only access
+  to actor-scoped replacements, three active MM tokens, and live HTTP 200.
+  Phase 1B is complete.
+- Phase 1C decision 2026-07-13: do not build temporary mirror-specific RLS
+  because the remaining companies are expected to migrate within four weeks.
+  Existing `backup_*` policies remain an explicitly time-bounded risk until
+  mirror retirement. Phase 1D is split into immediate app/sync cleanup and a
+  final mirror-table revocation only after the last company no longer depends
+  on fallback reads.
+- Phase 1D immediate candidate 2026-07-13: local migration `20260713024000`
+  hardens every remaining non-mirror broad browser policy. Attendance and timed
+  checkpoints follow Director/Support company scope plus primary/secondary CSM
+  assignment; contract templates are SuperAdmin/Director-only; unscoped AI,
+  raw Glide rows/metadata, and sync configuration become service-role-only;
+  sync jobs/runs and table visibility remain bound-SuperAdmin-only. The exact
+  rollback restores only the prior policies. No `backup_*` table is changed.
+  Static/regression checks and the production build pass; production remains
+  unchanged until a separate approval applies this migration and direct role
+  QA passes.
+- Phase 1D immediate production checkpoint 2026-07-13: Jay approved and
+  migration `20260713024000` is applied. Direct transaction-scoped QA passed
+  all intended role boundaries and rolled back every fixture. Postflight found
+  zero targeted broad policies, zero authenticated policies on service-only raw
+  configuration tables, both query indexes, zero QA residue, three active MM
+  tokens, current processed MM intake, and live app/login HTTP 200. The 13
+  `backup_*` broad policies remain unchanged for the four-week migration window.
+  Jay's production UI smoke passed Tables, Sync Log, MM Contract Templates,
+  Client Detail, and Daily Pulse. Immediate Phase 1D is closed. The separately
+  gated final mirror-table revocation remains deferred until the last
+  Glide-backed company migration is complete.
 
 QA:
 
@@ -316,6 +384,141 @@ QA:
 Rollback:
 
 - Revert only the last Auth setting changed if legitimate login fails.
+
+Source consolidation checkpoint 2026-07-13:
+
+- Clean local branch `codex/security-source-consolidation` now reproduces the
+  deployed Phase 0, Phase 0.5, recovery-fix, Phase 1A/B, and immediate Phase 1D
+  security source on top of current `main`.
+- Ten hardened function/shared files match downloaded production source
+  byte-for-byte. `manage-client-task` preserves current-main's stricter UUID
+  validator; `manage-integration-review` was corrected to the deployed
+  Director/SuperAdmin-only rule so Support cannot use integrations.
+- Current production DB types were regenerated and exposed through optional
+  `typedSupabase`; existing runtime queries remain unchanged. Beacon, the
+  Anthropic browser SDK, and obsolete Phase 1C draft are excluded.
+- Validation passes Phase 0 production checks 8/8, Phase 0.5 91/91, Phase 1A
+  37/37, Phase 1B 52/52, Phase 1D 16/16, clean diff checks, and the 102-module
+  production build. Branch remains local until Auth settings and final security
+  verification are complete.
+
+Auth production checkpoint 2026-07-13:
+
+- Jay enabled secure password changes and leaked-password protection, raised
+  minimum password length from 6 to 12 with the strongest available character
+  requirements, and preserved secure email change, 3,600-second OTP expiry,
+  and 8-digit OTPs. Require-current-password and CAPTCHA remain disabled for
+  the documented OTP-first/provider reasons.
+- Jay logged out and completed a fresh production OTP login successfully.
+  SuperAdmin login QA is closed.
+- Auth connection management now uses a 17% allocation rather than an absolute
+  cap of 10. The current 60-connection instance therefore retains the same
+  10-connection Auth capacity and can scale automatically. Jay completed a
+  second logout/fresh-OTP login successfully after saving this change.
+- Auth settings and performance are closed. Final advisor/exploit verification
+  remains before the consolidation branch can be proposed for merge.
+
+Final verification checkpoint 2026-07-13:
+
+- Fresh static gates pass Phase 0.5 91/91, Phase 1A 37/37, Phase 1B 52/52,
+  and Phase 1D 16/16. The current production build passes with 102 modules.
+- The branch diff against current `origin/main` excludes package changes,
+  Header/Beacon files, Beacon libraries, and the old Glide folder.
+- Fresh live Phase 0 exposure QA passes 8/8: anonymous SQL/RPC and protected
+  table reads are blocked; anonymous/invalid sync function auth is rejected;
+  and service auth reaches the target allowlist without executing a sync.
+- Supabase Security and Performance Advisor review is the final evidence gate
+  before review/merge of the local consolidation branch.
+
+Advisor review correction / Phase 1E candidate 2026-07-13:
+
+- Production Advisors report 0 Security errors and 0 Performance errors.
+  Security has 28 warnings / 6 info suggestions; Performance has 15 warnings /
+  40 info suggestions.
+- The six Security info suggestions are intentional service-only tables with
+  RLS enabled and no browser policy. Twenty-four authenticated
+  `SECURITY DEFINER` warnings are intentional actor-scoped policy helpers,
+  resolvers, guarded operational RPCs, or aggregate-only Dashboard functions.
+- The advisor exposed one real anonymous path: legacy
+  `dashboard_retention_counts_fast`. Clean local commit `3881d91` adds
+  reversible migration `20260713025000`: anonymous execution is revoked; a
+  wrapper enforces company role, denies Viewer/missing scope, and forces CSM
+  queries to the signed-in CSM's assignment before returning retention data.
+- The same migration pins all three mutable function search paths, removes 13
+  inert `USING (false)` policies, and drops only two advisor-confirmed duplicate
+  indexes. It changes no mirror read policy. Exact rollback and a 15/15 verifier
+  are included.
+- The 40 Performance info suggestions remain measured follow-up work for
+  unindexed foreign keys and unused-index candidates, as already deferred in
+  the roadmap. Production is unchanged pending a separately approved
+  transaction-only preflight and rollout.
+
+Phase 1E transaction-only preflight 2026-07-13:
+
+- Jay explicitly approved the production transaction-only preflight. The first
+  executor attempt rejected explicit transaction commands before executing the
+  body; the final preflight used the existing RPC transaction plus a deliberate
+  success sentinel to force rollback.
+- The final preflight passed against production using a real active CSM's
+  current unbound-email membership shape. It verified anon denial, authenticated
+  wrapper grant, hidden unchecked core, three pinned search paths, zero remaining
+  inert policies, retained equivalent indexes, unchanged mirror-policy count,
+  forced CSM assignment parity, and denial for an authenticated identity with no
+  membership.
+- A separate postflight confirmed the Phase 1E rollout marker and renamed core
+  were absent, the original function/grant/policies/indexes were restored, and
+  production was unchanged. Disposable preflight files were removed; the clean
+  worktree remains at local commit `3881d91`.
+- Apply SHA-256: `882dbf97ebc8040464182fd7fbc114e3e1d03a02c12a9e4fe2006b45c5ebf855`.
+  Exact rollback SHA-256:
+  `8f208abcbf2ce31490956b29b0e51b58921d1f4be310a5e7a7ff3cd2390acfe6`.
+  Permanent production apply remains separately gated.
+
+Phase 1E production checkpoint 2026-07-13:
+
+- Jay explicitly approved and migration `20260713025000` applied permanently
+  with SHA-256
+  `882dbf97ebc8040464182fd7fbc114e3e1d03a02c12a9e4fe2006b45c5ebf855`.
+- Catalog/runtime postflight passed: rollout marker present; anon retention grant
+  removed; authenticated scoped wrapper present; unchecked core hidden; all
+  three search paths pinned; 13 inert policies absent; two duplicate indexes
+  absent while equivalent indexes remain; exactly 13 deferred broad mirror
+  policies remain.
+- A real active CSM's wrapper result matched the service baseline forced to that
+  CSM's actual assignment. An authenticated identity with no membership was
+  denied. A direct live anonymous REST call now returns 401.
+- Regression gates pass Phase 0 live 8/8, Phase 0.5 91/91, Phase 1A 37/37,
+  Phase 1B 52/52, Phase 1D 16/16, Phase 1E 15/15, and the 102-module production
+  build. MM retains three active integration types; app and login return 200.
+- Exact rollback remains unapplied with SHA-256
+  `8f208abcbf2ce31490956b29b0e51b58921d1f4be310a5e7a7ff3cd2390acfe6`.
+  Jay's short Dashboard/note-search UI smoke and refreshed Advisor counts remain
+  before Phase 1E closure.
+
+Phase 1E QA closure 2026-07-13:
+
+- Jay completed the production UI smoke successfully: Moves Method Dashboard
+  and retention drilldown, Clients history/note search, and Ethical Scaling
+  Dashboard all worked normally.
+- Refreshed Advisors match the reviewed target exactly: Security has 0 errors,
+  24 intentional authenticated-function warnings, and 6 intentional service-only
+  info suggestions; Performance has 0 errors, 0 warnings, and 40 measured
+  unindexed-FK/unused-index suggestions.
+- Phase 1E is closed. Remaining rollout work is source/document consolidation,
+  final branch review, and a separately approved merge/push. Phase 1C/final
+  mirror-policy retirement remains deferred until all Glide-backed companies
+  migrate.
+
+Consolidation release candidate 2026-07-13:
+
+- The clean local branch includes the final Phase 1E evidence and synchronized
+  roadmap, Auth checklist, and rollout state.
+- Final gates pass Phase 0 live 8/8, Phase 0.5 91/91, Phase 1A 37/37, Phase 1B
+  52/52, Phase 1D 16/16, Phase 1E 15/15, the 102-module production build,
+  committed-scope checks, and credential-shaped-secret scanning.
+- Beacon, package changes, local secrets, and old Glide source are excluded.
+  The candidate is ready for a separately approved merge/push. No merge, push,
+  or deployment occurred during consolidation.
 
 ## Launch Gate
 

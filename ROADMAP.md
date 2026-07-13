@@ -50,7 +50,6 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Offboarding actual-end-date/churn upgrade QA passed.
   - Client Detail > Change Status > Offboarded now requires the actual end date and offer-fit answer, auto-classifies churn against the current contract end date, requires churn reason/notes only when churned, writes offboarding metadata/history/audit, and updates the RetainOS Help draft.
   - QA follow-up fix: Clients roster now waits for app-owned table detection and listens for a Client Detail status-change refresh token, so returning to `/clients` should show Offboarded without hard refresh.
-  - 2026-07-13 hotfix: the legacy `Jan 1, 2075` no-date sentinel is ignored in client contract displays, dashboard calculations, and status changes; RetainOS instead uses the verified date or calculates start date plus expected duration.
 - `[x]` 2026-06-20 Secondary pathway support QA passed.
   - Company Settings > Feature gates can enable Secondary pathway; Client Detail > Pathways & Milestones can set or clear the secondary pathway/milestone and shows it as a separate summary. `adding-secondary-offers` is now the RetainOS "Adding secondary pathways" draft.
   - 2026-07-02 QA fix: Change Pathway & Milestones now skips unnecessary primary pathway writes when only secondary pathway changes, only calls secondary writes when secondary values changed, validates secondary milestone selection, and surfaces real Edge Function errors.
@@ -58,10 +57,8 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-02 QA passed: Secondary Pathway expanded progress now has its own Start/Complete Secondary Milestone actions. `manage-client-milestone` supports secondary start/complete actions and updates the secondary current fields instead of the main pathway.
 - `[x]` Milestone-completed task template QA passed.
   - 2026-07-03 Jay QA passed: primary pathway milestone completion can auto-create matching template tasks.
-  - 2026-07-09 polish: completed Client Detail pathway milestones can edit completion date/notes without replaying completion side effects; milestone completion notes now persist on `client_milestones`.
-- `[x]` MM pathway/archive cleanup retest.
-  - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule.
-  - 2026-07-11 Jay QA passed: unused MM pathways and milestones archive correctly.
+- `[~]` `[qa]` MM pathway/archive cleanup retest.
+  - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule. Jay should retest archiving an unused MM pathway and an unused MM milestone.
 - `[x]` Moves Method webhook setup dry run.
   - 2026-07-02 readiness patch deployed: `zapier-create-client` accepts canonical `pathway_id`, optional `secondary_pathway_id` + `secondary_milestone_id`, and legacy `offer_id` / `secondary_offer_id` aliases. `webhook-update-client` accepts the same fields for a conditional second Zapier step. Both validate active app-owned company pathways/milestones and require Secondary Pathway to be enabled.
   - 2026-07-02 internal QA: Moves Method was seeded as an app-owned pilot shell only (`companies.id = 21586391-9a84-4072-9ae6-20436b27bea9`, legacy `wd7vy0vaQK2hgB3IRqy17w`) with 89 members, 16 pathways, 33 milestones, and zero migrated clients. Secondary Pathway and New Client Webhook settings are enabled.
@@ -71,10 +68,6 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-02 Daniel-call custom-field fix: seeded MM app-owned custom field definitions for legacy Glide slots `customfield1..customfield7` (Gender, Age, Goals, Training Background, Injuries, Close Date, Program Name and Length). Disposable-token live QA confirmed `zapier-create-client` accepts Daniel's `customfield6` / `customfield7` payload and writes `client_custom_field_values`.
   - 2026-07-04 cutover: Moves Method webhook resources/tokens were validated during migration prep; active app-owned tokens exist for client create, client update, and call-summary next steps. Remaining work is operational customer Zap maintenance, not RetainOS setup.
   - 2026-07-04 final handoff check: MM has one active non-expiring token for `client_create`, `client_update`, and `call_summary_next_steps`; client create/update tokens were last used by Daniel/MM Zapier on 2026-07-03, and call-summary next steps processed/matched Janet Post on 2026-07-04.
-  - 2026-07-05 hotfix deployed: `webhook-update-client` now allows `secondary_pathway_id` without `secondary_milestone_id` for secondary pathways that have no milestones, while still validating a milestone when one is provided. Live verification applied AA Bundle to Stacie Rigney via the deployed webhook with a temporary token that was deleted afterward.
-  - 2026-07-05 manual UI hotfix deployed: Client Detail > Change Pathway & Milestones now allows `set_secondary_pathway` without a milestone for no-milestone secondary pathways like AA Bundle; `manage-client-milestone` accepts the same pathway-only save and writes clean history/audit text.
-  - 2026-07-06 task dismissal hotfix deployed: `manage-client-task` now lets CSMs update tasks they own even when imported tasks point at legacy-only client ids, and validates legacy member assignee ids without UUID-cast failures. Live smoke test passed with a temporary MM CSM/task and all temp rows were cleaned up.
-  - 2026-07-08 task edit modal hotfix: editing an imported task no longer resubmits an unchanged hidden client link, so CSMs can dismiss/update tasks tied to offboarded/unselectable legacy clients.
 - `[x]` Secondary assignee support QA passed.
   - Company Settings > Feature gates can enable Secondary assignee; + New Client and Client Detail > Edit Profile can set/clear the Secondary Assignee. Server validation requires an active visible team member and prevents using the same person as Primary CSM. `adding-secondary-assignee` is a draft RetainOS Help resource.
 - `[x]` Archetypes in client views QA passed.
@@ -82,9 +75,6 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` 2026-06-21 Advocacy tracking QA passed.
   - Quick Update and Client Detail > Outcomes now track Review, Testimonial, Referral, and Renewal / Upsell asks and received events with repeat counts and optional notes. Dashboard > Overview has Advocacy & Growth cards for asked, received, and ratio by current filters. Ethical Scaling app-owned data was backfilled from legacy Glide fields.
   - Jay QA: testimonial save worked from Client Detail, Quick Update layout was corrected to show Pathway progress before Advocacy & Growth, and Dashboard Overview advocacy filters worked.
-  - 2026-07-06 Izabella request: Dashboard > Overview > Advocacy & Growth cards now drill into client lists. Received opens received clients; Asked opens asked clients; Ratio remains informational.
-  - 2026-07-08/09 MM launch fix: Dashboard Advocacy & Growth counts/drilldowns include migrated client advocacy summary dates as fallback records, and `20260709100000_backfill_missing_advocacy_events_from_clients.sql` materialized missing MM events for native dashboard queries.
-  - 2026-07-09 Lorcan QA fix: Client Detail > Outcomes advocacy saves now insert advocacy events first and refresh client summaries after insert so testimonial/review/referral/renewal received actions do not fail on stale summary updates.
 - `[x]` Moves Method Phase 4 contract management retest passed.
   - 2026-07-04 fix deployed: Director, Support, and assigned CSMs can create/edit/archive/delete app-owned contract rows for clients they can manage; CSM assignment checks accept app-owned member IDs; contract rows ending today remain Active; and client current-contract summary sync only promotes active/open non-archived contract rows so expired old contracts do not reappear as current after archive/edit.
   - 2026-07-04 Jay QA passed: editing contract value persisted after refresh, archiving removed contracts from Active, and archived contracts appeared correctly under Archived.
@@ -153,6 +143,63 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - Medium-term architecture question: decide whether RetainOS should keep legacy IDs as external-reference fields indefinitely, or eventually migrate internal relationships fully onto Supabase UUID foreign keys with legacy IDs only as audit/import metadata.
   - Evaluate after Moves Method stabilizes: task/client/member joins, webhook contracts, reporting performance, RLS simplicity, support/debug workflows, and migration cost/risk.
 - `[~]` `[mixed]` Define RLS/server-side authorization for all write paths.
+  - 2026-07-05 local Security Phase 0 branch prepared: staged DB/function hardening for anonymous access, legacy sync endpoint auth/allowlist, and a non-destructive verification script. Not applied/deployed/pushed yet; broader tenant-scoped RLS remains the next security phase.
+  - 2026-07-05 local follow-up hardening prepared: sync DDL identifier validation/quoting, webhook fallback constant-time comparison, removal of audited raw PostgREST filter strings in webhook/review/task assignee lookups, and resource update query scoping. Still local-only.
+  - 2026-07-05 local Phase 1 tenant-RLS draft prepared: DB-side SuperAdmin registry, company-membership helper functions, hot-path indexes, tenant-scoped read policies for app-owned tables, Resources read scoping, and companion super-admin seeding / tenant verification scripts. Still local-only; do not apply until staging/smoke QA plan is ready.
+  - 2026-07-05 local Phase 2/performance draft prepared: generic `prepare-login` responses, allow-listed webhook payload storage, shared CORS/JSON helper started, sync-control table policies folded into the RLS draft, and route-level code splitting/manual chunks. Still local-only.
+  - 2026-07-05 rollout prep added: shared Edge auth helper used by integration tokens/resources, generated Supabase DB types available through `typedSupabase`, Supabase Auth dashboard checklist documented, and `SECURITY_ROLLOUT_PLAN.md` drafted with phased QA/rollback gates. Still local-only.
+  - 2026-07-11 local-only Phase 0 checkpoint `089e099`: additive DB-side SuperAdmin/bootstrap helpers, guarded privileged RPCs and exposed-table grants, tenant-scoped links/advocacy/notification reads, service-role-only `sync-glide-table`, non-destructive verification, migration-order history, and production-ref command guards. Clean worktree build/scope QA passed with no Beacon artifacts. No push, migration apply, function deploy, Vercel deploy, or Auth setting change occurred. Phase 1 remains blocked until role-aware and mirror-table RLS are corrected.
+  - 2026-07-11 read-only production preflight passed for Phase 0A: project ref and candidate scope are pinned, all three configured SuperAdmins resolve to confirmed Auth users, MM/ES app-owned reads and current MM webhook activity are healthy, seven consecutive daily physical backups are complete, and the deployed `sync-glide-table` v7 rollback source was captured. The preflight also confirmed the live holes Phase 0 targets: anonymous rows are currently readable from links/advocacy and anonymous `exec_sql` is callable. No production write, SQL apply, function deploy, push, merge, Auth change, or Vercel change occurred.
+  - 2026-07-11 Phase 0A production bootstrap applied with reviewed SHA-256 `95529841438f4510d4bc1d80bbbfe46fb4b7ebf538c253d3938e4c5f754492a1`. Bootstrap history exists; the empty registry and new identity helpers deny anonymous access; MM/ES counts and MM webhook evidence are unchanged. SuperAdmin dry-run resolves all 3 configured Auth users with zero missing users, UUID conflicts, or archive actions. Registry seed and Phase 0B remain paused for separate approval; no function/Auth/Vercel/Git deployment occurred.
+  - 2026-07-12 approved production SuperAdmin registry seed completed: 3 configured rows synced, all 3 are active and exactly match their confirmed Supabase Auth UUIDs, with 0 missing users, conflicts, or archives. Registry/history/helpers still deny anonymous access. MM webhook ingestion continued during verification, adding one legitimate client/task. Phase 0B hardening and `sync-glide-table` deploy remain paused for separate approval.
+  - 2026-07-12 approved Phase 0B production hardening applied with reviewed SQL SHA-256 `cd8bab24c3df202f831ec429087c1250d31e29115ca6d395dcd5f1ed7ce9b11a`; both rollout-history rows exist. Anonymous `exec_sql`, links, advocacy, legacy staging tables, table estimates, and notification generation now deny access. Hardened `sync-glide-table` v9 is ACTIVE with JWT verification enabled; anon/invalid callers return 401 and a valid service caller reaches the no-write target allowlist. MM/ES service reads and MM's three active webhook types remain healthy. Automated gates passed; Jay-owned UI/role/sync smoke QA remains before Phase 0 is marked closed.
+  - 2026-07-12 Jay live QA passed: production Tables shows estimates; the 7-row `Company -> Client Groups` primary Glide sync completed successfully; MM Ginger Heus loads the expected client link plus testimonial/upsell advocacy; ES Ali Abdaal loads the expected testimonial; and the ES Clients list loads without authorization/notification errors. Only the controlled non-SuperAdmin cross-company notification/preference denial proof remains before Phase 0 closure.
+  - 2026-07-12 controlled Viewer QA confirmed `can_read_company(ES) = true` and `can_read_company(MM) = false`, but company-scoped notification reads time out with Postgres `57014`; every temporary Auth/member identity was deleted with zero residue. Local commit `eb83082` prepares a set-based notification RLS/index hotfix plus guarded audited rollback. Clean QA and independent review passed; production apply is waiting on Jay's explicit hotfix approval.
+  - 2026-07-12 correction / Phase 0 closure: Jay approved and the production notification policy/index hotfix was applied with reviewed SHA-256 `afd4e39e89a99f47090c456d744b3c7078045b06d6a3cfbad3c840af5d902e45`. A disposable Ethical Scaling Viewer passed all 7 real-JWT checks: own-company access, Moves Method denial, notification/preference isolation, and cross-company notification-generation denial; cleanup left 0 membership and 0 Auth rows. The full 8/8 Phase 0 verifier, service capability smoke, SuperAdmin registry alignment, MM/ES stability snapshot, and live webhook checks also passed. Phase 0 is closed; this parent item remains `[~]` only for the broader Phase 1 write-path/RLS rollout.
+  - 2026-07-12 local Phase 0.5 release candidate `0839973` is READY but not deployed/pushed/merged. It hardens 9 Edge Functions with DB-registry authority, exact-origin CORS, company-token-only production webhooks, replay short-circuiting, bounded email matching, minimized stored payloads, and SuperAdmin/service-role-only Glide sync modes while preserving newer live contract/task/call-attendance/next-contact behavior. Clean QA passed 74/74 focused checks, Deno local-symbol checking, a 101-module build, committed-scope/diff checks, production-baseline comparison, and independent Terra review. Roll out only through the four separately approved waves in `SECURITY_ROLLOUT_PLAN.md`.
+  - 2026-07-12 correction / Phase 0.5 Wave 1: Jay approved and the four management functions were deployed individually from clean commit `0839973`. Production is ACTIVE with JWT verification enabled for `manage-client-task` v10, `manage-resource` v5, `manage-integration-review` v9, and `manage-integration-token` v2. Every function passed trusted/untrusted-origin CORS checks plus unauthenticated and anon-session rejection before continuing; no rollback was needed. Wave 1 remains `[~]` pending Jay's short role-based task/resource/integration QA. Waves 2-4 remain undeployed and require separate approvals.
+  - 2026-07-12 correction / Wave 1 closure: Jay QA passed. CSM task creation worked; MM Director resources remained healthy; Support remained excluded from integration review/token management; and SuperAdmin saw exactly 3 active MM integration tokens. Phase 0.5 Wave 1 is closed. Waves 2-4 remain separately gated.
+  - 2026-07-12 Phase 0.5 Wave 2 attempt was stopped and rolled back: the first hardened `prepare-login` deploy returned generic 500s because it selected nonexistent `retainos_super_admins.id`. No OTP was sent and the unknown probe left 0 Auth rows. The exact captured pre-Wave-2 source was immediately restored as production v7 with JWT verification off. Clean retry commit `c759dba` fixes the schema column, prevents all four PostgREST ILIKE wildcard forms from classifying unknown emails, and keeps every valid-email internal outcome generic. It passed 77/77 checks, Deno, the clean build, read-only production query regressions, committed scope checks, and independent READY review. Production retry requires a new explicit approval.
+  - 2026-07-12 corrected Wave 2 retry: Jay approved and `prepare-login` v8 is ACTIVE with JWT verification off. Eligible, normal unknown, and backslash/percent/underscore/star-shaped unknown emails all returned identical 200 `{"ok":true}`; approved-origin CORS passed, an untrusted origin received no allow-origin header, and all unknown Auth residue remained 0. Waves 1, 3, and 4 stayed unchanged. Wave 2 remains `[~]` only for Jay's SuperAdmin, Director, and CSM OTP login QA.
+  - 2026-07-12 correction / Wave 2 closure: SuperAdmin OTP login passed. Disposable Ethical Scaling Director and CSM accounts both received OTPs and loaded the correct role-scoped app in incognito; Director had no SuperAdmin switcher and CSM saw no unassigned client data. Cleanup deleted both temporary memberships and both Auth users, leaving 0/0 residue. Phase 0.5 Wave 2 is closed; Waves 3-4 remain separately gated.
+  - 2026-07-12 Wave 3 preflight: MM has one current active company token for each live webhook and production global fallback is disabled. Client Create is READY for its separately approved 3A deploy with disposable client/token, replay, revoke, side-effect, and zero-residue QA. Client Update and Call Summary remain `[~]` locally: fix candidate-worsened stale/failed intake recovery before 3B/3C; Call Summary must also exclude archived clients and remove the five-row match cap. No Wave 3 function was deployed.
+  - 2026-07-12 correction / Wave 3A closure: Jay approved and hardened `zapier-create-client` v18 is ACTIVE with JWT verification off. Trusted/untrusted-origin CORS, missing/invalid/revoked token rejection, valid create, exact replay, contract/custom-field/task/history/audit side effects, token usage, and zero-residue cleanup all passed. The three real MM tokens remain active/current; Update, Call Summary, and Sync were untouched. Wave 3B remains local-only pending recovery-fix review and a separate approval.
+  - 2026-07-12 Wave 3B READY: local commit `87ba0b1` adds no auto replay. A client-update intake row still `received` after 30 minutes, safely beyond Supabase's 400-second hosted worker limit, moves to failed/review through status + `updated_at` optimistic conditions; race losers re-read current status and catch cannot regress terminal states. Deno/build/diff, 80/80 checks, live read-only JSON-path validation, and independent no-P0-P3 review passed. Production remains v10 until separately approved.
+  - 2026-07-12 correction / Wave 3B closure: Jay approved and hardened `webhook-update-client` v11 is ACTIVE with JWT verification off. Existing MM tokens were unchanged; a separate disposable token/client passed secondary pathway + milestone, custom-field/contact/next-step updates, exact replay, fresh/stale/failed event handling, invalid/revoked rejection, side-effect counts, and zero-residue cleanup. Client Create remains v18; Call Summary and Sync were untouched. Wave 3C remains separately gated.
+  - 2026-07-12 Wave 3C READY locally: clean commit `dd81050` hardens Call Summary matching/recovery and Integration Review partial-write recovery. Archived clients are excluded, broad attendee matching is bounded/literal-safe, stale intake is review-only with no auto replay, partial history/attendance/audit rows are reused, and every review terminal/error transition requires the exact DB-generated claim version. The first review found and blocked a P1 ownership race; the corrected candidate passed 91/91 checks, TypeScript/build/diff validation, and independent rereview with no P0-P3 findings. Roll out as two stop-gated steps: corrected Integration Review first with JWT verification on, then Call Summary with JWT verification off and disposable-token QA. Existing MM tokens remain untouched. Production is unchanged pending Jay's explicit Wave 3C1 approval.
+  - 2026-07-12 correction / Wave 3C1 closure: Jay approved and corrected `manage-integration-review` v10 is ACTIVE with JWT verification on. Missing/anon auth, trusted/untrusted CORS, one-winner concurrent claims, fresh/stale claim handling, partial history/attendance/audit recovery, owned failure handling, and zero-residue cleanup all passed with a disposable Director/client/event set. All seven stored MM token records were unchanged. Call Summary remains v12 and Wave 3C2 remains separately gated.
+  - 2026-07-12 correction / Wave 3C2 and Wave 3 closure: Jay approved and hardened `ingest-client-call-summary` v13 is ACTIVE with JWT verification off for company-token auth. Exact-origin CORS, missing/invalid/revoked rejection, multi-attendee matching, exact one-time history/attendance/audit, replay deduplication, fresh/stale intake handling, archived-client exclusion, malformed-timestamp rejection, and zero-residue cleanup passed. All seven stored MM token records were unchanged. Phase 0.5 Wave 3 is closed; only Wave 4 `sync-glide` remains separately gated.
+  - 2026-07-12 correction / Wave 4 and Phase 0.5 closure: Jay approved and hardened `sync-glide` v20 is ACTIVE with JWT verification on. Exact-origin CORS, missing/invalid/anon/member denial, service-role mode separation, and service `job_batch` validation passed. A disposable SuperAdmin synced only the 7-row `Company -> Client Groups` table; ES/MM app-owned counts and all MM token records stayed unchanged; cleanup left zero identity residue. All four Phase 0.5 waves are closed with intended JWT modes. Phase 1 tenant/write-path RLS remains separately gated.
+  - 2026-07-12 Phase 1A READY locally: the old blanket Phase 1 draft was rejected because it would overexpose CSM data and break mirror-only companies. Clean commit `45a5df6` adds no table-policy changes: it prepares bound SuperAdmin/app/mirror authority, assigned-only CSM client helpers, Viewer raw-client denial, supporting indexes, exact rollback, schema-cache reload, and one browser account-resolution RPC that replaces the Vite email allowlist/direct membership-table logic. Real membership-shape audit, 29/29 checks, build/diff/syntax, deterministic SQL previews, and independent no-P0-P3 review passed. Production remains unchanged pending a separate Phase 1A SQL approval; frontend deployment is gated after helper JWT QA.
+  - 2026-07-13 correction / Phase 1A authority foundation deployed: Jay approved and additive migration `20260713010000` was applied to production with reviewed SHA-256 `5180a931f27b6b6fe5e86ecbf57fb18913a6e99ba69194b06d8eaa830e41d440`. Real signed JWT QA passed 38/38 for bound SuperAdmin, Director, unbound-email Support fallback, primary/secondary-assigned CSM, Viewer raw-client denial, app-before-mirror precedence, and mirror-only CSM fallback; anonymous and internal-scope calls were denied and cleanup left zero temporary residue. Existing app counts, three bound SuperAdmins, all three active MM tokens, recent processed MM events, and live HTTP health remained stable. No table policy, Auth setting, Edge Function, Vercel deployment, Git push, or main merge changed. The browser resolver remains local pending a separate frontend release approval; Phase 1B-D RLS remains open.
+  - 2026-07-13 correction / Phase 1A frontend local QA: clean local commit `88608ba` replaces browser email/membership reconstruction with the production account resolver and closes Viewer UI/data-fetch gaps. Six-role browser QA passed across SuperAdmin, Director, Support, app CSM, Viewer, and mirror-only CSM; Viewer now keeps aggregate Dashboard/Resources only, cannot open Clients/Daily Pulse/Groups, cannot activate dashboard drilldowns, receives no client names/profile-history payloads, fails closed on aggregate RPC errors, and cannot prime a foreign company through the URL. Final checks passed 37/37, clean build/diff, adversarial company-scope QA, zero temporary residue, and independent no-P0-P3 review. Commit remains local-only; production frontend release is still gated, and Phase 1B must secure actor-scoped aggregate RPCs plus app-owned table policies because UI controls are not the database boundary.
+  - 2026-07-13 Phase 1B READY locally: clean commit `38817f0` adds actor-scoped Dashboard KPI/overview/chart RPCs, assignment-aware app-owned company/client/task policies, Viewer raw-row denial, exact rollbacks, and manual pre-policy/post-policy release gates. Final validation passed 50/50 Phase 1B checks, all 37 Phase 1A regressions, the 101-module build, deterministic apply/rollback previews, and two independent READY reviews. Nothing is deployed/applied/pushed; production must follow the gated order in `SECURITY_ROLLOUT_PLAN.md`.
+  - 2026-07-13 correction / Phase 1B Wave 1: Jay approved and additive aggregate migration `20260713020000` was applied to production with reviewed SHA-256 `c0e39fa60405d53267cd13c6788f636ea6ba2aa885c974be64084bdd040bce1e`. Postflight confirmed no policy or legacy-RPC grant change, anonymous denial, fail-closed unbound service access, unchanged 2/4,734/111/7,654 company/client/member/task counts, all three active MM integration types, recent processed/matched Fathom intake, and live HTTP 200. Frontend and all policy slices remain stop-gated.
+  - 2026-07-13 correction / Phase 1B Wave 1B + frontend: additive churn aggregate `20260713020200` is production-applied with SHA-256 `dd51ec58d6cf071738cf259bb13b5775cd7ceb08ffdb62d41f0fe8d97e26dc40`; it changes no policy and returns aggregate buckets only. The current-main-compatible frontend is live at commit `d29fa95`, Vercel reports success, the production bundle contains the DB-resolved account and actor-scoped chart RPC paths, and automated checks pass 37/37 + 52/52 + production build. Live role smoke QA remains the only blocker before manual gate `20500`; `21000`-`23000` remain unapplied. [qa]
+  - 2026-07-13 correction / Phase 1B closure: Jay completed live SuperAdmin, Director, Support, CSM, and Viewer QA, including assigned-CSM pathway changes shipped in `42c4835`. Temporary users/client and every associated milestone/history/advocacy/audit row were deleted with zero residue. Gates `20500`/`22500`, company policies `21000`, client policies `22000`, and legacy Dashboard lockdown `23000` are production-applied in order. Transactional direct-RLS QA passed company isolation, primary/secondary CSM assignment, Support/Director scope, Viewer raw-row denial, and zero-residue rollback. Final postflight shows 0 broad policies across the Phase 1B tables, actor-scoped Dashboard RPCs available only to authenticated users, legacy KPI RPCs service-role-only, 3 active MM tokens, stable app counts, and live app/login HTTP 200. Phase 1B is closed.
+  - 2026-07-13 Phase 1D audit: 25 broad authenticated policy entries remain. Thirteen are `backup_*` mirror tables intentionally deferred until all remaining companies migrate within the next four weeks; no Phase 1C build is planned. Immediate Phase 1D scope is 4 app-owned policy entries plus 8 policy entries across 6 Glide sync/admin tables. Mirror-table retirement must remain a separately gated final action so current mirror-only companies keep working until cutover.
+  - 2026-07-13 Phase 1D immediate candidate is locally complete and independently reviewed. It assignment-scopes attendance/checkpoint reads, restricts contract templates to SuperAdmin/Director, removes browser policies from unscoped AI/raw sync configuration tables, binds the remaining sync UI to SuperAdmin, and adds two query-shaped indexes. It changes no `backup_*` table and remains undeployed pending a separate production approval. [qa]
+  - 2026-07-13 correction / Phase 1D immediate closure: Jay approved and migration `20260713024000` is applied with SHA-256 `d6663dc2f258831d586069e4729f2b48c95778a1d95b921004ad23d2639571d5`. Transaction-only role QA passed Director/Support company scope, primary/secondary CSM assignment, Viewer denial, bound-SuperAdmin sync access, and service-only raw configuration. Postflight shows 0 targeted broad policies, 13 untouched `backup_*` mirror policies, both indexes present, zero QA residue, 3 active MM tokens, healthy recent webhook processing, and live app/login HTTP 200. Jay's production UI QA passed Tables, Sync Log, MM Contract Templates, Client Detail, and Daily Pulse. Immediate Phase 1D is closed; only final mirror retirement remains after the last Glide-backed migration.
+  - 2026-07-13 security source consolidation is locally complete on current `main` in branch `codex/security-source-consolidation`. It adds the already-deployed Phase 0/0.5 migrations, rollbacks, scripts, shared Edge auth/CORS helpers, current hardened function sources, Phase 1D migration/rollback, current generated production DB types, and audit/Auth docs. Beacon, the Anthropic browser dependency, and the obsolete Phase 1C draft are excluded. Static gates pass Phase 0.5 91/91, Phase 1A 37/37, Phase 1B 52/52, Phase 1D 16/16, production Phase 0 8/8, and the 102-module build. No push/deploy occurred; Auth settings and final advisor verification remain. [qa]
+  - 2026-07-13 Auth hardening QA: secure password change and leaked-password protection are enabled; minimum password length is 12 with the strongest available character requirements; secure email change, 3,600-second OTP expiry, and 8-digit OTPs remain enabled/configured. Require-current-password and CAPTCHA remain disabled for the OTP-first/provider reasons documented in `SUPABASE_AUTH_SETTINGS_CHECKLIST.md`. Jay logged out and completed a fresh production OTP login successfully. Remaining rollout gates are the Auth DB connection allocation check, final advisor/exploit verification, and reviewed merge/push of the local consolidation branch. [qa]
+  - 2026-07-13 correction / Auth performance closure: Auth DB allocation changed from a fixed 10 connections to 17%, preserving 10/60 current capacity while scaling automatically with compute. Jay saved it, logged out, and completed a fresh OTP login successfully. Auth settings/performance are closed; only final advisor/exploit verification and reviewed consolidation merge/push remain. [qa]
+  - 2026-07-13 final automated security verification: Phase 0.5 91/91, Phase 1A 37/37, Phase 1B 52/52, Phase 1D 16/16, the 102-module production build, and fresh live Phase 0 exposure checks 8/8 all pass. The current-`origin/main` diff contains no package, Header, Beacon, Beacon-library, or old-Glide-folder changes. Supabase Security/Performance Advisor review is the last evidence gate before reviewed consolidation merge/push. [qa]
+  - 2026-07-13 advisor correction / Phase 1E local candidate: Advisors show 0 Security and 0 Performance errors. Review found one real anonymous legacy retention RPC plus three mutable search paths; local-only commit `3881d91` adds reversible migration `20260713025000` to revoke anon access, role/assignment-scope retention data, pin the paths, remove 13 inert false policies, and remove two exact duplicate indexes without touching mirror read policies. Focused checks pass 15/15 plus all prior security regressions. The remaining 24 Security warnings are intentional actor-scoped authenticated helpers/RPCs; six Security info items are intentionally service-only; 40 Performance info items remain measured FK/unused-index follow-up. Production preflight/apply remains separately gated. [qa]
+  - 2026-07-13 Phase 1E transaction-only production preflight passed. Using a real active unbound-email CSM identity, the wrapper forced results to that CSM's assignment and matched the service baseline; a no-membership identity was denied. Grants, three search paths, 13 inert-policy removals, two duplicate-index removals, and unchanged mirror-policy inventory all passed inside the transaction. The forced sentinel rolled back everything, and postflight confirmed production exactly restored with no rollout marker. Permanent apply remains separately gated. [qa]
+  - 2026-07-13 Phase 1E production checkpoint: Jay approved and migration `20260713025000` applied with SHA-256 `882dbf97ebc8040464182fd7fbc114e3e1d03a02c12a9e4fe2006b45c5ebf855`. Live postflight passed grants, hidden core, three search paths, zero inert policies, zero duplicate indexes, 13 preserved broad mirror policies, real-CSM assignment parity, and no-membership denial. Direct anon retention now returns 401; Phase 0 8/8, 0.5 91/91, 1A 37/37, 1B 52/52, 1D 16/16, 1E 15/15, and build all pass. MM's three integration types and app/login 200 remain healthy. Short UI QA plus refreshed Advisor counts remain. [qa]
+  - 2026-07-13 correction / Phase 1E closure: Jay's production UI QA passed MM Dashboard/retention drilldown, Clients history/note search, and ES Dashboard. Refreshed Advisors exactly match target: Security 0 errors / 24 intentional warnings / 6 intentional info; Performance 0 errors / 0 warnings / 40 measured info. Phase 1E is closed. Only reviewed source consolidation/merge remains for this rollout; the 13 mirror policies remain deliberately deferred until final Glide retirement.
+  - 2026-07-13 consolidation release-candidate correction: the clean local branch now includes the final Phase 1E evidence and current roadmap/Auth/runbook state. Final gates pass Phase 0 live 8/8, Phase 0.5 91/91, Phase 1A 37/37, Phase 1B 52/52, Phase 1D 16/16, Phase 1E 15/15, the 102-module build, committed-scope checks, and credential-shaped-secret scanning. Beacon, package changes, secrets, and old Glide source remain excluded. The candidate is ready for a separately approved merge/push; no merge, push, or deployment has occurred. [qa]
+- `[ ]` `[priority: medium]` Integration review retry parity for secondary-pathway/custom-field-only client updates.
+  - Direct `webhook-update-client` processing supports these fields today. Manual/retry application from `manage-integration-review` still handles the primary update set only; close this as product parity work after the security rollout rather than expanding Phase 0.5.
+- `[ ]` `[priority: medium]` Security audit follow-up: unused index cleanup.
+  - Source: `SECURITY_PERFORMANCE_AUDIT.md`.
+  - Do not drop indexes in the security rollout. Revisit after enough production usage stats exist across migrated companies, then remove only confirmed-unused indexes with a measured rollback plan.
+- `[ ]` `[priority: medium]` Security audit follow-up: deeper frontend/query refactors.
+  - Source: `SECURITY_PERFORMANCE_AUDIT.md`.
+  - Useful for speed and maintainability, but not required to close the main security holes. Target column-scoped reads, fewer wide `select("*")` calls, and repository-style data access after the security rollout is stable.
+- `[ ]` `[priority: medium]` Security audit follow-up: split monster page components.
+  - Source: `SECURITY_PERFORMANCE_AUDIT.md`.
+  - Large blast radius; keep out of the security fork. Later scope should break up `ClientDetail`, `Clients`, `SaasClientDetail`, and `Dashboard` into tab/feature components and hooks.
 - `[~]` `[mixed]` Start write mode through controlled Edge Functions for first flows, then add direct RLS-backed writes only after policies are proven.
 - `[x]` Use Ethical Scaling as the first internal controlled pilot company.
   - Pilot schema/backfill/QA artifacts:
@@ -202,9 +249,11 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - 2026-06-16 Jay QA follow-up: Admin archive failures now surface affected-client details instead of the generic Edge Function non-2xx wrapper; Quick Update pathway completion now mirrors the Client Detail flow with next/another milestone start controls; empty Contract / Program Timing cards are hidden when timing is unavailable.
   - 2026-06-16 final QA follow-up: archive affected-client sampling now uses app-owned `client_business`, non-Error Supabase throws surface their message, and Quick Update defaults `Milestone To Start` to the next milestone in line.
   - Complete for V1/polish. Drag/drop reorder, hard-delete cleanup, and contract-page cleanup are separate later scopes.
-  - 2026-06-20 secondary pathway support is live for app-owned pilot/migrated clients: company setting gate, client secondary offer/milestone fields, Client Detail Pathways summary, modal set/clear flow, and history/audit events. Jay QA passed before MM rollout.
+  - 2026-06-20 secondary pathway support is live for app-owned pilot/migrated clients: company setting gate, client secondary offer/milestone fields, Client Detail Pathways summary, modal set/clear flow, and history/audit events. Awaiting Jay QA before treating the resource as publish-ready.
   - 2026-06-20 resource audit confirmed this covers the old "Customize Milestones and Offers" Glide workflow; `customize-milestones-offers` draft now documents the RetainOS Pathways & Milestones flow, archive/restore guardrails, and up/down reorder controls.
   - 2026-07-03 MM archive cleanup fix: archive blockers and usage counts now define active clients as Front End / Back End only and include secondary pathway/milestone usage, so unused MM pathways can be archived safely while secondary-attached pathways remain protected.
+- `[ ]` `[priority: high]` Pathway milestone fallback ordering for missing/tied positions.
+  - 2026-07-08 Moves Method QA found legacy combined pathways could have all milestone positions tied at `0`, making Client Detail fallback to arbitrary row order when a client has no explicit current milestone. Add a small frontend fallback so milestone sorting uses configured position first, then target days, then name/id for deterministic order.
 - `[x]` Deploy final Pathways & Milestones closure fixes.
   - 2026-06-17 build passed and `manage-company-pathway` / `manage-client-milestone` were deployed to Supabase project `zjauqflzxzsbpnivzsct`.
   - Safe Pathways/docs work was prepared for commit/push; Beacon local pilot files stayed out of scope.
@@ -222,8 +271,6 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
 - `[ ]` `[priority: medium]` Company settings V2.
   - Dashboard/client-list preference consumption beyond current defaults.
   - Client list column presets.
-  - 2026-07-08 MM launch follow-up: Admin Hub > Company Settings can configure Clients List columns per company; the Clients List keeps the client column frozen and horizontally scrolls when many columns are enabled.
-  - 2026-07-08 MM launch follow-up: Admin Hub > Company Settings can configure company-specific program/status display labels without changing canonical status values; MM seeds `suspended` as `MIA`.
   - Call/communication settings after integrations are closer to rollout.
 - `[ ]` `[priority: medium]` SaaS Client archive/offboard flow.
 - `[ ]` `[priority: medium]` Zapier SaaS company automation, if this remains needed.
@@ -252,7 +299,6 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-20 Filtering Clients overview audit added strategic roster filters for milestone, renewal window, last-contact age, next-contact window, Success, Progress, and Buy-In. List/card/calendar views now share the same applied filter set for app-owned and mirrored clients.
   - 2026-06-20 Contact cadence follow-up added Last Contact and Next Contact sort options to List/Card views, using the same app-owned and mirrored contact date columns as the roster display.
   - 2026-06-20 CSM assignment audit added `Unassigned` to the Clients CSM filter so Admin/Director/Support users can find clients that still need a primary CSM.
-  - 2026-07-08 MM column preference: Moves Method defaults now show Program plus Weeks In Program and Weeks Left instead of forcing Archetype, while other companies keep the existing fallback until configured.
 - `[x]` Clients calendar view and filters.
 - `[~]` `[polish]` `[priority: medium]` Client detail general information write flow.
   - Ethical Scaling pilot has profile edit v1 through `manage-client-profile`.
@@ -274,12 +320,10 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-10: reconciliation now reports active-client contract coverage, renewal date source/confidence, latest mirrored-contract summary mismatches, active clients missing app-owned contract history, active clients missing all contract history, and active clients missing current renewal dates.
   - 2026-06-15 Jay QA passed create/edit/archive/delete, contract filters, and duration/date calculation polish.
   - 2026-06-17 Ali sanity pass found no Glide contract leakage. `manage-client-contract` now writes calculated end/filtering dates into the client summary when a contract uses start date + expected duration days; four Ethical Scaling pilot summaries were repaired, including Ali Back End.
-- `[~]` `[polish]` `[priority: medium]` Contract/Renewal V2.
+- `[ ]` `[priority: medium]` Contract/Renewal V2.
   - 2026-06-17 Ali's remaining confusing Contract tab state is duplicate app-owned QA-created contract rows, not a source-of-truth/backfill failure.
   - Optional cleanup: use the SuperAdmin delete action for duplicate QA/test contracts when Jay wants demo data tidied.
   - When a manually created or webhook-created client is missing contract info, remind/ensure the contract is added.
-  - 2026-07-06 Contract Templates V1 shipped for app-owned companies: Admin Hub > Company Settings can define one active initial-contract template per primary pathway; manual New Client and Zapier client-create auto-create a contract from the pathway template only when explicit contract fields are not provided. Jay/Ben visual QA passed for the V1 shape; remaining work is richer multi-contract/LTV polish.
-  - 2026-07-08 launch polish: Contract Type was removed from Client Detail create/edit/display UI as redundant label noise; existing metadata is preserved for compatibility.
   - Richer multi-contract/LTV reporting.
   - High-fidelity renewal UX.
   - Automated renewal notifications.
@@ -307,7 +351,6 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Client detail timeline is filtered to the active/current offer so unrelated company pathway milestones are not shown.
   - Current offer and current milestone resolve by name, including auto-advanced milestones.
   - Company-level offer/milestone CRUD, ordering controls, archive blockers, and restore/unarchive are live for pilot companies.
-  - 2026-07-09 Program Timeline visual now supports Days/Weeks display and shows compact Weeks in / Weeks left context from current contract timing.
   - Remaining gaps: drag/drop reorder polish, final low-fi-aligned UX, and deeper reporting/backfill validation.
 - `[ ]` `[priority: low]` CRUD client tasks.
 - `[~]` `[polish]` Quick Update write flow.
@@ -338,7 +381,6 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-11 QA fix: `ingest-client-call-summary` must run with Supabase JWT verification disabled because Zapier sends the webhook secret in the Authorization header.
   - 2026-06-11 local polish: Admin Hub > Company Settings now surfaces an Integration Review Queue for app-owned companies, showing unmatched/ambiguous/failed webhook events with provider, match status, client email, summary preview, and recording link when available.
   - 2026-06-11 QA note: the queue successfully catches unmatched events, but still needs manual match/resolve actions. Long-term placement is likely Call AI / integration operations or a task-style inbox, not permanent Company Settings.
-  - 2026-07-09 MM operations update: dedicated `/call-ai` page added for SuperAdmin, Director, and Support to reconcile unmatched/ambiguous Fathom call-summary events. Support can now match/retry/ignore review events through the deployed `manage-integration-review` function; manual matches learn the event email into Email 2/3 when a client has an open alternate-email slot.
   - 2026-06-12 hardening: added app-owned `company_integration_secrets` and updated `ingest-client-call-summary` to validate the submitted token against the submitted company before processing. Active company tokens override the old global secret; the global env secret remains only as a local/dev fallback for companies with no active token rows.
   - 2026-06-12 local queue v1: added `manage-integration-review` plus UI actions to Match to client, Retry apply, and Ignore open intake events. Supports `call_summary_next_steps` and `client_update` events for app-owned companies; ignored events are auditable via `integration_intake_events.status = ignored`.
   - 2026-06-13 local/admin plumbing: added SuperAdmin-only Integration Tokens UI and `manage-integration-token` Edge Function for list/create/revoke/revoke-all. This gives RetainOS a per-company offboarding control for inbound integrations.
@@ -347,8 +389,6 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-13 closeout QA: direct live endpoint test passed for app-owned client matching by exact email with a company-scoped `call_summary_next_steps` token. Verified next steps update, last-contact update from call timestamp, `call_summary_webhook` history, processed intake row, audit event, idempotent duplicate response, unmatched-email review queue, missing-summary 400, invalid-token 401, and token `last_used_at` update. Temporary QA rows were cleaned up.
   - 2026-06-17 closeout QA: disposable company-scoped `call_summary_next_steps` token accepted an unmatched payload into the review queue, rejected a wrong integration token type with 401, rejected the revoked token with 401, updated `last_used_at`, and cleaned up temporary intake/token rows.
   - 2026-06-20 old Loom audit hardening: `ingest-client-call-summary` now accepts `client_email` or provider attendee/invitee email lists and only auto-applies when exactly one active app-owned client matches; deployed to `zjauqflzxzsbpnivzsct`.
-  - 2026-07-08 MM hotfix: recent Fathom payloads were verified to include `recording_url`; RetainOS now normalizes that URL onto call-summary history payloads and Client Detail > History surfaces existing metadata/raw-payload recording links.
-  - 2026-07-08 follow-up: Client Detail > Program and Update Next Steps/Contact now surface the latest Fathom recording link from call-summary history.
   - Before giving this to Moves Method or any customer: create one active company token per target company/integration, and document that revoking tokens stops RetainOS writes/processing but the customer-side Zap still needs to be turned off to avoid Zapier task spend.
 - `[x]` Client update webhook V1.
   - 2026-06-12 local implementation: `webhook-update-client` accepts app-owned company UUID or legacy company id plus exact `client_email`, or explicit app-owned `client_id` when it belongs to the submitted company and optional email also matches.
@@ -367,10 +407,6 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Dashboard duplicate was removed so Dashboard stays focused on KPI/chart reporting and CSM Reports owns field-upkeep compliance.
 - `[~]` `[polish]` Client history/change log.
   - Client Detail now has a pilot `History` tab for RetainOS Quick Update events.
-  - 2026-07-06 MM launch hotfix: Client Detail > History now merges legacy CST `backup_company_clients_history` rows with RetainOS app-owned history events, so migrated clients can see previous Next Steps / call-history context from the CST mirror. Added a Calls filter, CST history badge, clickable links, and long-entry Read more expansion.
-  - 2026-07-06 MM follow-up: Client Detail > History now has controlled row actions for Change date and Delete history entry across RetainOS app-owned history and imported CST mirror rows. Server-side role/assignment checks and app audit events are wired through `manage-client-history`; Jay QA passed.
-  - 2026-07-06 MM health-score history follow-up: imported CST Success, Progress, Buy In, health, and outcome history rows are now classified into the Health Scores filter and the client history load keeps a deeper CST history window so older score rows are not hidden behind call/Next Steps volume.
-  - 2026-07-06 MM Caroline Anthony fix: when CST did not provide a discrete history row but did provide current outcome values plus dates on the migrated client record, History now synthesizes migrated Health Scores entries from those fields.
 
 ### Phase 3: Operations, QC Reporting, And Migration Readiness
 
@@ -469,17 +505,17 @@ Next session lock:
   - New Task v1 creates app-owned `client_tasks` through `manage-client-task`.
   - 2026-06-18 Tasks V1.5 pass adds app-owned task edit, status updates, complete/reopen, dismiss/archive, task detail modal, and native drag/drop board columns. SQL migration for `task_updated` history events was applied and Jay deployed `manage-client-task`.
   - Jay QA passed company-level creation, client-linked creation, client link navigation, edit, and drag/drop including `In Progress` after the follow-up `in-progress`/`in_progress` normalization fix.
-  - 2026-06-18 Task Templates + Urgency V1 added `company_task_templates`, Company Settings template modal, manual New Task template picker, new-client auto-create hooks in `manage-client-create` and `zapier-create-client`, due today/due soon/overdue board signals, and Daily Pulse `task_due` section. SQL migration applied; `manage-company-customization`, `manage-client-create`, and `zapier-create-client` deployed. Jay QA passed.
+  - 2026-06-18 Task Templates + Urgency V1 added `company_task_templates`, Company Settings template modal, manual New Task template picker, new-client auto-create hooks in `manage-client-create` and `zapier-create-client`, due today/due soon/overdue board signals, and Daily Pulse `task_due` section. SQL migration applied; `manage-company-customization`, `manage-client-create`, and `zapier-create-client` deployed. Awaiting Jay QA.
   - 2026-06-20 QA follow-up deployed `manage-client-create` and `zapier-create-client` again so auto-created task names render `{client_name}` / `{client}` or append the client name by default. Tasks list view now groups by status and supports drag/drop like board view.
   - 2026-06-20 automation/recurring follow-up deployed `manage-client-task` and `manage-client-profile`: client CSM assignment claims open unassigned client tasks, and recurring tasks create the next occurrence when completed. Tasks board/list got soft status lane colors from the RetainOS palette.
   - 2026-06-20 custom reminder audit: RetainOS should model custom client reminders as client-linked tasks with due dates, not a separate CST-style reminder object. Optional later UX: Quick Update shortcut that creates a client-linked task/reminder.
-  - 2026-07-03 milestone-template V1: Task Templates can now use `When milestone is completed` for primary pathway milestones only. Admin selects Pathway + Milestone, due offset, assignment, priority, and status; `manage-client-milestone` creates matching tasks after primary milestone completion with duplicate protection. Jay QA passed.
-  - 2026-07-06 MM launch hotfix: Tasks board/list now resolves linked clients by app-owned client UUID, legacy Glide client id, known imported metadata/source-snapshot keys, and the loaded company roster. Follow-up hotfix uses CST mirror clients as label-only fallback for the known MM imported tasks whose legacy client links were unresolved at task backfill; unrecoverable imported client links show `Imported client task` and true company-level tasks show `Company task`, without restoring mirror writes.
-  - 2026-07-10 recurring template follow-up: Task Templates can mark created tasks as recurring with a repeat interval. Manual presets, new-client templates, Zapier client-created templates, and milestone-completed templates preserve the recurring rule; next occurrences stop auto-creating once the linked client is no longer Front End or Back End. SQL migration applied; `manage-company-customization`, `manage-client-create`, `zapier-create-client`, `manage-client-milestone`, and `manage-client-task` deployed. Jay QA passed after priority layout polish.
-  - Remaining later gaps after this QA: comments, attachments, realtime, richer notifications.
+  - 2026-07-03 milestone-template V1: Task Templates can now use `When milestone is completed` for primary pathway milestones only. Admin selects Pathway + Milestone, due offset, assignment, priority, and status; `manage-client-milestone` creates matching tasks after primary milestone completion with duplicate protection. Awaiting Jay QA.
+  - 2026-07-12 local duplicate-name picker polish: New Task and the Tasks client filter now label options as `Client Name - Program Status`, using status data already loaded by the page. `npm run build` passed. Local-only and awaiting Jay visual QA before commit/deploy.
+  - 2026-07-12 correction: Jay visually QA-approved both selectors. The Tasks-only change is captured in local commit `4f9352b` (`Clarify duplicate clients in task pickers`); it remains unpushed and undeployed with the rest of the security branch.
+  - Remaining later gaps after this QA: comments, attachments, recurring rules, realtime, richer notifications.
 - `[ ]` `[priority: low]` Tasks list/board filters for entire SaaS company.
-- `[~]` `[polish]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
-  - Due-state board badges, assignments, Daily Pulse task visibility, recurring tasks, and status movement have passed launch QA. Email/push/inbox delivery remains future notification scope.
+- `[~]` `[qa]` `[priority: low]` Task due dates, assignments, overdue state, and notifications.
+  - Due-state board badges and Daily Pulse task_due visibility are implemented and awaiting Jay QA. Email/push/inbox delivery remains future.
 - `[~]` `[polish]` CSM Reports list view and filters.
   - Standalone `/csm-reports` page exists for SuperAdmin, Director, and Support.
   - V1 filters: company, CSM, Today, last 7/14/30 days, and custom date range.
@@ -494,15 +530,10 @@ Next session lock:
   - App-owned offboarded, retention, and renewal/up-for-renewal formulas were hardened against Ethical Scaling pilot data sources.
   - Retention now includes `client_retention_recorded` events for same-program renewals.
   - 2026-07-04 Moves Method QA fix: Up For Renewal no longer treats "no Dashboard Date Range" as unbounded all-time renewal coverage. Default is overdue through next 30 days; explicit Date Range still wins.
-  - 2026-07-07 MM retention correction: migrated CST retention counts now use historical `program-status` movement rows as retention events for Front End -> Back End and Back End -> Back End, dated by the CST modified date. RetainOS-era retention counts new contracts marked Renewal/Upsell by contract start date; company settings can optionally allow active Front End / Back End status movements to count without a paired contract.
-  - 2026-07-09 MM hotfix: app-owned/migrated Dashboard retention now uses `dashboard_retention_counts_fast` to count unique retained clients server-side and avoid browser/RLS/large-history fetch zeroes.
-  - 2026-07-13 MM correction: repaired two verified July retention records (Erika Tindill and Manjul Apratim). Contract edits now keep their linked retention event's contract start date aligned for Dashboard reporting.
-  - 2026-07-13 Dashboard filters persist per company across navigation until Clear All Filters is used.
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
   - `[qa]` When an Offer filter is applied in Dashboard > Charts, the Clients By Offer chart switches to Clients By Milestone for that selected offer/pathway and keeps client-list drilldowns.
   - 2026-07-02 Loom polish: dashboard-visible copy now uses Pathway for the filter, all-pathways option, chart title, subtitle, and drilldown title. Internal database/query names still use `offer` where that is the current schema contract.
-  - 2026-07-06 MM launch follow-up: Churn Reason chart added to Dashboard > Charts using app-owned churn reason definitions where available, with clickable client drilldown. MM legacy CST churn codes were one-time normalized into Ben's app-owned reason values.
   - 2026-06-17 readiness packet prepared in `DASHBOARD_FORMULA_VALIDATION.md` with current formulas, sources, weak spots, and migration-day checks. Full confidence still waits for Moves Method or another larger migrated company.
 - `[ ]` `[priority: medium]` Dashboard advanced filtering and sorting.
   - Capture Ben pilot feedback: dashboard views should eventually support more operational filtering/sorting directly inside the dashboard.
@@ -569,8 +600,6 @@ Next session lock:
   - Directors can choose which Daily Pulse sections are visible for their company through Company Settings.
   - 2026-06-16 product polish clarified the persistent Daily Pulse vs compact reminder bell distinction, added an empty state when no Daily Pulse sections are enabled, and made zero-signal windows easier to QA.
   - 2026-06-16 Jay QA passed Daily Pulse page polish and Company Settings notification clarity.
-  - 2026-07-07 Moves Method launch polish: CSM-scoped Daily Pulse now has an Assignment view filter for Both, Primary clients, or Secondary clients. Admin/Director users get the same filter after selecting a specific CSM.
-  - 2026-07-07 Strategic Review timing rules now have app-owned completion tracking: Daily Pulse shows SR pending/complete from the configured contract-end offset and lets assigned coaches mark the checkpoint complete without turning it into a pathway milestone.
 - `[ ]` `[priority: medium]` Dashboard HTML export.
 
 ### Phase 4: Resources, User Management, Notifications, And Migration Readiness
@@ -621,7 +650,6 @@ Goal: prepare RetainOS for real customer migration, support operations, and repe
   - 2026-06-10 local polish: Company Settings now includes in-app visibility toggles for next contacts, renewals, pause returns, churn risk, RGAs, quiet profiles, and client-linked task due reminders. Clients bell and Daily Pulse respect those toggles.
   - 2026-06-16 product polish renamed the Clients dropdown as a reminder bell, clarified that full operating review belongs in Daily Pulse, and tightened Company Settings copy around bell-only, Daily Pulse, and timing-rule controls.
   - 2026-06-16 Jay QA passed the V1 in-app reminder bell and Company Settings notification-control clarity. Email delivery, push, and full inbox/read-dismiss behavior remain later notification scope.
-  - 2026-07-06 launch triage: Clients reminder bell data loading is paused and shown as "in development" because Daily Pulse + Tasks cover the current operating workflow and the reminder loader was adding avoidable rollout performance risk for CSMs. Rebuild as a lighter notification/inbox slice later.
   - Email delivery and full inbox remain intentionally disabled until read/dismiss/counts and delivery preferences are QAed.
 - `[ ]` `[priority: medium]` CST-style operational alert review surface.
   - Add a RetainOS equivalent of the old CST alert review modal/list: summarized alert groups, counts, and direct `View clients` actions.
@@ -842,7 +870,7 @@ Use this section to connect feature work into operational flows. A feature is no
 - `[ ]` `[priority: high]` New client can be imported from CSV with preview and validation.
 - `[ ]` `[priority: high]` New client can be created from Zapier with required `company_id`.
 - `[~]` `[polish]` `[priority: medium]` Client can be assigned to company, offer, pathway, milestone, CSM, and optional group/cohort.
-  - 2026-06-20 Secondary Assignee is live for app-owned pilot/migrated clients when the company feature gate is enabled: create/edit UI, server validation, CSM access scope, Clients/Dashboard filters, and draft resource. Jay QA passed before MM rollout.
+  - 2026-06-20 Secondary Assignee is live for app-owned pilot/migrated clients when the company feature gate is enabled: create/edit UI, server validation, CSM access scope, Clients/Dashboard filters, and draft resource. Awaiting Jay QA before promoting.
   - 2026-06-20 CSM assignment resource audit added an `Unassigned` Clients CSM filter and documented the RetainOS flow for assigning automation-created or manually created clients that still need an owner.
 - `[~]` `[polish]` Client setup captures contract details, start date, end/renewal logic, and external links.
   - New Contract v1 covers this for app-owned pilot/migrated clients from Client Detail > Contract.
@@ -860,11 +888,11 @@ Use this section to connect feature work into operational flows. A feature is no
   - 2026-07-02 Loom polish: Quick Update context cards truncate long North Star / Next Steps automation text and open the full rich text in a simple read-only modal from `Read more`.
 - `[~]` `[polish]` Quick Update writes to client history/change log.
   - Pilot writes app-owned `client_history_events`.
-- `[~]` `[polish]` Global client note search across profiles.
+- `[~]` `[qa]` Global client note search across profiles.
   - 2026-06-21 added Clients > Notes mode backed by `search_client_notes`.
   - Searches current Next Steps, app-owned client history notes/next steps/summaries/titles, and migrated legacy CST history values where available.
   - Respects applied Clients filters before searching note content: client name, CSM, secondary assignee, status, offer, milestone, renewals, contact cadence, health/outcomes, and advocacy.
-  - Needs later product validation for visual feel, result usefulness, and migration confidence on known old CST history examples before treating it as a prominent operating view.
+  - Awaiting Jay QA for visual feel, result usefulness, and migration confidence on known old CST history examples.
 - `[~]` `[polish]` Quick Update refreshes profile upkeep scoring.
   - Quick Update history events now feed Dashboard Profile Upkeep Score v1.
 - `[ ]` `[priority: medium]` Quick Update changes flow into dashboard KPIs, CSM Reports, alerts, and AI/reporting inputs.
@@ -885,8 +913,8 @@ Use this section to connect feature work into operational flows. A feature is no
 ### Task Manager Flow
 
 - `[x]` Task can be created from company-level context.
-- `[x]` Task can be created from client profile context.
-  - 2026-07-09 implementation: Client Detail > Tasks now has a New Task button for app-owned clients, creates a client-linked task through `manage-client-task`, and refreshes the task list/history after save. Jay QA passed.
+- `[~]` `[polish]` Task can be created from client profile context.
+  - Current v1 creates from top-level Tasks with an optional client link; direct Client Detail create button is still future.
 - `[x]` Task can be assigned to team members with due date and priority/status.
 - `[x]` Task appears in the global Task Manager and client profile when linked to a client.
 - `[x]` Task can be auto-created when a primary pathway milestone is completed.
@@ -1087,20 +1115,14 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[ ]` Manage / edit program.
 - `[ ]` Update Outcomes.
 - `[ ]` See client update history.
-- `[x]` Update dates of last / next contact.
-  - 2026-07-06 MM launch hotfix: Clients list/card now have a one-click contacted button that writes Date of Last Contact through `manage-client-quick-update`; Company Settings has a Contact cadence automation toggle to set Date of Next Contact X days after the contacted action. Jay QA passed on live MM.
-  - 2026-07-06 follow-up: the contacted button now uses the app blue treatment, manual Quick Update / Client Detail contact edits omit untouched date fields so the automation can apply safely, and Fathom/call-summary ingestion plus integration-review apply paths also set Date of Next Contact when the company automation is enabled.
-  - 2026-07-06 Vince feedback: one-click contacted now patches the visible roster row and triggers the Clients list reload token so sorted/filtered lists update without a hard refresh; List/Card views now support 12, 25, 50, or 100 rows per page, plus numbered pagination with ellipses for jumping directly across large rosters.
-  - 2026-07-07 Aaron feedback: one-click contacted now applies an immediate optimistic row update and uses per-client pending state so slow saves do not make the whole roster feel stuck.
-- `[x]` Track call attendance.
-  - 2026-07-06 MM launch build: added app-owned `client_call_attendance_events`, Attended/Missed controls and counts in Quick Update plus Client Detail > Program > Update Next Steps/Contact, and automatic Attended events when call-summary/next-steps ingestion matches a client. Jay QA passed for the launch implementation.
-  - 2026-07-06 MM compatibility backfill: explicit CST `call-tracker` rows were backfilled into app-owned call attendance for Moves Method only (`✅ Call Attended` -> attended, `❌ Call Missed` -> missed; `🟣 Communication` intentionally remains history-only). Backfilled 9,619 attended and 398 missed rows with `source = cst_migration`.
-- `[x]` Edit Next Steps/contact directly from Client Detail > Program.
+- `[ ]` Update dates of last / next contact.
+- `[ ]` Track call attendance.
+- `[~]` `[qa]` Edit Next Steps/contact directly from Client Detail > Program.
   - 2026-06-20 Emily pilot feedback: added Program-tab `Update Next Steps` modal that writes through `manage-client-quick-update`, updates the Program field, and appends the Quick Update history event. North Star direct-edit remains separate.
   - 2026-06-20 QA fix: modal passes `companyLegacyId`; History tab added Contract / Last Contact / Next Steps / Health Scores pills and search.
   - 2026-07-04 Moves Method Phase 4 QA polish: Client Detail > Program > Next Steps now truncates long rich text and opens the full value in a read-only `Read more` modal, matching Quick Update. Broad MM readback found no literal `0` in Program text/current contract-day fields; if Jay still sees `0`, capture a specific client example.
   - 2026-06-20 final polish: modal now also edits Date of Last Contact and Date of Next Contact.
-- `[x]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
+- `[~]` `[qa]` Edit North Star from Client Detail > Program through the existing profile modal shortcut.
 - `[ ]` Create, assign, and update client tasks.
 - `[ ]` View archived tasks in client context.
 - `[x]` Create / update contracts for client.
@@ -1110,13 +1132,6 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 
 ### Call AI
 
-- `[x]` Call AI unmatched recording reconciliation page for SuperAdmin, Director, and Support.
-  - V1 route: `/call-ai`; focused on unmatched Fathom/call-summary events, client search, match/retry/ignore, and recording links. Full transcript analysis remains later.
-  - 2026-07-10 follow-up: Admin Hub no longer carries a duplicate reconciliation queue; Company Settings links to the dedicated Call AI workspace as the single operating surface.
-- `[ ]` `[priority: medium]` Conversation AI (Slack analytics) V1.
-  - Scope: `retainos-conversation-ai-scope.md`.
-  - Read-only, weekly Slack channel analysis: ticket/request volume and resolution, response-time metrics, sentiment, silent-channel flags, and risk-language flags.
-  - Includes company-scoped Slack OAuth, encrypted token handling, source-agnostic conversation storage, scheduled sync, and a Conversation dashboard tab. No real-time events, Slack posting, task creation, or email ingestion in V1.
 - `[ ]` Add new call transcript to analyze for SuperAdmin, Director, and Support.
 - `[ ]` View past analyzed meetings for SuperAdmin, Director, and Support.
 - `[ ]` Share call analysis with team for SuperAdmin, Director, and Support.
@@ -1196,7 +1211,7 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 - `[x]` Program/status filters with shared visual mapping.
 - `[x]` CSM and secondary assignee filters.
 - `[x]` Offer filter from `backup_company_offers`.
-- `[x]` Server-side sorting by client name, onboarded date, renewal date, weeks in, and weeks left.
+- `[x]` Server-side sorting by client name, onboarded date, and renewal date.
 - `[x]` CSM users only see assigned clients, including secondary assignee matches.
 - `[x]` Viewer role hides Quick Update.
 
@@ -1371,8 +1386,9 @@ The current Glide model starts with Companies. Companies own team members, group
   - Company offer/milestone template CRUD uses app-owned `company_offers` and `company_offer_milestones`.
 - `[~]` `[polish]` Client-level Pathways & Milestones progress writes.
   - Enabled for app-owned pilot/migrated clients through `manage-client-milestone`.
-  - SuperAdmin/Director can change a client's current offer/pathway and milestone.
-  - Assigned CSMs can start and complete milestones for assigned clients.
+  - SuperAdmin/Director can change a client's current offer/pathway and milestone company-wide.
+  - Assigned CSMs can assign/change primary or secondary pathways and milestones, then start and complete milestones, for their assigned clients only.
+  - 2026-07-13 authorization correction shipped in `42c4835`: frontend and `manage-client-milestone` now enforce the assigned-CSM behavior; final live CSM QA remains before closing the temporary Phase 1B fixture.
   - Timeline UI must stay scoped to the client's active offer/pathway.
   - UX should later be rebuilt to match the shared low-fi workflow.
 
@@ -1390,14 +1406,14 @@ The current Glide model starts with Companies. Companies own team members, group
   - Pilot saves app-owned quick update events without changing mirrored client fields.
 - `[x]` Client Offboarding flow.
   - 2026-06-17 audit: current Client Detail UI uses `manage-client-status` to mark app-owned clients as `off-boarded`, save offboarded date/churn context, and write history/audit events; Jay QA passed with Josh Garvey assigned to Ben.
-  - 2026-06-20 RetainOS upgrade deployed: offboarding now uses an actual end date instead of save time, computes churn against current contract end, conditionally requires churn reason/notes, captures offer-fit, and stores an `offboarding` metadata packet. Jay QA passed.
+  - 2026-06-20 RetainOS upgrade deployed: offboarding now uses an actual end date instead of save time, computes churn against current contract end, conditionally requires churn reason/notes, captures offer-fit, and stores an `offboarding` metadata packet. Jay QA is queued for this richer flow.
   - `manage-client-offboard` is legacy unless intentionally revived.
 - `[~]` `[polish]` Client update history view.
   - Pilot view reads `client_history_events`; full Glide-style audit/change log is still future work.
-- `[x]` Track call attendance.
-  - 2026-07-06 MM launch build: call attendance now writes app-owned attended/missed events from Quick Update and Client Detail > Program, with Fathom-matched call summaries auto-recorded as attended. Jay QA passed for the launch implementation.
+- `[ ]` Track call attendance.
 - `[~]` `[polish]` Task create/edit/complete/dismiss flows.
-  - 2026-06-18 Tasks V1.5 pass adds edit/complete/reopen/dismiss/archive/status-drag behavior for app-owned companies. `manage-client-task` is deployed and launch QA passed; remaining task work is tracked as polish/new feature scope.
+  - 2026-06-18 local Tasks V1.5 pass adds edit/complete/reopen/dismiss/archive/status-drag behavior for app-owned companies.
+  - Needs `manage-client-task` deploy and Jay QA before closure.
 - `[x]` Contract create/edit flow.
   - Create/edit/archive are live locally through `manage-client-contract`.
   - 2026-06-15 Jay QA passed create/edit/archive/delete, Contract tab filters, current-summary display cleanup, and expected duration/date calculation polish after successful Supabase deploys.
@@ -1446,7 +1462,7 @@ These formulas matter when RetainOS moves away from read-only Glide mirror field
   - Pilot v1: New Contract renewal/upsell flow includes a Mark Success checkbox.
 - `[ ]` Average Time to Success.
   - Formula: success marked yes date minus onboarded/date-added-to-app date.
-- `[~]` `[downstream]` Average Time to Value / TTV.
+- `[~]` `[qa]` Average Time to Value / TTV.
   - Admin Hub > Pathways & Milestones stores the active Time to Value milestone per pathway/offer.
   - Dashboard > Overview > Journey shows Avg. Time to Value, reached count, and configured TTV points.
   - Formula: TTV milestone completion date minus client onboarding/start date, averaged across clients who reached a configured active TTV milestone in the selected filters.
@@ -1489,7 +1505,6 @@ Guiding note from source: keep notification triggers simple and avoid spamming u
   - Local Clients-page bell/dropdown prototype is the preferred UX direction after Jay QA; global bell placement and full inbox still need final design/build.
   - Company-level in-app visibility preferences are editable from Company Settings for pilot/migrated companies and consumed by the Clients bell and Daily Pulse.
   - Peak Diagnostic timing now supports one-time or recurring behavior for company-specific operating rhythms.
-  - 2026-07-06 launch triage pauses Clients bell data loading and shows the bell as in development; Daily Pulse and Tasks remain the supported CSM workflow until notification/inbox performance and dismiss/read semantics are redesigned.
   - Read/unread, dismiss UX, bell counts, email delivery, future push channel, and mature unsubscribe/preference rules remain future slices.
 - `[ ]` `[priority: medium]` Daily Pulse should reuse notification/workflow signals without becoming a dismissible inbox.
   - Treat it as the CSM start-of-day operating page for Today, This Week, and This Month.
@@ -1774,7 +1789,7 @@ This phase should happen after core wiring/write-mode foundations are stable. Us
   - Avg. Time to Success chart.
   - Updated vs. Non-Updated Profiles chart.
   - CSM Workload & Capacity chart.
-  - Churn Reason chart. `[qa]` 2026-07-06 implemented for app-owned/mirror chart data with app-owned label lookup and client drill-through.
+  - Churn Reason chart.
   - Renewal Opportunities chart.
   - Offboarding by CSM chart.
 - `[~]` `[polish]` Client screens high-fidelity pass.
@@ -1861,11 +1876,11 @@ Use this section as the “what good looks like” checklist before migrating re
   - 2026-07-02 Loom polish: Client Detail > Outcomes custom fields are collapsed behind an expandable section with filled-field count; Quick Update custom fields are unchanged.
 - `[x]` Client profile supports up to three email addresses for integration matching.
   - 2026-06-20 added primary + two alternate email slots on app-owned clients. Call Summary / Next Steps, Client Update Webhook, New Client Webhook, and Integration Review matching now use all three while keeping ambiguous matches in review.
-- `[x]` Client profile supports call attendance tracking.
+- `[ ]` Client profile supports call attendance tracking.
 - `[ ]` Client profile supports progress and buy-in updates.
 - `[x]` Client profile supports testimonials, reviews, referrals, renewal/upsell asks, and related client outcomes.
   - 2026-06-21 build: added app-owned `client_advocacy_events`, client advocacy summary fields, Quick Update and Client Detail > Outcomes Advocacy & Growth panels, Dashboard > Overview Advocacy & Growth reporting, legacy Glide backfill, and generic company migration script mapping. Jay QA passed the Client Detail write, Dashboard Overview display/filters, and Quick Update order correction.
-  - 2026-06-21 Client Advocacy Triggers follow-up: Clients now has app-owned Review, Testimonial, Referral, and Renewal / Upsell status filters (`Any`, `Not asked`, `Asked`, `Received`) that combine with existing roster filters. Treat further tuning as roster-filter polish unless Jay flags a current workflow issue.
+  - 2026-06-21 Client Advocacy Triggers follow-up: Clients now has app-owned Review, Testimonial, Referral, and Renewal / Upsell status filters (`Any`, `Not asked`, `Asked`, `Received`) that combine with existing roster filters. Jay QA needed before treating the filter follow-up as fully passed.
   - 2026-06-21 filter UI polish: advanced Journey/Contract, Health/Outcomes, and Advocacy/Growth filters are now collapsible sections with active-count badges to reduce filter-panel bulk. Awaiting Jay visual QA.
 - `[ ]` Client profile supports notes and next steps updates at the CSM cadence.
 - `[ ]` Client profile stores next steps and profile updates into history.
@@ -1951,7 +1966,6 @@ Use this section as the “what good looks like” checklist before migrating re
   - 2026-07-04 Moves Method Director QA catch: invite copy used localhost during local QA, CSM Reports returned Bad Request at MM scale, and Director company-resource create/edit was missing. Patched invite login URL copy, chunked CSM Reports history reads, and deployed Director company-resource management. Jay retested and passed Director QA.
   - 2026-07-04 Moves Method CSM QA catch: temp app-owned CSMs with no legacy CST member ID could see assigned clients/tasks but could not write quick edits because Edge Functions checked only `legacy_glide_row_id`. Deployed client write function patches so CSM authorization accepts either legacy member ID or app-owned member UUID. Jay retested and passed CSM QA.
   - 2026-07-04 Moves Method Support QA passed: Support sees approved company-wide operational views, cannot see/use integrations or token management, and has no SuperAdmin/company switcher access.
-  - 2026-07-07 MM launch hotfix: client/company write functions now ignore archived duplicate `company_members` rows when resolving the active actor by email. `manage-client-profile` and `manage-client-quick-update` were deployed after Ben Alfaro hit generic save errors on profile/archetype and Next Steps/Contact edits.
 - `[x]` RetainOS supports Jay-led final-sync validation before Glide is taken offline.
 - `[x]` Final cutover plan exists for:
   - Data backfill.
@@ -1959,6 +1973,10 @@ Use this section as the “what good looks like” checklist before migrating re
   - Notification/email setup.
   - Support process.
   - Rollback plan.
+- `[ ]` `[priority: later]` Retire CST/Glide mirror and sync infrastructure after the final company migration.
+  - Expected window: roughly 30-60 days, only after every company is app-owned and its migration signoff is complete.
+  - Preserve a final archival/reconciliation snapshot, then remove the SuperAdmin Tables and Sync Log surfaces, `sync-glide` / `sync-glide-table`, sync jobs/cron helpers, Glide secrets, and temporary mirror pipelines in one separately reviewed cleanup plan.
+  - Do not start early: mirror sync remains required for companies that have not completed cutover.
 - `[~]` `[polish]` Moves Method migration readiness can be evaluated without spending Glide sync cost.
   - 2026-06-14 added `npm run migration:readiness:moves`, which reads the current Supabase CST mirror only.
   - Final confidence still requires Jay to trigger the paid Glide/CST sync on the actual cutover day, then rerun readiness and app-owned backfill immediately after.
