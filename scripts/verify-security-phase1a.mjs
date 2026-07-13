@@ -267,13 +267,10 @@ check(
     ),
 );
 check(
-  "Viewer KPI loading uses aggregate RPCs instead of name-bearing client rows",
-  dashboard.includes(
-    "const shouldUseCanonicalKpis =\n        !canUseDashboardDrilldowns ||",
-  ) &&
-    dashboard.includes(
-      "if (cancelled || loadedCanonical || !canUseDashboardDrilldowns) return;",
-    ),
+  "Viewer KPI loading uses the actor-scoped aggregate without a raw fallback",
+  dashboard.includes('"dashboard_kpi_counts_actor_scoped"') &&
+    dashboard.includes("!canUseDashboardDrilldowns || !appliedUsesAppClients") &&
+    dashboard.includes("!canUseDashboardDrilldowns ||\n          !appliedUsesAppClients"),
 );
 check(
   "Viewer company scope ignores crafted URL company IDs before first render",
@@ -306,7 +303,9 @@ check(
       "canUseDashboardDrilldowns &&\n        appliedUsesAppClients &&",
     ) &&
     dashboard.includes("setChartClients(canUseDashboardDrilldowns ? clients : []);") &&
-    dashboard.includes("const reachedClients = canUseDashboardDrilldowns"),
+    dashboard.includes("const reachedClients = canUseDashboardDrilldowns") &&
+    dashboard.includes('"dashboard_overview_rollups_actor_scoped"') &&
+    dashboard.includes('"dashboard_chart_rollups_actor_scoped"'),
 );
 
 console.log(`\n${passed}/${passed + failed} Phase 1A checks passed.`);

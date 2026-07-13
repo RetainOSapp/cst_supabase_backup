@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "db:apply:sql": "node scripts/apply-sql-file.mjs",
+    "db:apply:release-gate": "node scripts/apply-release-gate-sql-file.mjs",
     "pilot:seed:ethical-scaling": "node scripts/seed-ethical-scaling-pilot.mjs --apply",
     "pilot:seed:ethical-scaling:dry": "node scripts/seed-ethical-scaling-pilot.mjs",
     "pilot:seed:ethical-scaling:clients": "node scripts/seed-ethical-scaling-clients-pilot.mjs --apply",

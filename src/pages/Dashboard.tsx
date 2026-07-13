@@ -77,9 +77,8 @@ interface DashboardRpcFilterParams {
   p_company_id: string;
   p_csm_id: string | null;
   p_secondary_assignee_id: string | null;
-  p_program_value: string | null;
-  p_program_values?: string[] | null;
-  p_offer_id?: string | null;
+  p_program_values: string[] | null;
+  p_offer_id: string | null;
   p_client_start_date_from: string | null;
   p_client_start_date_to: string | null;
   p_date_range_start: string | null;
@@ -107,6 +106,27 @@ interface CanonicalKpiCountsRow
     RetentionKpiCountsRow {
   paused_clients: number | null;
   suspended_clients: number | null;
+}
+
+interface DashboardOverviewRollupsRow {
+  advocacy: Array<{
+    type: AdvocacyType;
+    asked: number | string;
+    received: number | string;
+  }> | null;
+  ttv: {
+    average_days: number | string | null;
+    reached_count: number | string | null;
+    configured_milestones: number | string | null;
+  } | null;
+}
+
+interface DashboardChartRollupRow {
+  metric: string;
+  bucket_key: string;
+  bucket_label: string;
+  value: number | string;
+  capacity: number | string | null;
 }
 
 async function fetchPagedDashboardRows<T>(
@@ -1629,6 +1649,9 @@ export function Dashboard() {
   const [appCompanyByLegacyId, setAppCompanyByLegacyId] = useState(
     new Map<string, AppCompany>(),
   );
+  const [appCompanySourceStatus, setAppCompanySourceStatus] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
@@ -1998,8 +2021,6 @@ export function Dashboard() {
       p_secondary_assignee_id: appliedShowSecondaryFilter
         ? appliedFilters.secondaryAssigneeId || null
         : null,
-      p_program_value:
-        appliedProgramValues.length === 1 ? appliedProgramValues[0] : null,
       p_program_values:
         appliedProgramValues.length > 0 ? appliedProgramValues : null,
       p_offer_id: appliedFilters.offerId || null,
@@ -2063,6 +2084,8 @@ export function Dashboard() {
 
   useEffect(() => {
     async function loadCompanies() {
+      setAppCompanySourceStatus("loading");
+      setAppCompanyByLegacyId(new Map());
       let query = supabase
         .from("backup_companies")
         .select(
@@ -2115,6 +2138,7 @@ export function Dashboard() {
 
       if (appResult.error) {
         console.error("Failed to load app companies:", appResult.error);
+        setAppCompanySourceStatus("error");
       } else {
         setAppCompanyByLegacyId(
           new Map(
@@ -2126,6 +2150,7 @@ export function Dashboard() {
               ]),
           ),
         );
+        setAppCompanySourceStatus("ready");
       }
 
       setCompaniesLoading(false);
@@ -2135,9 +2160,12 @@ export function Dashboard() {
   }, [canUseCompanySwitcher, effectiveCompanyId]);
 
   useEffect(() => {
-    if (!pendingFilters.companyId) {
+    if (
+      !pendingFilters.companyId ||
+      appCompanySourceStatus !== "ready"
+    ) {
       setTeamMembers([]);
-      setTeamMembersLoading(false);
+      setTeamMembersLoading(appCompanySourceStatus === "loading");
       return;
     }
 
@@ -2154,7 +2182,7 @@ export function Dashboard() {
         const { data, error } = await supabase
           .from("company_members")
           .select(
-            "id, legacy_glide_row_id, name, email, role, hide_from_csm_list, capacity_number, status",
+            "id, legacy_glide_row_id, name, role, hide_from_csm_list, capacity_number, status",
           )
           .eq("company_id", appCompany.id)
           .eq("status", "active")
@@ -2196,12 +2224,19 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [appCompanyByLegacyId, pendingFilters.companyId]);
+  }, [
+    appCompanyByLegacyId,
+    appCompanySourceStatus,
+    pendingFilters.companyId,
+  ]);
 
   useEffect(() => {
-    if (!pendingFilters.companyId) {
+    if (
+      !pendingFilters.companyId ||
+      appCompanySourceStatus !== "ready"
+    ) {
       setOffers([]);
-      setOffersLoading(false);
+      setOffersLoading(appCompanySourceStatus === "loading");
       return;
     }
 
@@ -2244,7 +2279,11 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [appCompanyByLegacyId, pendingFilters.companyId]);
+  }, [
+    appCompanyByLegacyId,
+    appCompanySourceStatus,
+    pendingFilters.companyId,
+  ]);
 
   useEffect(() => {
     if (!pendingFilters.companyId) {
@@ -2403,11 +2442,6 @@ export function Dashboard() {
     }
 
     let cancelled = false;
-    const {
-      p_program_values: _canonicalProgramValues,
-      p_offer_id: _canonicalOfferId,
-      ...legacyRpcFilterParams
-    } = rpcFilterParams;
 
     async function loadClientSideFilteredKpis() {
       setPrimaryKpiLoading(true);
@@ -2802,7 +2836,7 @@ export function Dashboard() {
       setRetentionKpiLoading(true);
 
       const { data, error } = await supabase.rpc(
-        "dashboard_kpi_counts_canonical",
+        "dashboard_kpi_counts_actor_scoped",
         {
           p_company_id: rpcFilterParams.p_company_id,
           p_csm_id: assignedTeamMemberId || rpcFilterParams.p_csm_id,
@@ -2820,20 +2854,18 @@ export function Dashboard() {
 
       if (error) {
         console.error("Failed to load canonical dashboard KPIs:", error);
-        if (!canUseDashboardDrilldowns) {
-          setActiveClients(null);
-          setFrontEndClients(null);
-          setBackEndClients(null);
-          setOffBoardedClients(null);
-          setChurnedClientsCount(null);
-          setChurnPercentage(null);
-          setRetainedClients(null);
-          setRenewingClientsCount(null);
-          setRetentionPercentage(null);
-          setActiveRenewingClients(null);
-          setPrimaryKpiLoading(false);
-          setRetentionKpiLoading(false);
-        }
+        setActiveClients(null);
+        setFrontEndClients(null);
+        setBackEndClients(null);
+        setOffBoardedClients(null);
+        setChurnedClientsCount(null);
+        setChurnPercentage(null);
+        setRetainedClients(null);
+        setRenewingClientsCount(null);
+        setRetentionPercentage(null);
+        setActiveRenewingClients(null);
+        setPrimaryKpiLoading(false);
+        setRetentionKpiLoading(false);
         return false;
       }
 
@@ -2857,88 +2889,19 @@ export function Dashboard() {
       return true;
     }
 
-    async function loadPrimaryKpis() {
-      setPrimaryKpiLoading(true);
-
-      const { data, error } = await supabase.rpc(
-        "dashboard_kpi_counts_primary",
-        legacyRpcFilterParams,
-      );
-
-      if (cancelled) return;
-
-      if (error) {
-        console.error("Failed to load primary dashboard KPIs:", error);
-        setActiveClients(null);
-        setFrontEndClients(null);
-        setBackEndClients(null);
-        setOffBoardedClients(null);
-        setChurnedClientsCount(null);
-        setChurnPercentage(null);
-      } else {
-        const row = ((data ?? []) as PrimaryKpiCountsRow[])[0] ?? null;
-        setActiveClients(Number(row?.active_clients ?? 0));
-        setFrontEndClients(Number(row?.front_end_clients ?? 0));
-        setBackEndClients(Number(row?.back_end_clients ?? 0));
-        setOffBoardedClients(Number(row?.off_boarded_clients ?? 0));
-        setChurnedClientsCount(Number(row?.churned_clients ?? 0));
-        setChurnPercentage(
-          row?.churn_percentage == null ? 0 : Number(row.churn_percentage),
-        );
-      }
-
-      setPrimaryKpiLoading(false);
-    }
-
-    async function loadRetentionKpis() {
-      setRetentionKpiLoading(true);
-
-      const { data, error } = await supabase.rpc(
-        "dashboard_kpi_counts_retention",
-        legacyRpcFilterParams,
-      );
-
-      if (cancelled) return;
-
-      if (error) {
-        console.error("Failed to load retention dashboard KPIs:", error);
-        setRetainedClients(null);
-        setRenewingClientsCount(null);
-        setRetentionPercentage(null);
-        setActiveRenewingClients(null);
-      } else {
-        const row = ((data ?? []) as RetentionKpiCountsRow[])[0] ?? null;
-        setRetainedClients(Number(row?.retained_clients ?? 0));
-        setRenewingClientsCount(Number(row?.renewing_clients ?? 0));
-        setRetentionPercentage(
-          row?.retention_percentage == null ? 0 : Number(row.retention_percentage),
-        );
-        setActiveRenewingClients(Number(row?.active_renewing_clients ?? 0));
-      }
-
-      setRetentionKpiLoading(false);
-    }
-
     void (async () => {
-      const shouldUseCanonicalKpis =
-        !canUseDashboardDrilldowns ||
-        (!appliedUsesAppClients &&
-          (Boolean(appliedFilters.offerId) || appliedProgramValues.length > 1));
-
-      if (shouldUseCanonicalKpis) {
+      if (!canUseDashboardDrilldowns || !appliedUsesAppClients) {
         const loadedCanonical = await loadCanonicalKpis();
-        if (cancelled || loadedCanonical || !canUseDashboardDrilldowns) return;
+        if (
+          cancelled ||
+          loadedCanonical ||
+          !canUseDashboardDrilldowns ||
+          !appliedUsesAppClients
+        ) return;
       }
 
-      if (
-        appliedUsesAppClients ||
-        appliedFilters.offerId ||
-        appliedProgramValues.length > 1
-      ) {
+      if (appliedUsesAppClients) {
         await loadClientSideFilteredKpis();
-      } else {
-        loadPrimaryKpis();
-        loadRetentionKpis();
       }
     })();
 
@@ -2969,10 +2932,115 @@ export function Dashboard() {
   ]);
 
   useEffect(() => {
+    if (
+      canUseDashboardDrilldowns ||
+      !appliedUsesAppClients ||
+      !appliedFilters.companyId
+    ) {
+      if (!canUseDashboardDrilldowns) {
+        setAdvocacyLoading(false);
+        setTtvLoading(false);
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadViewerOverviewRollups() {
+      setAdvocacyLoading(true);
+      setTtvLoading(true);
+
+      const { data, error } = await supabase.rpc(
+        "dashboard_overview_rollups_actor_scoped",
+        {
+          p_company_id: rpcFilterParams.p_company_id,
+          p_csm_id: rpcFilterParams.p_csm_id,
+          p_secondary_assignee_id:
+            rpcFilterParams.p_secondary_assignee_id,
+          p_program_values: rpcFilterParams.p_program_values,
+          p_offer_id: rpcFilterParams.p_offer_id,
+          p_client_start_date_from:
+            rpcFilterParams.p_client_start_date_from,
+          p_client_start_date_to: rpcFilterParams.p_client_start_date_to,
+          p_date_range_start: rpcFilterParams.p_date_range_start,
+          p_date_range_end: rpcFilterParams.p_date_range_end,
+        },
+      );
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Failed to load Viewer Dashboard rollups:", error);
+        setAdvocacyMetrics(
+          advocacyDefinitions.map((definition) => ({
+            type: definition.type,
+            label: definition.label,
+            asked: 0,
+            received: 0,
+          })),
+        );
+        setTtvMetric({
+          averageDays: null,
+          reachedCount: 0,
+          configuredMilestones: 0,
+          reachedClients: [],
+          ttvMilestones: [],
+        });
+        setAdvocacyLoading(false);
+        setTtvLoading(false);
+        return;
+      }
+
+      const row = ((data ?? []) as DashboardOverviewRollupsRow[])[0] ?? null;
+      const advocacyByType = new Map(
+        (row?.advocacy ?? []).map((metric) => [metric.type, metric]),
+      );
+      setAdvocacyMetrics(
+        advocacyDefinitions.map((definition) => {
+          const metric = advocacyByType.get(definition.type);
+          return {
+            type: definition.type,
+            label: definition.label,
+            asked: Number(metric?.asked ?? 0),
+            received: Number(metric?.received ?? 0),
+          };
+        }),
+      );
+      setTtvMetric({
+        averageDays:
+          row?.ttv?.average_days == null
+            ? null
+            : Number(row.ttv.average_days),
+        reachedCount: Number(row?.ttv?.reached_count ?? 0),
+        configuredMilestones: Number(
+          row?.ttv?.configured_milestones ?? 0,
+        ),
+        reachedClients: [],
+        ttvMilestones: [],
+      });
+      setAdvocacyLoading(false);
+      setTtvLoading(false);
+    }
+
+    void loadViewerOverviewRollups();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appliedFilters.companyId,
+    appliedUsesAppClients,
+    canUseDashboardDrilldowns,
+    reportVersion,
+    rpcFilterParams,
+  ]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadAdvocacyMetrics() {
       const appCompany = appCompanyByLegacyId.get(appliedFilters.companyId);
+      if (!canUseDashboardDrilldowns && appCompany?.id) return;
       if (!appCompany?.id) {
         setAdvocacyMetrics(
           advocacyDefinitions.map((definition) => ({
@@ -2982,6 +3050,7 @@ export function Dashboard() {
             received: 0,
           })),
         );
+        setAdvocacyLoading(false);
         return;
       }
 
@@ -3141,6 +3210,7 @@ export function Dashboard() {
     appliedFilters.secondaryAssigneeId,
     appliedProgramValues,
     appliedShowSecondaryFilter,
+    canUseDashboardDrilldowns,
     reportVersion,
   ]);
 
@@ -3162,11 +3232,19 @@ export function Dashboard() {
         return;
       }
 
+      if (appCompanySourceStatus !== "ready") {
+        resetMetric();
+        setTtvLoading(appCompanySourceStatus === "loading");
+        return;
+      }
+
       setTtvLoading(true);
       const appCompany = appCompanyByLegacyId.get(appliedFilters.companyId);
       const usesAppTtv =
         appCompany?.migration_status === "pilot" ||
         appCompany?.migration_status === "migrated";
+
+      if (!canUseDashboardDrilldowns && usesAppTtv) return;
 
       const offerIds = appliedFilters.offerId
         ? [appliedFilters.offerId]
@@ -3437,6 +3515,7 @@ export function Dashboard() {
     };
   }, [
     appCompanyByLegacyId,
+    appCompanySourceStatus,
     appliedFilters.clientStartDate.endDate,
     appliedFilters.clientStartDate.startDate,
     appliedFilters.companyId,
@@ -3458,7 +3537,8 @@ export function Dashboard() {
     if (
       !canUseDashboardDrilldowns ||
       !activeDetailKey ||
-      !appliedFilters.companyId
+      !appliedFilters.companyId ||
+      appCompanySourceStatus !== "ready"
     ) {
       setDetailRows([]);
       setDetailTotalCount(0);
@@ -4065,6 +4145,7 @@ export function Dashboard() {
     };
   }, [
     activeDetailKey,
+    appCompanySourceStatus,
     appliedFilters.companyId,
     appliedFilters.clientStartDate.endDate,
     appliedFilters.clientStartDate.startDate,
@@ -4112,10 +4193,108 @@ export function Dashboard() {
       return;
     }
 
+    if (appCompanySourceStatus !== "ready") {
+      setChartData({
+        programDistribution: [],
+        buyInDistribution: [],
+        progressDistribution: [],
+        clientsByJourney: [],
+        journeyMilestoneIds: [],
+        tasksByStatus: [],
+        csmWorkload: [],
+      });
+      setCapacityRows([]);
+      setChartClients([]);
+      setProfileUpkeep(null);
+      setChartsLoading(appCompanySourceStatus === "loading");
+      return;
+    }
+
     let cancelled = false;
 
     async function loadCharts() {
       setChartsLoading(true);
+
+      if (!canUseDashboardDrilldowns && appliedUsesAppClients) {
+        const { data, error } = await supabase.rpc(
+          "dashboard_chart_rollups_actor_scoped",
+          {
+            p_company_id: rpcFilterParams.p_company_id,
+            p_csm_id: rpcFilterParams.p_csm_id,
+            p_secondary_assignee_id:
+              rpcFilterParams.p_secondary_assignee_id,
+            p_program_values: rpcFilterParams.p_program_values,
+            p_offer_id: rpcFilterParams.p_offer_id,
+            p_client_start_date_from:
+              rpcFilterParams.p_client_start_date_from,
+            p_client_start_date_to: rpcFilterParams.p_client_start_date_to,
+            p_date_range_end: rpcFilterParams.p_date_range_end,
+          },
+        );
+
+        if (cancelled) return;
+
+        if (error) {
+          console.error("Failed to load Viewer Dashboard charts:", error);
+          setChartData({
+            programDistribution: [],
+            buyInDistribution: [],
+            progressDistribution: [],
+            clientsByJourney: [],
+            journeyMilestoneIds: [],
+            tasksByStatus: [],
+            csmWorkload: [],
+          });
+          setCapacityRows([]);
+          setChartClients([]);
+          setProfileUpkeep(null);
+          setChartsLoading(false);
+          return;
+        }
+
+        const rows = (data ?? []) as DashboardChartRollupRow[];
+        const chartRows = (metric: string): ChartDatum[] =>
+          rows
+            .filter((row) => row.metric === metric)
+            .map((row) => ({
+              key: row.bucket_key,
+              label: row.bucket_label,
+              value: Number(row.value ?? 0),
+            }))
+            .sort((left, right) => right.value - left.value);
+
+        setChartData({
+          programDistribution: chartRows("program"),
+          buyInDistribution: chartRows("buy_in"),
+          progressDistribution: chartRows("progress"),
+          clientsByJourney: chartRows(
+            appliedFilters.offerId ? "milestone" : "pathway",
+          ),
+          journeyMilestoneIds: [],
+          tasksByStatus: chartRows("task_status"),
+          csmWorkload: chartRows("csm_workload"),
+        });
+        setCapacityRows(
+          rows
+            .filter((row) => row.metric === "csm_capacity")
+            .map((row) => ({
+              id: row.bucket_key,
+              name: row.bucket_label,
+              activeClients: Number(row.value ?? 0),
+              capacity:
+                row.capacity == null ? null : Number(row.capacity),
+            }))
+            .sort(
+              (left, right) =>
+                right.activeClients - left.activeClients ||
+                left.name.localeCompare(right.name),
+            ),
+        );
+        setChartClients([]);
+        setProfileUpkeep(null);
+        setChartsLoading(false);
+        return;
+      }
 
       const clientSourceTable = appliedUsesAppClients
         ? "clients"
@@ -4502,6 +4681,7 @@ export function Dashboard() {
   }, [
     appliedFilters.clientStartDate.endDate,
     appliedFilters.clientStartDate.startDate,
+    appCompanySourceStatus,
     appliedFilters.companyId,
     appliedFilters.csmId,
     appliedFilters.offerId,
@@ -4518,6 +4698,7 @@ export function Dashboard() {
     shouldLoadDashboardCharts,
     teamMemberNameById,
     reportVersion,
+    rpcFilterParams,
   ]);
 
   useEffect(() => {
