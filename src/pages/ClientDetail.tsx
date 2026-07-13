@@ -5903,12 +5903,20 @@ function PathwaysSection({
       ? Math.max(0, Math.min(100, Math.round((contractElapsedDays / contractTotalDays) * 100)))
       : null;
   const defaultTimelineOption = nearestProgramTimelineOption(contractTotalDays);
-  const [timelineDays, setTimelineDays] = useState(defaultTimelineOption.days);
+  const [timelineFallbackDays, setTimelineFallbackDays] = useState(
+    defaultTimelineOption.days,
+  );
   const [timelineScale, setTimelineScale] = useState<ProgramTimelineScale>("days");
   useEffect(() => {
-    setTimelineDays(defaultTimelineOption.days);
+    setTimelineFallbackDays(defaultTimelineOption.days);
   }, [defaultTimelineOption.days]);
-  const selectedTimelineDays = Math.max(30, timelineDays || defaultTimelineOption.days);
+  // A current contract is the source of truth for the client's journey length.
+  // Presets remain available only when no contract dates are available yet.
+  const selectedTimelineDays = Math.max(
+    30,
+    contractTotalDays ?? timelineFallbackDays ?? defaultTimelineOption.days,
+  );
+  const usesCurrentContractTimeline = contractTotalDays !== null;
   const notificationPreferenceByType = new Map(
     mergeNotificationPreferences(notificationPreferences).map((preference) => [
       preference.notification_type,
@@ -6238,20 +6246,26 @@ function PathwaysSection({
                 </button>
               ))}
             </div>
-            {PROGRAM_TIMELINE_OPTIONS.map((option) => (
-              <button
-                key={option.days}
-                type="button"
-                onClick={() => setTimelineDays(option.days)}
-                className={`rounded-md border px-3 py-2 text-sm font-semibold transition ${
-                  selectedTimelineDays === option.days
-                    ? "border-[#162b3e] bg-[#162b3e] text-white"
-                    : "border-[#d0d5dd] bg-white text-[#344054] hover:border-[#59abf0]"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
+            {usesCurrentContractTimeline ? (
+              <span className="rounded-md border border-[#d6eafb] bg-[#f7fbff] px-3 py-2 text-sm font-semibold text-[#1d4f8f]">
+                Current contract · {selectedTimelineDays} days
+              </span>
+            ) : (
+              PROGRAM_TIMELINE_OPTIONS.map((option) => (
+                <button
+                  key={option.days}
+                  type="button"
+                  onClick={() => setTimelineFallbackDays(option.days)}
+                  className={`rounded-md border px-3 py-2 text-sm font-semibold transition ${
+                    selectedTimelineDays === option.days
+                      ? "border-[#162b3e] bg-[#162b3e] text-white"
+                      : "border-[#d0d5dd] bg-white text-[#344054] hover:border-[#59abf0]"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))
+            )}
           </div>
         </div>
         <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
