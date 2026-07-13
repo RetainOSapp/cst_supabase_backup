@@ -1,13 +1,11 @@
 /// <reference path="../_shared/deno.d.ts" />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-webhook-secret, x-retainos-integration-token",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { getEnabledGlobalWebhookFallbackSecret } from "../_shared/auth.ts";
+import {
+  jsonResponse as sharedJsonResponse,
+  optionsResponse,
+} from "../_shared/http.ts";
 
 const CLIENT_UPDATE_FIELDS = [
   "next_steps_value",
@@ -18,6 +16,57 @@ const CLIENT_UPDATE_FIELDS = [
   "secondary_offer_milestones_current_milestone_id",
   "secondary_offer_milestones_current_milestone_change_date",
   "csm_team_member_id",
+] as const;
+
+const CLIENT_UPDATE_REVIEW_PAYLOAD_KEYS = [
+  "company_id",
+  "companyId",
+  "companyGlideId",
+  "company_glide_id",
+  "client_id",
+  "clientId",
+  "client_email",
+  "clientEmail",
+  "email",
+  "external_event_id",
+  "externalEventId",
+  "event_id",
+  "eventId",
+  "zapier_id",
+  "zapierId",
+  "provider",
+  "notes",
+  "note",
+  "next_steps",
+  "nextSteps",
+  "last_contact",
+  "lastContact",
+  "last_contact_at",
+  "lastContactAt",
+  "next_contact",
+  "nextContact",
+  "next_contact_at",
+  "nextContactAt",
+  "pathway_id",
+  "pathwayId",
+  "offer_id",
+  "offerId",
+  "secondary_pathway_id",
+  "secondaryPathwayId",
+  "secondary_offer_id",
+  "secondaryOfferId",
+  "secondary_pathway_offer_id",
+  "secondaryPathwayOfferId",
+  "secondary_milestone_id",
+  "secondaryMilestoneId",
+  "secondary_pathway_milestone_id",
+  "secondaryPathwayMilestoneId",
+  "assigned_to",
+  "assignedTo",
+  "csm_email",
+  "csmEmail",
+  "custom_fields",
+  "customFields",
 ] as const;
 
 type SupabaseClient = ReturnType<typeof createClient>;
@@ -36,13 +85,6 @@ type IntegrationSecretValidationResult =
     };
 
 class RequestValidationError extends Error {}
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
-}
 
 function describeError(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -78,6 +120,14 @@ function nullableText(value: unknown) {
   return text || null;
 }
 
+function pickPayloadFields(body: JsonRecord, keys: string[]) {
+  const picked: JsonRecord = {};
+  for (const key of keys) {
+    if (hasOwn(body, key)) picked[key] = body[key];
+  }
+  return picked;
+}
+
 function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
@@ -94,6 +144,41 @@ function clientMatchesEmail(client: JsonRecord, email: string) {
   const normalized = normalizeEmail(email);
   if (!normalized) return false;
   return clientEmailValues(client).includes(normalized);
+}
+
+async function findClientsByEmail(
+  supabase: SupabaseClient,
+  companyId: string,
+  clientSelect: string,
+  email: string,
+) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return [];
+
+  const results = await Promise.all(
+    ["client_email", "client_email_secondary", "client_email_tertiary"].map(
+      (column) =>
+        supabase
+          .from("clients")
+          .select(clientSelect)
+          .eq("company_id", companyId)
+          .ilike(column, normalizedEmail)
+          .is("archived_at", null)
+          .limit(5),
+    ),
+  );
+
+  const clients = new Map<string, JsonRecord>();
+  for (const result of results) {
+    if (result.error) throw result.error;
+    for (const row of result.data ?? []) {
+      const client = row as JsonRecord;
+      if (clientMatchesEmail(client, normalizedEmail)) {
+        clients.set(String(client.id), client);
+      }
+    }
+  }
+  return [...clients.values()];
 }
 
 function normalizeProvider(value: unknown) {
@@ -309,13 +394,19 @@ async function validateCompanyIntegrationSecret(
     };
   }
 
-  if (fallbackSecret && submittedSecret === fallbackSecret) {
-    return {
-      ok: true,
-      authMode: "global_secret_fallback",
-      tokenId: null,
-      tokenPrefix: null,
-    };
+  if (fallbackSecret) {
+    const [submittedHash, fallbackHash] = await Promise.all([
+      sha256Hex(submittedSecret ?? ""),
+      sha256Hex(fallbackSecret),
+    ]);
+    if (timingSafeEqual(submittedHash, fallbackHash)) {
+      return {
+        ok: true,
+        authMode: "global_secret_fallback",
+        tokenId: null,
+        tokenPrefix: null,
+      };
+    }
   }
 
   return {
@@ -342,15 +433,29 @@ async function upsertIntakeEvent(
       .eq("external_event_id", externalEventId)
       .maybeSingle();
     if (existingError) throw existingError;
-    if (existing) return existing;
+    if (existing) return { event: existing, isExisting: true };
 
     const { data, error } = await supabase
       .from("integration_intake_events")
       .insert(payload)
       .select("*")
       .single();
-    if (error) throw error;
-    return data;
+    if (error) {
+      if (error.code === "23505") {
+        const { data: racedEvent, error: racedEventError } = await supabase
+          .from("integration_intake_events")
+          .select("*")
+          .eq("company_id", payload.company_id)
+          .eq("integration_type", payload.integration_type)
+          .eq("provider", payload.provider)
+          .eq("external_event_id", externalEventId)
+          .single();
+        if (racedEventError) throw racedEventError;
+        return { event: racedEvent, isExisting: true };
+      }
+      throw error;
+    }
+    return { event: data, isExisting: false };
   }
 
   const { data, error } = await supabase
@@ -359,7 +464,7 @@ async function upsertIntakeEvent(
     .select("*")
     .single();
   if (error) throw error;
-  return data;
+  return { event: data, isExisting: false };
 }
 
 async function resolveAssignableMember(
@@ -553,11 +658,17 @@ async function prepareCustomFieldUpdates(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(
+      req,
+      "authorization, x-client-info, apikey, content-type, x-webhook-secret, x-retainos-integration-token",
+    );
   }
 
+  const respond = (body: unknown, status = 200) =>
+    sharedJsonResponse(req, body, status);
+
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return respond({ error: "Method not allowed" }, 405);
   }
 
   let supabase: SupabaseClient | null = null;
@@ -570,7 +681,7 @@ Deno.serve(async (req) => {
       Deno.env.get("supabase_service_role");
 
     if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse(
+      return respond(
         { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
         500,
       );
@@ -587,13 +698,13 @@ Deno.serve(async (req) => {
       cleanText(body.companyGlideId) ||
       cleanText(body.company_glide_id);
     if (!rawCompanyId) {
-      return jsonResponse({ error: "company_id is required." }, 400);
+      return respond({ error: "company_id is required." }, 400);
     }
 
     const provider = normalizeProvider(body.provider ?? "zapier");
     const company = await resolveCompany(supabase, rawCompanyId);
     if (!company) {
-      return jsonResponse(
+      return respond(
         {
           error:
             "Company is not enabled for RetainOS client update webhooks. Check company_id.",
@@ -603,9 +714,10 @@ Deno.serve(async (req) => {
     }
 
     const submittedSecret = getWebhookSecret(req);
-    const fallbackSecret =
-      Deno.env.get("CLIENT_UPDATE_WEBHOOK_SECRET") ??
-      Deno.env.get("WEBHOOK_UPDATE_CLIENT_SECRET");
+    const fallbackSecret = getEnabledGlobalWebhookFallbackSecret(
+      "CLIENT_UPDATE_WEBHOOK_SECRET",
+      "WEBHOOK_UPDATE_CLIENT_SECRET",
+    );
     const authResult = await validateCompanyIntegrationSecret(
       supabase,
       company.id,
@@ -614,8 +726,8 @@ Deno.serve(async (req) => {
       fallbackSecret,
       getClientIp(req),
     );
-    if (!authResult.ok) {
-      return jsonResponse({ error: authResult.error }, authResult.status);
+    if (authResult.ok === false) {
+      return respond({ error: authResult.error }, authResult.status);
     }
 
     const externalEventId =
@@ -632,13 +744,13 @@ Deno.serve(async (req) => {
       cleanText(body.client_id) || cleanText(body.clientId);
 
     if (!clientEmail && !requestedClientId) {
-      return jsonResponse(
+      return respond(
         { error: "client_email or client_id is required." },
         400,
       );
     }
     if (requestedClientId && !isUuid(requestedClientId)) {
-      return jsonResponse(
+      return respond(
         { error: "client_id must be the app-owned RetainOS client UUID." },
         400,
       );
@@ -652,7 +764,7 @@ Deno.serve(async (req) => {
       external_event_id: externalEventId,
       status: "received",
       match_status: "unmatched",
-      payload: body,
+      payload: pickPayloadFields(body, [...CLIENT_UPDATE_REVIEW_PAYLOAD_KEYS]),
       metadata: compactObject({
         client_email: clientEmail,
         requested_client_id: requestedClientId,
@@ -662,26 +774,35 @@ Deno.serve(async (req) => {
       }),
     };
 
-    const intakeEvent = await upsertIntakeEvent(
+    const intakeResult = await upsertIntakeEvent(
       supabase,
       intakePayload,
       externalEventId,
     );
+    const intakeEvent = intakeResult?.event;
     storedIntakeEvent = intakeEvent as JsonRecord | null;
 
     if (!intakeEvent) {
-      return jsonResponse(
+      return respond(
         { error: "Unable to store integration intake event." },
         500,
       );
     }
 
-    if (intakeEvent.status === "processed") {
-      return jsonResponse({
-        ok: true,
-        duplicate: true,
-        event: intakeEvent,
-      });
+    if (intakeResult.isExisting) {
+      const isProcessed = intakeEvent.status === "processed";
+      return respond(
+        {
+          ok: isProcessed,
+          duplicate: true,
+          inProgress: intakeEvent.status === "received",
+          needsReview: ["needs_review", "failed"].includes(
+            String(intakeEvent.status),
+          ),
+          event: intakeEvent,
+        },
+        isProcessed ? 200 : 202,
+      );
     }
 
     const clientSelect = [
@@ -703,32 +824,27 @@ Deno.serve(async (req) => {
       "archived_at",
     ].join(", ");
 
-    const { data: clientRows, error: clientError } = requestedClientId
-      ? await supabase
-          .from("clients")
-          .select(clientSelect)
-          .eq("company_id", company.id)
-          .eq("id", requestedClientId)
-          .is("archived_at", null)
-      : await supabase
-          .from("clients")
-          .select(clientSelect)
-          .eq("company_id", company.id)
-          .or(
-            [
-              `client_email.ilike.${clientEmail.replaceAll(",", "")}`,
-              `client_email_secondary.ilike.${clientEmail.replaceAll(",", "")}`,
-              `client_email_tertiary.ilike.${clientEmail.replaceAll(",", "")}`,
-            ].join(","),
-          )
-          .is("archived_at", null);
+    let clientRows: JsonRecord[];
+    if (requestedClientId) {
+      const { data, error } = await supabase
+        .from("clients")
+        .select(clientSelect)
+        .eq("company_id", company.id)
+        .eq("id", requestedClientId)
+        .is("archived_at", null);
+      if (error) throw error;
+      clientRows = (data ?? []) as JsonRecord[];
+    } else {
+      clientRows = await findClientsByEmail(
+        supabase,
+        company.id,
+        clientSelect,
+        clientEmail,
+      );
+    }
 
-    if (clientError) throw clientError;
-
-    const emailSafeRows = requestedClientId && clientEmail
-      ? (clientRows ?? []).filter(
-          (client) => clientMatchesEmail(client, clientEmail),
-        )
+    const emailSafeRows = clientEmail
+      ? (clientRows ?? []).filter((client) => clientMatchesEmail(client, clientEmail))
       : clientRows ?? [];
 
     if (emailSafeRows.length !== 1) {
@@ -755,7 +871,7 @@ Deno.serve(async (req) => {
         .single();
       if (updateError) throw updateError;
 
-      return jsonResponse(
+      return respond(
         {
           ok: false,
           needsReview: true,
@@ -779,16 +895,40 @@ Deno.serve(async (req) => {
       historyPayload.next_steps = clientUpdates.next_steps_value;
     }
 
-    if (firstPresent(body, ["last_contact", "lastContact", "last_contact_at"]) !== undefined) {
+    if (
+      firstPresent(body, [
+        "last_contact",
+        "lastContact",
+        "last_contact_at",
+        "lastContactAt",
+      ]) !== undefined
+    ) {
       clientUpdates.csm_date_of_last_contact = parseDateTime(
-        firstPresent(body, ["last_contact", "lastContact", "last_contact_at"]),
+        firstPresent(body, [
+          "last_contact",
+          "lastContact",
+          "last_contact_at",
+          "lastContactAt",
+        ]),
       );
       historyPayload.last_contact_at = clientUpdates.csm_date_of_last_contact;
     }
 
-    if (firstPresent(body, ["next_contact", "nextContact", "next_contact_at"]) !== undefined) {
+    if (
+      firstPresent(body, [
+        "next_contact",
+        "nextContact",
+        "next_contact_at",
+        "nextContactAt",
+      ]) !== undefined
+    ) {
       clientUpdates.csm_date_of_next_contact = parseDateTime(
-        firstPresent(body, ["next_contact", "nextContact", "next_contact_at"]),
+        firstPresent(body, [
+          "next_contact",
+          "nextContact",
+          "next_contact_at",
+          "nextContactAt",
+        ]),
       );
       historyPayload.next_contact_at = clientUpdates.csm_date_of_next_contact;
     }
@@ -935,7 +1075,16 @@ Deno.serve(async (req) => {
         },
         payload: {
           integration_type: "client_update",
-          raw_payload: body,
+          submitted_payload: pickPayloadFields(body, [
+            "external_event_id",
+            "externalEventId",
+            "provider",
+            "client_id",
+            "clientId",
+            "client_email",
+            "clientEmail",
+            "email",
+          ]),
           normalized_updates: clientUpdates,
         },
       })
@@ -989,7 +1138,7 @@ Deno.serve(async (req) => {
       },
     });
 
-    return jsonResponse({
+    return respond({
       ok: true,
       event: processedEvent,
       historyEvent,
@@ -1008,9 +1157,10 @@ Deno.serve(async (req) => {
         })
         .eq("id", storedIntakeEvent.id);
     }
-    return jsonResponse(
-      { error: message },
-      error instanceof RequestValidationError ? 400 : 500,
+    const isValidationError = error instanceof RequestValidationError;
+    return respond(
+      { error: isValidationError ? message : "Unexpected client update error." },
+      isValidationError ? 400 : 500,
     );
   }
 });

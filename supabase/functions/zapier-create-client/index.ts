@@ -1,13 +1,11 @@
 /// <reference path="../_shared/deno.d.ts" />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-webhook-secret, x-retainos-integration-token",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { getEnabledGlobalWebhookFallbackSecret } from "../_shared/auth.ts";
+import {
+  jsonResponse as sharedJsonResponse,
+  optionsResponse,
+} from "../_shared/http.ts";
 
 type IntegrationSecretValidationResult =
   | {
@@ -26,13 +24,6 @@ type SupabaseClient = ReturnType<typeof createClient>;
 type JsonRecord = Record<string, unknown>;
 
 class RequestValidationError extends Error {}
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
-}
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -441,13 +432,19 @@ async function validateCompanyIntegrationSecret(
     };
   }
 
-  if (fallbackSecret && submittedSecret === fallbackSecret) {
-    return {
-      ok: true,
-      authMode: "global_secret_fallback",
-      tokenId: null,
-      tokenPrefix: null,
-    };
+  if (fallbackSecret) {
+    const [submittedHash, fallbackHash] = await Promise.all([
+      sha256Hex(submittedSecret ?? ""),
+      sha256Hex(fallbackSecret),
+    ]);
+    if (timingSafeEqual(submittedHash, fallbackHash)) {
+      return {
+        ok: true,
+        authMode: "global_secret_fallback",
+        tokenId: null,
+        tokenPrefix: null,
+      };
+    }
   }
 
   return {
@@ -742,11 +739,17 @@ async function prepareCustomFieldInserts(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(
+      req,
+      "authorization, x-client-info, apikey, content-type, x-webhook-secret, x-retainos-integration-token",
+    );
   }
 
+  const respond = (body: unknown, status = 200) =>
+    sharedJsonResponse(req, body, status);
+
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return respond({ error: "Method not allowed" }, 405);
   }
 
   try {
@@ -756,7 +759,7 @@ Deno.serve(async (req) => {
       Deno.env.get("supabase_service_role");
 
     if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse(
+      return respond(
         { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
         500,
       );
@@ -773,7 +776,7 @@ Deno.serve(async (req) => {
       cleanText(body.name);
 
     if (!clientName) {
-      return jsonResponse(
+      return respond(
         {
           error: "Client name is required.",
           received_keys: Object.keys(body).filter(Boolean).sort(),
@@ -784,7 +787,7 @@ Deno.serve(async (req) => {
 
     const companyResult = await resolveCompany(supabase, body);
     if (companyResult.error) {
-      return jsonResponse(
+      return respond(
         {
           error: companyResult.error,
           received_keys: Object.keys(body).filter(Boolean).sort(),
@@ -799,11 +802,11 @@ Deno.serve(async (req) => {
       company.id,
       "client_create",
       getWebhookSecret(req),
-      Deno.env.get("ZAPIER_CLIENT_WEBHOOK_SECRET") ?? undefined,
+      getEnabledGlobalWebhookFallbackSecret("ZAPIER_CLIENT_WEBHOOK_SECRET"),
       getClientIp(req),
     );
-    if (!authResult.ok) {
-      return jsonResponse({ error: authResult.error }, authResult.status);
+    if (authResult.ok === false) {
+      return respond({ error: authResult.error }, authResult.status);
     }
 
     const externalId =
@@ -823,7 +826,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (existingError) throw existingError;
     if (existingClient) {
-      return jsonResponse({
+      return respond({
         ok: true,
         duplicate: true,
         client: existingClient,
@@ -861,7 +864,7 @@ Deno.serve(async (req) => {
     const hasSecondaryOffer = Boolean(cleanText(secondaryOfferValue));
     const hasSecondaryMilestone = Boolean(cleanText(secondaryMilestoneValue));
     if (hasSecondaryOffer !== hasSecondaryMilestone) {
-      return jsonResponse(
+      return respond(
         {
           error:
             "Secondary pathway requires both secondary_pathway_id and secondary_milestone_id.",
@@ -879,7 +882,7 @@ Deno.serve(async (req) => {
         secondaryOfferValue,
       );
       if (!secondaryOfferId) {
-        return jsonResponse({ error: "Choose a secondary pathway first." }, 400);
+        return respond({ error: "Choose a secondary pathway first." }, 400);
       }
       secondaryMilestone = await resolveOfferMilestone(
         supabase,
@@ -955,7 +958,7 @@ Deno.serve(async (req) => {
       firstNullableText(body.archetype, body.client_archetype, body.clientArchetype),
     );
     if (archetype === undefined) {
-      return jsonResponse(
+      return respond(
         { error: "Archetype must be one of: Doer, Controller, Worrier, Follower." },
         400,
       );
@@ -1147,7 +1150,7 @@ Deno.serve(async (req) => {
       },
     });
 
-    return jsonResponse({
+    return respond({
       ok: true,
       client,
       event,
@@ -1157,7 +1160,15 @@ Deno.serve(async (req) => {
       taskTemplateErrors: templateTaskResult.taskErrors,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, error instanceof RequestValidationError ? 400 : 500);
+    console.error(error);
+    const isValidationError = error instanceof RequestValidationError;
+    return respond(
+      {
+        error: isValidationError
+          ? error.message
+          : "Unexpected client creation error.",
+      },
+      isValidationError ? 400 : 500,
+    );
   }
 });

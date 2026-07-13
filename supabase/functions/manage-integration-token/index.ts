@@ -1,13 +1,17 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import {
+  AuthError,
+  cleanText,
+  createServiceClient,
+  getBearerToken,
+  requireSuperAdmin,
+  type SupabaseServiceClient,
+} from "../_shared/auth.ts";
+import {
+  jsonResponse as sharedJsonResponse,
+  optionsResponse,
+} from "../_shared/http.ts";
 
 const ACTIONS = new Set(["list", "create", "revoke", "revoke_all"]);
 const INTEGRATION_TYPES = new Set([
@@ -18,53 +22,12 @@ const INTEGRATION_TYPES = new Set([
   "course_completion",
 ]);
 
-type SupabaseClient = ReturnType<typeof createClient>;
+type SupabaseClient = SupabaseServiceClient;
 
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
-}
+class TokenValidationError extends Error {}
 
-function cleanText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeEmail(value: unknown) {
-  return cleanText(value).toLowerCase();
-}
-
-function parseAllowlist(value: string | undefined) {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
-function getBearerToken(req: Request) {
-  const auth = req.headers.get("Authorization") ?? "";
-  return auth.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
-}
-
-function describeError(error: unknown) {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object") {
-    const record = error as Record<string, unknown>;
-    const parts = [
-      record.message,
-      record.details,
-      record.hint,
-      record.code ? `code: ${record.code}` : null,
-    ]
-      .filter(Boolean)
-      .map(String);
-    if (parts.length > 0) return parts.join(" | ");
-  }
-  return "Unexpected error.";
+function jsonResponse(req: Request, body: unknown, status = 200) {
+  return sharedJsonResponse(req, body, status);
 }
 
 function isUuid(value: string) {
@@ -99,24 +62,6 @@ function createRawToken(integrationType: string) {
   return `rtos_${prefix}_${randomTokenSegment()}`;
 }
 
-async function assertSuperAdmin(supabase: SupabaseClient, token: string) {
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user?.email) {
-    throw new Error("Invalid session.");
-  }
-
-  const superAdminEmails = parseAllowlist(
-    Deno.env.get("SUPER_ADMIN_EMAILS") ??
-      Deno.env.get("VITE_SUPER_ADMIN_EMAILS"),
-  );
-  const email = normalizeEmail(userData.user.email);
-  if (!superAdminEmails.has(email)) {
-    throw new Error("Only Super Admins can manage integration tokens.");
-  }
-
-  return userData.user;
-}
-
 async function resolveCompany(supabase: SupabaseClient, rawCompanyId: string) {
   const query = supabase
     .from("companies")
@@ -128,7 +73,7 @@ async function resolveCompany(supabase: SupabaseClient, rawCompanyId: string) {
     : await query.eq("legacy_glide_row_id", rawCompanyId).maybeSingle();
   if (error) throw error;
   if (!data) {
-    throw new Error(
+    throw new TokenValidationError(
       "Integration tokens are available for app-owned pilot or migrated companies only.",
     );
   }
@@ -137,32 +82,22 @@ async function resolveCompany(supabase: SupabaseClient, rawCompanyId: string) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(req);
   }
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse(req, { error: "Method not allowed" }, 405);
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-      Deno.env.get("supabase_service_role");
-    if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse({ error: "Missing Supabase configuration." }, 500);
-    }
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createServiceClient();
     const token = getBearerToken(req);
-    if (!token) return jsonResponse({ error: "Missing authorization." }, 401);
+    if (!token) return jsonResponse(req, { error: "Missing authorization." }, 401);
 
-    const actor = await assertSuperAdmin(supabase, token);
+    const actor = await requireSuperAdmin(supabase, token);
     const body = await req.json().catch(() => ({}));
     const action = cleanText(body.action);
     if (!ACTIONS.has(action)) {
-      return jsonResponse({ error: "Choose a valid token action." }, 400);
+      return jsonResponse(req, { error: "Choose a valid token action." }, 400);
     }
 
     const company = await resolveCompany(supabase, cleanText(body.companyId));
@@ -177,12 +112,12 @@ Deno.serve(async (req) => {
         .eq("company_id", company.id)
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return jsonResponse({ ok: true, tokens: data ?? [] });
+      return jsonResponse(req, { ok: true, tokens: data ?? [] });
     }
 
     if (action === "create") {
       if (!INTEGRATION_TYPES.has(integrationType)) {
-        return jsonResponse({ error: "Choose a valid integration type." }, 400);
+        return jsonResponse(req, { error: "Choose a valid integration type." }, 400);
       }
 
       const rawToken = createRawToken(integrationType);
@@ -229,12 +164,12 @@ Deno.serve(async (req) => {
         },
       });
 
-      return jsonResponse({ ok: true, token: data, rawToken });
+      return jsonResponse(req, { ok: true, token: data, rawToken });
     }
 
     const tokenId = cleanText(body.tokenId);
     if (action === "revoke") {
-      if (!tokenId) return jsonResponse({ error: "Missing token id." }, 400);
+      if (!tokenId) return jsonResponse(req, { error: "Missing token id." }, 400);
       const now = new Date().toISOString();
       const { data, error } = await supabase
         .from("company_integration_secrets")
@@ -255,7 +190,7 @@ Deno.serve(async (req) => {
         )
         .single();
       if (error) throw error;
-      return jsonResponse({ ok: true, token: data });
+      return jsonResponse(req, { ok: true, token: data });
     }
 
     if (action === "revoke_all") {
@@ -277,12 +212,22 @@ Deno.serve(async (req) => {
         ? await update.eq("integration_type", integrationType).select("id")
         : await update.select("id");
       if (error) throw error;
-      return jsonResponse({ ok: true, revokedCount: data?.length ?? 0 });
+      return jsonResponse(req, { ok: true, revokedCount: data?.length ?? 0 });
     }
 
-    return jsonResponse({ error: "Unsupported action." }, 400);
+    return jsonResponse(req, { error: "Unsupported action." }, 400);
   } catch (error) {
     console.error(error);
-    return jsonResponse({ error: describeError(error) }, 500);
+    const isAuthError = error instanceof AuthError;
+    const isValidationError = error instanceof TokenValidationError;
+    return jsonResponse(
+      req,
+      {
+        error: isAuthError || isValidationError
+          ? error.message
+          : "Unexpected integration token error.",
+      },
+      isAuthError ? error.status : isValidationError ? 400 : 500,
+    );
   }
 });

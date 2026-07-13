@@ -25,7 +25,8 @@ import { loadDotEnv } from "./shared-env.mjs";
 loadDotEnv();
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const serviceRoleKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.supabase_service_role;
 const rawEmails = process.env.SUPER_ADMIN_EMAILS || process.env.VITE_SUPER_ADMIN_EMAILS || "";
 const args = new Set(process.argv.slice(2));
 const supportedArgs = new Set([

@@ -1,36 +1,28 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
-}
+import {
+  createServiceClient,
+  type SupabaseServiceClient,
+} from "../_shared/auth.ts";
+import {
+  jsonResponse as sharedJsonResponse,
+  optionsResponse,
+} from "../_shared/http.ts";
 
 function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
-function parseAllowlist(value: string | undefined) {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean),
-  );
+function jsonResponse(req: Request, body: unknown, status = 200) {
+  return sharedJsonResponse(req, body, status);
+}
+
+function genericPreparedResponse(req: Request) {
+  return jsonResponse(req, { ok: true });
 }
 
 async function hasActiveAppMembership(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseServiceClient,
   email: string,
 ) {
   const { data, error } = await supabase
@@ -46,7 +38,7 @@ async function hasActiveAppMembership(
 }
 
 async function hasActiveMirrorMembership(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseServiceClient,
   email: string,
 ) {
   const { data, error } = await supabase
@@ -62,71 +54,57 @@ async function hasActiveMirrorMembership(
   );
 }
 
+async function hasActiveSuperAdminEntry(
+  supabase: SupabaseServiceClient,
+  email: string,
+) {
+  const { data, error } = await supabase
+    .from("retainos_super_admins")
+    .select("id")
+    .ilike("email", email)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(req);
   }
 
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse(req, { error: "Method not allowed" }, 405);
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-      Deno.env.get("supabase_service_role");
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse(
-        { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
-        500,
-      );
-    }
-
     const body = await req.json().catch(() => ({}));
     const email = normalizeEmail(body.email);
 
     if (!email || !email.includes("@")) {
-      return jsonResponse({
+      return jsonResponse(req, {
         ok: false,
         error: "Enter a valid email address.",
       });
     }
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
-
-    const superAdminEmails = parseAllowlist(
-      Deno.env.get("SUPER_ADMIN_EMAILS") ??
-        Deno.env.get("VITE_SUPER_ADMIN_EMAILS"),
-    );
-    const isSuperAdmin = superAdminEmails.has(email);
+    const supabase = createServiceClient();
 
     let hasActiveMembership = false;
+    let isSuperAdmin = false;
     try {
+      isSuperAdmin = await hasActiveSuperAdminEntry(supabase, email);
       hasActiveMembership = await hasActiveAppMembership(supabase, email);
       if (!hasActiveMembership) {
         hasActiveMembership = await hasActiveMirrorMembership(supabase, email);
       }
     } catch (error) {
-      return jsonResponse(
-        {
-          error:
-            error instanceof Error
-              ? error.message
-              : "Could not verify RetainOS access.",
-        },
-        500,
-      );
+      console.error(error);
+      return jsonResponse(req, { error: "Could not prepare login right now." }, 500);
     }
 
     if (!isSuperAdmin && !hasActiveMembership) {
-      return jsonResponse({
-        ok: false,
-        error: "No active RetainOS access was found for this email.",
-      });
+      return genericPreparedResponse(req);
     }
 
     const { error: createError } = await supabase.auth.admin.createUser({
@@ -138,16 +116,13 @@ Deno.serve(async (req) => {
       createError &&
       !createError.message.toLowerCase().includes("already")
     ) {
-      return jsonResponse({ error: createError.message }, 500);
+      console.error(createError);
+      return jsonResponse(req, { error: "Could not prepare login right now." }, 500);
     }
 
-    return jsonResponse({
-      ok: true,
-      provisioned: !createError,
-      access: isSuperAdmin ? "super_admin" : "company_user",
-    });
+    return genericPreparedResponse(req);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, 500);
+    console.error(error);
+    return jsonResponse(req, { error: "Could not prepare login right now." }, 500);
   }
 });

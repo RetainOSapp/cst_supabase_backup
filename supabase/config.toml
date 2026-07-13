@@ -9,3 +9,18 @@ verify_jwt = false
 
 [functions.webhook-update-client]
 verify_jwt = false
+
+[functions.sync-glide]
+verify_jwt = true
+
+[functions.manage-client-task]
+verify_jwt = true
+
+[functions.manage-integration-review]
+verify_jwt = true
+
+[functions.manage-integration-token]
+verify_jwt = true
+
+[functions.manage-resource]
+verify_jwt = true

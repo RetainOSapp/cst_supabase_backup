@@ -11,16 +11,26 @@
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+const serviceRoleKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.supabase_service_role;
 
-if (!supabaseUrl || !anonKey) {
-  console.error("Missing VITE_SUPABASE_URL/SUPABASE_URL or VITE_SUPABASE_ANON_KEY/SUPABASE_ANON_KEY.");
+if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+  console.error(
+    "Missing Supabase URL, anonymous key, or service-role key.",
+  );
   process.exit(1);
 }
 
 const restUrl = `${supabaseUrl.replace(/\/$/, "")}/rest/v1`;
 const functionsUrl = `${supabaseUrl.replace(/\/$/, "")}/functions/v1`;
 
-async function request(label, url, options, expectedStatuses) {
+async function request(
+  label,
+  url,
+  options,
+  expectedStatuses,
+  expectedBodyIncludes = null,
+) {
   const expected = Array.isArray(expectedStatuses)
     ? expectedStatuses
     : [];
@@ -52,12 +62,14 @@ async function request(label, url, options, expectedStatuses) {
   }
 
   const body = await response.text().catch(() => "");
-  const ok = expected.includes(response.status);
+  const ok = expected.includes(response.status)
+    && (!expectedBodyIncludes || body.includes(expectedBodyIncludes));
   return {
     label,
     ok,
     status: response.status,
     expected: expected.join("/"),
+    expectedBodyIncludes,
     body: body.slice(0, 240),
   };
 }
@@ -159,6 +171,26 @@ const checks = [
         body: JSON.stringify({ glideTableId: "phase0-negative-check" }),
       },
       [401],
+    ),
+  () =>
+    request(
+      "sync-glide-table service role reaches the target allowlist",
+      `${functionsUrl}/sync-glide-table`,
+      {
+        method: "POST",
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${serviceRoleKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          glideTableId: "phase0-authorized-noop",
+          targetTable: "phase0_forbidden_target",
+          limit: 1,
+        }),
+      },
+      [400],
+      "Unsupported targetTable",
     ),
 ];
 

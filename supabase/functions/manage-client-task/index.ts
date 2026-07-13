@@ -1,13 +1,18 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import {
+  AuthError,
+  createServiceClient,
+  getBearerToken,
+  isRegisteredSuperAdmin,
+  requireAuthenticatedActor,
+  type AuthenticatedActor,
+  type SupabaseServiceClient,
+} from "../_shared/auth.ts";
+import {
+  jsonResponse as sharedJsonResponse,
+  optionsResponse,
+} from "../_shared/http.ts";
 
 const WRITER_ROLES = new Set(["director", "support", "csm"]);
 const ALLOWED_STATUS_VALUES = new Set([
@@ -18,13 +23,6 @@ const ALLOWED_STATUS_VALUES = new Set([
   "dismissed",
   "archived",
 ]);
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
-}
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -37,21 +35,6 @@ function nullableText(value: unknown) {
 
 function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
-
-function parseAllowlist(value: string | undefined) {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
-function getBearerToken(req: Request) {
-  const auth = req.headers.get("Authorization") ?? "";
-  const match = auth.match(/^Bearer\s+(.+)$/i);
-  return match?.[1] ?? "";
 }
 
 function normalizeDate(value: unknown) {
@@ -108,40 +91,71 @@ function normalizeStatus(value: unknown) {
   return text;
 }
 
-async function resolveActor(
-  supabase: ReturnType<typeof createClient>,
-  userEmail: string,
+async function findCompanyMemberByAssignmentId(
+  supabase: SupabaseServiceClient,
   companyId: string,
+  assignmentId: string,
 ) {
-  const superAdminEmails = parseAllowlist(
-    Deno.env.get("SUPER_ADMIN_EMAILS") ??
-      Deno.env.get("VITE_SUPER_ADMIN_EMAILS"),
-  );
-
-  if (superAdminEmails.has(userEmail)) {
-    return { role: "super_admin", memberId: null, legacyMemberId: null };
+  if (isUuid(assignmentId)) {
+    const { data, error } = await supabase
+      .from("company_members")
+      .select("id, legacy_glide_row_id, status")
+      .eq("company_id", companyId)
+      .eq("id", assignmentId)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data;
   }
 
   const { data, error } = await supabase
     .from("company_members")
+    .select("id, legacy_glide_row_id, status")
+    .eq("company_id", companyId)
+    .eq("legacy_glide_row_id", assignmentId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function resolveActor(
+  supabase: SupabaseServiceClient,
+  actor: AuthenticatedActor,
+  companyId: string,
+) {
+  if (await isRegisteredSuperAdmin(supabase, actor)) {
+    return { role: "super_admin", memberId: null, legacyMemberId: null };
+  }
+
+  const { data: uuidMembership, error: uuidMembershipError } = await supabase
+    .from("company_members")
     .select("id, legacy_glide_row_id, role, status")
     .eq("company_id", companyId)
-    .ilike("email", userEmail)
-    .eq("status", "active")
-    .limit(1)
+    .eq("auth_user_id", actor.id)
     .maybeSingle();
 
-  if (error) throw error;
+  if (uuidMembershipError) throw uuidMembershipError;
 
-  if (data && WRITER_ROLES.has(data.role)) {
+  let membership = uuidMembership;
+  if (!membership) {
+    const { data: emailMembership, error: emailMembershipError } = await supabase
+      .from("company_members")
+      .select("id, legacy_glide_row_id, role, status")
+      .eq("company_id", companyId)
+      .ilike("email", normalizeEmail(actor.email))
+      .maybeSingle();
+    if (emailMembershipError) throw emailMembershipError;
+    membership = emailMembership;
+  }
+
+  if (membership?.status === "active" && WRITER_ROLES.has(membership.role)) {
     return {
-      role: data.role as string,
-      memberId: data.id as string,
-      legacyMemberId: data.legacy_glide_row_id as string | null,
+      role: membership.role as string,
+      memberId: membership.id as string,
+      legacyMemberId: membership.legacy_glide_row_id as string | null,
     };
   }
 
-  throw new Error("You do not have permission to manage tasks.");
+  throw new AuthError("You do not have permission to manage tasks.", 403);
 }
 
 function actorAssignmentIds(actor: {
@@ -162,46 +176,26 @@ function actorPrimaryAssignmentId(actor: {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(req);
   }
 
+  const respond = (body: unknown, status = 200) =>
+    sharedJsonResponse(req, body, status);
+
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return respond({ error: "Method not allowed" }, 405);
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-      Deno.env.get("supabase_service_role");
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse(
-        { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
-        500,
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createServiceClient();
 
     const token = getBearerToken(req);
-    if (!token) return jsonResponse({ error: "Missing authorization." }, 401);
-
-    const { data: userData, error: userError } =
-      await supabase.auth.getUser(token);
-
-    if (userError || !userData.user?.email) {
-      return jsonResponse({ error: "Invalid session." }, 401);
-    }
-
-    const userEmail = normalizeEmail(userData.user.email);
+    const authenticatedActor = await requireAuthenticatedActor(supabase, token);
     const body = await req.json().catch(() => ({}));
     const action = cleanText(body.action) || "create";
     const companyGlideId = cleanText(body.companyGlideId);
 
-    if (!companyGlideId) return jsonResponse({ error: "Missing company." }, 400);
+    if (!companyGlideId) return respond({ error: "Missing company." }, 400);
 
     const { data: company, error: companyError } = await supabase
       .from("companies")
@@ -212,17 +206,17 @@ Deno.serve(async (req) => {
 
     if (companyError) throw companyError;
     if (!company) {
-      return jsonResponse(
+      return respond(
         { error: "This company is not enabled for RetainOS task writes." },
         400,
       );
     }
 
-    const actor = await resolveActor(supabase, userEmail, company.id);
+    const actor = await resolveActor(supabase, authenticatedActor, company.id);
 
     if (action !== "create") {
       const taskLegacyId = cleanText(body.taskId);
-      if (!taskLegacyId) return jsonResponse({ error: "Missing task." }, 400);
+      if (!taskLegacyId) return respond({ error: "Missing task." }, 400);
 
       const { data: existingTask, error: existingTaskError } = await supabase
         .from("client_tasks")
@@ -231,7 +225,7 @@ Deno.serve(async (req) => {
         .eq("glide_row_id", taskLegacyId)
         .maybeSingle();
       if (existingTaskError) throw existingTaskError;
-      if (!existingTask) return jsonResponse({ error: "Task not found." }, 404);
+      if (!existingTask) return respond({ error: "Task not found." }, 404);
 
       if (actor.role === "csm") {
         const assignmentIds = actorAssignmentIds(actor);
@@ -239,7 +233,7 @@ Deno.serve(async (req) => {
           assignmentIds.includes(existingTask.assigned_to_id ?? "") ||
           assignmentIds.includes(existingTask.created_by_id ?? "");
         if (!actorOwnsTask) {
-          return jsonResponse(
+          return respond(
             { error: "CSMs can update assigned or created tasks only." },
             403,
           );
@@ -260,14 +254,14 @@ Deno.serve(async (req) => {
           .eq("company_id", company.id)
           .maybeSingle();
         if (clientError) throw clientError;
-        if (!client) return jsonResponse({ error: "Linked client not found." }, 400);
+        if (!client) return respond({ error: "Linked client not found." }, 400);
         if (actor.role === "csm") {
           const assignmentIds = actorAssignmentIds(actor);
           const isAssigned =
             assignmentIds.includes(client.csm_team_member_id ?? "") ||
             assignmentIds.includes(client.csm_secondary_assignee_id ?? "");
           if (!isAssigned) {
-            return jsonResponse(
+            return respond(
               { error: "CSMs can link tasks to assigned clients only." },
               403,
             );
@@ -285,20 +279,13 @@ Deno.serve(async (req) => {
         body.assignedToId !== undefined || actor.role === "csm";
 
       if (isChangingAssignee && assignedToId) {
-        let memberQuery = supabase
-          .from("company_members")
-          .select("id, legacy_glide_row_id, status")
-          .eq("company_id", company.id);
-        memberQuery = isUuid(assignedToId)
-          ? memberQuery.or(
-              `id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`,
-            )
-          : memberQuery.eq("legacy_glide_row_id", assignedToId);
-        const { data: member, error: memberError } =
-          await memberQuery.maybeSingle();
-        if (memberError) throw memberError;
+        const member = await findCompanyMemberByAssignmentId(
+          supabase,
+          company.id as string,
+          assignedToId,
+        );
         if (!member || member.status !== "active") {
-          return jsonResponse({ error: "Assigned team member is not active." }, 400);
+          return respond({ error: "Assigned team member is not active." }, 400);
         }
       }
 
@@ -307,7 +294,7 @@ Deno.serve(async (req) => {
           ? existingTask.status_value
           : normalizeStatus(body.statusValue);
       if (body.statusValue !== undefined && !requestedStatus) {
-        return jsonResponse({ error: "Invalid task status." }, 400);
+        return respond({ error: "Invalid task status." }, 400);
       }
 
       const now = new Date().toISOString();
@@ -317,7 +304,7 @@ Deno.serve(async (req) => {
 
       if (body.taskName !== undefined) {
         const taskName = cleanText(body.taskName);
-        if (!taskName) return jsonResponse({ error: "Task name is required." }, 400);
+        if (!taskName) return respond({ error: "Task name is required." }, 400);
         updatePayload.task_name = taskName;
       }
       if (body.taskDescription !== undefined) {
@@ -443,7 +430,7 @@ Deno.serve(async (req) => {
         .insert({
           company_id: company.id,
           legacy_client_glide_row_id: task.client_id ?? task.glide_row_id,
-          actor_auth_user_id: userData.user.id,
+          actor_auth_user_id: authenticatedActor.id,
           actor_member_id: actor.memberId,
           event_type: "task_updated",
           source: "task_update",
@@ -461,7 +448,7 @@ Deno.serve(async (req) => {
 
       await supabase.from("app_audit_events").insert({
         company_id: company.id,
-        actor_auth_user_id: userData.user.id,
+        actor_auth_user_id: authenticatedActor.id,
         actor_member_id: actor.memberId,
         event_type: "task_updated",
         source: "task_update",
@@ -478,18 +465,18 @@ Deno.serve(async (req) => {
         },
       });
 
-      return jsonResponse({ ok: true, task, event, nextTask });
+      return respond({ ok: true, task, event, nextTask });
     }
 
     const taskName = cleanText(body.taskName);
-    if (!taskName) return jsonResponse({ error: "Task name is required." }, 400);
+    if (!taskName) return respond({ error: "Task name is required." }, 400);
     const clientId = nullableText(body.clientId);
     const requestedAssigneeId = nullableText(body.assignedToId);
     const assignedToId =
       actor.role === "csm" ? actorPrimaryAssignmentId(actor) : requestedAssigneeId;
 
     if (actor.role === "csm" && !assignedToId) {
-      return jsonResponse(
+      return respond(
         { error: "Your account is missing a team member assignment." },
         403,
       );
@@ -503,14 +490,14 @@ Deno.serve(async (req) => {
         .eq("company_id", company.id)
         .maybeSingle();
       if (clientError) throw clientError;
-      if (!client) return jsonResponse({ error: "Linked client not found." }, 400);
+      if (!client) return respond({ error: "Linked client not found." }, 400);
       if (actor.role === "csm") {
         const assignmentIds = actorAssignmentIds(actor);
         const isAssigned =
           assignmentIds.includes(client.csm_team_member_id ?? "") ||
           assignmentIds.includes(client.csm_secondary_assignee_id ?? "");
         if (!isAssigned) {
-          return jsonResponse(
+          return respond(
             { error: "CSMs can create tasks for assigned clients only." },
             403,
           );
@@ -519,20 +506,13 @@ Deno.serve(async (req) => {
     }
 
     if (assignedToId) {
-      let memberQuery = supabase
-        .from("company_members")
-        .select("id, legacy_glide_row_id, status")
-        .eq("company_id", company.id);
-      memberQuery = isUuid(assignedToId)
-        ? memberQuery.or(
-            `id.eq.${assignedToId},legacy_glide_row_id.eq.${assignedToId}`,
-          )
-        : memberQuery.eq("legacy_glide_row_id", assignedToId);
-      const { data: member, error: memberError } =
-        await memberQuery.maybeSingle();
-      if (memberError) throw memberError;
+      const member = await findCompanyMemberByAssignmentId(
+        supabase,
+        company.id as string,
+        assignedToId,
+      );
       if (!member || member.status !== "active") {
-        return jsonResponse({ error: "Assigned team member is not active." }, 400);
+        return respond({ error: "Assigned team member is not active." }, 400);
       }
     }
 
@@ -579,7 +559,7 @@ Deno.serve(async (req) => {
       .insert({
         company_id: company.id,
         legacy_client_glide_row_id: clientId ?? glideRowId,
-        actor_auth_user_id: userData.user.id,
+        actor_auth_user_id: authenticatedActor.id,
         actor_member_id: actor.memberId,
         event_type: "task_created",
         source: "task_create",
@@ -599,7 +579,7 @@ Deno.serve(async (req) => {
 
     await supabase.from("app_audit_events").insert({
       company_id: company.id,
-      actor_auth_user_id: userData.user.id,
+      actor_auth_user_id: authenticatedActor.id,
       actor_member_id: actor.memberId,
       event_type: "task_created",
       source: "task_create",
@@ -615,9 +595,16 @@ Deno.serve(async (req) => {
       },
     });
 
-    return jsonResponse({ ok: true, task, event });
+    return respond({ ok: true, task, event });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, 500);
+    console.error(error);
+    return respond(
+      {
+        error: error instanceof AuthError
+          ? error.message
+          : "Unexpected task management error.",
+      },
+      error instanceof AuthError ? error.status : 500,
+    );
   }
 });

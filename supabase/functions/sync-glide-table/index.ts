@@ -42,14 +42,61 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-async function isAuthorized(req: Request, serviceRoleKey: string): Promise<boolean> {
-  const token = extractBearerToken(req);
+function extractJwtRole(token: string): string | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+
+  try {
+    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(padded)) as { role?: unknown };
+    return typeof payload.role === "string" ? payload.role : null;
+  } catch {
+    return null;
+  }
+}
+
+async function hasServiceRoleAccess(params: {
+  supabaseUrl: string;
+  anonKey: string;
+  token: string;
+}): Promise<boolean> {
+  try {
+    const url = new URL("/rest/v1/security_rollout_history", params.supabaseUrl);
+    url.searchParams.set("select", "version");
+    url.searchParams.set("limit", "1");
+    const response = await fetch(url, {
+      headers: {
+        apikey: params.anonKey,
+        Authorization: `Bearer ${params.token}`,
+      },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function isAuthorized(params: {
+  req: Request;
+  supabaseUrl: string;
+  anonKey: string;
+  serviceRoleKey: string;
+}): Promise<boolean> {
+  const token = extractBearerToken(params.req);
   if (!token) return false;
   const [submittedHash, serviceHash] = await Promise.all([
     sha256Hex(token),
-    sha256Hex(serviceRoleKey),
+    sha256Hex(params.serviceRoleKey),
   ]);
-  return timingSafeEqual(submittedHash, serviceHash);
+  if (timingSafeEqual(submittedHash, serviceHash)) return true;
+  if (extractJwtRole(token) !== "service_role") return false;
+
+  return hasServiceRoleAccess({
+    supabaseUrl: params.supabaseUrl,
+    anonKey: params.anonKey,
+    token,
+  });
 }
 
 function stableStringify(value: unknown): string {
@@ -123,16 +170,25 @@ Deno.serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    if (!supabaseUrl || !serviceRoleKey) {
+    if (!supabaseUrl || !anonKey || !serviceRoleKey) {
       return Response.json(
-        { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
+        {
+          error:
+            "Missing SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY",
+        },
         { status: 500 },
       );
     }
 
-    if (!await isAuthorized(req, serviceRoleKey)) {
+    if (!await isAuthorized({
+      req,
+      supabaseUrl,
+      anonKey,
+      serviceRoleKey,
+    })) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

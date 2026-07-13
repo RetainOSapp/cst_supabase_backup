@@ -1,21 +1,26 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  AuthError,
+  createServiceClient,
+  getBearerToken,
+  isServiceRoleRequest,
+  requireSuperAdmin,
+  type SupabaseServiceClient,
+} from "../_shared/auth.ts";
+import { corsHeaders, optionsResponse } from "../_shared/http.ts";
 
 type GlideRow = Record<string, unknown>;
-type SupabaseClient = ReturnType<typeof createClient>;
+type SupabaseClient = SupabaseServiceClient;
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    headers: { ...headers, "Content-Type": "application/json" },
   });
 }
 
@@ -59,6 +64,28 @@ function normalizeColumnName(glideName: string): string {
     .replace(/[^a-z0-9]/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
+}
+
+function assertSafeBackupTableName(value: string): string {
+  if (!/^backup_[a-z0-9_]+$/.test(value)) {
+    throw new Error(`Unsafe backup table name: ${value}`);
+  }
+  return value;
+}
+
+function assertSafeColumnName(value: string): string {
+  if (!/^[a-z0-9_]+$/.test(value)) {
+    throw new Error(`Unsafe backup column name: ${value}`);
+  }
+  return value;
+}
+
+function quoteIdent(value: string): string {
+  return `"${value.replaceAll(`"`, `""`)}"`;
+}
+
+function quoteLiteral(value: string): string {
+  return `'${value.replaceAll(`'`, `''`)}'`;
 }
 
 function glideTypeToSql(kind: string): string {
@@ -253,38 +280,41 @@ async function ensureBackupTable(
   backupTableName: string,
   columns: GlideSchemaColumn[],
 ): Promise<{ columnMap: Record<string, string> }> {
+  const safeBackupTableName = assertSafeBackupTableName(backupTableName);
+  const tableIdent = `${quoteIdent("public")}.${quoteIdent(safeBackupTableName)}`;
+  const policyName = `auth_read_${safeBackupTableName}`;
   const columnMap: Record<string, string> = {};
   const colDefs: string[] = [
-    `"glide_row_id" text PRIMARY KEY`,
+    `${quoteIdent("glide_row_id")} text PRIMARY KEY`,
   ];
 
   for (const col of columns) {
-    const pgCol = normalizeColumnName(col.name);
+    const pgCol = assertSafeColumnName(normalizeColumnName(col.name));
     columnMap[col.id] = pgCol;
-    colDefs.push(`"${pgCol}" ${glideTypeToSql(col.type.kind)}`);
+    colDefs.push(`${quoteIdent(pgCol)} ${glideTypeToSql(col.type.kind)}`);
   }
 
-  colDefs.push(`"synced_at" timestamptz NOT NULL DEFAULT now()`);
-  colDefs.push(`"data" jsonb`);
+  colDefs.push(`${quoteIdent("synced_at")} timestamptz NOT NULL DEFAULT now()`);
+  colDefs.push(`${quoteIdent("data")} jsonb`);
 
-  const createSql = `CREATE TABLE IF NOT EXISTS "public"."${backupTableName}" (${colDefs.join(", ")})`;
+  const createSql = `CREATE TABLE IF NOT EXISTS ${tableIdent} (${colDefs.join(", ")})`;
   const { error: createErr } = await db.rpc("exec_sql", { sql: createSql });
   if (createErr) {
     throw new Error(`Failed to create ${backupTableName}: ${createErr.message}`);
   }
 
   for (const col of columns) {
-    const pgCol = normalizeColumnName(col.name);
-    const alterSql = `ALTER TABLE "public"."${backupTableName}" ADD COLUMN IF NOT EXISTS "${pgCol}" ${glideTypeToSql(col.type.kind)}`;
+    const pgCol = assertSafeColumnName(normalizeColumnName(col.name));
+    const alterSql = `ALTER TABLE ${tableIdent} ADD COLUMN IF NOT EXISTS ${quoteIdent(pgCol)} ${glideTypeToSql(col.type.kind)}`;
     try { await db.rpc("exec_sql", { sql: alterSql }); } catch (_) { /* column may already exist */ }
   }
 
   try {
-    await db.rpc("exec_sql", { sql: `ALTER TABLE "public"."${backupTableName}" ENABLE ROW LEVEL SECURITY` });
+    await db.rpc("exec_sql", { sql: `ALTER TABLE ${tableIdent} ENABLE ROW LEVEL SECURITY` });
   } catch (_) { /* already enabled */ }
 
   try {
-    const policySql = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='${backupTableName}' AND policyname='auth_read_${backupTableName}') THEN CREATE POLICY "auth_read_${backupTableName}" ON "public"."${backupTableName}" FOR SELECT TO authenticated USING (true); END IF; END $$`;
+    const policySql = `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = ${quoteLiteral(safeBackupTableName)} AND policyname = ${quoteLiteral(policyName)}) THEN CREATE POLICY ${quoteIdent(policyName)} ON ${tableIdent} FOR SELECT TO authenticated USING ((select public.is_retainos_super_admin())); END IF; END $$`;
     await db.rpc("exec_sql", { sql: policySql });
   } catch (_) { /* policy may already exist */ }
 
@@ -302,6 +332,7 @@ async function ensureBackupTable(
 async function handleRefreshTables(
   db: SupabaseClient,
   glideToken: string,
+  responseHeaders: Record<string, string>,
 ): Promise<Response> {
   const { data: configs, error: cfgErr } = await db
     .from("sync_config")
@@ -309,7 +340,11 @@ async function handleRefreshTables(
     .eq("active", true);
   if (cfgErr) throw cfgErr;
   if (!configs || configs.length === 0) {
-    return jsonResponse({ ok: true, message: "No active sync configs" });
+    return jsonResponse(
+      { ok: true, message: "No active sync configs" },
+      200,
+      responseHeaders,
+    );
   }
 
   let totalDiscovered = 0;
@@ -336,7 +371,11 @@ async function handleRefreshTables(
     }
   }
 
-  return jsonResponse({ ok: true, tablesDiscovered: totalDiscovered });
+  return jsonResponse(
+    { ok: true, tablesDiscovered: totalDiscovered },
+    200,
+    responseHeaders,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +642,7 @@ async function handleStartJob(
   userId: string | null,
   glideTableId: string,
   resume: boolean,
+  responseHeaders: Record<string, string>,
 ): Promise<Response> {
   if (!isJobBackedGlideTable(glideTableId)) {
     return jsonResponse(
@@ -611,6 +651,7 @@ async function handleStartJob(
           `start_job is only enabled for large tables: ${JOB_BACKED_GLIDE_TABLE_IDS.join(", ")}. Received: ${glideTableId}`,
       },
       400,
+      responseHeaders,
     );
   }
 
@@ -649,7 +690,11 @@ async function handleStartJob(
           })
           .eq("id", existingRow.id);
       }
-      return jsonResponse({ ok: true, jobId: existingRow.id, resumed: true });
+      return jsonResponse(
+        { ok: true, jobId: existingRow.id, resumed: true },
+        200,
+        responseHeaders,
+      );
     }
   }
 
@@ -663,9 +708,13 @@ async function handleStartJob(
     .select("id")
     .single();
   if (insErr) {
-    return jsonResponse({ error: insErr.message }, 500);
+    return jsonResponse({ error: insErr.message }, 500, responseHeaders);
   }
-  return jsonResponse({ ok: true, jobId: (inserted as any).id, resumed: false });
+  return jsonResponse(
+    { ok: true, jobId: (inserted as any).id, resumed: false },
+    200,
+    responseHeaders,
+  );
 }
 
 async function ensureChainSecret(
@@ -1002,84 +1051,69 @@ async function runJobBatch(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(req);
   }
+  const responseHeaders = corsHeaders(req);
+  const respond = (body: unknown, status = 200) =>
+    jsonResponse(body, status, responseHeaders);
+
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Use POST" }, 405);
+    return respond({ error: "Use POST" }, 405);
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse(
-        { error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" },
-        500,
-      );
-    }
-
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
-    const isSystem = bearer.length > 0 && bearer === serviceRoleKey;
-
-    let userId: string | null = null;
-    if (!isSystem) {
-      const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-      const userClient = createClient(supabaseUrl, anonKey, {
-        global: { headers: { Authorization: authHeader } },
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-      const {
-        data: { user },
-        error: authErr,
-      } = await userClient.auth.getUser();
-      if (authErr || !user) {
-        return jsonResponse({ error: "Unauthorized" }, 401);
-      }
-      userId = user.id;
-    }
-
-    const adminClient = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
     const body = await req.json().catch(() => ({}));
-    const mode: string = body.mode ?? "single";
+    const mode = typeof body.mode === "string" ? body.mode : "single";
+    const serviceRoleKey =
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
+      Deno.env.get("supabase_service_role") ??
+      "";
+    if (!serviceRoleKey) {
+      return respond({ error: "Missing Supabase service configuration." }, 500);
+    }
 
-    // ---- job_batch mode (system + user both allowed) ----
+    const adminClient = createServiceClient();
+    const isSystem = await isServiceRoleRequest(req);
+    let userId: string | null = null;
+
+    if (mode === "job_batch") {
+      if (!isSystem) return respond({ error: "Unauthorized" }, 401);
+    } else {
+      if (isSystem) {
+        return respond(
+          { error: "Service-role requests are limited to job_batch." },
+          403,
+        );
+      }
+      const actor = await requireSuperAdmin(adminClient, getBearerToken(req));
+      userId = actor.id;
+    }
+
+    // ---- job_batch mode (service role only) ----
     if (mode === "job_batch") {
       const jobId = String(body.jobId ?? "");
       if (!jobId) {
-        return jsonResponse({ error: "Missing jobId for job_batch" }, 400);
+        return respond({ error: "Missing jobId for job_batch" }, 400);
       }
-      const glideTokenForJob =
-        typeof body.glideToken === "string" && body.glideToken.length > 0
-          ? body.glideToken
-          : Deno.env.get("GLIDE_API_TOKEN");
+      const glideTokenForJob = Deno.env.get("GLIDE_API_TOKEN");
       if (!glideTokenForJob) {
-        return jsonResponse(
+        return respond(
           { error: "Missing GLIDE_API_TOKEN (set as secret)" },
           500,
         );
       }
       const result = await runJobBatch(adminClient, glideTokenForJob, jobId);
-      return jsonResponse({
+      return respond({
         ok: result.status === "success" || result.status === "partial",
         result,
       });
     }
 
-    // ---- start_job mode (requires user; glideTableId must be job-backed) ----
+    // ---- start_job mode (SuperAdmin only; glideTableId must be job-backed) ----
     if (mode === "start_job") {
-      if (isSystem) {
-        return jsonResponse(
-          { error: "start_job requires a user JWT, not service role" },
-          403,
-        );
-      }
       const glideTableId = String(body.glideTableId ?? "");
       if (!glideTableId) {
-        return jsonResponse(
+        return respond(
           { error: "Missing glideTableId for start_job" },
           400,
         );
@@ -1087,36 +1121,39 @@ Deno.serve(async (req) => {
       const resume = body.resume === true;
       // Bootstrap the vault secret pg_cron uses, so the chain runs without manual setup.
       await ensureChainSecret(adminClient, serviceRoleKey);
-      return await handleStartJob(adminClient, userId, glideTableId, resume);
+      return await handleStartJob(
+        adminClient,
+        userId,
+        glideTableId,
+        resume,
+        responseHeaders,
+      );
     }
 
-    const glideToken =
-      typeof body.glideToken === "string" && body.glideToken.length > 0
-        ? body.glideToken
-        : Deno.env.get("GLIDE_API_TOKEN");
+    const glideToken = Deno.env.get("GLIDE_API_TOKEN");
     if (!glideToken) {
-      return jsonResponse(
-        { error: "Missing GLIDE_API_TOKEN (set as secret or pass in body)" },
+      return respond(
+        { error: "Missing GLIDE_API_TOKEN (set as secret)" },
         500,
       );
     }
 
     // ---- refresh_tables mode ----
     if (mode === "refresh_tables") {
-      return await handleRefreshTables(adminClient, glideToken);
+      return await handleRefreshTables(adminClient, glideToken, responseHeaders);
     }
 
     // ---- validation for sync modes ----
     const maxRows = body.maxRows != null ? Number(body.maxRows) : DEFAULT_MAX_ROWS;
     if (!Number.isFinite(maxRows) || maxRows <= 0) {
-      return jsonResponse({ error: "Invalid maxRows" }, 400);
+      return respond({ error: "Invalid maxRows" }, 400);
     }
 
     // ---- single mode ----
     if (mode === "single") {
       const glideTableId = String(body.glideTableId ?? "");
       if (!glideTableId) {
-        return jsonResponse(
+        return respond(
           { error: "Missing glideTableId for single mode" },
           400,
         );
@@ -1128,7 +1165,7 @@ Deno.serve(async (req) => {
         .eq("glide_table_id", glideTableId)
         .single();
       if (tblErr || !tableRow) {
-        return jsonResponse(
+        return respond(
           { error: `Table ${glideTableId} not found in sync_table_list. Run refresh_tables first.` },
           404,
         );
@@ -1140,7 +1177,7 @@ Deno.serve(async (req) => {
         .eq("id", tableRow.sync_config_id)
         .single();
       if (!cfg) {
-        return jsonResponse({ error: "sync_config not found" }, 500);
+        return respond({ error: "sync_config not found" }, 500);
       }
 
       const result = await syncOneTable(
@@ -1150,7 +1187,7 @@ Deno.serve(async (req) => {
         cfg.glide_app_id,
         maxRows,
       );
-      return jsonResponse({
+      return respond({
         ok: result.status === "success" || result.status === "partial",
         results: [result],
       });
@@ -1169,7 +1206,7 @@ Deno.serve(async (req) => {
       const { data: allTables, error: allErr } = await allQuery;
       if (allErr) throw allErr;
       if (!allTables || allTables.length === 0) {
-        return jsonResponse({
+        return respond({
           ok: true,
           results: [],
           message: "No tables in sync_table_list. Run refresh_tables first.",
@@ -1206,14 +1243,19 @@ Deno.serve(async (req) => {
       }
 
       const allOk = results.every((r) => r.status === "success" || r.status === "partial");
-      return jsonResponse({ ok: allOk, results });
+      return respond({ ok: allOk, results });
     }
 
-    return jsonResponse({ error: `Unknown mode: ${mode}` }, 400);
-  } catch (e: any) {
-    return jsonResponse(
-      { ok: false, error: e instanceof Error ? e.message : String(e) },
-      500,
+    return respond({ error: `Unknown mode: ${mode}` }, 400);
+  } catch (error) {
+    console.error(error);
+    const isAuthError = error instanceof AuthError;
+    return respond(
+      {
+        ok: false,
+        error: isAuthError ? error.message : "Unexpected sync error.",
+      },
+      isAuthError ? error.status : 500,
     );
   }
 });

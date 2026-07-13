@@ -1,13 +1,18 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import {
+  AuthError,
+  createServiceClient,
+  getBearerToken,
+  isRegisteredSuperAdmin,
+  requireAuthenticatedActor,
+  type AuthenticatedActor,
+  type SupabaseServiceClient,
+} from "../_shared/auth.ts";
+import {
+  jsonResponse as sharedJsonResponse,
+  optionsResponse,
+} from "../_shared/http.ts";
 
 const ACTIONS = new Set(["match", "retry", "ignore"]);
 const ACTIVE_PROGRAM_STATUSES = new Set([
@@ -24,16 +29,13 @@ const CLIENT_UPDATE_FIELDS = [
   "csm_team_member_id",
 ] as const;
 
-type SupabaseClient = ReturnType<typeof createClient>;
+type SupabaseClient = SupabaseServiceClient;
 type JsonRecord = Record<string, unknown>;
 
 class ReviewValidationError extends Error {}
 
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
+function jsonResponse(req: Request, body: unknown, status = 200) {
+  return sharedJsonResponse(req, body, status);
 }
 
 function cleanText(value: unknown) {
@@ -74,18 +76,39 @@ function eventClientEmail(event: JsonRecord) {
   );
 }
 
-function parseAllowlist(value: string | undefined) {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
+async function findClientsByEmail(
+  supabase: SupabaseClient,
+  companyId: string,
+  clientSelect: string,
+  email: string,
+) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return [];
 
-function getBearerToken(req: Request) {
-  const auth = req.headers.get("Authorization") ?? "";
-  return auth.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  const results = await Promise.all(
+    ["client_email", "client_email_secondary", "client_email_tertiary"].map(
+      (column) =>
+        supabase
+          .from("clients")
+          .select(clientSelect)
+          .eq("company_id", companyId)
+          .ilike(column, normalizedEmail)
+          .is("archived_at", null)
+          .limit(5),
+    ),
+  );
+  const clients = new Map<string, JsonRecord>();
+
+  for (const result of results) {
+    if (result.error) throw result.error;
+    for (const row of result.data ?? []) {
+      const client = row as JsonRecord;
+      if (clientMatchesEmail(client, normalizedEmail)) {
+        clients.set(String(client.id), client);
+      }
+    }
+  }
+  return [...clients.values()];
 }
 
 function isUuid(value: string) {
@@ -103,6 +126,14 @@ function firstPresent(body: JsonRecord, keys: string[]) {
     if (hasOwn(body, key)) return body[key];
   }
   return undefined;
+}
+
+function pickPayloadFields(body: JsonRecord, keys: string[]) {
+  const picked: JsonRecord = {};
+  for (const key of keys) {
+    if (hasOwn(body, key)) picked[key] = body[key];
+  }
+  return picked;
 }
 
 function parseDateTime(value: unknown, fallbackToNow = false) {
@@ -244,30 +275,40 @@ function getMetadata(event: JsonRecord) {
 
 async function assertCanReviewIntegrations(
   supabase: SupabaseClient,
-  userEmail: string,
+  actor: AuthenticatedActor,
   companyId: string,
 ) {
-  const superAdminEmails = parseAllowlist(
-    Deno.env.get("SUPER_ADMIN_EMAILS") ??
-      Deno.env.get("VITE_SUPER_ADMIN_EMAILS"),
-  );
-  if (superAdminEmails.has(userEmail)) return "super_admin";
+  if (await isRegisteredSuperAdmin(supabase, actor)) return "super_admin";
 
-  const { data, error } = await supabase
+  const { data: uuidMembership, error: uuidMembershipError } = await supabase
     .from("company_members")
     .select("id, role, status")
     .eq("company_id", companyId)
-    .ilike("email", userEmail)
+    .eq("auth_user_id", actor.id)
     .maybeSingle();
-  if (error) throw error;
-  if (
-    data?.status === "active" &&
-    (data.role === "director" || data.role === "support")
-  ) {
-    return data.role as string;
+  if (uuidMembershipError) throw uuidMembershipError;
+
+  let membership = uuidMembership;
+  if (!membership) {
+    const { data: emailMembership, error: emailMembershipError } = await supabase
+      .from("company_members")
+      .select("id, role, status")
+      .eq("company_id", companyId)
+      .ilike("email", normalizeEmail(actor.email))
+      .maybeSingle();
+    if (emailMembershipError) throw emailMembershipError;
+    membership = emailMembership;
   }
-  throw new ReviewValidationError(
+
+  if (
+    membership?.status === "active" &&
+    (membership.role === "director" || membership.role === "support")
+  ) {
+    return membership.role as string;
+  }
+  throw new AuthError(
     "You do not have permission to review integration events.",
+    403,
   );
 }
 
@@ -375,24 +416,16 @@ async function findClientForEvent(
     throw new ReviewValidationError("This event has no client email to retry.");
   }
 
-  const { data, error } = await supabase
-    .from("clients")
-    .select(clientSelect)
-    .eq("company_id", companyId)
-    .or(
-      [
-        `client_email.ilike.${clientEmail.replaceAll(",", "")}`,
-        `client_email_secondary.ilike.${clientEmail.replaceAll(",", "")}`,
-        `client_email_tertiary.ilike.${clientEmail.replaceAll(",", "")}`,
-      ].join(","),
-    )
-    .is("archived_at", null);
-  if (error) throw error;
-
-  const rows = (data ?? []).filter((client) =>
+  const emailMatches = await findClientsByEmail(
+    supabase,
+    companyId,
+    clientSelect,
+    clientEmail,
+  );
+  const rows = emailMatches.filter((client) =>
     ACTIVE_PROGRAM_STATUSES.has(
       String(client.program_status_value ?? "").trim().toLowerCase(),
-    ) && clientMatchesEmail(client, clientEmail),
+    ),
   );
   if (rows.length !== 1) {
     const matchStatus = rows.length > 1 ? "ambiguous" : "unmatched";
@@ -410,7 +443,7 @@ async function findClientForEvent(
           ...metadata,
           retry_checked_at: new Date().toISOString(),
           active_matches: rows.length,
-          total_matches: (data ?? []).length,
+          total_matches: emailMatches.length,
         },
       })
       .eq("id", event.id);
@@ -559,10 +592,22 @@ async function applyCallSummary(
       },
       payload: {
         integration_type: "call_summary_next_steps",
+        submitted_payload: pickPayloadFields(payload, [
+          "provider",
+          "external_event_id",
+          "externalEventId",
+          "external_call_id",
+          "externalCallId",
+          "call_id",
+          "callId",
+          "recording_url",
+          "recordingUrl",
+          "url",
+          "title",
+        ]),
         recording_url: recordingUrl,
         title: nullableText(payload.title) ?? nullableText(metadata.title),
         started_at: startedAt,
-        raw_payload: payload,
       },
     })
     .select("*")
@@ -650,16 +695,27 @@ async function applyClientUpdate(
     historyPayload.next_steps = clientUpdates.next_steps_value;
   }
 
-  const hasLastContactUpdate =
-    firstPresent(payload, ["last_contact", "lastContact", "last_contact_at"]) !==
-    undefined;
-  const hasNextContactUpdate =
-    firstPresent(payload, ["next_contact", "nextContact", "next_contact_at"]) !==
-    undefined;
+  const hasLastContactUpdate = firstPresent(payload, [
+    "last_contact",
+    "lastContact",
+    "last_contact_at",
+    "lastContactAt",
+  ]) !== undefined;
+  const hasNextContactUpdate = firstPresent(payload, [
+    "next_contact",
+    "nextContact",
+    "next_contact_at",
+    "nextContactAt",
+  ]) !== undefined;
 
   if (hasLastContactUpdate) {
     clientUpdates.csm_date_of_last_contact = parseDateTime(
-      firstPresent(payload, ["last_contact", "lastContact", "last_contact_at"]),
+      firstPresent(payload, [
+        "last_contact",
+        "lastContact",
+        "last_contact_at",
+        "lastContactAt",
+      ]),
       false,
     );
     historyPayload.last_contact_at = clientUpdates.csm_date_of_last_contact;
@@ -667,7 +723,12 @@ async function applyClientUpdate(
 
   if (hasNextContactUpdate) {
     clientUpdates.csm_date_of_next_contact = parseDateTime(
-      firstPresent(payload, ["next_contact", "nextContact", "next_contact_at"]),
+      firstPresent(payload, [
+        "next_contact",
+        "nextContact",
+        "next_contact_at",
+        "nextContactAt",
+      ]),
       false,
     );
     historyPayload.next_contact_at = clientUpdates.csm_date_of_next_contact;
@@ -683,11 +744,14 @@ async function applyClientUpdate(
     }
   }
 
-  if (firstPresent(payload, ["offer_id", "offerId"]) !== undefined) {
+  if (
+    firstPresent(payload, ["pathway_id", "pathwayId", "offer_id", "offerId"]) !==
+      undefined
+  ) {
     const offer = await resolveOffer(
       supabase,
-      company.id,
-      firstPresent(payload, ["offer_id", "offerId"]),
+      String(company.id),
+      firstPresent(payload, ["pathway_id", "pathwayId", "offer_id", "offerId"]),
     );
     clientUpdates.offer_milestones_current_offer_id = offer?.glide_row_id ?? null;
   }
@@ -698,7 +762,7 @@ async function applyClientUpdate(
   ) {
     const assignment = await resolveAssignableMember(
       supabase,
-      company.id,
+      String(company.id),
       firstPresent(payload, ["assigned_to", "assignedTo", "csm_email", "csmEmail"]),
     );
     clientUpdates.csm_team_member_id = assignment?.value ?? null;
@@ -756,7 +820,16 @@ async function applyClientUpdate(
       },
       payload: {
         integration_type: "client_update",
-        raw_payload: payload,
+        submitted_payload: pickPayloadFields(payload, [
+          "external_event_id",
+          "externalEventId",
+          "provider",
+          "client_id",
+          "clientId",
+          "client_email",
+          "clientEmail",
+          "email",
+        ]),
         normalized_updates: clientUpdates,
       },
     })
@@ -823,31 +896,16 @@ async function applyClientUpdate(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(req);
   }
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse(req, { error: "Method not allowed" }, 405);
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-      Deno.env.get("supabase_service_role");
-    if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse({ error: "Missing Supabase configuration." }, 500);
-    }
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createServiceClient();
     const token = getBearerToken(req);
-    if (!token) return jsonResponse({ error: "Missing authorization." }, 401);
-
-    const { data: userData, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !userData.user?.email) {
-      return jsonResponse({ error: "Invalid session." }, 401);
-    }
+    const actor = await requireAuthenticatedActor(supabase, token);
 
     const body = (await req.json().catch(() => ({}))) as JsonRecord;
     const action = cleanText(body.action);
@@ -856,22 +914,23 @@ Deno.serve(async (req) => {
     const clientId = nullableText(body.clientId);
 
     if (!ACTIONS.has(action)) {
-      return jsonResponse({ error: "Choose a valid review action." }, 400);
+      return jsonResponse(req, { error: "Choose a valid review action." }, 400);
     }
     if (!companyLegacyId || !eventId) {
-      return jsonResponse({ error: "Missing company or event id." }, 400);
+      return jsonResponse(req, { error: "Missing company or event id." }, 400);
     }
 
     const company = await resolveCompany(supabase, companyLegacyId);
     if (!company) {
       return jsonResponse(
+        req,
         { error: "Integration review is available for app-owned companies only." },
         400,
       );
     }
 
-    const actorEmail = normalizeEmail(userData.user.email);
-    await assertCanReviewIntegrations(supabase, actorEmail, company.id);
+    const actorEmail = normalizeEmail(actor.email);
+    await assertCanReviewIntegrations(supabase, actor, company.id);
     const event = await loadReviewEvent(supabase, company.id, eventId);
 
     if (action === "ignore") {
@@ -892,7 +951,7 @@ Deno.serve(async (req) => {
         .select("*")
         .single();
       if (ignoreError) throw ignoreError;
-      return jsonResponse({ ok: true, event: ignoredEvent });
+      return jsonResponse(req, { ok: true, event: ignoredEvent });
     }
 
     const { client, matchedBy } = await findClientForEvent(
@@ -919,7 +978,7 @@ Deno.serve(async (req) => {
         matchedBy,
         actorEmail,
       );
-      return jsonResponse({ ok: true, learnedEmail, ...result });
+      return jsonResponse(req, { ok: true, learnedEmail, ...result });
     }
 
     if (String(event.integration_type) === "client_update") {
@@ -931,17 +990,23 @@ Deno.serve(async (req) => {
         matchedBy,
         actorEmail,
       );
-      return jsonResponse({ ok: true, learnedEmail, ...result });
+      return jsonResponse(req, { ok: true, learnedEmail, ...result });
     }
 
     throw new ReviewValidationError(
       "This integration type is stored for review but cannot be retried yet.",
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
+    console.error(error);
+    const isValidationError = error instanceof ReviewValidationError;
+    const isAuthError = error instanceof AuthError;
+    const message = isValidationError || isAuthError
+      ? error.message
+      : "Unexpected integration review error.";
     return jsonResponse(
+      req,
       { error: message },
-      error instanceof ReviewValidationError ? 400 : 500,
+      isAuthError ? error.status : isValidationError ? 400 : 500,
     );
   }
 });

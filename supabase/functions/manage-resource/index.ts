@@ -1,13 +1,19 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import {
+  AuthError,
+  cleanText,
+  createServiceClient,
+  getBearerToken,
+  isRegisteredSuperAdmin,
+  normalizeEmail,
+  requireAuthenticatedActor,
+  type SupabaseServiceClient,
+} from "../_shared/auth.ts";
+import {
+  jsonResponse as sharedJsonResponse,
+  optionsResponse,
+} from "../_shared/http.ts";
 
 const ACTIONS = new Set(["create_resource", "update_resource", "archive_resource"]);
 const RESOURCE_TYPES = new Set(["guide", "video", "template"]);
@@ -20,33 +26,17 @@ interface ResourceActor {
   companyLegacyIds: Set<string>;
 }
 
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-  });
+class ResourceRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
-function cleanText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeEmail(value: unknown) {
-  return cleanText(value).toLowerCase();
-}
-
-function parseAllowlist(value: string | undefined) {
-  return new Set(
-    (value ?? "")
-      .split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean),
-  );
-}
-
-function getBearerToken(req: Request) {
-  const auth = req.headers.get("Authorization") ?? "";
-  return auth.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+function jsonResponse(req: Request, body: unknown, status = 200) {
+  return sharedJsonResponse(req, body, status);
 }
 
 function slugify(value: string) {
@@ -66,39 +56,47 @@ function optionalInteger(value: unknown) {
 }
 
 async function resolveActor(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseServiceClient,
   token: string,
 ) {
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user?.email) {
-    throw new Error("Invalid session.");
-  }
-
-  const superAdminEmails = parseAllowlist(
-    Deno.env.get("SUPER_ADMIN_EMAILS") ??
-      Deno.env.get("VITE_SUPER_ADMIN_EMAILS"),
-  );
-  const email = normalizeEmail(userData.user.email);
-  if (!superAdminEmails.has(email)) {
-    const { data: memberships, error: membershipError } = await supabase
+  const actor = await requireAuthenticatedActor(supabase, token);
+  const email = normalizeEmail(actor.email);
+  if (!await isRegisteredSuperAdmin(supabase, actor)) {
+    const { data: uuidMemberships, error: uuidMembershipError } = await supabase
       .from("company_members")
       .select("company_id, role, status")
-      .ilike("email", email)
+      .eq("auth_user_id", actor.id)
       .eq("status", "active")
       .eq("role", "director");
 
-    if (membershipError) throw membershipError;
+    if (uuidMembershipError) throw uuidMembershipError;
 
-    const companyIds = [
-      ...new Set(
+    let memberships = uuidMemberships ?? [];
+    if (memberships.length === 0) {
+      const { data: emailMemberships, error: emailMembershipError } = await supabase
+        .from("company_members")
+        .select("company_id, role, status")
+        .ilike("email", email)
+        .eq("status", "active")
+        .eq("role", "director");
+
+      if (emailMembershipError) throw emailMembershipError;
+      memberships = emailMemberships ?? [];
+    }
+
+    const companyIds: string[] = [
+      ...new Set<string>(
         (memberships ?? [])
-          .map((membership) => membership.company_id)
-          .filter((id): id is string => Boolean(id)),
+          .map((membership: { company_id?: unknown }) => membership.company_id)
+          .filter((id: unknown): id is string => typeof id === "string" && Boolean(id)),
       ),
     ];
 
     if (companyIds.length === 0) {
-      throw new Error("Only Super Admins and Directors can manage resources.");
+      throw new AuthError(
+        "Only Super Admins and Directors can manage resources.",
+        403,
+      );
     }
 
     const { data: companies, error: companyError } = await supabase
@@ -108,25 +106,25 @@ async function resolveActor(
 
     if (companyError) throw companyError;
 
-    const companyLegacyIds = new Set(
+    const companyLegacyIds = new Set<string>(
       (companies ?? [])
-        .map((company) => company.legacy_glide_row_id)
-        .filter((id): id is string => Boolean(id)),
+        .map((company: { legacy_glide_row_id?: unknown }) => company.legacy_glide_row_id)
+        .filter((id: unknown): id is string => typeof id === "string" && Boolean(id)),
     );
 
     if (companyLegacyIds.size === 0) {
-      throw new Error("Director access is missing a company workspace.");
+      throw new AuthError("Director access is missing a company workspace.", 403);
     }
 
     return {
-      id: userData.user.id,
+      id: actor.id,
       role: "director",
       companyLegacyIds,
     } satisfies ResourceActor;
   }
 
   return {
-    id: userData.user.id,
+    id: actor.id,
     role: "super_admin",
     companyLegacyIds: new Set<string>(),
   } satisfies ResourceActor;
@@ -139,10 +137,13 @@ function assertCanManageResourceScope(
 ) {
   if (actor.role === "super_admin") return;
   if (scope !== "company") {
-    throw new Error("Directors can only manage company resources.");
+    throw new AuthError("Directors can only manage company resources.", 403);
   }
   if (!companyLegacyId || !actor.companyLegacyIds.has(companyLegacyId)) {
-    throw new Error("Directors can only manage resources for their company.");
+    throw new AuthError(
+      "Directors can only manage resources for their company.",
+      403,
+    );
   }
 }
 
@@ -151,7 +152,7 @@ function assertCanManageExistingResource(
   resource: { scope?: string | null; company_legacy_id?: string | null } | null,
 ) {
   if (actor.role === "super_admin") return;
-  if (!resource) throw new Error("Resource not found.");
+  if (!resource) throw new ResourceRequestError("Resource not found.", 404);
   assertCanManageResourceScope(
     actor,
     resource.scope ?? "retainos_help",
@@ -161,39 +162,29 @@ function assertCanManageExistingResource(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: CORS_HEADERS });
+    return optionsResponse(req);
   }
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse(req, { error: "Method not allowed" }, 405);
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const serviceRoleKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-      Deno.env.get("supabase_service_role");
-    if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse({ error: "Missing Supabase configuration." }, 500);
-    }
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createServiceClient();
     const token = getBearerToken(req);
-    if (!token) return jsonResponse({ error: "Missing authorization." }, 401);
+    if (!token) return jsonResponse(req, { error: "Missing authorization." }, 401);
 
     const actor = await resolveActor(supabase, token);
     const body = await req.json().catch(() => ({}));
     const action = cleanText(body.action);
     if (!ACTIONS.has(action)) {
-      return jsonResponse({ error: "Choose a valid resource action." }, 400);
+      return jsonResponse(req, { error: "Choose a valid resource action." }, 400);
     }
 
     const resourceId = cleanText(body.resourceId);
     const now = new Date().toISOString();
 
     if (action === "archive_resource") {
-      if (!resourceId) return jsonResponse({ error: "Missing resource id." }, 400);
+      if (!resourceId) return jsonResponse(req, { error: "Missing resource id." }, 400);
 
       const { data: beforeData, error: beforeError } = await supabase
         .from("resources")
@@ -203,15 +194,21 @@ Deno.serve(async (req) => {
       if (beforeError) throw beforeError;
       assertCanManageExistingResource(actor, beforeData);
 
-      const { data, error } = await supabase
+      let archiveQuery = supabase
         .from("resources")
         .update({ status: "archived", updated_at: now })
-        .eq("id", resourceId)
-        .select("*")
-        .single();
+        .eq("id", resourceId);
+
+      if (actor.role === "director") {
+        archiveQuery = archiveQuery
+          .eq("scope", "company")
+          .eq("company_legacy_id", beforeData?.company_legacy_id ?? "");
+      }
+
+      const { data, error } = await archiveQuery.select("*").single();
       if (error) throw error;
 
-      return jsonResponse({ ok: true, resource: data });
+      return jsonResponse(req, { ok: true, resource: data });
     }
 
     const title = cleanText(body.title);
@@ -225,19 +222,19 @@ Deno.serve(async (req) => {
     const scope = cleanText(body.scope) || "retainos_help";
     const companyLegacyId = cleanText(body.companyLegacyId);
 
-    if (!title) return jsonResponse({ error: "Title is required." }, 400);
-    if (!slug) return jsonResponse({ error: "Slug is required." }, 400);
+    if (!title) return jsonResponse(req, { error: "Title is required." }, 400);
+    if (!slug) return jsonResponse(req, { error: "Slug is required." }, 400);
     if (!RESOURCE_TYPES.has(type)) {
-      return jsonResponse({ error: "Choose a valid resource type." }, 400);
+      return jsonResponse(req, { error: "Choose a valid resource type." }, 400);
     }
     if (!STATUSES.has(status)) {
-      return jsonResponse({ error: "Choose a valid resource status." }, 400);
+      return jsonResponse(req, { error: "Choose a valid resource status." }, 400);
     }
     if (!RESOURCE_SCOPES.has(scope)) {
-      return jsonResponse({ error: "Choose a valid resource library." }, 400);
+      return jsonResponse(req, { error: "Choose a valid resource library." }, 400);
     }
     if (scope === "company" && !companyLegacyId) {
-      return jsonResponse({ error: "Choose a company for company resources." }, 400);
+      return jsonResponse(req, { error: "Choose a company for company resources." }, 400);
     }
     assertCanManageResourceScope(actor, scope, companyLegacyId);
 
@@ -276,10 +273,10 @@ Deno.serve(async (req) => {
         after_data: data,
       });
 
-      return jsonResponse({ ok: true, resource: data });
+      return jsonResponse(req, { ok: true, resource: data });
     }
 
-    if (!resourceId) return jsonResponse({ error: "Missing resource id." }, 400);
+    if (!resourceId) return jsonResponse(req, { error: "Missing resource id." }, 400);
 
     const { data: beforeData } = await supabase
       .from("resources")
@@ -292,15 +289,21 @@ Deno.serve(async (req) => {
       beforeData?.company_legacy_id &&
       beforeData.company_legacy_id !== companyLegacyId
     ) {
-      throw new Error("Directors cannot move resources between companies.");
+      throw new AuthError("Directors cannot move resources between companies.", 403);
     }
 
-    const { data, error } = await supabase
+    let updateQuery = supabase
       .from("resources")
       .update(payload)
-      .eq("id", resourceId)
-      .select("*")
-      .single();
+      .eq("id", resourceId);
+
+    if (actor.role === "director") {
+      updateQuery = updateQuery
+        .eq("scope", "company")
+        .eq("company_legacy_id", companyLegacyId);
+    }
+
+    const { data, error } = await updateQuery.select("*").single();
     if (error) throw error;
 
     await supabase.from("app_audit_events").insert({
@@ -315,12 +318,19 @@ Deno.serve(async (req) => {
       after_data: data,
     });
 
-    return jsonResponse({ ok: true, resource: data });
+    return jsonResponse(req, { ok: true, resource: data });
   } catch (error) {
     console.error(error);
+    const isAuthError = error instanceof AuthError;
+    const isRequestError = error instanceof ResourceRequestError;
     return jsonResponse(
-      { error: error instanceof Error ? error.message : "Unexpected error." },
-      500,
+      req,
+      {
+        error: isAuthError || isRequestError
+          ? error.message
+          : "Unexpected resource management error.",
+      },
+      isAuthError ? error.status : isRequestError ? error.status : 500,
     );
   }
 });
