@@ -989,14 +989,17 @@ Deno.serve(async (req) => {
           return jsonResponse({ error: "Choose a pathway for this template." }, 400);
         }
 
-        const { data: offer, error: offerError } = await supabase
+        const { data: offers, error: offerError } = await supabase
           .from("company_offers")
-          .select("glide_row_id, name, status")
-          .eq("company_id", company.id)
-          .eq("glide_row_id", appliesToOfferId)
-          .maybeSingle();
+          .select("id, glide_row_id, name, status")
+          .eq("company_id", company.id);
         if (offerError) throw offerError;
-        if (!offer || offer.status !== "active") {
+        const offer = offers?.find(
+          (item) =>
+            (item.glide_row_id === appliesToOfferId || item.id === appliesToOfferId) &&
+            item.status !== "archived",
+        );
+        if (!offer) {
           return jsonResponse(
             { error: "Template pathway is not active for this company." },
             400,
@@ -1007,7 +1010,9 @@ Deno.serve(async (req) => {
           company_id: company.id,
           name,
           description: nullableText(body.description),
-          applies_to_offer_id: appliesToOfferId,
+          // Templates are keyed by the stable legacy pathway ID, even if a
+          // caller supplied the app-owned UUID from a newer surface.
+          applies_to_offer_id: offer.glide_row_id,
           contract_days: requiredBoundedInteger(body.contractDays, 90, 1, 3650),
           monthly_value: optionalNumber(body.monthlyValue),
           reference_link: nullableText(body.referenceLink),

@@ -3075,7 +3075,11 @@ function TaskTemplatesModal({
     );
     setSaving(false);
     if (invokeError || data?.error) {
-      setError(invokeError?.message ?? data.error);
+      const response = invokeError?.context;
+      const responseBody = response instanceof Response
+        ? await response.json().catch(() => null)
+        : null;
+      setError(responseBody?.error ?? data?.error ?? invokeError?.message ?? "Unable to save the contract template.");
       return;
     }
     resetDraft();
