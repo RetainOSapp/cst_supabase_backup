@@ -76,12 +76,38 @@ function normalizeDate(value: unknown) {
   return date.toISOString();
 }
 
+function isLegacyContractEndPlaceholder(value: unknown) {
+  const date = normalizeDate(value);
+  if (!date) return false;
+  const parsed = new Date(date);
+  return (
+    parsed.getUTCFullYear() === 2075 &&
+    parsed.getUTCMonth() === 0 &&
+    parsed.getUTCDate() === 1
+  );
+}
+
 function addDays(dateValue: unknown, days: number) {
   if (!dateValue || days <= 0) return null;
   const date = new Date(String(dateValue));
   if (Number.isNaN(date.getTime())) return null;
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString();
+}
+
+function resolvedContractEndDate(client: Record<string, unknown>) {
+  const explicitEnd = normalizeDate(
+    client.current_contract_end_date_for_filtering ??
+      client.current_contract_end_date,
+  );
+  if (explicitEnd && !isLegacyContractEndPlaceholder(explicitEnd)) {
+    return explicitEnd;
+  }
+
+  const contractDays = Number(client.current_contract_of_days);
+  return Number.isFinite(contractDays) && contractDays > 0
+    ? addDays(client.current_contract_start_date, contractDays)
+    : null;
 }
 
 function daysBetween(startIso: string, endIso: string) {
@@ -256,12 +282,7 @@ Deno.serve(async (req) => {
     const requestedOffboardedAt =
       targetStatus === "off-boarded" ? normalizeDate(body.offboardedAt) : null;
     const contractEndForOffboarding =
-      targetStatus === "off-boarded"
-        ? normalizeDate(
-            client.current_contract_end_date_for_filtering ??
-              client.current_contract_end_date,
-          )
-        : null;
+      targetStatus === "off-boarded" ? resolvedContractEndDate(client) : null;
     const offboardingChurned =
       requestedOffboardedAt && contractEndForOffboarding
         ? new Date(requestedOffboardedAt).getTime() <
@@ -310,11 +331,7 @@ Deno.serve(async (req) => {
         : Number(client.current_contract_of_days);
     const extendedContractEndDate =
       pauseExtensionDays > 0
-        ? addDays(
-            client.current_contract_end_date ??
-              client.current_contract_end_date_for_filtering,
-            pauseExtensionDays,
-          )
+        ? addDays(resolvedContractEndDate(client), pauseExtensionDays)
         : null;
     const extendedContractDays =
       pauseExtensionDays > 0 && Number.isFinite(currentContractDays)

@@ -660,24 +660,36 @@ function addDays(dateValue: unknown, daysValue: unknown) {
   return date.toISOString();
 }
 
-function contractEndDate(contract: Record<string, unknown>) {
+function isLegacyContractEndPlaceholder(value: unknown) {
+  if (!isPresent(value)) return false;
+  const date = new Date(String(value));
   return (
-    valueFrom(contract, [
-      "end_date",
-      "current_contract_end_date",
-      "current_contract_end_date_for_filtering",
-      "current_contract_select_end_date",
-    ]) ??
-    addDays(
-      valueFrom(contract, ["start_date", "current_contract_start_date"]),
-      valueFrom(contract, ["current_contract_of_days", "contract_days", "days"]),
-    )
+    !Number.isNaN(date.getTime()) &&
+    date.getUTCFullYear() === 2075 &&
+    date.getUTCMonth() === 0 &&
+    date.getUTCDate() === 1
+  );
+}
+
+function resolvedContractEndDate(contract: Record<string, unknown>) {
+  const explicitEndDate = valueFrom(contract, [
+    "end_date",
+    "current_contract_end_date",
+    "current_contract_end_date_for_filtering",
+    "current_contract_select_end_date",
+  ]);
+  if (isPresent(explicitEndDate) && !isLegacyContractEndPlaceholder(explicitEndDate)) {
+    return explicitEndDate;
+  }
+  return addDays(
+    valueFrom(contract, ["start_date", "current_contract_start_date"]),
+    valueFrom(contract, ["current_contract_of_days", "contract_days", "days"]),
   );
 }
 
 function renewalDateConfidence(contract: Record<string, unknown>) {
   const linkedEndDate = valueFrom(contract, ["end_date"]);
-  if (isPresent(linkedEndDate)) {
+  if (isPresent(linkedEndDate) && !isLegacyContractEndPlaceholder(linkedEndDate)) {
     return {
       value: linkedEndDate,
       sourceLabel: "Linked contract end date",
@@ -686,7 +698,7 @@ function renewalDateConfidence(contract: Record<string, unknown>) {
   }
 
   const filteringDate = valueFrom(contract, ["current_contract_end_date_for_filtering"]);
-  if (isPresent(filteringDate)) {
+  if (isPresent(filteringDate) && !isLegacyContractEndPlaceholder(filteringDate)) {
     return {
       value: filteringDate,
       sourceLabel: "Client summary filtering date",
@@ -695,7 +707,7 @@ function renewalDateConfidence(contract: Record<string, unknown>) {
   }
 
   const explicitEndDate = valueFrom(contract, ["current_contract_end_date"]);
-  if (isPresent(explicitEndDate)) {
+  if (isPresent(explicitEndDate) && !isLegacyContractEndPlaceholder(explicitEndDate)) {
     return {
       value: explicitEndDate,
       sourceLabel: "Client summary end date",
@@ -745,7 +757,7 @@ function getContractStatus(contract: Record<string, unknown>) {
     return "Archived";
   }
   if (isPresent(valueFrom(contract, ["archived_at"]))) return "Archived";
-  const end = contractEndDate(contract);
+  const end = resolvedContractEndDate(contract);
   if (!isPresent(end)) return "Open";
   const endDate = new Date(String(end));
   if (Number.isNaN(endDate.getTime())) return "Open";
@@ -3014,10 +3026,7 @@ function ClientStatusModal({
   const selectedChurnReason = sortedChurnReasons.find(
     (item) => item.value === churnReason,
   );
-  const contractEndDateValue = valueFrom(client, [
-    "current_contract_end_date_for_filtering",
-    "current_contract_end_date",
-  ]);
+  const contractEndDateValue = resolvedContractEndDate(client);
   const contractEndDateInput = dateInputValue(contractEndDateValue);
   const actualEndDate = dateFromValue(offboardedAt);
   const contractEndDate = dateFromValue(contractEndDateValue);
@@ -3269,7 +3278,12 @@ function ClientStatusModal({
                       Add or review the contract end date before relying on churn
                       reporting.
                     </span>
-                  ) : null}
+                  ) : (
+                    <span className="ml-1">
+                      An actual end date before the contract end is recorded as churn.
+                      Use Pause when the client is expected to return.
+                    </span>
+                  )}
                 </div>
                 {churned === true ? (
                   sortedChurnReasons.length > 0 ? (
@@ -5392,7 +5406,7 @@ function ContractCard({
             valueFrom(contract, ["start_date", "current_contract_start_date"]),
           )}
         />
-        <ContractField label="End Date" value={formatDate(contractEndDate(contract))} />
+        <ContractField label="End Date" value={formatDate(resolvedContractEndDate(contract))} />
         <ContractField
           label="Renewal Source"
           value={`${renewalDate.sourceLabel} (${renewalDate.confidenceLabel})`}
@@ -5869,13 +5883,7 @@ function PathwaysSection({
     "contract_start_date",
     "start_date",
   ]);
-  const contractEnd = valueFrom(client, [
-    "current_contract_end_date_for_filtering",
-    "current_contract_end_date",
-    "contract_end_date",
-    "renewal_date",
-    "end_date",
-  ]);
+  const contractEnd = resolvedContractEndDate(client);
   const contractStartDate = dateFromValue(contractStart);
   const contractEndDate = dateFromValue(contractEnd);
   const now = new Date();

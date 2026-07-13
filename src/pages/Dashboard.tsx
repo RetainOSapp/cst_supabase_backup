@@ -1250,14 +1250,23 @@ function passesReportEndDate(client: OfferKpiClientRow, endDate: string) {
 
 function calculatedContractEndDate(client: OfferKpiClientRow) {
   const filteringEnd = dateFromValue(client.current_contract_end_date_for_filtering);
-  if (filteringEnd) return filteringEnd;
+  if (filteringEnd && !isLegacyContractEndPlaceholder(filteringEnd)) return filteringEnd;
   const explicitEnd = dateFromValue(client.current_contract_end_date);
-  if (explicitEnd) return explicitEnd;
+  if (explicitEnd && !isLegacyContractEndPlaceholder(explicitEnd)) return explicitEnd;
   const start = dateFromValue(
     client.current_contract_start_date ?? client.client_age_date_onboarded,
   );
   if (!start || client.current_contract_of_days == null) return null;
   return addDays(start, Number(client.current_contract_of_days));
+}
+
+function isLegacyContractEndPlaceholder(date: Date | null) {
+  return Boolean(
+    date &&
+      date.getUTCFullYear() === 2075 &&
+      date.getUTCMonth() === 0 &&
+      date.getUTCDate() === 1,
+  );
 }
 
 function calculatedOffboardedDate(client: OfferKpiClientRow) {

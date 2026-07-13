@@ -50,6 +50,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Offboarding actual-end-date/churn upgrade QA passed.
   - Client Detail > Change Status > Offboarded now requires the actual end date and offer-fit answer, auto-classifies churn against the current contract end date, requires churn reason/notes only when churned, writes offboarding metadata/history/audit, and updates the RetainOS Help draft.
   - QA follow-up fix: Clients roster now waits for app-owned table detection and listens for a Client Detail status-change refresh token, so returning to `/clients` should show Offboarded without hard refresh.
+  - 2026-07-13 hotfix: the legacy `Jan 1, 2075` no-date sentinel is ignored in client contract displays, dashboard calculations, and status changes; RetainOS instead uses the verified date or calculates start date plus expected duration.
 - `[x]` 2026-06-20 Secondary pathway support QA passed.
   - Company Settings > Feature gates can enable Secondary pathway; Client Detail > Pathways & Milestones can set or clear the secondary pathway/milestone and shows it as a separate summary. `adding-secondary-offers` is now the RetainOS "Adding secondary pathways" draft.
   - 2026-07-02 QA fix: Change Pathway & Milestones now skips unnecessary primary pathway writes when only secondary pathway changes, only calls secondary writes when secondary values changed, validates secondary milestone selection, and surfaces real Edge Function errors.
