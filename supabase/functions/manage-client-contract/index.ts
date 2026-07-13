@@ -657,6 +657,43 @@ Deno.serve(async (req) => {
 
       if (historyError) throw historyError;
 
+      // A retention event uses the contract start date as its reporting date. If a
+      // retained contract is corrected later, keep that event aligned with the
+      // corrected contract instead of leaving Dashboard on the original date.
+      const { data: retentionEvent } = await supabase
+        .from("client_history_events")
+        .select("id, payload")
+        .eq("company_id", company.id)
+        .eq("legacy_client_glide_row_id", clientLegacyId)
+        .eq("event_type", "client_retention_recorded")
+        .contains("payload", { contract: { id: existingContract.id } })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (retentionEvent) {
+        const existingPayload =
+          retentionEvent.payload && typeof retentionEvent.payload === "object"
+            ? (retentionEvent.payload as Record<string, unknown>)
+            : {};
+        const { error: retentionUpdateError } = await supabase
+          .from("client_history_events")
+          .update({
+            summary: effectiveEndDate
+              ? `Retention contract corrected. New renewal date: ${effectiveEndDate.slice(0, 10)}.`
+              : "Retention contract corrected.",
+            payload: {
+              ...existingPayload,
+              retention_date: startDate,
+              contract,
+              client: updatedClient,
+            },
+          })
+          .eq("id", retentionEvent.id);
+
+        if (retentionUpdateError) throw retentionUpdateError;
+      }
+
       await supabase.from("app_audit_events").insert({
         company_id: company.id,
         actor_auth_user_id: userData.user.id,
@@ -803,6 +840,7 @@ Deno.serve(async (req) => {
             payload: {
               actor_role: actor.role,
               retention_type: retentionType,
+              retention_date: startDate,
               from_status: currentProgramStatus,
               to_status: nextProgramStatus,
               success_marked: markSuccess,

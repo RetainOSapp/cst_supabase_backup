@@ -40,6 +40,7 @@ const CSM_QUERY_KEY = "csmId";
 const SECONDARY_ASSIGNEE_QUERY_KEY = "secondaryAssigneeId";
 const PROGRAM_QUERY_KEY = "program";
 const OFFER_QUERY_KEY = "offerId";
+const DASHBOARD_FILTERS_STORAGE_KEY = "retainos-dashboard-filters-v1";
 const DETAIL_PAGE_SIZE = 25;
 const DASHBOARD_QUERY_PAGE_SIZE = 1000;
 const DASHBOARD_IN_FILTER_CHUNK_SIZE = 500;
@@ -513,6 +514,52 @@ function emptyDashboardFilters(): DashboardFilters {
     dateRange: clearedMonthDateFilter(),
     clientStartDate: clearedMonthDateFilter(),
   };
+}
+
+function dashboardFilterStorageKey(companyId: string) {
+  return `${DASHBOARD_FILTERS_STORAGE_KEY}:${companyId}`;
+}
+
+function readStoredDashboardFilters(companyId: string): DashboardFilters | null {
+  if (!companyId) return null;
+  try {
+    const raw = window.localStorage.getItem(dashboardFilterStorageKey(companyId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<DashboardFilters>;
+    return {
+      ...emptyDashboardFilters(),
+      ...parsed,
+      companyId,
+      dateRange: { ...clearedMonthDateFilter(), ...(parsed.dateRange ?? {}) },
+      clientStartDate: {
+        ...clearedMonthDateFilter(),
+        ...(parsed.clientStartDate ?? {}),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function storeDashboardFilters(filters: DashboardFilters) {
+  if (!filters.companyId) return;
+  try {
+    window.localStorage.setItem(
+      dashboardFilterStorageKey(filters.companyId),
+      JSON.stringify(filters),
+    );
+  } catch {
+    // Dashboard filters are a convenience; reporting remains usable without storage.
+  }
+}
+
+function clearStoredDashboardFilters(companyId: string) {
+  if (!companyId) return;
+  try {
+    window.localStorage.removeItem(dashboardFilterStorageKey(companyId));
+  } catch {
+    // Ignore unavailable browser storage.
+  }
 }
 
 function dashboardFiltersFromSearchParams(
@@ -1549,12 +1596,12 @@ export function Dashboard() {
     role,
     teamMemberId,
   } = useAccountContext();
-  const [pendingFilters, setPendingFilters] = useState(() =>
-    dashboardFiltersFromSearchParams(searchParams, effectiveCompanyId),
-  );
-  const [appliedFilters, setAppliedFilters] = useState(() =>
-    dashboardFiltersFromSearchParams(searchParams, effectiveCompanyId),
-  );
+  const initialDashboardFilters = () => {
+    const fromUrl = dashboardFiltersFromSearchParams(searchParams, effectiveCompanyId);
+    return fromUrl.companyId ? readStoredDashboardFilters(fromUrl.companyId) ?? fromUrl : fromUrl;
+  };
+  const [pendingFilters, setPendingFilters] = useState(initialDashboardFilters);
+  const [appliedFilters, setAppliedFilters] = useState(initialDashboardFilters);
   const [reportVersion, setReportVersion] = useState(0);
   const [activeDashboardTab, setActiveDashboardTab] =
     useState<DashboardTab>("overview");
@@ -1662,6 +1709,7 @@ export function Dashboard() {
     };
     setPendingFilters(cleared);
     setAppliedFilters(cleared);
+    clearStoredDashboardFilters(cleared.companyId);
     setReportVersion((v) => v + 1);
     const next = new URLSearchParams();
     if (effectiveCompanyId) next.set(COMPANY_QUERY_KEY, effectiveCompanyId);
@@ -1677,6 +1725,7 @@ export function Dashboard() {
       csmId: assignedTeamMemberId || pendingFilters.csmId,
     };
     setAppliedFilters(next);
+    storeDashboardFilters(next);
     setSearchParams(
       (prev) => {
         const p = new URLSearchParams(prev);
@@ -1710,22 +1759,14 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!effectiveCompanyId || effectiveCompanyId === pendingFilters.companyId) return;
-    setPendingFilters((prev) => ({
-      ...prev,
+    const stored = readStoredDashboardFilters(effectiveCompanyId);
+    const next = {
+      ...(stored ?? emptyDashboardFilters()),
       companyId: effectiveCompanyId,
-      csmId: assignedTeamMemberId,
-      secondaryAssigneeId: "",
-      offerId: "",
-      program: "",
-    }));
-    setAppliedFilters((prev) => ({
-      ...prev,
-      companyId: effectiveCompanyId,
-      csmId: assignedTeamMemberId,
-      secondaryAssigneeId: "",
-      offerId: "",
-      program: "",
-    }));
+      csmId: assignedTeamMemberId || stored?.csmId || "",
+    };
+    setPendingFilters(next);
+    setAppliedFilters(next);
     setReportVersion((v) => v + 1);
     updateSearchParams({
       [COMPANY_QUERY_KEY]: effectiveCompanyId,
