@@ -59,31 +59,44 @@ as $$
       on source.company_id = authorized.company_id
      and source.glide_row_id = authorized.glide_row_id
     where nullif(btrim(source.churn_reason_value), '') is not null
+  ),
+  churn_buckets as (
+    select
+      'churn_reason'::text as metric,
+      churn.churn_reason_value as bucket_key,
+      coalesce(
+        nullif(reason.label, ''),
+        initcap(
+          replace(replace(churn.churn_reason_value, '-', ' '), '_', ' ')
+        )
+      ) || case
+        when reason.status = 'archived' then ' (Archived)'
+        else ''
+      end as bucket_label,
+      count(*)::bigint as value,
+      null::numeric as capacity,
+      reason.position as sort_position
+    from churn_rows churn
+    left join public.company_churn_reasons reason
+      on reason.company_id = churn.company_id
+     and reason.value = churn.churn_reason_value
+    group by
+      churn.churn_reason_value,
+      reason.label,
+      reason.status,
+      reason.position
   )
   select
-    'churn_reason'::text,
-    churn.churn_reason_value,
-    coalesce(
-      nullif(reason.label, ''),
-      initcap(
-        replace(replace(churn.churn_reason_value, '-', ' '), '_', ' ')
-      )
-    ) || case
-      when reason.status = 'archived' then ' (Archived)'
-      else ''
-    end,
-    count(*)::bigint,
-    null::numeric
-  from churn_rows churn
-  left join public.company_churn_reasons reason
-    on reason.company_id = churn.company_id
-   and reason.value = churn.churn_reason_value
-  group by
-    churn.churn_reason_value,
-    reason.label,
-    reason.status,
-    reason.position
-  order by reason.position nulls last, churn.churn_reason_value;
+    bucket.metric,
+    bucket.bucket_key,
+    bucket.bucket_label,
+    bucket.value,
+    bucket.capacity
+  from churn_buckets bucket
+  order by
+    bucket.sort_position nulls last,
+    bucket.value desc,
+    bucket.bucket_label;
 $$;
 
 revoke all on function public.dashboard_churn_reason_rollup_actor_scoped(

@@ -172,6 +172,9 @@ check(
     churnReasonAggregate.includes("dashboard_authorized_app_clients(") &&
     churnReasonAggregate.includes("'churn_reason'::text") &&
     churnReasonAggregate.includes("count(*)::bigint") &&
+    churnReasonAggregate.includes("bucket.sort_position nulls last") &&
+    churnReasonAggregate.includes("bucket.value desc") &&
+    churnReasonAggregate.includes("bucket.bucket_label") &&
     !churnReasonAggregate.includes("client_name") &&
     !churnReasonAggregate.includes("client_email"),
 );
