@@ -2233,3 +2233,60 @@ The following block was moved out of active MEMORY.md on 2026-07-06 to keep sess
 - Root cause: some CST health-score data exists only as current client fields (`outcomes_*_value` + `outcomes_*_date`) rather than discrete rows in `backup_company_clients_history`.
 - Updated `src/pages/ClientDetail.tsx`: Client Detail > History now synthesizes "migrated current field" Health Scores entries from current Success, Progress, and Buy In values when they have dates. These rows dedupe against real history rows when the same score/date/value exists.
 - Verification: `npm run build` passed in the hotfix worktree. No Edge Function deploy required.
+
+## Active MEMORY Archive - 2026-07-13 Cleanup
+
+The following completed checkpoints were moved verbatim from active `MEMORY.md`
+to keep the startup router below 150 lines.
+
+## Latest Checkpoint - 2026-07-06 Memory Cleanup
+
+- Active `MEMORY.md` was reduced from 669 lines to this short router/current-state file.
+- The stale active block from `Latest Checkpoint - 2026-06-17` onward was moved under `## Active MEMORY Archive Before 2026-07-06 Cleanup` in `MEMORY_ARCHIVE.md` for search-only history.
+- Resource migration details should live in `RETAINOS_RESOURCES_MIGRATION.md`, resource SQL migrations, `ROADMAP.md`, or archive, not active memory.
+- Future entries here must be durable operational facts only; completed work summaries should go to roadmap/archive.
+
+## MM Launch Reminder Bell Pause - 2026-07-06
+
+- Clients-page reminder bell data loading is intentionally paused during MM launch; the bell shows "in development" and CSMs should use Daily Pulse + Tasks. Details/future scope live in `ROADMAP.md`.
+
+## Daily Pulse Strategic Review Completion - 2026-07-07
+
+- Strategic Review remains a Company Timing Rule, not a pathway milestone. Completion is stored in `client_timed_checkpoint_completions` via `manage-client-timed-checkpoint`; Daily Pulse shows SR pending/complete from the configured contract-end offset.
+
+## MM Retention Formula Correction - 2026-07-07
+
+- Dashboard retention now splits migrated CST history from RetainOS-era writes: CST FE->BE and BE->BE `program-status` movements count as historical retention events by CST modified date; new RetainOS retention counts only Renewal/Upsell contract events by contract start date.
+- Live SOP resource `retention-churn-metrics` was refreshed via `20260707180000_update_retention_sop_resource.sql`.
+- 2026-07-09 hotfix: app-owned Dashboard retention uses `dashboard_retention_counts_fast` to count unique retained clients server-side for migrated CST history.
+
+## Status-Only Retention Company Setting - 2026-07-07
+
+- RetainOS-era status-only retention is strict/off by default, but `company_settings.allow_status_change_retention` can let a company count active Front End / Back End status movements as retention without a paired Renewal/Upsell contract.
+- Migration `20260707183000_status_change_retention_setting.sql` and `manage-company-customization` were applied/deployed live before the app push.
+
+## Fathom Recording URL Hotfix - 2026-07-08
+
+- Fathom payloads include `recording_url`; `ingest-client-call-summary` / `manage-integration-review` now normalize it onto history payloads, and Client History reads existing metadata/raw payload links.
+- Follow-up UI hotfix: Client Detail > Program and Update Next Steps/Contact surface the latest Fathom recording link from call-summary history without rewriting the note body.
+
+## Company Status Labels - 2026-07-08
+
+- Company Settings can now store display-only program/status labels in `metadata.program_status_labels`; canonical values stay unchanged for migration/reporting.
+- MM was seeded with `suspended` displayed as `MIA` via `20260708170000_mm_program_status_labels.sql`; `manage-company-customization` was deployed for Admin Hub saves.
+
+## Contract Type UI Removal - 2026-07-08
+
+- Client Detail no longer shows Contract Type in contract create/edit/display; `manage-client-contract` preserves existing metadata when editing.
+
+## MM Advocacy Dashboard Fallback - 2026-07-08
+
+- Dashboard Advocacy & Growth counts migrated client summary advocacy dates as fallback rows; MM-only backfill `20260709100000_backfill_missing_advocacy_events_from_clients.sql` was applied live.
+
+## Call AI Reconciliation Page - 2026-07-09
+
+- `/call-ai` is the V1 home for unmatched Fathom/call-summary reconciliation; Support can match/retry/ignore, and manual matches learn the event email into Email 2/3 when a slot is open.
+
+## Recurring Task Templates - 2026-07-10
+
+- Added recurring fields to `company_task_templates`, Task Templates UI, manual presets, client/milestone template task creation, and active-client-only recurrence guard in `manage-client-task`; build passed and functions deployed.
