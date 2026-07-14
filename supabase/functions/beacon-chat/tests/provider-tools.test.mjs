@@ -338,3 +338,8 @@ test("answer sanitizer makes all model-created Markdown paths non-clickable", ()
   assert.doesNotMatch(value.answer, /\]\(|\/clients\/abc/);
   assert.doesNotMatch(value.answer, /evil\.example|javascript:/);
 });
+
+test("answer sanitizer removes unsupported bold markers from plain text", () => {
+  const result = sanitizeAnswer("You have **14** active clients and __2__ renewals.");
+  assert.equal(result.answer, "You have 14 active clients and 2 renewals.");
+});

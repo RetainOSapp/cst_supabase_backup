@@ -47,6 +47,8 @@ export function sanitizeAnswer(raw) {
   // separately from allow-listed, server-authorized tool rows.
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label) => String(label));
   text = text.replace(/\b(?:https?:\/\/|javascript:|data:)\S+/gi, "[external link removed]");
+  text = text.replace(/\*\*([^*\n]+)\*\*/g, "$1");
+  text = text.replace(/__([^_\n]+)__/g, "$1");
 
   if (text.length > LIMITS.maxAnswerChars) {
     return { answer: `${text.slice(0, LIMITS.maxAnswerChars).trimEnd()}…`, truncated: true };
