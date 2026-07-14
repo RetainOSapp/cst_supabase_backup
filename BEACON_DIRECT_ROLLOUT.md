@@ -138,6 +138,13 @@ Vercel deploy from `main`. The widget remains absent because no company is enabl
 Confirm ordinary RetainOS pages and Admin Hub are unchanged; AI Features appears
 only in the RetainOS SuperAdmin SaaS-client view.
 
+Completed 2026-07-14 in production commit `d76d90e`. Vercel reported the
+production deployment ready; `https://app.retainos.ai/` and `/login` returned
+HTTP 200. The live browser bundle contains the Beacon client and contains no
+OpenAI/Anthropic endpoint or provider credential name. Final database readback
+still showed Beacon globally `paused`, with 0 entitlements, 0 allowances, and 0
+usage events. The widget therefore remains hidden from every company.
+
 ### 6. Enable Ethical Scaling only
 
 In AI Features, set Beacon to a one-time `$25.00` allowance and pilot status for
