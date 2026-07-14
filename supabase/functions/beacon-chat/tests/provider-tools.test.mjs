@@ -89,6 +89,40 @@ test("OpenAI adapter retries once for retryable status without parsing provider 
   assert.equal(errorBodyRead, false);
 });
 
+test("OpenAI adapter retains only bounded rejection code and parameter", async () => {
+  const provider = createOpenAIResponsesProvider({
+    apiKey: "test-only",
+    fetchImpl: async () => new Response(JSON.stringify({
+      error: {
+        message: "sensitive provider detail must never be propagated",
+        type: "invalid_request_error",
+        code: "unsupported_parameter",
+        param: "reasoning.effort",
+        extra: { secret: "discarded" },
+      },
+    }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    }),
+    now: () => 1,
+  });
+
+  await assert.rejects(
+    () => provider.createResponse({
+      input: [],
+      instructions: "fixed",
+      tools: [],
+      safetyIdentifier: "safe_hash",
+      deadlineMs: 10_000,
+    }),
+    (error) =>
+      error.category ===
+        "provider_rejected.unsupported_parameter.reasoning.effort" &&
+      !error.message.includes("sensitive") &&
+      !error.message.includes("discarded"),
+  );
+});
+
 test("OpenAI adapter does not retry an ambiguous network failure", async () => {
   let calls = 0;
   const provider = createOpenAIResponsesProvider({

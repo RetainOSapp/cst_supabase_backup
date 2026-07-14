@@ -42,6 +42,19 @@ function boundedTimeout(now, deadlineMs) {
   return Math.max(1, Math.min(LIMITS.providerTimeoutMs, deadlineMs - now()));
 }
 
+function safeDiagnosticPart(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9_.-]{1,64}$/.test(normalized) ? normalized : null;
+}
+
+async function rejectionCategory(response, fallback) {
+  const payload = await response.json().catch(() => null);
+  const code = safeDiagnosticPart(payload?.error?.code);
+  const param = safeDiagnosticPart(payload?.error?.param);
+  return [fallback, code, param].filter(Boolean).join(".");
+}
+
 export function createOpenAIResponsesProvider({
   apiKey,
   fetchImpl = fetch,
@@ -94,14 +107,15 @@ export function createOpenAIResponsesProvider({
               await sleepImpl(125 + Math.floor(random() * 125));
               continue;
             }
-            throw new ProviderError(
-              response.status === 429
-                ? "provider_rate_limited"
-                : response.status >= 500
-                  ? "provider_unavailable"
-                  : "provider_rejected",
-              response.status,
-            );
+            const baseCategory = response.status === 429
+              ? "provider_rate_limited"
+              : response.status >= 500
+                ? "provider_unavailable"
+                : "provider_rejected";
+            const category = response.status >= 400 && response.status < 500
+              ? await rejectionCategory(response, baseCategory)
+              : baseCategory;
+            throw new ProviderError(category, response.status);
           }
 
           const payload = await response.json().catch(() => null);
