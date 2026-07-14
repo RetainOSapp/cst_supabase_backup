@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { BeaconWidget } from "./beacon/BeaconWidget.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { loadUnifiedCompanies, loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
 import { supabase } from "../lib/supabase.ts";
@@ -310,6 +311,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         {children}
+        <BeaconWidget />
       </div>
     </div>
   );

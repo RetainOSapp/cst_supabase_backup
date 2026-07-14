@@ -24,3 +24,12 @@ verify_jwt = true
 
 [functions.manage-resource]
 verify_jwt = true
+
+[functions.beacon-access]
+verify_jwt = true
+
+[functions.beacon-chat]
+verify_jwt = true
+
+[functions.manage-ai-feature-entitlement]
+verify_jwt = true

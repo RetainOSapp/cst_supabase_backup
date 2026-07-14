@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { AiFeaturesPanel } from "../components/beacon/AiFeaturesPanel.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
 import {
@@ -5925,22 +5926,29 @@ export function SaasClientDetail({
             <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
           </div>
         ) : (
-          <CompanySettingsSetup
-            companyLegacyId={companyId ?? ""}
-            source={settingsSource}
-            settings={companySettings}
-            notificationPreferences={notificationPreferences}
-            taskTemplates={taskTemplates}
-            contractTemplates={contractTemplates}
-            taskTemplateOffers={taskTemplateOffers}
-            taskTemplateMilestones={taskTemplateMilestones}
-            teamMembers={teamMembers}
-            integrationTokens={integrationTokens}
-            integrationTokensLoading={integrationTokensLoading}
-            canManageTokens={isSuperAdmin && settingsSource === "app_owned"}
-            canManage={settingsSource === "app_owned" && canManageCompanyDefinitions}
-            onReload={() => setSettingsReloadKey((key) => key + 1)}
-          />
+          <>
+            <CompanySettingsSetup
+              companyLegacyId={companyId ?? ""}
+              source={settingsSource}
+              settings={companySettings}
+              notificationPreferences={notificationPreferences}
+              taskTemplates={taskTemplates}
+              contractTemplates={contractTemplates}
+              taskTemplateOffers={taskTemplateOffers}
+              taskTemplateMilestones={taskTemplateMilestones}
+              teamMembers={teamMembers}
+              integrationTokens={integrationTokens}
+              integrationTokensLoading={integrationTokensLoading}
+              canManageTokens={isSuperAdmin && settingsSource === "app_owned"}
+              canManage={settingsSource === "app_owned" && canManageCompanyDefinitions}
+              onReload={() => setSettingsReloadKey((key) => key + 1)}
+            />
+            {mode === "super_admin" && isSuperAdmin ? (
+              <div className="mt-6">
+                <AiFeaturesPanel companyId={companyId ?? ""} />
+              </div>
+            ) : null}
+          </>
         )
       )}
 
