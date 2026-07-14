@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { LIMITS, OPENAI_MODEL } from "../_shared/contracts.mjs";
+import { LIMITS, OPENAI_MODEL, SYSTEM_INSTRUCTIONS } from "../_shared/contracts.mjs";
 import { runBeaconTurn, sanitizeAnswer } from "../_shared/orchestrator.mjs";
 import { createOpenAIResponsesProvider } from "../_shared/provider.mjs";
 import { executeTool } from "../_shared/tools.mjs";
@@ -220,6 +220,86 @@ test("tool dispatcher denies invented tools and extra arguments before RPC", asy
   assert.equal(rpcCalls, 0);
 });
 
+test("list_clients forwards only bounded exact CSM and upcoming-contact filters", async () => {
+  let called;
+  await executeTool({
+    serviceClient: {
+      rpc: async (name, args) => {
+        called = { name, args };
+        return { data: [], error: null };
+      },
+    },
+    context: CONTEXT,
+    toolName: "list_clients",
+    rawArguments: JSON.stringify({
+      programStatus: null,
+      healthDimension: null,
+      healthState: null,
+      csmMemberId: null,
+      csmName: "  Ada Lovelace  ",
+      nameFragment: null,
+      nextContactDays: 30,
+      sort: "name_asc",
+      limit: 25,
+    }),
+  });
+  assert.equal(called.name, "beacon_list_clients");
+  assert.equal(called.args.p_company_id, COMPANY);
+  assert.equal(called.args.p_csm_name, "Ada Lovelace");
+  assert.equal(called.args.p_next_contact_days, 30);
+  await assert.rejects(
+    () => executeTool({
+      serviceClient: { rpc: async () => ({ data: [], error: null }) },
+      context: CONTEXT,
+      toolName: "list_clients",
+      rawArguments: JSON.stringify({
+        programStatus: null,
+        healthDimension: null,
+        healthState: null,
+        csmMemberId: null,
+        csmName: null,
+        nameFragment: null,
+        nextContactDays: 366,
+        sort: "name_asc",
+        limit: 25,
+      }),
+    }),
+    (error) => error.code === "tool_schema_denied",
+  );
+});
+
+test("client brief accepts UUID or unambiguous natural name, never both", async () => {
+  let called;
+  const serviceClient = {
+    rpc: async (name, args) => {
+      called = { name, args };
+      return { data: [], error: null };
+    },
+  };
+  await executeTool({
+    serviceClient,
+    context: CONTEXT,
+    toolName: "get_client_brief",
+    rawArguments: JSON.stringify({
+      clientId: null,
+      clientName: "  Acme Coaching  ",
+      csmName: "Ada Lovelace",
+    }),
+  });
+  assert.equal(called.name, "beacon_get_client_brief");
+  assert.equal(called.args.p_client_name, "Acme Coaching");
+  assert.equal(called.args.p_csm_name, "Ada Lovelace");
+  await assert.rejects(
+    () => executeTool({
+      serviceClient,
+      context: CONTEXT,
+      toolName: "get_client_brief",
+      rawArguments: JSON.stringify({ clientId: COMPANY, clientName: "Acme", csmName: null }),
+    }),
+    (error) => error.code === "tool_schema_denied",
+  );
+});
+
 test("tool results contain only allow-listed fields and a server-fixed company scope", async () => {
   let called;
   const result = await executeTool({
@@ -330,13 +410,23 @@ test("a fourth requested tool execution fails closed", async () => {
   assert.equal(rpcCalls, 3);
 });
 
-test("answer sanitizer makes all model-created Markdown paths non-clickable", () => {
+test("answer sanitizer removes model-created links, internal paths, and UUIDs", () => {
   const value = sanitizeAnswer(
-    "[Client](/clients/abc) [Bad](https://evil.example/x) javascript:alert(1)",
+    "[Client](/clients/abc) [Bad](https://evil.example/x) javascript:alert(1) " +
+      "/clients/private-client 22222222-2222-4222-8222-222222222222",
   );
   assert.match(value.answer, /^Client Bad/);
   assert.doesNotMatch(value.answer, /\]\(|\/clients\/abc/);
+  assert.doesNotMatch(value.answer, /\/clients\/private-client|22222222-2222-4222-8222-222222222222/);
   assert.doesNotMatch(value.answer, /evil\.example|javascript:/);
+});
+
+test("system instructions require authoritative aggregates and human-readable ambiguity UX", () => {
+  assert.match(SYSTEM_INSTRUCTIONS, /company_metrics is authoritative/);
+  assert.match(SYSTEM_INSTRUCTIONS, /Never derive or estimate an aggregate from list rows/);
+  assert.match(SYSTEM_INSTRUCTIONS, /Never reveal or ask the user for UUIDs/);
+  assert.match(SYSTEM_INSTRUCTIONS, /client name, business name, program status, or assigned CSM/);
+  assert.match(SYSTEM_INSTRUCTIONS, /server supplies authorized structured links separately/);
 });
 
 test("answer sanitizer removes unsupported bold markers from plain text", () => {

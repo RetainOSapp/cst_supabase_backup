@@ -13,6 +13,7 @@ const migrationNames = [
   "20260714016000_beacon_role_controls_and_aggregate_cost.sql",
   "20260714017000_beacon_nano_price_lineage.sql",
   "20260714018000_beacon_reservation_model_binding.sql",
+  "20260714019000_beacon_natural_language_queries.sql",
 ];
 
 function read(relativePath) {
@@ -40,10 +41,12 @@ const adminConflictCorrection = migrations[migrationNames[5]];
 const roleCostCorrection = migrations[migrationNames[6]];
 const nanoPriceLineage = migrations[migrationNames[7]];
 const reservationModelBinding = migrations[migrationNames[8]];
+const naturalLanguageQueries = migrations[migrationNames[9]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
 const provider = read("supabase/functions/beacon-chat/_shared/provider.mjs");
+const toolSource = read("supabase/functions/beacon-chat/_shared/tools.mjs");
 const usageTableDefinition = foundation.slice(
   foundation.indexOf("create table if not exists public.ai_usage_events"),
   foundation.indexOf("comment on table public.ai_usage_events"),
@@ -423,6 +426,20 @@ check(
       "server_metadata",
     ].every((name) => !reads.includes(name)) &&
     !/select\s+\*/i.test(reads),
+);
+check(
+  "natural-name and upcoming-contact filters stay actor-bound, bounded, and ambiguity-safe",
+  functionBody(naturalLanguageQueries, "beacon_list_clients").includes("p_csm_name text") &&
+    functionBody(naturalLanguageQueries, "beacon_list_clients").includes("p_next_contact_days integer") &&
+    functionBody(naturalLanguageQueries, "beacon_list_clients").includes("p_next_contact_days between 0 and 365") &&
+    functionBody(naturalLanguageQueries, "beacon_get_client_brief").includes("p_client_name text") &&
+    functionBody(naturalLanguageQueries, "beacon_get_client_brief").includes("count(*) over () as match_count") &&
+    functionBody(naturalLanguageQueries, "beacon_get_client_brief").includes("where client.match_count = 1") &&
+    naturalLanguageQueries.includes("from public, anon, authenticated") &&
+    naturalLanguageQueries.includes("to service_role") &&
+    toolSource.includes("p_csm_name: args.csmName") &&
+    toolSource.includes("p_next_contact_days: args.nextContactDays") &&
+    contracts.includes('maximum: 365'),
 );
 check(
   "canonical retention uses app-owned history only",

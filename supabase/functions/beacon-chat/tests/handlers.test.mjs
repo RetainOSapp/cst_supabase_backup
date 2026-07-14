@@ -264,6 +264,50 @@ test("fabricated model paths never become structured links", async () => {
   assert.equal("links" in result, false);
 });
 
+test("model text cannot expose IDs or paths while server-authorized structured links survive", async () => {
+  let providerCall = 0;
+  const result = await handleBeaconChat({
+    body: { companyId: COMPANY, message: "Show Approved", history: [] },
+    token: "jwt",
+    requestId: "request-authorized-link-redaction",
+    serviceClient: serviceClient({
+      toolData: [{
+        client_id: "22222222-2222-4222-8222-222222222222",
+        client_name: "Approved",
+        internal_path: "/clients/approved",
+      }],
+    }),
+    authenticate,
+    checkRegisteredSuperAdmin: notSuperAdmin,
+    providerFactory: () => ({
+      createResponse: async () => {
+        providerCall += 1;
+        return providerCall === 1
+          ? {
+              output: [{
+                type: "function_call",
+                call_id: "call_1",
+                name: "list_contract_gaps",
+                arguments: JSON.stringify({ limit: 25 }),
+              }],
+            }
+          : {
+              output: [{
+                type: "message",
+                content: [{
+                  type: "output_text",
+                  text: "Approved is 22222222-2222-4222-8222-222222222222 at /clients/approved",
+                }],
+              }],
+            };
+      },
+    }),
+    now: () => 1,
+  });
+  assert.doesNotMatch(result.answer, /22222222-2222-4222-8222-222222222222|\/clients\/approved/);
+  assert.deepEqual(result.links, [{ label: "Approved", path: "/clients/approved" }]);
+});
+
 test("chat finalizes a reservation after a provider failure", async () => {
   const calls = [];
   await assert.rejects(

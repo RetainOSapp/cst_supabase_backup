@@ -47,6 +47,11 @@ export function sanitizeAnswer(raw) {
   // separately from allow-listed, server-authorized tool rows.
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label) => String(label));
   text = text.replace(/\b(?:https?:\/\/|javascript:|data:)\S+/gi, "[external link removed]");
+  text = text.replace(/\/clients\/[A-Za-z0-9_-]+/g, "[internal reference removed]");
+  text = text.replace(
+    /\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b/gi,
+    "[internal reference removed]",
+  );
   text = text.replace(/\*\*([^*\n]+)\*\*/g, "$1");
   text = text.replace(/__([^_\n]+)__/g, "$1");
 

@@ -45,6 +45,24 @@ function nullableName(value) {
   return value.trim();
 }
 
+function nullableExactName(value, label) {
+  if (value === null) return null;
+  if (typeof value !== "string" || value.trim().length < 1 || value.trim().length > 120) {
+    throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.", {
+      category: `invalid_${label}`,
+    });
+  }
+  return value.trim();
+}
+
+function nullableDays(value) {
+  if (value === null) return null;
+  if (!Number.isInteger(value) || value < 0 || value > 365) {
+    throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+  }
+  return value;
+}
+
 function actorBoundArgs(context) {
   if (
     !isUuid(context.companyId) ||
@@ -84,7 +102,9 @@ export const TOOL_DISPATCH = Object.freeze({
         "healthDimension",
         "healthState",
         "csmMemberId",
+        "csmName",
         "nameFragment",
+        "nextContactDays",
         "sort",
         "limit",
       ];
@@ -106,7 +126,9 @@ export const TOOL_DISPATCH = Object.freeze({
         healthDimension,
         healthState,
         csmMemberId: nullableUuid(args.csmMemberId),
+        csmName: nullableExactName(args.csmName, "csm_name"),
         nameFragment: nullableName(args.nameFragment),
+        nextContactDays: nullableDays(args.nextContactDays),
         sort,
         limit: limit(args.limit),
       };
@@ -118,7 +140,9 @@ export const TOOL_DISPATCH = Object.freeze({
         p_health_dimension: args.healthDimension,
         p_health_state: args.healthState,
         p_csm_member_id: args.csmMemberId,
+        p_csm_name: args.csmName,
         p_name_fragment: args.nameFragment,
+        p_next_contact_days: args.nextContactDays,
         p_sort: args.sort,
         p_limit: args.limit,
       };
@@ -201,14 +225,25 @@ export const TOOL_DISPATCH = Object.freeze({
   get_client_brief: Object.freeze({
     rpc: SQL_CONTRACT.userRpcs.get_client_brief,
     validate(args) {
-      assertNoUnexpectedKeys(args, ["clientId"]);
-      if (!isUuid(args.clientId)) {
+      assertNoUnexpectedKeys(args, ["clientId", "clientName", "csmName"]);
+      if (["clientId", "clientName", "csmName"].some((key) => !(key in args))) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
-      return { clientId: args.clientId };
+      const clientId = nullableUuid(args.clientId);
+      const clientName = nullableExactName(args.clientName, "client_name");
+      const csmName = nullableExactName(args.csmName, "csm_name");
+      if ((clientId === null) === (clientName === null) || (clientId !== null && csmName !== null)) {
+        throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+      }
+      return { clientId, clientName, csmName };
     },
     rpcArgs(context, args) {
-      return { ...actorBoundArgs(context), p_client_id: args.clientId };
+      return {
+        ...actorBoundArgs(context),
+        p_client_id: args.clientId,
+        p_client_name: args.clientName,
+        p_csm_name: args.csmName,
+      };
     },
   }),
 });
