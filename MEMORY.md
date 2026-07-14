@@ -45,13 +45,10 @@ Feature status belongs in `ROADMAP.md`; historical logs move verbatim to `MEMORY
 
 Before staging/committing, inspect `git status --short`. Uncommitted work may be intentional.
 
-- Beacon local pilot is intentionally uncommitted and must not be committed/deployed as-is:
-  - `src/components/Beacon.tsx`
-  - `src/lib/beacon/*`
-  - Beacon mount/import changes in `src/components/Header.tsx`
-  - related `package.json` / `package-lock.json` Anthropic dependency changes
-- Beacon promotion path before rollout: move chat loop into a Supabase Edge Function, store `ANTHROPIC_API_KEY` as a Supabase secret, enforce server-side company/role scoping, and add `canAccessBeacon` gating.
-- The original desktop workspace remains intentionally dirty on `security-phase-0` with the Beacon pilot and historical local changes. Production source is on `main`; do not bulk-commit or switch that dirty workspace until Beacon is extracted and its remaining work is reconciled deliberately.
+- Normal workspace: `/Users/joaogoncalves/Desktop/cst_supabase_backup` on clean production `main`.
+- Beacon rebuild workspace: `/Users/joaogoncalves/Desktop/cst_supabase_beacon` on `codex/beacon-secure-rebuild`. Its `BEACON_PROTOTYPE_REFERENCE_DO_NOT_COMMIT/` files preserve the unsafe browser-direct pilot only as local reference; never commit/deploy them as-is.
+- Beacon promotion path: build a provider-server-side `beacon-chat` Supabase Edge Function, keep the AI key as a Supabase secret, enforce company entitlement plus role/client scoping, and add usage limits/audit logging.
+- Old Glide project reference moved outside Git to `/Users/joaogoncalves/Desktop/RetainOS Local Reference/old glide project test` until remaining migrations finish.
 
 ## Deploy / Environment Notes
 

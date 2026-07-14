@@ -973,11 +973,12 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[~]` `[polish]` `[priority: medium]` Client detail edit/manage.
 - `[x]` Dashboard / KPI dashboard for selected company.
 - `[~]` `[polish]` `[priority: low]` Generate AI Insights action exists as placeholder only.
-- `[~]` `[priority: low]` `[mixed]` Beacon assistant chat (SuperAdmin-only, local pilot).
+- `[~]` `[priority: high]` `[mixed]` Beacon assistant chat secure rebuild.
   - Working chat over live client data: renewals, contract gaps, health/referral-ready, CSM books, client detail. Jay validated v1 locally on 2026-06-10.
   - Now a **floating bubble widget** on every authenticated page (mounted in `AppShell`), not a standalone page. The `/beacon` route and its sidebar nav item were removed on 2026-06-14; conversation persists across navigation.
   - `[polish]` remaining: broader question QA against roster/dashboard counts.
-  - `[downstream]` Intentionally uncommitted: uses a browser-direct Anthropic call with a local `.env` key. Close condition for commit/rollout: move the loop into a `beacon-chat` Edge Function (key as Supabase secret, server-side role scoping) and add a `canAccessBeacon` capability for Director/CSM access. See MEMORY.md "Beacon v1 Local Pilot - 2026-06-10".
+  - `[downstream]` The old browser-direct implementation is revoked and excluded from production. Rebuild from `/Users/joaogoncalves/Desktop/cst_supabase_beacon` using a `beacon-chat` Edge Function, server-held AI key, SuperAdmin-controlled company entitlement, server-side role/client scoping, usage limits, and audit logging.
+  - 2026-07-13 workspace extraction: useful prototype files were verified byte-for-byte and quarantined under `BEACON_PROTOTYPE_REFERENCE_DO_NOT_COMMIT/` on `codex/beacon-secure-rebuild`; unsafe Anthropic package/Vite integration and stale application files were discarded. Ethical Scaling is the first secure pilot, followed by Moves Method after QA.
 - `[~]` `[polish]` `[priority: medium]` CSM Reports updated-clients list and client detail flow.
 - `[ ]` `[priority: later]` Call AI filters/KPIs/analysis list view.
 - `[ ]` `[priority: later]` New meeting transcript flow.
