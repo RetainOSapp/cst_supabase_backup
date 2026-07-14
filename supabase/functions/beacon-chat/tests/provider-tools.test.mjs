@@ -233,10 +233,12 @@ test("list_clients forwards only bounded exact CSM and upcoming-contact filters"
     toolName: "list_clients",
     rawArguments: JSON.stringify({
       programStatus: null,
+      activeOnly: false,
       healthDimension: null,
       healthState: null,
       csmMemberId: null,
       csmName: "  Ada Lovelace  ",
+      csmAssignment: "any",
       nameFragment: null,
       nextContactDays: 30,
       riskStates: null,
@@ -255,10 +257,12 @@ test("list_clients forwards only bounded exact CSM and upcoming-contact filters"
       toolName: "list_clients",
       rawArguments: JSON.stringify({
         programStatus: null,
+        activeOnly: false,
         healthDimension: null,
         healthState: null,
         csmMemberId: null,
         csmName: null,
+        csmAssignment: null,
         nameFragment: null,
         nextContactDays: 366,
         riskStates: null,
@@ -274,10 +278,12 @@ test("list_clients forwards combined risk states and rejects mixing them with on
   let called;
   const base = {
     programStatus: null,
+    activeOnly: true,
     healthDimension: null,
     healthState: null,
     csmMemberId: null,
     csmName: "Ada Lovelace",
+    csmAssignment: "primary",
     nameFragment: null,
     nextContactDays: null,
     riskStates: ["red", "yellow"],
@@ -298,6 +304,8 @@ test("list_clients forwards combined risk states and rejects mixing them with on
   assert.equal(called.name, "beacon_list_clients");
   assert.deepEqual(called.args.p_risk_states, ["red", "yellow"]);
   assert.equal(called.args.p_csm_name, "Ada Lovelace");
+  assert.equal(called.args.p_active_only, true);
+  assert.equal(called.args.p_csm_assignment, "primary");
   await assert.rejects(
     () => executeTool({
       serviceClient: { rpc: async () => ({ data: [], error: null }) },
@@ -308,6 +316,15 @@ test("list_clients forwards combined risk states and rejects mixing them with on
         healthDimension: "success",
         healthState: "red",
       }),
+    }),
+    (error) => error.code === "tool_schema_denied",
+  );
+  await assert.rejects(
+    () => executeTool({
+      serviceClient: { rpc: async () => ({ data: [], error: null }) },
+      context: CONTEXT,
+      toolName: "list_clients",
+      rawArguments: JSON.stringify({ ...base, programStatus: "back-end" }),
     }),
     (error) => error.code === "tool_schema_denied",
   );
@@ -330,12 +347,14 @@ test("client brief accepts UUID or unambiguous natural name, never both", async 
       clientName: "  Acme Coaching  ",
       programStatus: null,
       csmName: "Ada Lovelace",
+      csmAssignment: "any",
     }),
   });
   assert.equal(called.name, "beacon_get_client_brief");
   assert.equal(called.args.p_client_name, "Acme Coaching");
   assert.equal(called.args.p_program_status, null);
   assert.equal(called.args.p_csm_name, "Ada Lovelace");
+  assert.equal(called.args.p_csm_assignment, "any");
   await assert.rejects(
     () => executeTool({
       serviceClient,
@@ -346,6 +365,7 @@ test("client brief accepts UUID or unambiguous natural name, never both", async 
         clientName: "Acme",
         programStatus: null,
         csmName: null,
+        csmAssignment: null,
       }),
     }),
     (error) => error.code === "tool_schema_denied",
@@ -477,7 +497,7 @@ test("system instructions require authoritative aggregates and human-readable am
   assert.match(SYSTEM_INSTRUCTIONS, /company_metrics is authoritative/);
   assert.match(SYSTEM_INSTRUCTIONS, /Never derive or estimate an aggregate from list rows/);
   assert.match(SYSTEM_INSTRUCTIONS, /Never reveal or ask the user for UUIDs/);
-  assert.match(SYSTEM_INSTRUCTIONS, /client name, business name, program status, or assigned CSM/);
+  assert.match(SYSTEM_INSTRUCTIONS, /business name, program status, and assigned CSM choices/);
   assert.match(SYSTEM_INSTRUCTIONS, /server supplies authorized structured links separately/);
   assert.match(SYSTEM_INSTRUCTIONS, /partial human client name/);
   assert.match(SYSTEM_INSTRUCTIONS, /list_clients lookup with nameFragment/);
@@ -485,6 +505,11 @@ test("system instructions require authoritative aggregates and human-readable am
   assert.match(SYSTEM_INSTRUCTIONS, /list_clients filtered by that human-readable CSM name/);
   assert.match(SYSTEM_INSTRUCTIONS, /riskStates set to \["red", "yellow"\]/);
   assert.match(SYSTEM_INSTRUCTIONS, /Do not answer a combined-risk question from only one health dimension/);
+  assert.match(SYSTEM_INSTRUCTIONS, /Active clients.*union of front-end and back-end clients/);
+  assert.match(SYSTEM_INSTRUCTIONS, /activeOnly true and programStatus null/);
+  assert.match(SYSTEM_INSTRUCTIONS, /never interpret active as front-end alone/);
+  assert.match(SYSTEM_INSTRUCTIONS, /"under" or "managed by".*primary assignment/);
+  assert.match(SYSTEM_INSTRUCTIONS, /generic "assigned to".*csmAssignment to "any"/);
 });
 
 test("answer sanitizer removes unsupported bold markers from plain text", () => {

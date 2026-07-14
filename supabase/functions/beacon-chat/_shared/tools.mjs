@@ -111,10 +111,12 @@ export const TOOL_DISPATCH = Object.freeze({
     validate(args) {
       const keys = [
         "programStatus",
+        "activeOnly",
         "healthDimension",
         "healthState",
         "csmMemberId",
         "csmName",
+        "csmAssignment",
         "nameFragment",
         "nextContactDays",
         "riskStates",
@@ -137,16 +139,25 @@ export const TOOL_DISPATCH = Object.freeze({
       if (args.csmMemberId !== null && args.csmName !== null) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
+      if (typeof args.activeOnly !== "boolean" || (args.activeOnly && args.programStatus !== null)) {
+        throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+      }
+      const csmAssignment = nullableEnum(args.csmAssignment, ["primary", "any"], "csm_assignment");
+      if (csmAssignment !== null && args.csmName === null) {
+        throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+      }
       const sort = nullableEnum(args.sort, CLIENT_SORTS, "sort");
       if (sort === null) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
       return {
         programStatus: nullableEnum(args.programStatus, PROGRAM_STATUSES, "program_status"),
+        activeOnly: args.activeOnly,
         healthDimension,
         healthState,
         csmMemberId: nullableUuid(args.csmMemberId),
         csmName: nullableExactName(args.csmName, "csm_name"),
+        csmAssignment,
         nameFragment: nullableName(args.nameFragment),
         nextContactDays: nullableDays(args.nextContactDays),
         riskStates,
@@ -158,10 +169,12 @@ export const TOOL_DISPATCH = Object.freeze({
       return {
         ...actorBoundArgs(context),
         p_program_status: args.programStatus,
+        p_active_only: args.activeOnly,
         p_health_dimension: args.healthDimension,
         p_health_state: args.healthState,
         p_csm_member_id: args.csmMemberId,
         p_csm_name: args.csmName,
+        p_csm_assignment: args.csmAssignment,
         p_name_fragment: args.nameFragment,
         p_next_contact_days: args.nextContactDays,
         p_risk_states: args.riskStates,
@@ -247,21 +260,23 @@ export const TOOL_DISPATCH = Object.freeze({
   get_client_brief: Object.freeze({
     rpc: SQL_CONTRACT.userRpcs.get_client_brief,
     validate(args) {
-      assertNoUnexpectedKeys(args, ["clientId", "clientName", "programStatus", "csmName"]);
-      if (["clientId", "clientName", "programStatus", "csmName"].some((key) => !(key in args))) {
+      assertNoUnexpectedKeys(args, ["clientId", "clientName", "programStatus", "csmName", "csmAssignment"]);
+      if (["clientId", "clientName", "programStatus", "csmName", "csmAssignment"].some((key) => !(key in args))) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
       const clientId = nullableUuid(args.clientId);
-      const clientName = nullableExactName(args.clientName, "client_name");
+      const clientName = nullableName(args.clientName);
       const programStatus = nullableEnum(args.programStatus, PROGRAM_STATUSES, "program_status");
       const csmName = nullableExactName(args.csmName, "csm_name");
+      const csmAssignment = nullableEnum(args.csmAssignment, ["primary", "any"], "csm_assignment");
       if (
         (clientId === null) === (clientName === null) ||
-        (clientId !== null && (programStatus !== null || csmName !== null))
+        (clientId !== null && (programStatus !== null || csmName !== null || csmAssignment !== null)) ||
+        (csmAssignment !== null && csmName === null)
       ) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
-      return { clientId, clientName, programStatus, csmName };
+      return { clientId, clientName, programStatus, csmName, csmAssignment };
     },
     rpcArgs(context, args) {
       return {
@@ -270,6 +285,7 @@ export const TOOL_DISPATCH = Object.freeze({
         p_client_name: args.clientName,
         p_program_status: args.programStatus,
         p_csm_name: args.csmName,
+        p_csm_assignment: args.csmAssignment,
       };
     },
   }),

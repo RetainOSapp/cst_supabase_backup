@@ -16,6 +16,7 @@ const migrationNames = [
   "20260714019000_beacon_natural_language_queries.sql",
   "20260714020000_beacon_natural_query_filters.sql",
   "20260714021000_beacon_pilot_daily_limit.sql",
+  "20260714022000_beacon_active_assignment_semantics.sql",
 ];
 
 function read(relativePath) {
@@ -46,6 +47,7 @@ const reservationModelBinding = migrations[migrationNames[8]];
 const naturalLanguageQueries = migrations[migrationNames[9]];
 const naturalQueryFilters = migrations[migrationNames[10]];
 const pilotDailyLimit = migrations[migrationNames[11]];
+const activeAssignmentSemantics = migrations[migrationNames[12]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
@@ -457,6 +459,19 @@ check(
     naturalQueryFilters.includes("to service_role") &&
     toolSource.includes("p_risk_states: args.riskStates") &&
     toolSource.includes("p_program_status: args.programStatus"),
+);
+check(
+  "active and primary assignment semantics are additive, bounded, and service-only",
+  functionBody(activeAssignmentSemantics, "beacon_list_clients").includes("p_active_only boolean") &&
+    functionBody(activeAssignmentSemantics, "beacon_list_clients").includes("array['front-end', 'back-end']::text[]") &&
+    functionBody(activeAssignmentSemantics, "beacon_list_clients").includes("p_csm_assignment in ('primary', 'any')") &&
+    functionBody(activeAssignmentSemantics, "beacon_list_clients").includes("source_rows.primary_csm_name") &&
+    functionBody(activeAssignmentSemantics, "beacon_get_client_brief").includes("p_csm_assignment text") &&
+    functionBody(activeAssignmentSemantics, "beacon_get_client_brief").includes("candidate.match_count = 1") &&
+    activeAssignmentSemantics.includes("from public, anon, authenticated") &&
+    activeAssignmentSemantics.includes("to service_role") &&
+    toolSource.includes("p_active_only: args.activeOnly") &&
+    toolSource.includes("p_csm_assignment: args.csmAssignment"),
 );
 check(
   "canonical retention uses app-owned history only",
