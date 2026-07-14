@@ -30,6 +30,31 @@ interface DisplayMessage {
   truncated?: boolean;
 }
 
+function BeaconLightIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3v2" />
+      <path d="m5.6 5.6 1.5 1.5" />
+      <path d="m18.4 5.6-1.5 1.5" />
+      <path d="M3 11h3" />
+      <path d="M18 11h3" />
+      <path d="M8.2 11a3.8 3.8 0 0 1 7.6 0" />
+      <path d="m9 11-1.5 9h9L15 11" />
+      <path d="M8.4 15h7.2" />
+      <path d="M7.8 18h8.4" />
+    </svg>
+  );
+}
+
 const ROLE_PROMPTS = {
   super_admin: [
     "Which clients need attention right now?",
@@ -305,7 +330,7 @@ export function BeaconWidget() {
         >
           <header className="flex items-center gap-3 border-b border-[#e4e9f0] bg-[#162b3e] px-4 py-3 text-white">
             <div className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#59abf0] font-bold text-[#162b3e]" aria-hidden="true">
-              B
+              <BeaconLightIcon />
             </div>
             <div className="min-w-0 flex-1">
               <h2 id="beacon-title" className="text-sm font-bold">Beacon beta</h2>
@@ -472,7 +497,9 @@ export function BeaconWidget() {
           aria-label="Open Beacon beta"
           className="retainos-focus flex h-14 items-center gap-2 rounded-full bg-[#162b3e] px-4 text-sm font-bold text-white shadow-[0_12px_32px_rgba(14,27,41,0.28)] transition hover:-translate-y-0.5 hover:bg-[#1e3a52]"
         >
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-[#59abf0] text-[#162b3e]" aria-hidden="true">B</span>
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-[#59abf0] text-[#162b3e]" aria-hidden="true">
+            <BeaconLightIcon />
+          </span>
           Beacon <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[#d6eafb]">Beta</span>
         </button>
       )}

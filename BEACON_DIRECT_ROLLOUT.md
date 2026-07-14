@@ -178,6 +178,15 @@ Run a short smoke pass using existing accounts:
 8. Pause Ethical Scaling and confirm the next request stops; then resume only if
    that test passes.
 
+Jay's first UI pass on 2026-07-14 confirmed launcher visibility, memory-only
+navigation/reset behavior, keyboard close/reopen, SuperAdmin AI Features, the
+$25 pilot presentation, and complete hiding for Moves Method. Five authorized
+chat attempts finalized as `provider_unavailable` before tool or token usage.
+Because `OPENAI_API_KEY` had been added after the original function deployment,
+`beacon-chat` was redeployed with a fresh secret binding as active version 3
+(`ea334695351950739d23c796ecab48e8d411bf5883c23697019c515234df8a62`).
+Chat retest remains open; no prompt or response content was inspected.
+
 ### 7. Observe, then decide on Moves Method
 
 Use Beacon normally with Ethical Scaling. Review errors, answer quality, usage,
