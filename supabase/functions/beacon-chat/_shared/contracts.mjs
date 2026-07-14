@@ -5,7 +5,7 @@ export const BEACON_FEATURE_KEY = "beacon";
 export const OPENAI_MODEL = "gpt-5.4-nano-2026-03-17";
 export const OPENAI_FALLBACK_MODEL = "gpt-5.4-mini-2026-03-17";
 export const OPENAI_REASONING_EFFORT = "none";
-export const RELEASE_VERSION = "beacon-edge-beta-v1";
+export const RELEASE_VERSION = "beacon-edge-beta-v1-nano";
 
 export const LIMITS = Object.freeze({
   maxUserMessageChars: 2_000,

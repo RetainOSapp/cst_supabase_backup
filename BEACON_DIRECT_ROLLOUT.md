@@ -229,3 +229,4 @@ RetainOS reads, writes, or integrations.
 - Applied reversible `20260714017000_beacon_nano_price_lineage.sql`; SHA-256 `237f8084c17d278cb4991c6f132e6e46fcf350f15a0b46127c22abf2204105d5`.
 - The finalizer accepts only the pinned mini and nano IDs, recomputes expected micro-cost from trusted provider token counts using the reviewed price card, rejects mismatches, and records the model-specific immutable price lineage.
 - Mini stayed active while the migration applied. `beacon-chat` moved to nano only after DB 65/65 and Edge 37/37 passed. Mini remains the immediate source rollback; Moves Method remains disabled.
+- Follow-up `20260714018000_beacon_reservation_model_binding.sql` (`48b5dd1e51cee64f71bb880b9e3892b66e65ba659cad2a0e4a8dea10c47fb3e4`) binds the server-owned release to its model and reservation price lineage, preserving the ledger trigger's reservation/finalization equality invariant. DB 68/68 and Edge 37/37 pass.

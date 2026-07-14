@@ -12,6 +12,7 @@ const migrationNames = [
   "20260714015000_beacon_admin_feature_conflict_fix.sql",
   "20260714016000_beacon_role_controls_and_aggregate_cost.sql",
   "20260714017000_beacon_nano_price_lineage.sql",
+  "20260714018000_beacon_reservation_model_binding.sql",
 ];
 
 function read(relativePath) {
@@ -38,6 +39,7 @@ const readinessCorrection = migrations[migrationNames[4]];
 const adminConflictCorrection = migrations[migrationNames[5]];
 const roleCostCorrection = migrations[migrationNames[6]];
 const nanoPriceLineage = migrations[migrationNames[7]];
+const reservationModelBinding = migrations[migrationNames[8]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
@@ -350,6 +352,8 @@ check(
     nanoPriceLineage.includes("p_estimated_cost_micros <> (case p_model") &&
     nanoPriceLineage.includes("greatest(p_input_tokens - p_cached_input_tokens, 0) * 0.2") &&
     nanoPriceLineage.includes("case p_model") &&
+    reservationModelBinding.includes("p_release_version = 'beacon-edge-beta-v1-nano'") &&
+    reservationModelBinding.includes("v_reservation.release_version is distinct from p_release_version") &&
     finalize.includes("actual_cost_exceeded_reservation") &&
     finalize.includes("update public.ai_feature_global_controls") &&
     finalize.includes("update public.company_ai_feature_entitlements") &&
