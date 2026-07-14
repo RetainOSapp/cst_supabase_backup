@@ -163,7 +163,11 @@ export async function handleBeaconChat({
       progress.costUncertain = true;
     }
     thrown = error;
-    outcome = error instanceof BeaconError ? error.code : "error";
+    outcome = error instanceof BeaconError && error.category.startsWith("provider_")
+      ? error.category
+      : error instanceof BeaconError
+        ? error.code
+        : "error";
   } finally {
     if (reservationId) {
       try {

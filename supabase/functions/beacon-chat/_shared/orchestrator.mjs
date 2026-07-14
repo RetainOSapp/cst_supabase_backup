@@ -56,12 +56,15 @@ export function sanitizeAnswer(raw) {
 
 function providerFailure(error) {
   if (!(error instanceof ProviderError)) return error;
+  const diagnosticCategory = error.status > 0
+    ? `${error.category}_${error.status}`
+    : error.category;
   if (error.category === "provider_timeout") {
     return new BeaconError(
       "provider_timeout",
       504,
       "Beacon took too long to respond. Please try again.",
-      { category: error.category, costUncertain: error.costUncertain },
+      { category: diagnosticCategory, costUncertain: error.costUncertain },
     );
   }
   if (error.category === "provider_rate_limited") {
@@ -69,14 +72,14 @@ function providerFailure(error) {
       "provider_busy",
       503,
       "Beacon is temporarily busy. Please try again shortly.",
-      { category: error.category, costUncertain: error.costUncertain },
+      { category: diagnosticCategory, costUncertain: error.costUncertain },
     );
   }
   return new BeaconError(
     "provider_unavailable",
     503,
     "Beacon is temporarily unavailable.",
-    { category: error.category, costUncertain: error.costUncertain },
+    { category: diagnosticCategory, costUncertain: error.costUncertain },
   );
 }
 

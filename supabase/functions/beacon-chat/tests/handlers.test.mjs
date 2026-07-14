@@ -226,7 +226,7 @@ test("chat finalizes a reservation after a provider failure", async () => {
   );
   const finalize = calls.find((entry) => entry.name === SQL_CONTRACT.serviceRpcs.finalizeUsage);
   assert.ok(finalize);
-  assert.equal(finalize.args.p_outcome, "provider_unavailable");
+  assert.equal(finalize.args.p_outcome, "provider_unavailable_500");
   assert.equal(finalize.args.p_input_tokens, 0);
   assert.equal(finalize.args.p_cost_uncertain, false);
 });
@@ -256,7 +256,7 @@ test("ambiguous dispatched provider work consumes the conservative reservation",
   );
   const finalize = calls.find((entry) => entry.name === SQL_CONTRACT.serviceRpcs.finalizeUsage);
   assert.ok(finalize);
-  assert.equal(finalize.args.p_outcome, "provider_unavailable");
+  assert.equal(finalize.args.p_outcome, "provider_network_error");
   assert.equal(finalize.args.p_estimated_cost_micros, 0);
   assert.equal(finalize.args.p_cost_uncertain, true);
 });
