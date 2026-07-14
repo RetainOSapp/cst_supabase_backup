@@ -11,6 +11,7 @@ const migrationNames = [
   "20260714014000_beacon_assignment_readiness_active_csm.sql",
   "20260714015000_beacon_admin_feature_conflict_fix.sql",
   "20260714016000_beacon_role_controls_and_aggregate_cost.sql",
+  "20260714017000_beacon_nano_price_lineage.sql",
 ];
 
 function read(relativePath) {
@@ -36,6 +37,7 @@ const reads = migrations[migrationNames[3]];
 const readinessCorrection = migrations[migrationNames[4]];
 const adminConflictCorrection = migrations[migrationNames[5]];
 const roleCostCorrection = migrations[migrationNames[6]];
+const nanoPriceLineage = migrations[migrationNames[7]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
@@ -342,8 +344,12 @@ check(
 );
 check(
   "pinned price reservation and actual-cost anomaly pause fail closed",
-  reserve.includes("gpt-5.4-mini-2026-03-17-2026-07-13") &&
-    finalize.includes("p_model <> 'gpt-5.4-mini-2026-03-17'") &&
+  allSql.includes("gpt-5.4-mini-2026-03-17-2026-07-13") &&
+    nanoPriceLineage.includes("gpt-5.4-nano-2026-03-17-2026-07-14") &&
+    nanoPriceLineage.includes("Usage finalization model price lineage is invalid") &&
+    nanoPriceLineage.includes("p_estimated_cost_micros <> (case p_model") &&
+    nanoPriceLineage.includes("greatest(p_input_tokens - p_cached_input_tokens, 0) * 0.2") &&
+    nanoPriceLineage.includes("case p_model") &&
     finalize.includes("actual_cost_exceeded_reservation") &&
     finalize.includes("update public.ai_feature_global_controls") &&
     finalize.includes("update public.company_ai_feature_entitlements") &&

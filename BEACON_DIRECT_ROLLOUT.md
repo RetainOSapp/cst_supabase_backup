@@ -223,3 +223,9 @@ RetainOS reads, writes, or integrations.
 - Hard-budget usage now sums `actual_cost_micros` and rounds once to cents. Existing 10,863 micros therefore consume 2 cents, not six per-request rounded cents.
 - GPT-5.4 nano is the Ethical Scaling evaluation model. GPT-5.4 mini remains the pinned rollback model; switching back requires only a source redeploy, not a database change.
 - Local evidence: database 62/62, Edge 37/37, frontend 26/26, production build pass. Nano conversation quality and real Director/Support/CSM/Viewer account QA remain required before Moves Method is considered.
+
+## Nano accounting lineage
+
+- Applied reversible `20260714017000_beacon_nano_price_lineage.sql`; SHA-256 `237f8084c17d278cb4991c6f132e6e46fcf350f15a0b46127c22abf2204105d5`.
+- The finalizer accepts only the pinned mini and nano IDs, recomputes expected micro-cost from trusted provider token counts using the reviewed price card, rejects mismatches, and records the model-specific immutable price lineage.
+- Mini stayed active while the migration applied. `beacon-chat` moved to nano only after DB 65/65 and Edge 37/37 passed. Mini remains the immediate source rollback; Moves Method remains disabled.
