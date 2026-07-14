@@ -63,6 +63,18 @@ function nullableDays(value) {
   return value;
 }
 
+function nullableRiskStates(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) {
+    throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+  }
+  const unique = [...new Set(value)];
+  if (unique.length !== value.length || unique.some((state) => !["red", "yellow"].includes(state))) {
+    throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+  }
+  return unique;
+}
+
 function actorBoundArgs(context) {
   if (
     !isUuid(context.companyId) ||
@@ -105,6 +117,7 @@ export const TOOL_DISPATCH = Object.freeze({
         "csmName",
         "nameFragment",
         "nextContactDays",
+        "riskStates",
         "sort",
         "limit",
       ];
@@ -115,6 +128,13 @@ export const TOOL_DISPATCH = Object.freeze({
       const healthDimension = nullableEnum(args.healthDimension, HEALTH_DIMENSIONS, "health_dimension");
       const healthState = nullableEnum(args.healthState, HEALTH_STATES, "health_state");
       if ((healthDimension === null) !== (healthState === null)) {
+        throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+      }
+      const riskStates = nullableRiskStates(args.riskStates);
+      if (riskStates !== null && healthDimension !== null) {
+        throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
+      }
+      if (args.csmMemberId !== null && args.csmName !== null) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
       const sort = nullableEnum(args.sort, CLIENT_SORTS, "sort");
@@ -129,6 +149,7 @@ export const TOOL_DISPATCH = Object.freeze({
         csmName: nullableExactName(args.csmName, "csm_name"),
         nameFragment: nullableName(args.nameFragment),
         nextContactDays: nullableDays(args.nextContactDays),
+        riskStates,
         sort,
         limit: limit(args.limit),
       };
@@ -143,6 +164,7 @@ export const TOOL_DISPATCH = Object.freeze({
         p_csm_name: args.csmName,
         p_name_fragment: args.nameFragment,
         p_next_contact_days: args.nextContactDays,
+        p_risk_states: args.riskStates,
         p_sort: args.sort,
         p_limit: args.limit,
       };
@@ -225,23 +247,28 @@ export const TOOL_DISPATCH = Object.freeze({
   get_client_brief: Object.freeze({
     rpc: SQL_CONTRACT.userRpcs.get_client_brief,
     validate(args) {
-      assertNoUnexpectedKeys(args, ["clientId", "clientName", "csmName"]);
-      if (["clientId", "clientName", "csmName"].some((key) => !(key in args))) {
+      assertNoUnexpectedKeys(args, ["clientId", "clientName", "programStatus", "csmName"]);
+      if (["clientId", "clientName", "programStatus", "csmName"].some((key) => !(key in args))) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
       const clientId = nullableUuid(args.clientId);
       const clientName = nullableExactName(args.clientName, "client_name");
+      const programStatus = nullableEnum(args.programStatus, PROGRAM_STATUSES, "program_status");
       const csmName = nullableExactName(args.csmName, "csm_name");
-      if ((clientId === null) === (clientName === null) || (clientId !== null && csmName !== null)) {
+      if (
+        (clientId === null) === (clientName === null) ||
+        (clientId !== null && (programStatus !== null || csmName !== null))
+      ) {
         throw new BeaconError("tool_schema_denied", 502, "Beacon could not complete that request.");
       }
-      return { clientId, clientName, csmName };
+      return { clientId, clientName, programStatus, csmName };
     },
     rpcArgs(context, args) {
       return {
         ...actorBoundArgs(context),
         p_client_id: args.clientId,
         p_client_name: args.clientName,
+        p_program_status: args.programStatus,
         p_csm_name: args.csmName,
       };
     },

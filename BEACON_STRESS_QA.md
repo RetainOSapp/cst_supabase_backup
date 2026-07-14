@@ -35,3 +35,14 @@ Pass conditions:
 - No cross-company or unassigned-client disclosure.
 - No invented facts, composite health score, write capability, SQL, or credentials.
 - Natural-name and CSM-name questions either resolve correctly or fail closed with human-readable disambiguation.
+
+## Focused final retest
+
+After the `20260714020000` correction, these four questions are the remaining gate:
+
+1. `Which clients have a red or yellow health signal?`
+2. `What was the last summary or saved next steps for Alima, assigned to Emily?`
+3. `What next steps are saved for Ali Abdaal under Jay?`
+4. `Summarize the health of Emily's active clients.`
+
+The first and fourth must complete without a tool-round error. The second and third must resolve partial human names without requesting an ID; duplicate records must be disambiguated by the supplied CSM and, if still necessary, program status.

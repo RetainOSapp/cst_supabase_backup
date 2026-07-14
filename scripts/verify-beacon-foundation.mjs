@@ -14,6 +14,7 @@ const migrationNames = [
   "20260714017000_beacon_nano_price_lineage.sql",
   "20260714018000_beacon_reservation_model_binding.sql",
   "20260714019000_beacon_natural_language_queries.sql",
+  "20260714020000_beacon_natural_query_filters.sql",
 ];
 
 function read(relativePath) {
@@ -42,6 +43,7 @@ const roleCostCorrection = migrations[migrationNames[6]];
 const nanoPriceLineage = migrations[migrationNames[7]];
 const reservationModelBinding = migrations[migrationNames[8]];
 const naturalLanguageQueries = migrations[migrationNames[9]];
+const naturalQueryFilters = migrations[migrationNames[10]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
@@ -440,6 +442,19 @@ check(
     toolSource.includes("p_csm_name: args.csmName") &&
     toolSource.includes("p_next_contact_days: args.nextContactDays") &&
     contracts.includes('maximum: 365'),
+);
+check(
+  "additive natural query overloads uniquely resolve partial names and combine bounded health risk states",
+  functionBody(naturalQueryFilters, "beacon_list_clients").includes("p_risk_states text[]") &&
+    functionBody(naturalQueryFilters, "beacon_list_clients").includes("p_risk_states <@ array['red', 'yellow']::text[]") &&
+    functionBody(naturalQueryFilters, "beacon_list_clients").includes("count(*) over () as match_count") &&
+    functionBody(naturalQueryFilters, "beacon_get_client_brief").includes("p_program_status text") &&
+    functionBody(naturalQueryFilters, "beacon_get_client_brief").includes("position(lower(btrim(p_client_name))") &&
+    functionBody(naturalQueryFilters, "beacon_get_client_brief").includes("where candidate.match_count = 1") &&
+    naturalQueryFilters.includes("from public, anon, authenticated") &&
+    naturalQueryFilters.includes("to service_role") &&
+    toolSource.includes("p_risk_states: args.riskStates") &&
+    toolSource.includes("p_program_status: args.programStatus"),
 );
 check(
   "canonical retention uses app-owned history only",

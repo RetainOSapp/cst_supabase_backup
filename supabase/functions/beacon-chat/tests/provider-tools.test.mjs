@@ -239,6 +239,7 @@ test("list_clients forwards only bounded exact CSM and upcoming-contact filters"
       csmName: "  Ada Lovelace  ",
       nameFragment: null,
       nextContactDays: 30,
+      riskStates: null,
       sort: "name_asc",
       limit: 25,
     }),
@@ -260,8 +261,52 @@ test("list_clients forwards only bounded exact CSM and upcoming-contact filters"
         csmName: null,
         nameFragment: null,
         nextContactDays: 366,
+        riskStates: null,
         sort: "name_asc",
         limit: 25,
+      }),
+    }),
+    (error) => error.code === "tool_schema_denied",
+  );
+});
+
+test("list_clients forwards combined risk states and rejects mixing them with one dimension", async () => {
+  let called;
+  const base = {
+    programStatus: null,
+    healthDimension: null,
+    healthState: null,
+    csmMemberId: null,
+    csmName: "Ada Lovelace",
+    nameFragment: null,
+    nextContactDays: null,
+    riskStates: ["red", "yellow"],
+    sort: "health_risk_first",
+    limit: 25,
+  };
+  await executeTool({
+    serviceClient: {
+      rpc: async (name, args) => {
+        called = { name, args };
+        return { data: [], error: null };
+      },
+    },
+    context: CONTEXT,
+    toolName: "list_clients",
+    rawArguments: JSON.stringify(base),
+  });
+  assert.equal(called.name, "beacon_list_clients");
+  assert.deepEqual(called.args.p_risk_states, ["red", "yellow"]);
+  assert.equal(called.args.p_csm_name, "Ada Lovelace");
+  await assert.rejects(
+    () => executeTool({
+      serviceClient: { rpc: async () => ({ data: [], error: null }) },
+      context: CONTEXT,
+      toolName: "list_clients",
+      rawArguments: JSON.stringify({
+        ...base,
+        healthDimension: "success",
+        healthState: "red",
       }),
     }),
     (error) => error.code === "tool_schema_denied",
@@ -283,18 +328,25 @@ test("client brief accepts UUID or unambiguous natural name, never both", async 
     rawArguments: JSON.stringify({
       clientId: null,
       clientName: "  Acme Coaching  ",
+      programStatus: null,
       csmName: "Ada Lovelace",
     }),
   });
   assert.equal(called.name, "beacon_get_client_brief");
   assert.equal(called.args.p_client_name, "Acme Coaching");
+  assert.equal(called.args.p_program_status, null);
   assert.equal(called.args.p_csm_name, "Ada Lovelace");
   await assert.rejects(
     () => executeTool({
       serviceClient,
       context: CONTEXT,
       toolName: "get_client_brief",
-      rawArguments: JSON.stringify({ clientId: COMPANY, clientName: "Acme", csmName: null }),
+      rawArguments: JSON.stringify({
+        clientId: COMPANY,
+        clientName: "Acme",
+        programStatus: null,
+        csmName: null,
+      }),
     }),
     (error) => error.code === "tool_schema_denied",
   );
@@ -427,6 +479,12 @@ test("system instructions require authoritative aggregates and human-readable am
   assert.match(SYSTEM_INSTRUCTIONS, /Never reveal or ask the user for UUIDs/);
   assert.match(SYSTEM_INSTRUCTIONS, /client name, business name, program status, or assigned CSM/);
   assert.match(SYSTEM_INSTRUCTIONS, /server supplies authorized structured links separately/);
+  assert.match(SYSTEM_INSTRUCTIONS, /partial human client name/);
+  assert.match(SYSTEM_INSTRUCTIONS, /list_clients lookup with nameFragment/);
+  assert.match(SYSTEM_INSTRUCTIONS, /list_csm_books is only workload context and is never sufficient by itself/);
+  assert.match(SYSTEM_INSTRUCTIONS, /list_clients filtered by that human-readable CSM name/);
+  assert.match(SYSTEM_INSTRUCTIONS, /riskStates set to \["red", "yellow"\]/);
+  assert.match(SYSTEM_INSTRUCTIONS, /Do not answer a combined-risk question from only one health dimension/);
 });
 
 test("answer sanitizer removes unsupported bold markers from plain text", () => {
