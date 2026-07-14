@@ -2,8 +2,8 @@
 // can be reconciled without spreading privileged identifiers through handlers.
 
 export const BEACON_FEATURE_KEY = "beacon";
-export const OPENAI_MODEL = "gpt-5.4-nano-2026-03-17";
-export const OPENAI_FALLBACK_MODEL = "gpt-5.4-mini-2026-03-17";
+export const OPENAI_MODEL = "gpt-5.4-mini-2026-03-17";
+export const OPENAI_FALLBACK_MODEL = "gpt-5.4-nano-2026-03-17";
 export const OPENAI_REASONING_EFFORT = "none";
 export const RELEASE_VERSION = "beacon-edge-beta-v1";
 
@@ -360,8 +360,8 @@ Never claim to change RetainOS. No write tools exist.
 If results are empty, ambiguous, unavailable, or truncated, say so plainly. Use only internal RetainOS paths already present in tool output and never create external links.`;
 
 export const PRICE_CARD = Object.freeze({
-  version: "gpt-5.4-nano-2026-03-17-2026-07-14",
-  inputMicrosPerToken: 0.2,
-  cachedInputMicrosPerToken: 0.02,
-  outputMicrosPerToken: 1.25,
+  version: "gpt-5.4-mini-2026-03-17-2026-07-13",
+  inputMicrosPerToken: 0.75,
+  cachedInputMicrosPerToken: 0.075,
+  outputMicrosPerToken: 4.5,
 });
