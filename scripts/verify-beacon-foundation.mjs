@@ -15,6 +15,7 @@ const migrationNames = [
   "20260714018000_beacon_reservation_model_binding.sql",
   "20260714019000_beacon_natural_language_queries.sql",
   "20260714020000_beacon_natural_query_filters.sql",
+  "20260714021000_beacon_pilot_daily_limit.sql",
 ];
 
 function read(relativePath) {
@@ -44,6 +45,7 @@ const nanoPriceLineage = migrations[migrationNames[7]];
 const reservationModelBinding = migrations[migrationNames[8]];
 const naturalLanguageQueries = migrations[migrationNames[9]];
 const naturalQueryFilters = migrations[migrationNames[10]];
+const pilotDailyLimit = migrations[migrationNames[11]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");

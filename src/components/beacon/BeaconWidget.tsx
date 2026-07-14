@@ -109,7 +109,14 @@ function userFacingError(error: unknown) {
   if (!(error instanceof BeaconApiError)) {
     return "Beacon could not complete that request. Please try again.";
   }
-  if (error.code === "rate_limited") {
+  if ([
+    "rate_limited",
+    "actor_concurrency_limited",
+    "actor_minute_limited",
+    "actor_daily_limited",
+    "company_minute_limited",
+    "company_daily_limited",
+  ].includes(error.code)) {
     return error.retryAfterSeconds
       ? `Beacon is receiving a lot of requests. Try again in ${error.retryAfterSeconds} seconds.`
       : "Beacon is receiving a lot of requests. Please try again shortly.";
