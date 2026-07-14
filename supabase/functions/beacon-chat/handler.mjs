@@ -43,12 +43,13 @@ function accessError(reasonCode) {
   );
 }
 
-async function safetyIdentifier(actorId, companyId) {
+export async function safetyIdentifier(actorId, companyId) {
   const bytes = new TextEncoder().encode(`beacon:${actorId}:${companyId}`);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return `beacon_${Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")}`;
+    .join("")
+    .slice(0, 56)}`;
 }
 
 function inputCharacters(request) {

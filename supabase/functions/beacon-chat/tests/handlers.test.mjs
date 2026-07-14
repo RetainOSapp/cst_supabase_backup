@@ -5,12 +5,24 @@ import { handleBeaconAccess } from "../../beacon-access/handler.mjs";
 import { handleManageAiFeature } from "../../manage-ai-feature-entitlement/handler.mjs";
 import { SQL_CONTRACT } from "../_shared/contracts.mjs";
 import { ProviderError } from "../_shared/provider.mjs";
-import { handleBeaconChat } from "../handler.mjs";
+import { handleBeaconChat, safetyIdentifier } from "../handler.mjs";
 
 const COMPANY = "11111111-1111-4111-8111-111111111111";
 const ACTOR = "22222222-2222-4222-8222-222222222222";
 const MEMBER = "33333333-3333-4333-8333-333333333333";
 const RESERVATION = "44444444-4444-4444-8444-444444444444";
+
+test("safety identifier is stable, bounded, and contains no raw identity", async () => {
+  const first = await safetyIdentifier(ACTOR, COMPANY);
+  const repeated = await safetyIdentifier(ACTOR, COMPANY);
+  const otherCompany = await safetyIdentifier(ACTOR, RESERVATION);
+  assert.equal(first, repeated);
+  assert.notEqual(first, otherCompany);
+  assert.equal(first.length, 63);
+  assert.match(first, /^beacon_[a-f0-9]{56}$/);
+  assert.equal(first.includes(ACTOR), false);
+  assert.equal(first.includes(COMPANY), false);
+});
 
 function serviceClient({
   role = "director",
