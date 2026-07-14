@@ -3,11 +3,13 @@ import {
   BeaconApiError,
   listManagedAiFeatures,
   updateManagedAiFeature,
+  updateManagedAiFeatureAccess,
   type AiFeatureAllowance,
   type AiFeatureMeterType,
   type AiFeaturePeriodType,
   type BeaconFeatureStatus,
   type ManagedAiFeature,
+  type BeaconConfigurableRole,
 } from "../../lib/beaconApi.ts";
 
 const FEATURE_COPY: Record<string, { label: string; description: string }> = {
@@ -43,6 +45,16 @@ const METER_OPTIONS: { value: AiFeatureMeterType; label: string }[] = [
 const PERIOD_OPTIONS: { value: AiFeaturePeriodType; label: string }[] = [
   { value: "one_time", label: "One-time pilot" },
   { value: "monthly", label: "Monthly" },
+];
+
+const BEACON_ROLE_OPTIONS: {
+  value: BeaconConfigurableRole;
+  label: string;
+  detail: string;
+}[] = [
+  { value: "director", label: "Director", detail: "All operational company data." },
+  { value: "support", label: "Support", detail: "Operational data without sensitive configuration." },
+  { value: "csm", label: "CSM", detail: "Only assigned or verified historically assigned clients." },
 ];
 
 function defaultAllowance(meterType: AiFeatureMeterType): AiFeatureAllowance {
@@ -247,7 +259,9 @@ function AiFeatureCard({
   onUpdated: (feature: ManagedAiFeature) => void;
 }) {
   const [allowances, setAllowances] = useState<AiFeatureAllowance[]>(feature.allowances);
+  const [allowedRoles, setAllowedRoles] = useState<BeaconConfigurableRole[]>(feature.allowedRoles);
   const [saving, setSaving] = useState(false);
+  const [savingAccess, setSavingAccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const copy = featureCopy(feature);
@@ -265,6 +279,7 @@ function AiFeatureCard({
   )?.value;
 
   useEffect(() => setAllowances(feature.allowances), [feature]);
+  useEffect(() => setAllowedRoles(feature.allowedRoles), [feature]);
 
   if (!isReleased) {
     return (
@@ -305,12 +320,31 @@ function AiFeatureCard({
         status,
         allowances,
       });
-      onUpdated(result.feature);
+      onUpdated({ ...result.feature, allowedRoles: feature.allowedRoles });
       setSuccess(`${copy.label} was updated.`);
     } catch (caughtError) {
       setError(errorMessage(caughtError));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveAccess() {
+    setSavingAccess(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await updateManagedAiFeatureAccess({
+        companyId,
+        featureKey: "beacon",
+        allowedRoles,
+      });
+      onUpdated({ ...feature, allowedRoles: result.allowedRoles });
+      setSuccess("Beacon role access was updated.");
+    } catch (caughtError) {
+      setError(errorMessage(caughtError));
+    } finally {
+      setSavingAccess(false);
     }
   }
 
@@ -325,6 +359,44 @@ function AiFeatureCard({
           {feature.status}
         </span>
       </div>
+
+      <fieldset className="mt-4 rounded-xl border border-[#d6eafb] bg-[#f6fbff] p-4">
+        <legend className="px-1 text-xs font-bold text-[#162b3e]">Who can access Beacon</legend>
+        <p className="mb-3 text-[11px] leading-5 text-[#667085]">
+          RetainOS SuperAdmins always retain access. Viewer access is unavailable.
+          These choices are enforced again by the server on every request.
+        </p>
+        <label className="flex items-start gap-3 rounded-lg border border-[#e4e9f0] bg-white px-3 py-2.5 opacity-70">
+          <input type="checkbox" checked disabled className="mt-0.5" />
+          <span><span className="block text-xs font-bold text-[#162b3e]">RetainOS SuperAdmin</span><span className="text-[10px] text-[#667085]">Always enabled for rollout and rollback control.</span></span>
+        </label>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          {BEACON_ROLE_OPTIONS.map((option) => (
+            <label key={option.value} className="flex items-start gap-2 rounded-lg border border-[#e4e9f0] bg-white px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={allowedRoles.includes(option.value)}
+                disabled={savingAccess}
+                onChange={(event) => setAllowedRoles((current) =>
+                  event.target.checked
+                    ? [...current, option.value]
+                    : current.filter((role) => role !== option.value)
+                )}
+                className="mt-0.5"
+              />
+              <span><span className="block text-xs font-bold text-[#162b3e]">{option.label}</span><span className="text-[10px] leading-4 text-[#667085]">{option.detail}</span></span>
+            </label>
+          ))}
+        </div>
+        <button
+          type="button"
+          disabled={savingAccess}
+          onClick={() => void saveAccess()}
+          className="retainos-button-secondary mt-3"
+        >
+          {savingAccess ? "Saving access…" : "Save role access"}
+        </button>
+      </fieldset>
 
       <div className="mt-4 space-y-3">
         {allowances.map((allowance, index) => (

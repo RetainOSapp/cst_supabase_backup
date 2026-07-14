@@ -66,6 +66,17 @@ export async function resolveAccessContext({
     throw new BeaconError("access_denied", 403, "Beacon access is not available.");
   }
 
+  const roleAccess = await rpc(
+    serviceClient,
+    SQL_CONTRACT.serviceRpcs.roleAccessAllowed,
+    {
+      p_company_id: row.company_id,
+      p_feature_key: BEACON_FEATURE_KEY,
+      p_actor_role: row.role,
+    },
+    "Beacon role access could not be verified.",
+  );
+
   return {
     companyId: row.company_id,
     companyLegacyId:
@@ -73,6 +84,7 @@ export async function resolveAccessContext({
     role: row.role,
     memberId: isUuid(row.member_id) ? row.member_id : null,
     csmAssignmentLedgerReady: row.csm_assignment_ledger_ready === true,
+    roleAccessAllowed: roleAccess === true,
   };
 }
 
@@ -138,6 +150,9 @@ export function accessDecision(context, gate) {
 }
 
 export function authorizationDecision(context) {
+  if (context.roleAccessAllowed !== true) {
+    return { allowed: false, reasonCode: "role_not_allowed" };
+  }
   if (context.role === "viewer") {
     return { allowed: false, reasonCode: "role_not_allowed" };
   }
@@ -323,5 +338,32 @@ export async function updateFeatureCard(serviceClient, context, actor, request) 
       })),
     },
     "AI feature settings could not be updated.",
+  );
+}
+
+export async function getFeatureRoleAccess(serviceClient, context, actor) {
+  return rpc(
+    serviceClient,
+    SQL_CONTRACT.serviceRpcs.adminGetFeatureAccess,
+    {
+      p_company_id: context.companyId,
+      p_actor_auth_user_id: actor.id,
+      p_feature_key: BEACON_FEATURE_KEY,
+    },
+    "AI feature role access could not be loaded.",
+  );
+}
+
+export async function updateFeatureRoleAccess(serviceClient, context, actor, request) {
+  return rpc(
+    serviceClient,
+    SQL_CONTRACT.serviceRpcs.adminUpdateFeatureAccess,
+    {
+      p_company_id: context.companyId,
+      p_actor_auth_user_id: actor.id,
+      p_feature_key: request.featureKey,
+      p_allowed_roles: request.allowedRoles,
+    },
+    "AI feature role access could not be updated.",
   );
 }

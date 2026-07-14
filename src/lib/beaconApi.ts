@@ -3,6 +3,7 @@ import { supabase } from "./supabase.ts";
 export type BeaconAuthorizedRole = "super_admin" | "director" | "support" | "csm";
 export type BeaconResolvedRole = BeaconAuthorizedRole | "viewer";
 export type BeaconFeatureStatus = "disabled" | "pilot" | "enabled" | "paused";
+export type BeaconConfigurableRole = "director" | "support" | "csm";
 
 export interface BeaconAccessLimits {
   maxInputCharacters?: number;
@@ -83,6 +84,7 @@ export interface ManagedAiFeature {
   description?: string;
   status: BeaconFeatureStatus;
   allowances: AiFeatureAllowance[];
+  allowedRoles: BeaconConfigurableRole[];
   enabledAt?: string | null;
   pausedAt?: string | null;
   updatedAt?: string | null;
@@ -220,6 +222,15 @@ function parseManagedAiFeature(value: unknown): ManagedAiFeature {
     throw malformedResponse();
   }
   const featureKey = boundedString(feature.featureKey, 100, true) as AiFeatureKey;
+  const rawAllowedRoles = feature.allowedRoles ?? [];
+  if (
+    !Array.isArray(rawAllowedRoles) ||
+    rawAllowedRoles.length > 3 ||
+    new Set(rawAllowedRoles).size !== rawAllowedRoles.length ||
+    rawAllowedRoles.some((role) => !["director", "support", "csm"].includes(String(role)))
+  ) {
+    throw malformedResponse();
+  }
   if (
     featureKey === "beacon" &&
     (allowances.length > 1 ||
@@ -233,6 +244,7 @@ function parseManagedAiFeature(value: unknown): ManagedAiFeature {
     description: boundedString(feature.description, 500),
     status: status as BeaconFeatureStatus,
     allowances,
+    allowedRoles: rawAllowedRoles as BeaconConfigurableRole[],
     enabledAt: boundedString(feature.enabledAt, 60) ?? null,
     pausedAt: boundedString(feature.pausedAt, 60) ?? null,
     updatedAt: boundedString(feature.updatedAt, 60) ?? null,
@@ -452,4 +464,28 @@ export async function updateManagedAiFeature(input: {
   const parsed = parseAiFeatureUpdate(response);
   if (parsed.feature.featureKey !== input.featureKey) throw malformedResponse();
   return parsed;
+}
+
+export async function updateManagedAiFeatureAccess(input: {
+  companyId: string;
+  featureKey: "beacon";
+  allowedRoles: BeaconConfigurableRole[];
+}) {
+  const response = await invokeSignedFunction<unknown>(
+    "manage-ai-feature-entitlement",
+    { action: "update_access", ...input },
+  );
+  const body = objectValue(response);
+  if (!body || body.featureKey !== "beacon" || !Array.isArray(body.allowedRoles)) {
+    throw malformedResponse();
+  }
+  const allowedRoles = body.allowedRoles.map(String);
+  if (
+    allowedRoles.length > 3 ||
+    new Set(allowedRoles).size !== allowedRoles.length ||
+    allowedRoles.some((role) => !["director", "support", "csm"].includes(role))
+  ) {
+    throw malformedResponse();
+  }
+  return { featureKey: "beacon" as const, allowedRoles: allowedRoles as BeaconConfigurableRole[] };
 }

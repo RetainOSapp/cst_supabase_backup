@@ -142,7 +142,7 @@ function parseAllowance(raw) {
 }
 
 export function parseManageBody(raw) {
-  if (!isPlainObject(raw) || (raw.action !== "list" && raw.action !== "update")) {
+  if (!isPlainObject(raw) || !["list", "update", "update_access"].includes(raw.action)) {
     throw new BeaconError("invalid_request", 400, "Choose a valid AI feature action.");
   }
 
@@ -151,6 +151,31 @@ export function parseManageBody(raw) {
     return {
       action: "list",
       companyId: parseCompanySelector(raw.companyId),
+    };
+  }
+
+  if (raw.action === "update_access") {
+    assertExactKeys(
+      raw,
+      ["action", "companyId", "featureKey", "allowedRoles"],
+      "AI feature access request",
+    );
+    if (raw.featureKey !== "beacon" || !Array.isArray(raw.allowedRoles)) {
+      throw new BeaconError("invalid_request", 400, "Choose valid Beacon role access.");
+    }
+    const allowedRoles = raw.allowedRoles.map((role) => String(role));
+    if (
+      allowedRoles.length > 3 ||
+      new Set(allowedRoles).size !== allowedRoles.length ||
+      allowedRoles.some((role) => !["director", "support", "csm"].includes(role))
+    ) {
+      throw new BeaconError("invalid_request", 400, "Choose valid Beacon role access.");
+    }
+    return {
+      action: "update_access",
+      companyId: parseCompanySelector(raw.companyId),
+      featureKey: "beacon",
+      allowedRoles,
     };
   }
 

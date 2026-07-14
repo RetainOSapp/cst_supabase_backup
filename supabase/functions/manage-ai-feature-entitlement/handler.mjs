@@ -6,8 +6,10 @@ import {
 } from "../beacon-chat/_shared/contracts.mjs";
 import {
   listFeatureCards,
+  getFeatureRoleAccess,
   resolveAccessContext,
   updateFeatureCard,
+  updateFeatureRoleAccess,
 } from "../beacon-chat/_shared/database.mjs";
 import { BeaconError } from "../beacon-chat/_shared/errors.mjs";
 import { parseManageBody, isUuid } from "../beacon-chat/_shared/validation.mjs";
@@ -216,8 +218,25 @@ export async function handleManageAiFeature({
   });
 
   if (request.action === "list") {
-    const data = await listFeatureCards(serviceClient, context, actor);
-    const features = rows(data, "features").map(publicFeatureCard);
+    const [data, accessRoles] = await Promise.all([
+      listFeatureCards(serviceClient, context, actor),
+      getFeatureRoleAccess(serviceClient, context, actor),
+    ]);
+    if (
+      !Array.isArray(accessRoles) ||
+      accessRoles.some((role) => !["director", "support", "csm"].includes(role))
+    ) {
+      throw new BeaconError(
+        "feature_status_unavailable",
+        503,
+        "AI feature settings could not be loaded.",
+      );
+    }
+    const features = rows(data, "features").map(publicFeatureCard).map((feature) =>
+      feature.featureKey === "beacon"
+        ? { ...feature, allowedRoles: [...accessRoles] }
+        : feature
+    );
     if (new Set(features.map((item) => item.featureKey)).size !== features.length) {
       throw new BeaconError(
         "feature_status_unavailable",
@@ -226,6 +245,23 @@ export async function handleManageAiFeature({
       );
     }
     return { features };
+  }
+
+  if (request.action === "update_access") {
+    const allowedRoles = await updateFeatureRoleAccess(
+      serviceClient,
+      context,
+      actor,
+      request,
+    );
+    if (!Array.isArray(allowedRoles)) {
+      throw new BeaconError(
+        "feature_update_unavailable",
+        503,
+        "AI feature settings could not be updated.",
+      );
+    }
+    return { featureKey: request.featureKey, allowedRoles };
   }
 
   const data = await updateFeatureCard(serviceClient, context, actor, request);

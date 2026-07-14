@@ -143,6 +143,15 @@ const checks = [
       !aiFeatures.includes("feature.lastError"),
   ],
   [
+    "Beacon company-role controls are bounded in the browser and enforced through the signed management endpoint",
+    api.includes('export type BeaconConfigurableRole = "director" | "support" | "csm"') &&
+      api.includes('{ action: "update_access", ...input }') &&
+      api.includes('!["director", "support", "csm"].includes(role)') &&
+      aiFeatures.includes("RetainOS SuperAdmins always retain access") &&
+      aiFeatures.includes("Viewer access is unavailable") &&
+      aiFeatures.includes("updateManagedAiFeatureAccess"),
+  ],
+  [
     "structured links are restricted to an internal client-detail route",
     widget.includes(String.raw`^\/clients\/[A-Za-z0-9_-]+$`) &&
       widget.includes("(response.links ?? []).filter(safeClientLink)") &&

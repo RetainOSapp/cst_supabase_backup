@@ -214,3 +214,12 @@ The fastest rollback is configuration, not schema deletion:
 Only use the reverse-order SQL rollbacks if the additive database objects
 themselves cause a verified problem. Beacon being paused must not affect normal
 RetainOS reads, writes, or integrations.
+# 2026-07-14 Cost and role-access iteration
+
+- Applied `20260714016000_beacon_role_controls_and_aggregate_cost.sql` to the existing RetainOS project only; SHA-256 `25e842b4232636e79b36b82db06274483a0b4369923b327d056e24c005629435`.
+- Redeployed `beacon-access`, `beacon-chat`, and `manage-ai-feature-entitlement` with JWT verification preserved.
+- Ethical Scaling remains the only `pilot` entitlement with its one-time 2,500-cent allowance. Its initial configurable roles are Director, Support, and CSM. Moves Method has no entitlement.
+- SuperAdmin is always allowed for control/rollback; Viewer is always denied. The reservation RPC independently rechecks the company role gate.
+- Hard-budget usage now sums `actual_cost_micros` and rounds once to cents. Existing 10,863 micros therefore consume 2 cents, not six per-request rounded cents.
+- GPT-5.4 nano is the Ethical Scaling evaluation model. GPT-5.4 mini remains the pinned rollback model; switching back requires only a source redeploy, not a database change.
+- Local evidence: database 62/62, Edge 37/37, frontend 26/26, production build pass. Nano conversation quality and real Director/Support/CSM/Viewer account QA remain required before Moves Method is considered.

@@ -64,6 +64,9 @@ function serviceClient({
           error: null,
         };
       }
+      if (name === SQL_CONTRACT.serviceRpcs.roleAccessAllowed) {
+        return { data: role !== "viewer", error: null };
+      }
       if (name === SQL_CONTRACT.serviceRpcs.reserveUsage) {
         return { data: { accepted: true, reservation_id: RESERVATION }, error: null };
       }
@@ -75,6 +78,12 @@ function serviceClient({
       }
       if (name === SQL_CONTRACT.serviceRpcs.adminUpdateFeature) {
         return { data: featureData[0], error: null };
+      }
+      if (name === SQL_CONTRACT.serviceRpcs.adminGetFeatureAccess) {
+        return { data: ["director", "support", "csm"], error: null };
+      }
+      if (name === SQL_CONTRACT.serviceRpcs.adminUpdateFeatureAccess) {
+        return { data: args.p_allowed_roles, error: null };
       }
       if (Object.values(SQL_CONTRACT.userRpcs).includes(name)) {
         return { data: toolData, error: toolError };
@@ -159,6 +168,42 @@ test("all entitlement and authorization denials stop before quota and provider",
     assert.equal(providerCalls, 0, item.expected);
     assert.equal(reserveCalls, 0, item.expected);
   }
+});
+
+test("company role selection denial stops before entitlement, quota, and provider", async () => {
+  const calls = [];
+  let providerCalls = 0;
+  const client = serviceClient({
+    onRpc: (name) => calls.push(name),
+  });
+  const originalRpc = client.rpc;
+  client.rpc = async (name, args) => {
+    if (name === SQL_CONTRACT.serviceRpcs.roleAccessAllowed) {
+      calls.push(name);
+      return { data: false, error: null };
+    }
+    return originalRpc(name, args);
+  };
+
+  await assert.rejects(
+    () => handleBeaconChat({
+      body: { companyId: COMPANY, message: "Hello", history: [] },
+      token: "jwt",
+      requestId: "request-role-disabled",
+      serviceClient: client,
+      authenticate,
+      checkRegisteredSuperAdmin: notSuperAdmin,
+      providerFactory: () => {
+        providerCalls += 1;
+        return { createResponse: async () => ({ output: [] }) };
+      },
+      now: () => 1,
+    }),
+    (error) => error.code === "role_not_allowed",
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(calls.includes(SQL_CONTRACT.serviceRpcs.featureGate), false);
+  assert.equal(calls.includes(SQL_CONTRACT.serviceRpcs.reserveUsage), false);
 });
 
 test("chat reserves fixed quota before provider and finalizes metadata on success", async () => {
@@ -435,4 +480,33 @@ test("management update returns only the updated camelCase feature", async () =>
   });
   assert.deepEqual(Object.keys(result), ["feature"]);
   assert.equal(result.feature.featureKey, "beacon");
+});
+
+test("management lists and updates the exact configurable Beacon roles", async () => {
+  const feature = featureCard();
+  const client = serviceClient({ role: "super_admin", featureData: [feature] });
+  const authenticateSuperAdmin = async () => ({ id: ACTOR, email: "super@example.com" });
+  const listed = await handleManageAiFeature({
+    body: { action: "list", companyId: COMPANY },
+    token: "jwt",
+    serviceClient: client,
+    authenticateSuperAdmin,
+  });
+  assert.deepEqual(listed.features[0].allowedRoles, ["director", "support", "csm"]);
+
+  const updated = await handleManageAiFeature({
+    body: {
+      action: "update_access",
+      companyId: COMPANY,
+      featureKey: "beacon",
+      allowedRoles: ["director", "csm"],
+    },
+    token: "jwt",
+    serviceClient: client,
+    authenticateSuperAdmin,
+  });
+  assert.deepEqual(updated, {
+    featureKey: "beacon",
+    allowedRoles: ["director", "csm"],
+  });
 });

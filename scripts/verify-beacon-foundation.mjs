@@ -10,6 +10,7 @@ const migrationNames = [
   "20260714013000_beacon_phase_a_read_rpcs.sql",
   "20260714014000_beacon_assignment_readiness_active_csm.sql",
   "20260714015000_beacon_admin_feature_conflict_fix.sql",
+  "20260714016000_beacon_role_controls_and_aggregate_cost.sql",
 ];
 
 function read(relativePath) {
@@ -34,6 +35,7 @@ const service = migrations[migrationNames[2]];
 const reads = migrations[migrationNames[3]];
 const readinessCorrection = migrations[migrationNames[4]];
 const adminConflictCorrection = migrations[migrationNames[5]];
+const roleCostCorrection = migrations[migrationNames[6]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
@@ -219,6 +221,9 @@ const serviceRpcNames = [
   "beacon_finalize_usage",
   "beacon_admin_list_ai_features",
   "beacon_admin_update_ai_feature",
+  "beacon_role_access_allowed",
+  "beacon_admin_get_ai_feature_access",
+  "beacon_admin_update_ai_feature_access",
 ];
 const readRpcNames = [
   "beacon_company_metrics",
@@ -231,15 +236,15 @@ const readRpcNames = [
   "beacon_get_client_brief",
 ];
 check(
-  "Edge SQL_CONTRACT contains all 14 exact RPC names",
+  "Edge SQL_CONTRACT contains all 17 exact RPC names",
   [...serviceRpcNames, ...readRpcNames].every((name) =>
     contracts.includes(`"${name}"`)
   ),
 );
 check(
-  "database defines all 14 exact Edge RPC names",
+  "database defines all 17 exact Edge RPC names",
   serviceRpcNames.every((name) =>
-    service.includes(`create or replace function public.${name}`)
+    allSql.includes(`create or replace function public.${name}`)
   ) && readRpcNames.every((name) =>
     reads.includes(`create or replace function public.${name}`)
   ),
@@ -252,11 +257,30 @@ check(
 );
 check(
   "management RPCs independently require UUID-bound active SuperAdmin",
-  serviceRpcNames.slice(4).every((name) => {
-    const body = functionBody(service, name);
+  [
+    [service, "beacon_admin_list_ai_features"],
+    [service, "beacon_admin_update_ai_feature"],
+    [roleCostCorrection, "beacon_admin_get_ai_feature_access"],
+    [roleCostCorrection, "beacon_admin_update_ai_feature_access"],
+  ].every(([source, name]) => {
+    const body = functionBody(source, name);
     return body.includes("admin.auth_user_id = p_actor_auth_user_id") &&
       body.includes("admin.status = 'active'");
   }),
+);
+check(
+  "company role access is server-owned with SuperAdmin implicit and Viewer denied",
+  roleCostCorrection.includes("allowed_roles text[] not null") &&
+    roleCostCorrection.includes("when p_actor_role = 'super_admin' then true") &&
+    roleCostCorrection.includes("when p_actor_role = 'viewer' then false") &&
+    roleCostCorrection.includes("public.beacon_role_access_allowed(") &&
+    database.includes("roleAccessAllowed: roleAccess === true"),
+);
+check(
+  "commercial usage rounds aggregate provider micros instead of each request",
+  roleCostCorrection.includes("sum(event.actual_cost_micros)") &&
+    roleCostCorrection.includes("sum(reservation.reserved_cost_micros)") &&
+    !roleCostCorrection.includes("v_new_consumed constant text := 'select sum(event.actual_meter_value)'")
 );
 check(
   "management update versions and audits policy without accepting usage",
@@ -429,9 +453,14 @@ check(
     rollbacks[migrationNames[1]].includes(
       "drop table if exists public.client_assignment_intervals",
     ) &&
-    serviceRpcNames.every((name) =>
+    serviceRpcNames.slice(0, 6).every((name) =>
       rollbacks[migrationNames[2]].includes(`public.${name}`)
     ) &&
+    [
+      "beacon_role_access_allowed",
+      "beacon_admin_get_ai_feature_access",
+      "beacon_admin_update_ai_feature_access",
+    ].every((name) => rollbacks[migrationNames[6]].includes(`public.${name}`)) &&
     readRpcNames.every((name) =>
       rollbacks[migrationNames[3]].includes(`public.${name}`)
     ) &&

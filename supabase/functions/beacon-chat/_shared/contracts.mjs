@@ -2,7 +2,8 @@
 // can be reconciled without spreading privileged identifiers through handlers.
 
 export const BEACON_FEATURE_KEY = "beacon";
-export const OPENAI_MODEL = "gpt-5.4-mini-2026-03-17";
+export const OPENAI_MODEL = "gpt-5.4-nano-2026-03-17";
+export const OPENAI_FALLBACK_MODEL = "gpt-5.4-mini-2026-03-17";
 export const OPENAI_REASONING_EFFORT = "none";
 export const RELEASE_VERSION = "beacon-edge-beta-v1";
 
@@ -79,6 +80,9 @@ export const SQL_CONTRACT = Object.freeze({
     finalizeUsage: "beacon_finalize_usage",
     adminListFeatures: "beacon_admin_list_ai_features",
     adminUpdateFeature: "beacon_admin_update_ai_feature",
+    roleAccessAllowed: "beacon_role_access_allowed",
+    adminGetFeatureAccess: "beacon_admin_get_ai_feature_access",
+    adminUpdateFeatureAccess: "beacon_admin_update_ai_feature_access",
   }),
   userRpcs: Object.freeze({
     company_metrics: "beacon_company_metrics",
@@ -108,6 +112,8 @@ export const SQL_CONTRACT = Object.freeze({
 //   the selected feature's allowance policy and audits p_actor_auth_user_id.
 //   Phase 1 Beacon must enforce exactly one usd_cents allowance when nonempty;
 //   pilot/enabled requires it. Multi-meter reservation is not yet supported.
+// roleAccessAllowed and admin feature-access RPCs keep company role selection
+// server-owned. SuperAdmin is implicit and Viewer can never be enabled.
 // Every tool RPC is callable only by the Edge service role. The Edge layer adds
 // the authenticated actor UUID and canonical member UUID; SQL re-resolves that
 // identity and re-checks the app-owned company scope. Browsers cannot execute
@@ -354,8 +360,8 @@ Never claim to change RetainOS. No write tools exist.
 If results are empty, ambiguous, unavailable, or truncated, say so plainly. Use only internal RetainOS paths already present in tool output and never create external links.`;
 
 export const PRICE_CARD = Object.freeze({
-  version: "gpt-5.4-mini-2026-03-17-2026-07-13",
-  inputMicrosPerToken: 0.75,
-  cachedInputMicrosPerToken: 0.075,
-  outputMicrosPerToken: 4.5,
+  version: "gpt-5.4-nano-2026-03-17-2026-07-14",
+  inputMicrosPerToken: 0.2,
+  cachedInputMicrosPerToken: 0.02,
+  outputMicrosPerToken: 1.25,
 });
