@@ -23,6 +23,7 @@ Feature status belongs in `ROADMAP.md`; historical logs move verbatim to `MEMORY
   - `CONTRACT_BACKFILL_RENEWAL_PLAN.md`: contract/renewal planning.
   - `DASHBOARD_FORMULA_VALIDATION.md`: dashboard and CSM formula validation.
   - `CSV_BULK_IMPORT_EXPORT.md`: CSV import/export behavior.
+  - `PERFORMANCE_PROGRAM_RELEASABLE_PHASES.md`: measured four-phase performance program.
 - Closed/reference docs: search only when relevant, do not load by default:
   - `RETAINOS_RESOURCES_MIGRATION.md`
   - `PATHWAYS_MILESTONES_POLISH_PLAN.md`

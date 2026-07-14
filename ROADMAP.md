@@ -195,12 +195,19 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
 - `[ ]` `[priority: medium]` Security audit follow-up: unused index cleanup.
   - Source: `SECURITY_PERFORMANCE_AUDIT.md`.
   - Do not drop indexes in the security rollout. Revisit after enough production usage stats exist across migrated companies, then remove only confirmed-unused indexes with a measured rollback plan.
+  - 2026-07-13 planning correction: schedule through `PERFORMANCE_PROGRAM_RELEASABLE_PHASES.md`, not as an independent cleanup project.
 - `[ ]` `[priority: medium]` Security audit follow-up: deeper frontend/query refactors.
   - Source: `SECURITY_PERFORMANCE_AUDIT.md`.
   - Useful for speed and maintainability, but not required to close the main security holes. Target column-scoped reads, fewer wide `select("*")` calls, and repository-style data access after the security rollout is stable.
+  - 2026-07-13 planning correction: schedule through `PERFORMANCE_PROGRAM_RELEASABLE_PHASES.md`, beginning with measured Dashboard/Clients hot paths.
 - `[ ]` `[priority: medium]` Security audit follow-up: split monster page components.
   - Source: `SECURITY_PERFORMANCE_AUDIT.md`.
   - Large blast radius; keep out of the security fork. Later scope should break up `ClientDetail`, `Clients`, `SaasClientDetail`, and `Dashboard` into tab/feature components and hooks.
+  - 2026-07-13 planning correction: schedule incrementally through `PERFORMANCE_PROGRAM_RELEASABLE_PHASES.md`, never as a single rewrite.
+- `[ ]` `[priority: medium]` Performance program - independently releasable phases.
+  - Source of truth: `PERFORMANCE_PROGRAM_RELEASABLE_PHASES.md`.
+  - Four releases: baseline/route splitting; Dashboard/Clients data paths; Client Detail/Tasks/Daily Pulse data paths; measured index and component maintenance.
+  - Start after the secure Beacon rebuild or during a clear window between customer tickets and migration-critical work. Re-measure and QA each phase before starting the next.
 - `[~]` `[mixed]` Start write mode through controlled Edge Functions for first flows, then add direct RLS-backed writes only after policies are proven.
 - `[x]` Use Ethical Scaling as the first internal controlled pilot company.
   - Pilot schema/backfill/QA artifacts:
