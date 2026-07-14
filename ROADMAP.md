@@ -318,6 +318,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
 - `[x]` CRUD client contracts V1.
   - New Contract v1 is enabled for app-owned pilot/migrated clients through `manage-client-contract`.
   - Creates/edits/archives/deletes app-owned `client_contracts`, updates the app-owned client current contract summary, and writes history/audit events.
+  - 2026-07-14 MM template backfill: after Jay approved RetainOS/Zapier client creation time as the start-date rule, 90 current contracts were created from the enabled pathway templates (23 three-month, 38 six-month, 29 twelve-month). The backfill is idempotent via `scripts/backfill-mm-template-contracts.mjs`, records source/template metadata and a company audit event, and leaves Serina Ablett and Arana Karaka for manual pathway/contract handling.
   - 2026-06-15 local closeout adds Contract tab filters for Active, Old, Archived, and All; keeps the current contract summary visually separate from linked contract history.
   - 2026-07-04 Moves Method launch QA update: Director, Support, and assigned CSMs can manage contract rows for accessible clients; client current-contract summary sync now ignores archived/expired old rows.
   - Contract renewal prompt v1 is live for active clients whose contract ends within 30 days.
