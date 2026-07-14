@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { LIMITS, OPENAI_MODEL, SYSTEM_INSTRUCTIONS } from "../_shared/contracts.mjs";
+import { LIMITS, OPENAI_MODEL, OPENAI_TOOLS, SYSTEM_INSTRUCTIONS } from "../_shared/contracts.mjs";
 import { runBeaconTurn, sanitizeAnswer } from "../_shared/orchestrator.mjs";
 import { createOpenAIResponsesProvider } from "../_shared/provider.mjs";
 import { executeTool } from "../_shared/tools.mjs";
@@ -540,6 +540,11 @@ test("system instructions require authoritative aggregates and human-readable am
   assert.match(SYSTEM_INSTRUCTIONS, /never interpret active as front-end alone/);
   assert.match(SYSTEM_INSTRUCTIONS, /"under" or "managed by".*primary assignment/);
   assert.match(SYSTEM_INSTRUCTIONS, /generic "assigned to".*csmAssignment to "any"/);
+  assert.match(SYSTEM_INSTRUCTIONS, /must use get_client_brief before answering/);
+  assert.match(SYSTEM_INSTRUCTIONS, /continue to get_client_brief/);
+  assert.match(SYSTEM_INSTRUCTIONS, /Never claim those fields are missing or unavailable based only on list_clients/);
+  const listTool = OPENAI_TOOLS.find((tool) => tool.name === "list_clients");
+  assert.match(listTool.description, /never proves that a summary or saved next steps are absent/);
 });
 
 test("answer sanitizer removes unsupported bold markers from plain text", () => {
