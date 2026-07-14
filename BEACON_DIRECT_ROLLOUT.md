@@ -151,6 +151,19 @@ In AI Features, set Beacon to a one-time `$25.00` allowance and pilot status for
 Ethical Scaling. Leave Moves Method and every other company disabled. Then make
 the global Beacon control active.
 
+Enabled 2026-07-14. Ethical Scaling is the only Beacon entitlement, with status
+`pilot` and one active `usd_cents`/`one_time` hard allowance of 2,500 cents;
+warning thresholds are 75% and 90%. The global Beacon control is active at
+configuration version 2, while all other companies remain without an
+entitlement. Usage was zero immediately after enablement.
+
+The first enablement attempt exposed a PostgreSQL ambiguity in the management
+RPC's `ON CONFLICT` target and stopped before global activation. Narrow migration
+`20260714015000_beacon_admin_feature_conflict_fix` corrected the target by naming
+the existing entitlement primary-key constraint. It was applied with SHA-256
+`1b23bcff57d4a11419b78061a58db625aa6b33cc0d442979d9f35e3b7516e8d8`;
+the database verifier now passes 57/57.
+
 Run a short smoke pass using existing accounts:
 
 1. SuperAdmin/Director can ask a normal company question.

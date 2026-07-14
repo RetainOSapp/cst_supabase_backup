@@ -9,6 +9,7 @@ const migrationNames = [
   "20260714012000_beacon_service_rpcs.sql",
   "20260714013000_beacon_phase_a_read_rpcs.sql",
   "20260714014000_beacon_assignment_readiness_active_csm.sql",
+  "20260714015000_beacon_admin_feature_conflict_fix.sql",
 ];
 
 function read(relativePath) {
@@ -32,6 +33,7 @@ const assignments = migrations[migrationNames[1]];
 const service = migrations[migrationNames[2]];
 const reads = migrations[migrationNames[3]];
 const readinessCorrection = migrations[migrationNames[4]];
+const adminConflictCorrection = migrations[migrationNames[5]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
@@ -103,6 +105,15 @@ check(
     foundation.includes("status text not null default 'paused'") &&
     foundation.includes("('beacon', 'paused'") &&
     !/\bOPENAI_API_KEY\b|sk-[A-Za-z0-9_-]+/.test(allSql),
+);
+check(
+  "management RPC uses an unambiguous entitlement conflict target",
+  adminConflictCorrection.includes(
+    "on conflict on constraint company_ai_feature_entitlements_pkey do update",
+  ) &&
+    adminConflictCorrection.includes(
+      "public.beacon_admin_update_ai_feature(uuid,uuid,text,text,jsonb)",
+    ),
 );
 check(
   "meter vocabulary matches the Edge contract with no usd_micros drift",
