@@ -77,7 +77,7 @@ npx supabase functions deploy prepare-login --project-ref zjauqflzxzsbpnivzsct -
 - MM launch hotfixes through 2026-07-06 included task dismissal, contacted shortcut, contact cadence automation, legacy/current history visibility, history date/delete controls, secondary pathway no-milestone support, and dashboard KPI info privacy.
 - History edit/delete audit lives internally in `app_audit_events`; no user-facing audit log exists yet.
 - 2026-07-14 MM contract-template backfill: 90 Zapier-created clients with no current contract were matched exactly to enabled pathway templates and backfilled using their RetainOS/Zapier `created_at` as the start date (23 three-month, 38 six-month, 29 twelve-month). Each row is tagged `mm_pathway_template_zapier_intake_v1`, updates the current summary, and has a company audit record. Serina Ablett and Arana Karaka are intentionally unmatched/manual.
-- 2026-07-14 local routing fix awaiting deployment: Vercel SPA rewrite no longer excludes all dotted paths. Glide client/table IDs may contain dots, and refreshing those React routes otherwise returns Vercel `404 NOT_FOUND` before the app loads. Static Vite assets and `favicon.svg` remain excluded from the SPA fallback.
+- 2026-07-14 Vercel dotted-route fix is deployed in production: the SPA rewrite no longer excludes all dotted paths. Glide client/table IDs may contain dots, and refreshing those React routes otherwise returns Vercel `404 NOT_FOUND` before the app loads. Static Vite assets and `favicon.svg` remain excluded; direct production refresh of a dotted Client Detail URL returned 200. Await Adam browser confirmation.
 - Full feature state and remaining QA belong in `ROADMAP.md`, not here.
 
 ## Routing
