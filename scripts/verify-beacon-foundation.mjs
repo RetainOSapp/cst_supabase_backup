@@ -17,6 +17,7 @@ const migrationNames = [
   "20260714020000_beacon_natural_query_filters.sql",
   "20260714021000_beacon_pilot_daily_limit.sql",
   "20260714022000_beacon_active_assignment_semantics.sql",
+  "20260714023000_beacon_authorized_assignee_role_correction.sql",
 ];
 
 function read(relativePath) {
@@ -48,6 +49,7 @@ const naturalLanguageQueries = migrations[migrationNames[9]];
 const naturalQueryFilters = migrations[migrationNames[10]];
 const pilotDailyLimit = migrations[migrationNames[11]];
 const activeAssignmentSemantics = migrations[migrationNames[12]];
+const assigneeRoleCorrection = migrations[migrationNames[13]];
 const allSql = Object.values(migrations).join("\n");
 const contracts = read("supabase/functions/beacon-chat/_shared/contracts.mjs");
 const database = read("supabase/functions/beacon-chat/_shared/database.mjs");
@@ -472,6 +474,17 @@ check(
     activeAssignmentSemantics.includes("to service_role") &&
     toolSource.includes("p_active_only: args.activeOnly") &&
     toolSource.includes("p_csm_assignment: args.csmAssignment"),
+);
+check(
+  "partial assignees derive from actor-authorized assignments without account-role coupling",
+  occurrences(assigneeRoleCorrection, "eligible_assignees as") === 2 &&
+    occurrences(assigneeRoleCorrection, "public.beacon_authorized_client_ids(") >= 4 &&
+    assigneeRoleCorrection.includes("assigned_client.csm_team_member_id") &&
+    assigneeRoleCorrection.includes("assigned_client.csm_secondary_assignee_id") &&
+    assigneeRoleCorrection.includes("scope.actor_role <> 'csm' or member.id = scope.actor_member_id") &&
+    !assigneeRoleCorrection.includes("member.role = 'csm'") &&
+    assigneeRoleCorrection.includes("from public, anon, authenticated") &&
+    assigneeRoleCorrection.includes("to service_role"),
 );
 check(
   "canonical retention uses app-owned history only",

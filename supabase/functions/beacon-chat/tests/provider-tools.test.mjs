@@ -274,6 +274,36 @@ test("list_clients forwards only bounded exact CSM and upcoming-contact filters"
   );
 });
 
+test("assignee-name queries carry no caller-controlled account role", async () => {
+  let called;
+  await executeTool({
+    serviceClient: { rpc: async (name, args) => {
+      called = { name, args };
+      return { data: [], error: null };
+    } },
+    context: CONTEXT,
+    toolName: "list_clients",
+    rawArguments: JSON.stringify({
+      programStatus: "back-end",
+      activeOnly: false,
+      healthDimension: null,
+      healthState: null,
+      csmMemberId: null,
+      csmName: "Jay Goncalves",
+      csmAssignment: "primary",
+      nameFragment: "Ali Abdaal",
+      nextContactDays: null,
+      riskStates: null,
+      sort: "name_asc",
+      limit: 2,
+    }),
+  });
+  assert.equal(called.args.p_csm_name, "Jay Goncalves");
+  assert.equal(called.args.p_csm_assignment, "primary");
+  assert.equal("p_csm_role" in called.args, false);
+  assert.equal("p_role" in called.args, false);
+});
+
 test("list_clients forwards combined risk states and rejects mixing them with one dimension", async () => {
   let called;
   const base = {
