@@ -187,6 +187,15 @@ Because `OPENAI_API_KEY` had been added after the original function deployment,
 (`ea334695351950739d23c796ecab48e8d411bf5883c23697019c515234df8a62`).
 Chat retest remains open; no prompt or response content was inspected.
 
+Chat retest passed after bounding the irreversible actor/company
+`safety_identifier` to 63 characters; OpenAI had rejected the original
+71-character value with `string_above_max_length`. SuperAdmin QA then completed
+six successful requests covering company metrics, renewals, client lookup,
+multi-turn context, and refusal of contract writes, SQL, and credentials. The
+ledger recorded the expected allow-listed tools and no content. Actual provider
+cost was 10,863 micros (about $0.0109); the conservative whole-cent commercial
+meter charged 6 cents, leaving $24.94. All pre-fix failures charged zero.
+
 ### 7. Observe, then decide on Moves Method
 
 Use Beacon normally with Ethical Scaling. Review errors, answer quality, usage,
