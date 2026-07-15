@@ -955,6 +955,38 @@ function formatWeeksUntil(value: unknown) {
   return `${weeks.toLocaleString()} week${weeks === 1 ? "" : "s"}`;
 }
 
+function isLegacyContractEndPlaceholder(value: unknown) {
+  if (!value) return false;
+  const date = new Date(String(value));
+  return (
+    !Number.isNaN(date.getTime()) &&
+    date.getUTCFullYear() === 2075 &&
+    date.getUTCMonth() === 0 &&
+    date.getUTCDate() === 1
+  );
+}
+
+function rosterRenewalDate(client: ClientRow) {
+  const renewal = valueFrom(client, renewalColumns);
+  if (!isLegacyContractEndPlaceholder(renewal)) return renewal;
+
+  const start = valueFrom(client, [
+    "current_contract_start_date",
+    "contract_start_date",
+    "client_age_date_onboarded",
+    "date_onboarded",
+  ]);
+  const days = Number(
+    valueFrom(client, ["current_contract_of_days", "contract_days", "days"]),
+  );
+  const startDate = start ? new Date(String(start)) : null;
+  if (!startDate || Number.isNaN(startDate.getTime()) || !Number.isFinite(days) || days <= 0) {
+    return null;
+  }
+  startDate.setUTCDate(startDate.getUTCDate() + Math.round(days));
+  return startDate.toISOString();
+}
+
 function plainText(value: unknown) {
   return String(value ?? "")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -4484,7 +4516,7 @@ export function Clients() {
       valueFrom(client, pathwayColumns),
     progress: valueFrom(client, progressColumns),
     onboarded: valueFrom(client, onboardedColumns),
-    renewal: valueFrom(client, renewalColumns),
+    renewal: rosterRenewalDate(client),
   });
   return (
     <div className="space-y-6">

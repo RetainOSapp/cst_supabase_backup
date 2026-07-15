@@ -24,7 +24,8 @@
     "migration:readiness:moves": "node scripts/migration-readiness-snapshot.mjs --company=\"Moves Method\"",
     "pilot:backfill:company-activity": "node scripts/backfill-company-activity.mjs",
     "pilot:backfill:company-contracts": "node scripts/backfill-company-contracts.mjs",
-    "pilot:backfill:mm-template-contracts": "node scripts/backfill-mm-template-contracts.mjs"
+    "pilot:backfill:mm-template-contracts": "node scripts/backfill-mm-template-contracts.mjs",
+    "pilot:repair:mm-legacy-contract-placeholders": "node scripts/repair-mm-legacy-contract-placeholders.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
