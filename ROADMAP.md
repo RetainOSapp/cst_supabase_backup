@@ -312,6 +312,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
 - `[x]` Clients calendar view and filters.
 - `[~]` `[polish]` `[priority: medium]` Client detail general information write flow.
   - Ethical Scaling pilot has profile edit v1 through `manage-client-profile`.
+  - 2026-07-16 Client Detail keeps the client summary/actions visible while scrolling below the global header, and app-owned tasks can be opened and edited directly from the profile Tasks tab through the existing audited `manage-client-task` update path.
   - SuperAdmin/Director/Support can edit company clients; CSM can edit assigned clients only; Viewer is read-only.
   - Fields: client name, business name, email, archetype, North Star, General Information, and Director Notes for SuperAdmin/Director only.
   - 2026-06-20 multiple-email support added Email 2 / Email 3, app-owned `client_email_secondary` / `client_email_tertiary`, and integration matching across all three client emails.

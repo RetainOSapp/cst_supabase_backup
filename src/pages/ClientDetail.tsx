@@ -170,6 +170,7 @@ type ClientTaskRow = Record<string, unknown> & {
   priority?: string | null;
   status_value?: string | null;
   external_link?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 type TaskStatus = "todo" | "in-progress" | "waiting" | "done" | "dismissed" | "archived";
 const TASK_STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
@@ -6646,30 +6647,51 @@ function taskDueBadge(task: ClientTaskRow) {
   return null;
 }
 
+function taskRecurringIntervalDays(task: ClientTaskRow | null | undefined) {
+  const days = Number(task?.metadata?.recurring_interval_days ?? 7);
+  return Number.isFinite(days) ? Math.min(365, Math.max(1, Math.round(days))) : 7;
+}
+
 function ClientTaskModal({
   client,
+  task,
   teamMembers,
   assignedTeamMemberId,
   onClose,
   onSaved,
 }: {
   client: ClientRow;
+  task?: ClientTaskRow | null;
   teamMembers: TeamMember[];
   assignedTeamMemberId: string;
   onClose: () => void;
   onSaved: (task: ClientTaskRow, event: ClientHistoryEventRow | null) => void;
 }) {
-  const [taskName, setTaskName] = useState("");
-  const [taskDescription, setTaskDescription] = useState("");
-  const [assignedToId, setAssignedToId] = useState(
-    client.csm_team_member_id || assignedTeamMemberId || "",
+  const isEditing = Boolean(task);
+  const [taskName, setTaskName] = useState(task?.task_name ?? "");
+  const [taskDescription, setTaskDescription] = useState(
+    task?.task_description ?? "",
   );
-  const [taskDueDate, setTaskDueDate] = useState("");
-  const [priority, setPriority] = useState("");
-  const [statusValue, setStatusValue] = useState<TaskStatus>("todo");
-  const [externalLink, setExternalLink] = useState("");
-  const [recurringIsRecurring, setRecurringIsRecurring] = useState(false);
-  const [recurringIntervalDays, setRecurringIntervalDays] = useState(7);
+  const [assignedToId, setAssignedToId] = useState(
+    task?.assigned_to_id ??
+      client.csm_team_member_id ??
+      assignedTeamMemberId ??
+      "",
+  );
+  const [taskDueDate, setTaskDueDate] = useState(
+    task?.task_due_date ? task.task_due_date.slice(0, 10) : "",
+  );
+  const [priority, setPriority] = useState(task?.priority ?? "");
+  const [statusValue, setStatusValue] = useState<TaskStatus>(
+    taskStatusKey(task?.status_value ?? "todo"),
+  );
+  const [externalLink, setExternalLink] = useState(task?.external_link ?? "");
+  const [recurringIsRecurring, setRecurringIsRecurring] = useState(
+    task?.recurring_is_recurring === true,
+  );
+  const [recurringIntervalDays, setRecurringIntervalDays] = useState(
+    taskRecurringIntervalDays(task),
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const companyGlideId =
@@ -6693,9 +6715,10 @@ function ClientTaskModal({
 
     const { data, error } = await supabase.functions.invoke("manage-client-task", {
       body: {
-        action: "create",
+        action: isEditing ? "update" : "create",
         companyGlideId,
-        clientId: client.glide_row_id,
+        taskId: task?.glide_row_id,
+        ...(!isEditing ? { clientId: client.glide_row_id } : {}),
         taskName,
         taskDescription,
         assignedToId,
@@ -6711,7 +6734,11 @@ function ClientTaskModal({
     setSaving(false);
     if (error || data?.error) {
       setSaveError(
-        data?.error ?? (await functionErrorMessage(error, "Failed to create task.")),
+        data?.error ??
+          (await functionErrorMessage(
+            error,
+            isEditing ? "Failed to update task." : "Failed to create task.",
+          )),
       );
       return;
     }
@@ -6728,16 +6755,19 @@ function ClientTaskModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
-        aria-label="Close new task"
+        aria-label={isEditing ? "Close task editor" : "Close new task"}
         onClick={onClose}
         className="absolute inset-0 bg-slate-900/40 cursor-pointer"
       />
       <div className="relative max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">New Client Task</h2>
+            <h2 className="text-lg font-semibold text-gray-900">
+              {isEditing ? "Edit Client Task" : "New Client Task"}
+            </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Create a task linked to {displayValue(client.client_name)}.
+              {isEditing ? "Update" : "Create"} a task linked to{" "}
+              {displayValue(client.client_name)}.
             </p>
           </div>
           <button
@@ -6904,7 +6934,7 @@ function ClientTaskModal({
               disabled={saving}
               className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 cursor-pointer"
             >
-              {saving ? "Saving..." : "Create Task"}
+              {saving ? "Saving..." : isEditing ? "Update Task" : "Create Task"}
             </button>
           </div>
         </form>
@@ -6916,9 +6946,13 @@ function ClientTaskModal({
 function TaskCard({
   task,
   teamMemberNameById,
+  canEdit,
+  onEdit,
 }: {
   task: ClientTaskRow;
   teamMemberNameById: Map<string, string>;
+  canEdit: boolean;
+  onEdit: () => void;
 }) {
   const assignedTo = task.assigned_to_id
     ? (teamMemberNameById.get(task.assigned_to_id) ?? task.assigned_to_id)
@@ -6960,16 +6994,27 @@ function TaskCard({
             )}
           </div>
         </div>
-        {typeof task.external_link === "string" && task.external_link.trim() && (
-          <a
-            href={task.external_link}
-            target="_blank"
-            rel="noreferrer"
-            className="text-sm font-medium text-indigo-600 underline"
-          >
-            Open link
-          </a>
-        )}
+        <div className="flex shrink-0 items-center gap-3">
+          {typeof task.external_link === "string" && task.external_link.trim() && (
+            <a
+              href={task.external_link}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-medium text-indigo-600 underline"
+            >
+              Open link
+            </a>
+          )}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="retainos-button-secondary px-3 py-1.5 text-sm"
+            >
+              Edit
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {isPresent(task.task_description) && (
@@ -7009,11 +7054,13 @@ function TasksSection({
   teamMemberNameById,
   canCreateTask,
   onCreateTask,
+  onEditTask,
 }: {
   tasks: ClientTaskRow[];
   teamMemberNameById: Map<string, string>;
   canCreateTask: boolean;
   onCreateTask: () => void;
+  onEditTask: (task: ClientTaskRow) => void;
 }) {
   const [showClosedTasks, setShowClosedTasks] = useState(false);
   const openTasks = tasks.filter((task) => !isClosedTask(task));
@@ -7051,6 +7098,8 @@ function TasksSection({
               key={task.glide_row_id ?? task.task_name ?? "task"}
               task={task}
               teamMemberNameById={teamMemberNameById}
+              canEdit={canCreateTask}
+              onEdit={() => onEditTask(task)}
             />
           ))}
         </div>
@@ -7078,6 +7127,8 @@ function TasksSection({
                     key={task.glide_row_id ?? task.task_name ?? "task"}
                     task={task}
                     teamMemberNameById={teamMemberNameById}
+                    canEdit={canCreateTask}
+                    onEdit={() => onEditTask(task)}
                   />
                 ))}
             </div>
@@ -7837,6 +7888,7 @@ export function ClientDetail() {
   const [changingStatus, setChangingStatus] = useState(false);
   const [creatingContract, setCreatingContract] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
+  const [editingTask, setEditingTask] = useState<ClientTaskRow | null>(null);
   const [editingContract, setEditingContract] = useState<ContractRow | null>(null);
   const [archivingContractId, setArchivingContractId] = useState<string | null>(null);
   const [deletingClient, setDeletingClient] = useState(false);
@@ -8582,7 +8634,7 @@ export function ClientDetail() {
           &larr; Back to clients
         </Link>
       </div>
-      <div className="mb-6 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
+      <div className="sticky top-16 z-20 mb-6 rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-4">
             {client.client_image ? (
@@ -8684,6 +8736,7 @@ export function ClientDetail() {
           teamMemberNameById={teamMemberNameById}
           canCreateTask={Boolean(isAppOwnedClient && capabilities.canAccessTasks)}
           onCreateTask={() => setCreatingTask(true)}
+          onEditTask={(task) => setEditingTask(task)}
         />
       ) : activeTab === "history" ? (
         <HistorySection
@@ -8857,6 +8910,25 @@ export function ClientDetail() {
                 const bDue = dateFromValue(b.task_due_date)?.getTime() ?? Number.MAX_SAFE_INTEGER;
                 return aDue - bDue;
               }),
+            );
+            if (event) {
+              setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+          }}
+        />
+      ) : null}
+      {editingTask ? (
+        <ClientTaskModal
+          client={client}
+          task={editingTask}
+          teamMembers={teamMembers}
+          assignedTeamMemberId={teamMemberId}
+          onClose={() => setEditingTask(null)}
+          onSaved={(task, event) => {
+            setTasks((current) =>
+              current.map((row) =>
+                row.glide_row_id === task.glide_row_id ? task : row,
+              ),
             );
             if (event) {
               setHistoryEvents((current) => [event, ...current].slice(0, 25));
