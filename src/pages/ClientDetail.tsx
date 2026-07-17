@@ -3107,7 +3107,22 @@ function ClientStatusModal({
     setSaving(false);
 
     if (error) {
-      setSaveError(error.message);
+      const context =
+        error && typeof error === "object" && "context" in error
+          ? (error as { context?: unknown }).context
+          : null;
+      const responseError = context instanceof Response
+        ? await context
+            .clone()
+            .json()
+            .then((body: unknown) =>
+              body && typeof body === "object" && "error" in body
+                ? String((body as { error: unknown }).error)
+                : null,
+            )
+            .catch(() => null)
+        : null;
+      setSaveError(responseError || error.message);
       return;
     }
     if (data?.error) {
