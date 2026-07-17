@@ -57,9 +57,10 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-02 QA passed: Secondary Pathway expanded progress now has its own Start/Complete Secondary Milestone actions. `manage-client-milestone` supports secondary start/complete actions and updates the secondary current fields instead of the main pathway.
 - `[x]` Milestone-completed task template QA passed.
   - 2026-07-03 Jay QA passed: primary pathway milestone completion can auto-create matching template tasks.
-- `[~]` `[qa]` MM pathway/archive cleanup retest.
+- `[x]` MM pathway/archive cleanup retest.
   - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule. Jay should retest archiving an unused MM pathway and an unused MM milestone.
   - 2026-07-17 closeout plan: run this as the same post-release QA pass as deterministic milestone fallback ordering rather than as a separate session.
+  - 2026-07-17 Jay QA passed: an unused MM milestone and unused MM pathway archived without a false active-client blocker, then restored normally.
 - `[x]` Moves Method webhook setup dry run.
   - 2026-07-02 readiness patch deployed: `zapier-create-client` accepts canonical `pathway_id`, optional `secondary_pathway_id` + `secondary_milestone_id`, and legacy `offer_id` / `secondary_offer_id` aliases. `webhook-update-client` accepts the same fields for a conditional second Zapier step. Both validate active app-owned company pathways/milestones and require Secondary Pathway to be enabled.
   - 2026-07-02 internal QA: Moves Method was seeded as an app-owned pilot shell only (`companies.id = 21586391-9a84-4072-9ae6-20436b27bea9`, legacy `wd7vy0vaQK2hgB3IRqy17w`) with 89 members, 16 pathways, 33 milestones, and zero migrated clients. Secondary Pathway and New Client Webhook settings are enabled.
@@ -263,9 +264,10 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - 2026-06-20 secondary pathway support is live for app-owned pilot/migrated clients: company setting gate, client secondary offer/milestone fields, Client Detail Pathways summary, modal set/clear flow, and history/audit events. Awaiting Jay QA before treating the resource as publish-ready.
   - 2026-06-20 resource audit confirmed this covers the old "Customize Milestones and Offers" Glide workflow; `customize-milestones-offers` draft now documents the RetainOS Pathways & Milestones flow, archive/restore guardrails, and up/down reorder controls.
   - 2026-07-03 MM archive cleanup fix: archive blockers and usage counts now define active clients as Front End / Back End only and include secondary pathway/milestone usage, so unused MM pathways can be archived safely while secondary-attached pathways remain protected.
-- `[~]` `[qa]` `[priority: high]` Pathway milestone fallback ordering for missing/tied positions.
+- `[x]` Pathway milestone fallback ordering for missing/tied positions.
   - 2026-07-08 Moves Method QA found legacy combined pathways could have all milestone positions tied at `0`, making Client Detail fallback to arbitrary row order when a client has no explicit current milestone. Add a small frontend fallback so milestone sorting uses configured position first, then target days, then name/id for deterministic order.
-  - 2026-07-17 clean-main candidate centralizes that comparator across every Client Detail fallback. Focused ordering tests pass 3/3 and the production build passes; release and paired MM pathway/archive browser QA remain before closure.
+  - 2026-07-17 clean-main candidate centralizes that comparator across every Client Detail fallback. Focused ordering tests pass 3/3 and the production build passes; production release and paired MM pathway/archive browser QA were the remaining close conditions.
+  - 2026-07-17 Jay QA passed in Moves Method: a client with tied legacy positions correctly resolves the 8-, 16-, 24-, 32-, 40-, then 48-week diagnostics by configured target days.
 - `[x]` Deploy final Pathways & Milestones closure fixes.
   - 2026-06-17 build passed and `manage-company-pathway` / `manage-client-milestone` were deployed to Supabase project `zjauqflzxzsbpnivzsct`.
   - Safe Pathways/docs work was prepared for commit/push; Beacon local pilot files stayed out of scope.
