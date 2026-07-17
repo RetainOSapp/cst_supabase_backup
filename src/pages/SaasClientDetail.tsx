@@ -576,7 +576,15 @@ function NewTeamMemberModal({
     setSaving(false);
 
     if (invokeError) {
-      setError(invokeError.message);
+      const response = invokeError.context;
+      const responseBody = response instanceof Response
+        ? await response.json().catch(() => null)
+        : null;
+      setError(
+        responseBody?.error ??
+          invokeError.message ??
+          "Unable to save the team member.",
+      );
       return;
     }
 
