@@ -65,10 +65,21 @@ const checks = [
   ],
   [
     "Beacon conversation is memory-only",
-    !/localStorage|sessionStorage|indexedDB|document\.cookie/.test(
-      beaconBrowserSource,
-    ) && widget.includes("useState<DisplayMessage[]>([])") &&
+    !/sessionStorage|indexedDB|document\.cookie/.test(beaconBrowserSource) &&
+      widget.includes('const BEACON_DOCK_STORAGE_KEY = "retainos.beacon.dock.v1"') &&
+      !/localStorage[\s\S]{0,160}(?:messages|history|content|input)/i.test(widget) &&
+      widget.includes("useState<DisplayMessage[]>([])") &&
       widget.includes("setMessages([])"),
+  ],
+  [
+    "desktop Beacon drag is bounded, docked, and stores only its safe position preference",
+    widget.includes('window.matchMedia("(pointer: fine)")') &&
+      widget.includes("BEACON_VIEWPORT_MARGIN") &&
+      widget.includes("BEACON_DRAG_THRESHOLD") &&
+      widget.includes("storeDock(next)") &&
+      widget.includes("[access, desktopDragEnabled, open]") &&
+      widget.includes('title={desktopDragEnabled ? "Drag to move Beacon"') &&
+      widget.includes("suppressLauncherClickRef.current"),
   ],
   [
     "model answers are plain React text without HTML or Markdown rendering",

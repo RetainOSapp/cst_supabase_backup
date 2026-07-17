@@ -1,9 +1,11 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type FormEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Link } from "react-router-dom";
 import { useAccountContext } from "../../lib/accountContext.tsx";
@@ -20,6 +22,54 @@ import {
 const CLIENT_INPUT_LIMIT = 2_000;
 const CLIENT_HISTORY_LIMIT = 10;
 const CLIENT_HISTORY_CONTENT_LIMIT = 2_000;
+const BEACON_DOCK_STORAGE_KEY = "retainos.beacon.dock.v1";
+const BEACON_VIEWPORT_MARGIN = 24;
+const BEACON_DRAG_THRESHOLD = 5;
+
+type BeaconDockSide = "left" | "right";
+
+interface BeaconPosition {
+  x: number;
+  y: number;
+  side: BeaconDockSide;
+}
+
+interface BeaconDragState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  offsetX: number;
+  offsetY: number;
+  moved: boolean;
+}
+
+function readStoredDock(): { side: BeaconDockSide; y: number } | null {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(BEACON_DOCK_STORAGE_KEY) ?? "null");
+    if (
+      parsed &&
+      (parsed.side === "left" || parsed.side === "right") &&
+      typeof parsed.y === "number" &&
+      Number.isFinite(parsed.y)
+    ) {
+      return { side: parsed.side, y: parsed.y };
+    }
+  } catch {
+    // A blocked or malformed preference must never prevent Beacon from opening.
+  }
+  return null;
+}
+
+function storeDock(position: BeaconPosition) {
+  try {
+    window.localStorage.setItem(
+      BEACON_DOCK_STORAGE_KEY,
+      JSON.stringify({ side: position.side, y: Math.round(position.y) }),
+    );
+  } catch {
+    // Dock persistence is optional; Beacon remains fully usable without storage.
+  }
+}
 
 interface DisplayMessage {
   id: string;
@@ -153,12 +203,130 @@ export function BeaconWidget() {
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [desktopDragEnabled, setDesktopDragEnabled] = useState(false);
+  const [position, setPosition] = useState<BeaconPosition | null>(null);
+  const [dragging, setDragging] = useState(false);
   const accessGeneration = useRef(0);
   const requestGeneration = useRef(0);
   const submittingRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const launcherRef = useRef<HTMLButtonElement>(null);
+  const widgetRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<BeaconDragState | null>(null);
+  const suppressLauncherClickRef = useRef(false);
+
+  function constrainedPosition(x: number, y: number, side: BeaconDockSide) {
+    const widget = widgetRef.current;
+    const width = widget?.offsetWidth ?? 0;
+    const height = widget?.offsetHeight ?? 0;
+    const maxX = Math.max(BEACON_VIEWPORT_MARGIN, window.innerWidth - width - BEACON_VIEWPORT_MARGIN);
+    const maxY = Math.max(BEACON_VIEWPORT_MARGIN, window.innerHeight - height - BEACON_VIEWPORT_MARGIN);
+    return {
+      x: Math.max(BEACON_VIEWPORT_MARGIN, Math.min(x, maxX)),
+      y: Math.max(BEACON_VIEWPORT_MARGIN, Math.min(y, maxY)),
+      side,
+    };
+  }
+
+  function dockedPosition(side: BeaconDockSide, y: number) {
+    const width = widgetRef.current?.offsetWidth ?? 0;
+    const x = side === "left"
+      ? BEACON_VIEWPORT_MARGIN
+      : window.innerWidth - width - BEACON_VIEWPORT_MARGIN;
+    return constrainedPosition(x, y, side);
+  }
+
+  function correctDockPosition(persist = false) {
+    if (!desktopDragEnabled || !widgetRef.current) return;
+    setPosition((current) => {
+      const stored = current ? null : readStoredDock();
+      const side = current?.side ?? stored?.side ?? "right";
+      const defaultY = window.innerHeight - widgetRef.current!.offsetHeight - BEACON_VIEWPORT_MARGIN;
+      const next = dockedPosition(side, current?.y ?? stored?.y ?? defaultY);
+      if (persist) storeDock(next);
+      return next;
+    });
+  }
+
+  function handleDragStart(event: ReactPointerEvent<HTMLElement>) {
+    if (!desktopDragEnabled || event.button !== 0 || !position) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      offsetX: event.clientX - position.x,
+      offsetY: event.clientY - position.y,
+      moved: false,
+    };
+    suppressLauncherClickRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleDragMove(event: ReactPointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.moved) {
+      drag.moved = Math.hypot(
+        event.clientX - drag.startClientX,
+        event.clientY - drag.startClientY,
+      ) >= BEACON_DRAG_THRESHOLD;
+      if (!drag.moved) return;
+      setDragging(true);
+      suppressLauncherClickRef.current = true;
+    }
+    event.preventDefault();
+    setPosition((current) => constrainedPosition(
+      event.clientX - drag.offsetX,
+      event.clientY - drag.offsetY,
+      current?.side ?? "right",
+    ));
+  }
+
+  function handleDragEnd(event: ReactPointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragRef.current = null;
+    setDragging(false);
+    if (!drag.moved) return;
+    setPosition((current) => {
+      if (!current) return current;
+      const width = widgetRef.current?.offsetWidth ?? 0;
+      const side: BeaconDockSide = current.x + width / 2 < window.innerWidth / 2
+        ? "left"
+        : "right";
+      const next = dockedPosition(side, current.y);
+      storeDock(next);
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    const query = window.matchMedia("(pointer: fine)");
+    const update = () => setDesktopDragEnabled(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!desktopDragEnabled) {
+      setPosition(null);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => correctDockPosition());
+    return () => window.cancelAnimationFrame(frame);
+  }, [access, desktopDragEnabled, open]);
+
+  useEffect(() => {
+    if (!desktopDragEnabled) return;
+    const handleResize = () => correctDockPosition(true);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [desktopDragEnabled]);
 
   useEffect(() => {
     const generation = ++accessGeneration.current;
@@ -327,7 +495,15 @@ export function BeaconWidget() {
   if (!access) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 sm:bottom-6 sm:right-6">
+    <div
+      ref={widgetRef}
+      style={desktopDragEnabled && position
+        ? { left: `${position.x}px`, top: `${position.y}px` }
+        : undefined}
+      className={`fixed bottom-4 right-4 z-40 sm:bottom-6 sm:right-6 ${
+        desktopDragEnabled && position ? "sm:bottom-auto sm:right-auto" : ""
+      }`}
+    >
       {open ? (
         <section
           role="dialog"
@@ -336,12 +512,26 @@ export function BeaconWidget() {
           className="flex h-[min(680px,calc(100vh-2rem))] w-[min(390px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-[#d6eafb] bg-white shadow-[0_18px_55px_rgba(14,27,41,0.24)]"
         >
           <header className="flex items-center gap-3 border-b border-[#e4e9f0] bg-[#162b3e] px-4 py-3 text-white">
-            <div className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#59abf0] font-bold text-[#162b3e]" aria-hidden="true">
-              <BeaconLightIcon />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h2 id="beacon-title" className="text-sm font-bold">Beacon beta</h2>
-              <p className="text-[11px] text-[#b8c7d6]">Read-only RetainOS assistant</p>
+            <div
+              title={desktopDragEnabled ? "Drag to move Beacon" : undefined}
+              onPointerDown={handleDragStart}
+              onPointerMove={handleDragMove}
+              onPointerUp={handleDragEnd}
+              onPointerCancel={handleDragEnd}
+              className={`retainos-focus flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left ${
+                desktopDragEnabled ? "cursor-grab select-none touch-none active:cursor-grabbing" : "cursor-default"
+              }`}
+            >
+              <span className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#59abf0] font-bold text-[#162b3e]" aria-hidden="true">
+                <BeaconLightIcon />
+              </span>
+              <span className="min-w-0 flex-1">
+                <h2 id="beacon-title" className="text-sm font-bold">Beacon beta</h2>
+                <span className="block text-[11px] text-[#b8c7d6]">Read-only RetainOS assistant</span>
+              </span>
+              {desktopDragEnabled ? (
+                <span className="pr-1 text-sm tracking-[-1px] text-[#8297aa]" aria-hidden="true">⠿</span>
+              ) : null}
             </div>
             <button
               type="button"
@@ -500,9 +690,25 @@ export function BeaconWidget() {
         <button
           ref={launcherRef}
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={(event) => {
+            if (suppressLauncherClickRef.current) {
+              event.preventDefault();
+              suppressLauncherClickRef.current = false;
+              return;
+            }
+            setOpen(true);
+          }}
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
           aria-label="Open Beacon beta"
-          className="retainos-focus flex h-14 items-center gap-2 rounded-full bg-[#162b3e] px-4 text-sm font-bold text-white shadow-[0_12px_32px_rgba(14,27,41,0.28)] transition hover:-translate-y-0.5 hover:bg-[#1e3a52]"
+          title={desktopDragEnabled ? "Open Beacon or drag to move" : undefined}
+          className={`retainos-focus flex h-14 items-center gap-2 rounded-full bg-[#162b3e] px-4 text-sm font-bold text-white shadow-[0_12px_32px_rgba(14,27,41,0.28)] transition hover:bg-[#1e3a52] ${
+            desktopDragEnabled
+              ? `${dragging ? "cursor-grabbing" : "cursor-grab"} select-none touch-none`
+              : "hover:-translate-y-0.5"
+          }`}
         >
           <span className="grid h-8 w-8 place-items-center rounded-full bg-[#59abf0] text-[#162b3e]" aria-hidden="true">
             <BeaconLightIcon />
