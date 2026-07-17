@@ -59,6 +59,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-03 Jay QA passed: primary pathway milestone completion can auto-create matching template tasks.
 - `[~]` `[qa]` MM pathway/archive cleanup retest.
   - 2026-07-03 fix deployed: Admin Hub > Pathways & Milestones archive blockers now count only active Front End / Back End clients across primary and secondary pathway fields, and the UI usage count uses the same rule. Jay should retest archiving an unused MM pathway and an unused MM milestone.
+  - 2026-07-17 closeout plan: run this as the same post-release QA pass as deterministic milestone fallback ordering rather than as a separate session.
 - `[x]` Moves Method webhook setup dry run.
   - 2026-07-02 readiness patch deployed: `zapier-create-client` accepts canonical `pathway_id`, optional `secondary_pathway_id` + `secondary_milestone_id`, and legacy `offer_id` / `secondary_offer_id` aliases. `webhook-update-client` accepts the same fields for a conditional second Zapier step. Both validate active app-owned company pathways/milestones and require Secondary Pathway to be enabled.
   - 2026-07-02 internal QA: Moves Method was seeded as an app-owned pilot shell only (`companies.id = 21586391-9a84-4072-9ae6-20436b27bea9`, legacy `wd7vy0vaQK2hgB3IRqy17w`) with 89 members, 16 pathways, 33 milestones, and zero migrated clients. Secondary Pathway and New Client Webhook settings are enabled.
@@ -262,8 +263,9 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - 2026-06-20 secondary pathway support is live for app-owned pilot/migrated clients: company setting gate, client secondary offer/milestone fields, Client Detail Pathways summary, modal set/clear flow, and history/audit events. Awaiting Jay QA before treating the resource as publish-ready.
   - 2026-06-20 resource audit confirmed this covers the old "Customize Milestones and Offers" Glide workflow; `customize-milestones-offers` draft now documents the RetainOS Pathways & Milestones flow, archive/restore guardrails, and up/down reorder controls.
   - 2026-07-03 MM archive cleanup fix: archive blockers and usage counts now define active clients as Front End / Back End only and include secondary pathway/milestone usage, so unused MM pathways can be archived safely while secondary-attached pathways remain protected.
-- `[ ]` `[priority: high]` Pathway milestone fallback ordering for missing/tied positions.
+- `[~]` `[qa]` `[priority: high]` Pathway milestone fallback ordering for missing/tied positions.
   - 2026-07-08 Moves Method QA found legacy combined pathways could have all milestone positions tied at `0`, making Client Detail fallback to arbitrary row order when a client has no explicit current milestone. Add a small frontend fallback so milestone sorting uses configured position first, then target days, then name/id for deterministic order.
+  - 2026-07-17 clean-main candidate centralizes that comparator across every Client Detail fallback. Focused ordering tests pass 3/3 and the production build passes; release and paired MM pathway/archive browser QA remain before closure.
 - `[x]` Deploy final Pathways & Milestones closure fixes.
   - 2026-06-17 build passed and `manage-company-pathway` / `manage-client-milestone` were deployed to Supabase project `zjauqflzxzsbpnivzsct`.
   - Safe Pathways/docs work was prepared for commit/push; Beacon local pilot files stayed out of scope.
@@ -564,19 +566,21 @@ Next session lock:
 - `[~]` `[polish]` `[priority: medium]` Dashboard CSM list/workload/capacity views.
   - CSM Active Client Workload counts active clients by active client-managing CSM.
   - CSM Capacity displays active clients versus configured team-member capacity.
-- `[~]` `[polish]` `[priority: medium]` Dashboard canonical formula validation.
+- `[x]` Dashboard canonical formula validation.
   - Validate active, front-end/back-end, offboarded, churn, retention, renewal, workload, and capacity definitions against Ethical Scaling pilot data.
   - Working spec: `DASHBOARD_FORMULA_VALIDATION.md`.
   - Draft SQL starting point: `DASHBOARD_CANONICAL_RPC_DRAFT.sql`.
   - Canonical KPI UI integration v1 is wired for Dashboard KPI cards; remaining work is broader validation against Moves Method or another larger migrated-company dataset before marking shipped. Ethical Scaling has too few active clients to give strong formula/performance confidence.
   - Remaining gaps: charts/client drill-throughs still use client-row calculations; decide later whether those should move to canonical reporting views too.
   - 2026-06-17 validation packet is ready. Next action on migration day: compare Dashboard KPI cards, chart/drilldown totals, Clients list filters, contract/renewal spot checks, and CSM Reports denominators against the packet after final sync/backfill.
-- `[ ]` `[priority: high]` Full Dashboard formula review on Moves Method scale.
+  - 2026-07-17 Jay correction: Moves Method has been operating and validating the Dashboard at app-owned scale; feedback is QA-approved. Any newly discovered formula defect becomes a separate regression rather than keeping V1 open.
+- `[x]` Full Dashboard formula review on Moves Method scale.
   - Not urgent for migration-day launch, but high priority for the first post-cutover week now that MM has real app-owned scale.
   - Review every Dashboard KPI, chart, drilldown, CSM workload/capacity count, retention/churn/renewal metric, and applied filter interaction against `DASHBOARD_FORMULA_VALIDATION.md`.
   - Compare Dashboard totals against app-owned Supabase counts, Clients filters, CSM Reports denominators, and selected CST/read-only reference snapshots where useful.
   - Outcome should be a short pass/fail punch list: formula correct, needs SQL/RPC hardening, needs UI copy clarification, or needs source-data cleanup.
   - 2026-07-04 first MM finding: renewal KPI default range was too broad and has a focused QA retest queued. Continue remaining KPI/chart formula review after that retest.
+  - 2026-07-17 Jay confirmed the subsequent MM operating feedback is approved, closing the scale-review item.
 - `[x]` Client contact calendar.
   - V1 exists as a Calendar view on `/clients`, beside List and Cards.
   - Day, Week, and Month modes exist.
@@ -693,11 +697,16 @@ Goal: add higher-tier intelligence and scale features after the first migrated c
 - `[ ]` `[priority: later]` Groups / cohort management.
   - Deliberately late priority. Groups can be built after client migration because it is not blocking the Ethical Scaling pilot or early client migrations.
   - Future scope: CRUD groups, group list/detail views, group-client assignment flow, and group-scoped filters/reporting.
-- `[ ]` `[priority: later]` Call AI filters and list view.
-- `[ ]` `[priority: later]` Add new meeting transcript and run AI manually.
-- `[ ]` `[priority: later]` Automatic transcript ingestion through Fathom or equivalent.
-- `[ ]` `[priority: later]` Fixed AI prompts managed only by SuperAdmin.
-- `[ ]` `[priority: later]` Company-specific prompts for Pro/Enterprise, built by CST Dev Team.
+- `[ ]` `[priority: high]` Call Intelligence V1 removes the Call AI dependency blocking Erica Jordan, Shopanova, and Bye Bye Panic from app-owned migration.
+  - Existing foundations: company-scoped `call_ai_transcript` tokens, planned RetainOS webhook contract, integration intake/reconciliation queue, Call AI page, and server-side AI entitlement/cost controls.
+  - Add a `Call Intelligence` tab beside the existing reconciliation experience, wired to app-owned call/analysis records and the approved low/high-fidelity screens.
+  - Preserve Glide parity from Jay's structured outputs, prompts, processing rules, and presentation before adding V2 intelligence.
+  - Accept provider-agnostic transcript payloads through the existing Zapier/recorder pattern first; use Jay's Fathom Zap for controlled local and pilot QA.
+  - Freeze model, reasoning, transcript retention, cost limit, and API-key isolation after representative transcript evals; do not assume Beacon's model/budget is correct for long-form analysis.
+- `[ ]` `[priority: high]` Deploy and validate the existing company-scoped Call AI transcript-token/webhook foundation.
+- `[ ]` `[priority: high]` Automatic transcript ingestion through Zapier plus Fathom or equivalent recorder payloads.
+- `[ ]` `[priority: high]` Fixed and company-specific parity prompts managed through a controlled server path.
+- `[ ]` `[priority: medium]` Add new meeting transcript and run Call Intelligence manually.
 - `[ ]` `[priority: low]` Dashboard AI Insights generation.
 - `[ ]` `[priority: later]` Call AI summaries, red flags, green lights, sentiment, archetype, and call score.
 - `[ ]` `[priority: medium]` Automated flagging for churn risk, renewals, and RGAs.
@@ -756,13 +765,13 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 
 #### Call AI Integration
 
-- `[ ]` `[priority: later]` AI usage can launch after initial go-live.
-  - Not a blocker for the first 2-3 migrated companies.
-  - Initial migration can proceed without full AI automation if core client, dashboard, task, and reporting workflows are stable.
-- `[ ]` `[priority: later]` Upload and process meeting transcripts manually.
-- `[ ]` `[priority: later]` Automatically ingest meeting transcripts through Fathom or equivalent integration.
-- `[ ]` `[priority: later]` Fixed AI prompts for sentiment analysis, call grading, and summaries.
-- `[ ]` `[priority: later]` Company-specific custom prompts for tailored analysis.
+- `[ ]` `[priority: high]` Call Intelligence V1 is migration-critical because three remaining companies depend on Glide Call AI.
+  - Keep the current Call AI page reconciliation experience and add a second `Call Intelligence` tab for matched calls, analysis states, and results.
+  - Ship provider-agnostic authenticated transcript intake, idempotency, client matching/review, server-side structured analysis, app-owned persistence, audit, and bounded retries/costs.
+  - Use Jay-provided Glide formats/prompts and low/high-fidelity screens as the parity contract; begin with Jay's Fathom-to-Zapier QA flow.
+- `[ ]` `[priority: medium]` Upload and process meeting transcripts manually.
+- `[ ]` `[priority: high]` Automatically ingest meeting transcripts through Zapier plus Fathom or equivalent integration.
+- `[ ]` `[priority: high]` Fixed and company-specific controlled prompts for sentiment, grading, summaries, and the agreed structured outputs.
 - `[ ]` `[priority: later]` On-demand analysis for specific call scenarios.
 - `[ ]` `[priority: later]` Call sharing between team members.
 - `[ ]` `[priority: later]` Weekly automated reports on call analysis metrics.
@@ -989,7 +998,8 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[~]` `[polish]` `[priority: medium]` Client detail edit/manage.
 - `[x]` Dashboard / KPI dashboard for selected company.
 - `[~]` `[polish]` `[priority: low]` Generate AI Insights action exists as placeholder only.
-- `[~]` `[priority: high]` `[qa]` Beacon assistant chat secure rebuild.
+- `[x]` Beacon assistant chat secure V1.
+  - 2026-07-17 Jay accepts the secure read-only assistant as QA-approved V1. It is live, company-enabled under Jay's control, and in Moves Method testing. Further tools, writes, or product expansion are separate V2 scopes.
   - Working chat over live client data: renewals, contract gaps, health/referral-ready, CSM books, client detail. Jay validated v1 locally on 2026-06-10.
   - Now a **floating bubble widget** on every authenticated page (mounted in `AppShell`), not a standalone page. The `/beacon` route and its sidebar nav item were removed on 2026-06-14; conversation persists across navigation.
   - `[polish]` remaining: broader question QA against roster/dashboard counts.
@@ -1028,8 +1038,8 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[ ]` `[priority: later]` Beacon controlled write tools after the read-only beta is validated.
   - Treat each write action as a separately allow-listed capability with role/client authorization, user confirmation, idempotency, audit, and rollback. Existing application write permission never automatically grants Beacon write authority.
 - `[~]` `[polish]` `[priority: medium]` CSM Reports updated-clients list and client detail flow.
-- `[ ]` `[priority: later]` Call AI filters/KPIs/analysis list view.
-- `[ ]` `[priority: later]` New meeting transcript flow.
+- `[~]` `[downstream]` `[priority: high]` Call AI reconciliation exists; add the Call Intelligence tab and app-owned analysis list/results plumbing.
+- `[ ]` `[priority: medium]` New meeting transcript flow.
 - `[ ]` `[priority: later]` Call analysis detail view and share-with-team action.
 - `[x]` Tasks list view.
 - `[~]` `[polish]` `[priority: low]` New Task flow.

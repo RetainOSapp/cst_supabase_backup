@@ -47,7 +47,8 @@ Feature status belongs in `ROADMAP.md`; historical logs move verbatim to `MEMORY
 
 Before staging/committing, inspect `git status --short`. Uncommitted work may be intentional.
 
-- Normal workspace: `/Users/joaogoncalves/Desktop/cst_supabase_backup` on clean production `main`.
+- Pipeline workspace: `/Users/joaogoncalves/Desktop/cst_supabase_backup` on dirty `codex/pipeline-phase-0-2`; preserve its intentional uncommitted candidate.
+- Shippable workspace: `/private/tmp/cst-shippable-main`, created from clean production `main`; keep non-Pipeline releases isolated here while the Pipeline candidate remains open.
 - Beacon rebuild workspace: `/Users/joaogoncalves/Desktop/cst_supabase_beacon` on `codex/beacon-secure-rebuild`. Its `BEACON_PROTOTYPE_REFERENCE_DO_NOT_COMMIT/` files preserve the unsafe browser-direct pilot only as local reference; never commit/deploy them as-is.
 - Beacon promotion path: build a provider-server-side `beacon-chat` Supabase Edge Function, keep the AI key as a Supabase secret, enforce company entitlement plus role/client scoping, and add usage limits/audit logging.
 - Old Glide project reference moved outside Git to `/Users/joaogoncalves/Desktop/RetainOS Local Reference/old glide project test` until remaining migrations finish.

@@ -21,6 +21,7 @@ import {
   emptyAdvocacyDrafts,
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
+import { compareOfferMilestones } from "../lib/milestoneOrdering.ts";
 
 const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
 const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as const;
@@ -123,10 +124,13 @@ type MilestoneActionKind =
   | "complete_secondary_milestone"
   | "update_milestone_completion";
 type OfferMilestoneRow = Record<string, unknown> & {
+  id?: string | null;
   glide_row_id?: string | null;
   offer_id?: string | null;
   name?: string | null;
   order?: number | null;
+  position?: number | null;
+  target_days_to_complete?: number | null;
   target_days_to_complete_from_onboarding_date?: number | null;
   ttv_milestone?: boolean | null;
   final_milestone?: boolean | null;
@@ -1593,11 +1597,6 @@ function CallAttendanceControls({
       </div>
     </section>
   );
-}
-
-function milestoneSortValue(milestone: OfferMilestoneRow) {
-  const order = Number(milestone.order);
-  return Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER;
 }
 
 function dateFromValue(value: unknown) {
@@ -3846,7 +3845,7 @@ function MilestoneActionModal({
     );
   const orderedMilestones = offerMilestones
     .filter((milestone) => String(milestone.offer_id ?? "") === String(currentOfferId))
-    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+    .sort(compareOfferMilestones);
   const currentMilestoneIndex = orderedMilestones.findIndex(
     (milestone) => String(milestone.glide_row_id ?? "") === String(currentMilestoneId),
   );
@@ -4339,7 +4338,7 @@ function PathwayChangeModal({
   const [offerId, setOfferId] = useState(initialOfferId);
   const milestonesForOffer = offerMilestones
     .filter((milestone) => milestone.offer_id === offerId)
-    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+    .sort(compareOfferMilestones);
   const initialMilestoneId =
     effectiveCurrent.milestoneId ||
     milestonesForOffer[0]?.glide_row_id ||
@@ -4353,7 +4352,7 @@ function PathwayChangeModal({
   const [secondaryOfferId, setSecondaryOfferId] = useState(initialSecondaryOfferId);
   const secondaryMilestonesForOffer = offerMilestones
     .filter((milestone) => milestone.offer_id === secondaryOfferId)
-    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+    .sort(compareOfferMilestones);
   const initialSecondaryMilestoneId =
     textInputValue(valueFrom(client, [
       "secondary_offer_milestones_current_milestone_id",
@@ -4370,7 +4369,7 @@ function PathwayChangeModal({
   const currentProgress = effectiveCurrent.progress;
   const currentOfferMilestones = offerMilestones
     .filter((milestone) => String(milestone.offer_id ?? "") === String(currentOfferId))
-    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+    .sort(compareOfferMilestones);
   const currentMilestoneIndex = currentOfferMilestones.findIndex(
     (milestone) =>
       String(milestone.glide_row_id ?? "") === String(currentMilestoneId),
@@ -4415,7 +4414,7 @@ function PathwayChangeModal({
     setOfferId(nextOfferId);
     const firstMilestone = offerMilestones
       .filter((milestone) => milestone.offer_id === nextOfferId)
-      .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b))[0];
+      .sort(compareOfferMilestones)[0];
     setMilestoneId(firstMilestone?.glide_row_id ?? "");
   }
 
@@ -4423,7 +4422,7 @@ function PathwayChangeModal({
     setSecondaryOfferId(nextOfferId);
     const firstMilestone = offerMilestones
       .filter((milestone) => milestone.offer_id === nextOfferId)
-      .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b))[0];
+      .sort(compareOfferMilestones)[0];
     setSecondaryMilestoneId(firstMilestone?.glide_row_id ?? "");
   }
 
@@ -5750,7 +5749,7 @@ function PathwaysSection({
   });
   const sortedOfferMilestones = currentOfferMilestones
     .slice()
-    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+    .sort(compareOfferMilestones);
   const progressByMilestoneId = new Map(
     clientMilestones
       .filter(
@@ -6037,7 +6036,7 @@ function PathwaysSection({
       if (!isPresent(secondaryOfferValue)) return false;
       return String(milestone.offer_id) === String(secondaryOfferValue);
     })
-    .sort((a, b) => milestoneSortValue(a) - milestoneSortValue(b));
+    .sort(compareOfferMilestones);
   const secondaryProgressCandidates = clientMilestones.filter(
     (milestone) =>
       isPresent(milestone.milestone_id) &&

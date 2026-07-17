@@ -10,6 +10,7 @@
     "beacon:verify:db": "node scripts/verify-beacon-foundation.mjs",
     "beacon:verify:edge": "node scripts/verify-beacon-edge.mjs",
     "beacon:verify:frontend": "node scripts/verify-beacon-frontend.mjs",
+    "test:milestone-ordering": "node --test scripts/milestone-ordering.test.mjs",
     "preview": "vite preview",
     "db:apply:sql": "node scripts/apply-sql-file.mjs",
     "db:apply:release-gate": "node scripts/apply-release-gate-sql-file.mjs",
