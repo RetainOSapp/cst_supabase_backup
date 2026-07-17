@@ -53,6 +53,20 @@ function normalizeCapacity(value: unknown) {
   return Math.max(0, Math.min(1000, num));
 }
 
+function errorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message
+  ) {
+    return error.message;
+  }
+  return "Unexpected error";
+}
+
 async function sendLoginInvite(
   supabase: ReturnType<typeof createClient>,
   email: string,
@@ -400,7 +414,6 @@ Deno.serve(async (req) => {
 
     return jsonResponse({ error: "Unsupported action." }, 400);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, 500);
+    return jsonResponse({ error: errorMessage(error) }, 500);
   }
 });
