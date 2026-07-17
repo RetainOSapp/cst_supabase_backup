@@ -81,6 +81,7 @@ npx supabase functions deploy prepare-login --project-ref zjauqflzxzsbpnivzsct -
 - 2026-07-15 MM legacy renewal repair: corrected 815 client summaries whose `2075-01-01` migration placeholder conflicted with a positive contract duration, plus 27 matching migration-summary contract rows. Carol Weyrauch now renews 2026-08-04. The remaining 116 client records have no duration and 24 linked contract summaries are genuinely open-ended; they remain unchanged. `scripts/repair-mm-legacy-contract-placeholders.mjs` is idempotent; Clients defensively derives a date if legacy input recurs.
 - 2026-07-16 Client Detail polish keeps the summary/actions sticky below the app header and allows app-owned task edits from the client Tasks tab via the existing audited task function.
 - 2026-07-16 navigation-continuity candidate on `codex/navigation-continuity` preserves Dashboard/Clients filters and Clients page/view/sort state across navigation, uses real client links for new-tab behavior, and passes the production build. It is not committed, pushed, or deployed.
+- 2026-07-17 contact-touch reliability candidate on `codex/contact-touch-reliability` keeps rapid “Mark contacted today” updates row-local, synchronously prevents duplicate same-client clicks, requires the returned client/history event, rejects stale roster reads, and silently reconciles only after the burst settles. Build passes; not committed, pushed, or deployed.
 - Full feature state and remaining QA belong in `ROADMAP.md`, not here.
 
 ## Routing

@@ -3410,6 +3410,8 @@ export function Clients() {
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [totalClients, setTotalClients] = useState(0);
+  const clientsLoadRequestRef = useRef(0);
+  const handledRosterRefreshTokenRef = useRef(rosterRefreshToken);
   const [page, setPage] = useState(
     cachedCompanyMatches ? (cachedState?.page ?? 1) : 1,
   );
@@ -3440,6 +3442,11 @@ export function Clients() {
   const [contactTouchClientIds, setContactTouchClientIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [contactTouchConfirmedClientIds, setContactTouchConfirmedClientIds] =
+    useState<Set<string>>(() => new Set());
+  const contactTouchInFlightRef = useRef(new Set<string>());
+  const contactTouchReconcileTimerRef = useRef<number | null>(null);
+  const contactTouchConfirmationTimersRef = useRef(new Map<string, number>());
   const [contactTouchMessage, setContactTouchMessage] = useState<string | null>(
     null,
   );
@@ -3544,100 +3551,6 @@ export function Clients() {
     Boolean(appliedFilters.companyId || filters.companyId);
   const canQuickUpdateClients = capabilities.canQuickUpdate && isUsingAppClients;
   const clientsReturnTo = `${location.pathname}${location.search}`;
-
-  const handleMarkContacted = useCallback(
-    async (client: ClientRow) => {
-      if (!canQuickUpdateClients || contactTouchClientIds.has(client.glide_row_id)) {
-        return;
-      }
-      const companyLegacyId =
-        client.company_id ?? appliedFilters.companyId ?? filters.companyId ?? "";
-      if (!companyLegacyId) {
-        setContactTouchError("Missing company id.");
-        setContactTouchMessage(null);
-        return;
-      }
-
-      const contactedAt = new Date().toISOString();
-      const optimisticClient = {
-        ...client,
-        csm_date_of_last_contact: contactedAt,
-        last_contact: contactedAt,
-        last_contact_date: contactedAt,
-        date_of_last_contact: contactedAt,
-      };
-      const applyClientPatch = (updatedClient: ClientRow) => {
-        setClients((current) =>
-          current.map((row) =>
-            row.glide_row_id === updatedClient.glide_row_id ? updatedClient : row,
-          ),
-        );
-        setCalendarClients((current) =>
-          current.map((row) =>
-            row.glide_row_id === updatedClient.glide_row_id ? updatedClient : row,
-          ),
-        );
-        setQuickUpdateClient((current) =>
-          current?.glide_row_id === updatedClient.glide_row_id
-            ? updatedClient
-            : current,
-        );
-      };
-
-      setContactTouchClientIds((current) => {
-        const next = new Set(current);
-        next.add(client.glide_row_id);
-        return next;
-      });
-      setContactTouchError(null);
-      setContactTouchMessage(null);
-      applyClientPatch(optimisticClient);
-
-      const { data, error } = await supabase.functions.invoke(
-        "manage-client-quick-update",
-        {
-          body: {
-            companyLegacyId,
-            clientLegacyId: client.glide_row_id,
-            contactTouch: true,
-            lastContactAt: contactedAt,
-          },
-        },
-      );
-      setContactTouchClientIds((current) => {
-        const next = new Set(current);
-        next.delete(client.glide_row_id);
-        return next;
-      });
-
-      if (error) {
-        applyClientPatch(client);
-        setContactTouchError(error.message);
-        return;
-      }
-      if (data?.error) {
-        applyClientPatch(client);
-        setContactTouchError(data.error);
-        return;
-      }
-      if (data?.client) {
-        const updatedClient = mapAppClientRow(data.client as Record<string, unknown>);
-        applyClientPatch(updatedClient);
-      }
-      setContactTouchMessage(
-        `${client.client_name ?? "Client"} marked as contacted today.`,
-      );
-      const refreshToken = `${Date.now()}`;
-      window.localStorage.setItem(CLIENTS_ROSTER_REFRESH_KEY, refreshToken);
-      setRosterRefreshToken(refreshToken);
-    },
-    [
-      appliedFilters.companyId,
-      canQuickUpdateClients,
-      contactTouchClientIds,
-      filters.companyId,
-    ],
-  );
 
   useEffect(() => {
     writeClientsCache({
@@ -4030,25 +3943,31 @@ export function Clients() {
       cancelled = true;
     };
   }, [filters.companyId, programChoices.length]);
-  const loadClients = useCallback(async () => {
+  const loadClients = useCallback(async (options: { silent?: boolean } = {}) => {
+    const requestId = ++clientsLoadRequestRef.current;
+    const silent = options.silent === true;
     if (!appliedFilters.companyId) {
+      if (requestId !== clientsLoadRequestRef.current) return;
       setClients([]);
       setTotalClients(0);
       setClientsLoading(false);
       return;
     }
     if (!appClientCompanyIdsLoaded) {
-      setClientsLoading(true);
+      if (!silent) setClientsLoading(true);
       return;
     }
     if (capabilities.canViewOnlyAssignedClients && !assignedTeamMemberId) {
+      if (requestId !== clientsLoadRequestRef.current) return;
       setClients([]);
       setTotalClients(0);
       setClientsLoading(false);
       return;
     }
-    setClientsLoading(true);
-    setClientsError(null);
+    if (!silent) {
+      setClientsLoading(true);
+      setClientsError(null);
+    }
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
     const useAppClients = appClientCompanyIds.has(appliedFilters.companyId);
@@ -4142,11 +4061,14 @@ export function Clients() {
       })
       .order("client_name", { ascending: true, nullsFirst: false });
     const { data, error, count } = await query;
+    if (requestId !== clientsLoadRequestRef.current) return;
     if (error) {
       console.error("Failed to load clients:", error);
-      setClients([]);
-      setTotalClients(0);
-      setClientsError(error.message);
+      if (!silent) {
+        setClients([]);
+        setTotalClients(0);
+        setClientsError(error.message);
+      }
     } else {
       const rows = useAppClients
         ? ((data ?? []) as Record<string, unknown>[]).map(mapAppClientRow)
@@ -4163,13 +4085,172 @@ export function Clients() {
     capabilities.canViewOnlyAssignedClients,
     page,
     pageSize,
-    rosterRefreshToken,
     sortDirection,
     sortField,
   ]);
   useEffect(() => {
     void loadClients();
   }, [loadClients]);
+
+  useEffect(() => {
+    if (
+      !rosterRefreshToken ||
+      rosterRefreshToken === handledRosterRefreshTokenRef.current
+    ) {
+      return;
+    }
+    handledRosterRefreshTokenRef.current = rosterRefreshToken;
+    void loadClients({ silent: true });
+  }, [loadClients, rosterRefreshToken]);
+
+  const scheduleContactTouchReconciliation = useCallback(() => {
+    if (contactTouchReconcileTimerRef.current !== null) {
+      window.clearTimeout(contactTouchReconcileTimerRef.current);
+    }
+
+    const reconcile = () => {
+      if (contactTouchInFlightRef.current.size > 0) {
+        contactTouchReconcileTimerRef.current = window.setTimeout(reconcile, 600);
+        return;
+      }
+      contactTouchReconcileTimerRef.current = null;
+      const refreshToken = `${Date.now()}`;
+      window.localStorage.setItem(CLIENTS_ROSTER_REFRESH_KEY, refreshToken);
+      void loadClients({ silent: true });
+    };
+
+    contactTouchReconcileTimerRef.current = window.setTimeout(reconcile, 750);
+  }, [loadClients]);
+
+  const showContactTouchConfirmation = useCallback((clientId: string) => {
+    const existingTimer = contactTouchConfirmationTimersRef.current.get(clientId);
+    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
+
+    setContactTouchConfirmedClientIds((current) => new Set(current).add(clientId));
+    const timer = window.setTimeout(() => {
+      contactTouchConfirmationTimersRef.current.delete(clientId);
+      setContactTouchConfirmedClientIds((current) => {
+        const next = new Set(current);
+        next.delete(clientId);
+        return next;
+      });
+    }, 1800);
+    contactTouchConfirmationTimersRef.current.set(clientId, timer);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (contactTouchReconcileTimerRef.current !== null) {
+        window.clearTimeout(contactTouchReconcileTimerRef.current);
+      }
+      contactTouchConfirmationTimersRef.current.forEach((timer) => {
+        window.clearTimeout(timer);
+      });
+      contactTouchConfirmationTimersRef.current.clear();
+    },
+    [],
+  );
+
+  const handleMarkContacted = useCallback(
+    async (client: ClientRow) => {
+      const clientId = client.glide_row_id;
+      if (!canQuickUpdateClients || contactTouchInFlightRef.current.has(clientId)) {
+        return;
+      }
+      const companyLegacyId =
+        client.company_id ?? appliedFilters.companyId ?? filters.companyId ?? "";
+      if (!companyLegacyId) {
+        setContactTouchError("Missing company id.");
+        setContactTouchMessage(null);
+        return;
+      }
+
+      const contactedAt = new Date().toISOString();
+      const optimisticClient = {
+        ...client,
+        csm_date_of_last_contact: contactedAt,
+        last_contact: contactedAt,
+        last_contact_date: contactedAt,
+        date_of_last_contact: contactedAt,
+      };
+      const applyClientPatch = (updatedClient: ClientRow) => {
+        setClients((current) =>
+          current.map((row) =>
+            row.glide_row_id === updatedClient.glide_row_id ? updatedClient : row,
+          ),
+        );
+        setCalendarClients((current) =>
+          current.map((row) =>
+            row.glide_row_id === updatedClient.glide_row_id ? updatedClient : row,
+          ),
+        );
+        setQuickUpdateClient((current) =>
+          current?.glide_row_id === updatedClient.glide_row_id
+            ? updatedClient
+            : current,
+        );
+      };
+
+      // A pending silent roster query may contain the pre-contact value. Invalidate
+      // it before applying optimistic row state so it cannot overwrite this click.
+      clientsLoadRequestRef.current += 1;
+      contactTouchInFlightRef.current.add(clientId);
+      setContactTouchClientIds((current) => new Set(current).add(clientId));
+      setContactTouchError(null);
+      setContactTouchMessage(null);
+      applyClientPatch(optimisticClient);
+
+      let confirmed = false;
+      try {
+        const { data, error } = await supabase.functions.invoke(
+          "manage-client-quick-update",
+          {
+            body: {
+              companyLegacyId,
+              clientLegacyId: clientId,
+              contactTouch: true,
+              lastContactAt: contactedAt,
+            },
+          },
+        );
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        if (!data?.client || !data?.event) {
+          throw new Error("Contact update was not confirmed. Please try again.");
+        }
+
+        applyClientPatch(mapAppClientRow(data.client as Record<string, unknown>));
+        showContactTouchConfirmation(clientId);
+        setContactTouchMessage(
+          `${client.client_name ?? "Client"} marked as contacted today.`,
+        );
+        confirmed = true;
+      } catch (error) {
+        applyClientPatch(client);
+        setContactTouchError(
+          `${client.client_name ?? "Client"} was not marked as contacted: ${
+            error instanceof Error ? error.message : "Please try again."
+          }`,
+        );
+      } finally {
+        contactTouchInFlightRef.current.delete(clientId);
+        setContactTouchClientIds((current) => {
+          const next = new Set(current);
+          next.delete(clientId);
+          return next;
+        });
+        if (confirmed) scheduleContactTouchReconciliation();
+      }
+    },
+    [
+      appliedFilters.companyId,
+      canQuickUpdateClients,
+      filters.companyId,
+      scheduleContactTouchReconciliation,
+      showContactTouchConfirmation,
+    ],
+  );
+
   const loadCalendarClients = useCallback(async () => {
     if (!appliedFilters.companyId || viewMode !== "calendar") {
       setCalendarClients([]);
@@ -5344,6 +5425,7 @@ export function Clients() {
                 canQuickUpdateClients ? handleMarkContacted : undefined
               }
               markingContactedClientIds={contactTouchClientIds}
+              confirmedContactedClientIds={contactTouchConfirmedClientIds}
             />
           ) : (
             <ClientCards
@@ -5359,6 +5441,7 @@ export function Clients() {
                 canQuickUpdateClients ? handleMarkContacted : undefined
               }
               markingContactedClientIds={contactTouchClientIds}
+              confirmedContactedClientIds={contactTouchConfirmedClientIds}
             />
           )}
           {(viewMode === "list" || viewMode === "card") &&
@@ -5422,6 +5505,7 @@ function ClientTable({
   onQuickUpdate,
   onMarkContacted,
   markingContactedClientIds,
+  confirmedContactedClientIds,
 }: {
   clients: ClientRow[];
   programChoices: ProgramChoice[];
@@ -5442,6 +5526,7 @@ function ClientTable({
   onQuickUpdate?: (client: ClientRow) => void;
   onMarkContacted?: (client: ClientRow) => void;
   markingContactedClientIds?: Set<string>;
+  confirmedContactedClientIds?: Set<string>;
 }) {
   const visibleColumns = columns.length > 0 ? columns : DEFAULT_CLIENT_LIST_COLUMNS;
   return (
@@ -5467,6 +5552,8 @@ function ClientTable({
             const meta = clientMeta(client);
             const isMarkingContacted =
               markingContactedClientIds?.has(client.glide_row_id) === true;
+            const isContactTouchConfirmed =
+              confirmedContactedClientIds?.has(client.glide_row_id) === true;
             return (
               <tr
                 key={client.glide_row_id}
@@ -5487,8 +5574,16 @@ function ClientTable({
                     {onMarkContacted ? (
                       <button
                         type="button"
-                        title="Mark contacted today"
-                        aria-label={`Mark ${client.client_name ?? "client"} as contacted today`}
+                        title={
+                          isContactTouchConfirmed
+                            ? "Marked contacted today"
+                            : "Mark contacted today"
+                        }
+                        aria-label={
+                          isContactTouchConfirmed
+                            ? `${client.client_name ?? "Client"} marked as contacted today`
+                            : `Mark ${client.client_name ?? "client"} as contacted today`
+                        }
                         disabled={isMarkingContacted}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -5498,6 +5593,8 @@ function ClientTable({
                       >
                         {isMarkingContacted ? (
                           <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2b79c4] border-t-transparent" />
+                        ) : isContactTouchConfirmed ? (
+                          <span className="text-base font-bold leading-none text-emerald-600">✓</span>
                         ) : (
                           <CalendarContactIcon />
                         )}
@@ -5577,6 +5674,7 @@ function ClientCards({
   onQuickUpdate,
   onMarkContacted,
   markingContactedClientIds,
+  confirmedContactedClientIds,
 }: {
   clients: ClientRow[];
   programChoices: ProgramChoice[];
@@ -5596,6 +5694,7 @@ function ClientCards({
   onQuickUpdate?: (client: ClientRow) => void;
   onMarkContacted?: (client: ClientRow) => void;
   markingContactedClientIds?: Set<string>;
+  confirmedContactedClientIds?: Set<string>;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -5603,6 +5702,8 @@ function ClientCards({
         const meta = clientMeta(client);
         const isMarkingContacted =
           markingContactedClientIds?.has(client.glide_row_id) === true;
+        const isContactTouchConfirmed =
+          confirmedContactedClientIds?.has(client.glide_row_id) === true;
         return (
           <article
             key={client.glide_row_id}
@@ -5653,8 +5754,16 @@ function ClientCards({
                 {onMarkContacted ? (
                   <button
                     type="button"
-                    title="Mark contacted today"
-                    aria-label={`Mark ${client.client_name ?? "client"} as contacted today`}
+                      title={
+                        isContactTouchConfirmed
+                          ? "Marked contacted today"
+                          : "Mark contacted today"
+                      }
+                      aria-label={
+                        isContactTouchConfirmed
+                          ? `${client.client_name ?? "Client"} marked as contacted today`
+                          : `Mark ${client.client_name ?? "client"} as contacted today`
+                      }
                     disabled={isMarkingContacted}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -5664,6 +5773,8 @@ function ClientCards({
                   >
                     {isMarkingContacted ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2b79c4] border-t-transparent" />
+                    ) : isContactTouchConfirmed ? (
+                      <span className="text-base font-bold leading-none text-emerald-600">✓</span>
                     ) : (
                       <CalendarContactIcon />
                     )}
