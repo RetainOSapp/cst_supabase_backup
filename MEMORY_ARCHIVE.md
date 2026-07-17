@@ -2290,3 +2290,11 @@ to keep the startup router below 150 lines.
 ## Recurring Task Templates - 2026-07-10
 
 - Added recurring fields to `company_task_templates`, Task Templates UI, manual presets, client/milestone template task creation, and active-client-only recurrence guard in `manage-client-task`; build passed and functions deployed.
+
+## Security Rollout Release Candidate - 2026-07-13
+
+- Production Phases 0, 0.5, 1A, 1B, 1D, and 1E are deployed and Jay-QAed; Phase 1C mirror-policy work is intentionally deferred until remaining Glide companies migrate.
+- Current Advisors: Security `0 errors / 24 warnings / 6 info`; Performance `0 errors / 0 warnings / 40 info`. Remaining entries are classified/deferred in `SECURITY_PERFORMANCE_AUDIT.md`.
+- The clean local consolidation branch is `codex/security-source-consolidation` in `/private/tmp/retainos-security-source-consolidation`; it excludes Beacon and secrets and must not be pushed or merged without Jay's explicit approval.
+- Detailed rollout state, rollback steps, and verification evidence live in `SECURITY_ROLLOUT_PLAN.md`; do not expand this memory checkpoint with the rollout log.
+- 2026-07-13 correction: Jay approved the release; commits through `e4cda12` were fast-forwarded to production `main`, Vercel succeeded, and live app/login/bundle smoke passed. Beacon and Anthropic client code remain absent.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getProgramStatusDisplay,
   ProgramStatusPill,
@@ -7851,6 +7851,20 @@ function HistorySection({
 export function ClientDetail() {
   const { clientId } = useParams<{ clientId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const clientsReturnTo = useMemo(() => {
+    const candidate = (location.state as { clientsReturnTo?: unknown } | null)
+      ?.clientsReturnTo;
+    if (typeof candidate !== "string") return "/clients";
+    try {
+      const url = new URL(candidate, window.location.origin);
+      return url.origin === window.location.origin && url.pathname === "/clients"
+        ? `${url.pathname}${url.search}${url.hash}`
+        : "/clients";
+    } catch {
+      return "/clients";
+    }
+  }, [location.state]);
   const { capabilities, effectiveCompanyId, teamMemberId } = useAccountContext();
   const [client, setClient] = useState<ClientRow | null>(null);
   const [contracts, setContracts] = useState<ContractRow[]>([]);
@@ -8370,7 +8384,7 @@ export function ClientDetail() {
     return (
       <div>
         <Link
-          to="/clients"
+          to={clientsReturnTo}
           className="text-sm font-medium text-[#2b79c4] hover:text-[#162b3e]"
         >
           &larr; Back to clients
@@ -8611,7 +8625,7 @@ export function ClientDetail() {
         updatedAt: Date.now(),
       }),
     );
-    navigate("/clients", { replace: true });
+    navigate(clientsReturnTo, { replace: true });
   }
   const upsertMilestone = (milestone: ClientMilestoneRow) => {
     setClientMilestones((current) => [
@@ -8628,7 +8642,7 @@ export function ClientDetail() {
     <div>
       <div className="mb-4">
         <Link
-          to="/clients"
+          to={clientsReturnTo}
           className="text-sm font-medium text-[#2b79c4] hover:text-[#162b3e]"
         >
           &larr; Back to clients

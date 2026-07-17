@@ -1655,10 +1655,13 @@ export function Dashboard() {
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
+  const [teamMembersCompanyId, setTeamMembersCompanyId] = useState("");
   const [offers, setOffers] = useState<Offer[]>([]);
   const [offersLoading, setOffersLoading] = useState(false);
+  const [offersCompanyId, setOffersCompanyId] = useState("");
   const [baseProgramChoices, setBaseProgramChoices] = useState<ProgramChoice[]>([]);
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
+  const [programChoicesLoaded, setProgramChoicesLoaded] = useState(false);
   const [programStatusLabels, setProgramStatusLabels] =
     useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
 
@@ -1793,6 +1796,10 @@ export function Dashboard() {
   const canUseCompanySwitcher = capabilities.canUseCompanySwitcher;
 
   useEffect(() => {
+    storeDashboardFilters(appliedFilters);
+  }, [appliedFilters]);
+
+  useEffect(() => {
     if (activeDashboardTab === "ai" && !capabilities.canTriggerAiInsights) {
       setActiveDashboardTab("overview");
     }
@@ -1824,10 +1831,10 @@ export function Dashboard() {
     setReportVersion((v) => v + 1);
     updateSearchParams({
       [COMPANY_QUERY_KEY]: effectiveCompanyId,
-      [CSM_QUERY_KEY]: assignedTeamMemberId || null,
-      [SECONDARY_ASSIGNEE_QUERY_KEY]: null,
-      [OFFER_QUERY_KEY]: null,
-      [PROGRAM_QUERY_KEY]: null,
+      [CSM_QUERY_KEY]: next.csmId || null,
+      [SECONDARY_ASSIGNEE_QUERY_KEY]: next.secondaryAssigneeId || null,
+      [OFFER_QUERY_KEY]: next.offerId || null,
+      [PROGRAM_QUERY_KEY]: next.program || null,
     });
   }, [assignedTeamMemberId, effectiveCompanyId, pendingFilters.companyId]);
 
@@ -2165,6 +2172,7 @@ export function Dashboard() {
       appCompanySourceStatus !== "ready"
     ) {
       setTeamMembers([]);
+      setTeamMembersCompanyId("");
       setTeamMembersLoading(appCompanySourceStatus === "loading");
       return;
     }
@@ -2173,6 +2181,8 @@ export function Dashboard() {
 
     async function loadTeamMembers() {
       setTeamMembersLoading(true);
+      setTeamMembersCompanyId("");
+      let loadedSuccessfully = true;
 
       const appCompany = appCompanyByLegacyId.get(pendingFilters.companyId);
       const usesAppCompany =
@@ -2191,6 +2201,7 @@ export function Dashboard() {
         if (error) {
           console.error("Failed to load app team members:", error);
           setTeamMembers([]);
+          loadedSuccessfully = false;
         } else {
           setTeamMembers(
             ((data ?? []) as unknown as TeamMember[]).map((member) => ({
@@ -2209,7 +2220,10 @@ export function Dashboard() {
           .eq("company_id", pendingFilters.companyId)
           .order("name", { ascending: true });
         if (cancelled) return;
-        if (error) console.error("Failed to load team members:", error);
+        if (error) {
+          console.error("Failed to load team members:", error);
+          loadedSuccessfully = false;
+        }
         const rows = ((data ?? []) as unknown as TeamMember[]).map(
           (member) => ({ ...member, glide_row_id: member.glide_row_id ?? "" }),
         );
@@ -2217,6 +2231,7 @@ export function Dashboard() {
       }
 
       setTeamMembersLoading(false);
+      setTeamMembersCompanyId(loadedSuccessfully ? pendingFilters.companyId : "");
     }
 
     loadTeamMembers();
@@ -2236,6 +2251,7 @@ export function Dashboard() {
       appCompanySourceStatus !== "ready"
     ) {
       setOffers([]);
+      setOffersCompanyId("");
       setOffersLoading(appCompanySourceStatus === "loading");
       return;
     }
@@ -2244,6 +2260,7 @@ export function Dashboard() {
 
     async function loadOffers() {
       setOffersLoading(true);
+      setOffersCompanyId("");
 
       const appCompany = appCompanyByLegacyId.get(pendingFilters.companyId);
       const usesAppCompany =
@@ -2272,6 +2289,7 @@ export function Dashboard() {
       }
 
       setOffersLoading(false);
+      setOffersCompanyId(error ? "" : pendingFilters.companyId);
     }
 
     loadOffers();
@@ -2312,6 +2330,7 @@ export function Dashboard() {
 
     async function loadProgramChoices() {
       setProgramChoicesLoading(true);
+      setProgramChoicesLoaded(false);
 
       const { data, error } = await supabase
         .from("backup_choices")
@@ -2329,6 +2348,7 @@ export function Dashboard() {
       }
 
       setProgramChoicesLoading(false);
+      setProgramChoicesLoaded(!error);
     }
 
     loadProgramChoices();
@@ -2366,6 +2386,10 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!pendingFilters.csmId) return;
+    if (
+      teamMembersLoading ||
+      teamMembersCompanyId !== pendingFilters.companyId
+    ) return;
 
     const isValidCsm = availableTeamMembers.some(
       (member) => teamMemberOptionId(member) === pendingFilters.csmId,
@@ -2374,10 +2398,21 @@ export function Dashboard() {
     if (!isValidCsm) {
       setPendingFilters((prev) => ({ ...prev, csmId: "" }));
     }
-  }, [availableTeamMembers, pendingFilters.csmId]);
+  }, [
+    availableTeamMembers,
+    pendingFilters.companyId,
+    pendingFilters.csmId,
+    teamMembersCompanyId,
+    teamMembersLoading,
+  ]);
 
   useEffect(() => {
     if (!pendingFilters.secondaryAssigneeId) return;
+    if (
+      companiesLoading ||
+      teamMembersLoading ||
+      teamMembersCompanyId !== pendingFilters.companyId
+    ) return;
 
     if (!showSecondaryAssigneeFilter) {
       setPendingFilters((prev) => ({ ...prev, secondaryAssigneeId: "" }));
@@ -2393,12 +2428,17 @@ export function Dashboard() {
     }
   }, [
     availableTeamMembers,
+    companiesLoading,
+    pendingFilters.companyId,
     pendingFilters.secondaryAssigneeId,
     showSecondaryAssigneeFilter,
+    teamMembersCompanyId,
+    teamMembersLoading,
   ]);
 
   useEffect(() => {
     if (!pendingFilters.offerId) return;
+    if (offersLoading || offersCompanyId !== pendingFilters.companyId) return;
 
     const isValidOffer = offerOptions.some(
       (offer) => offer.value === pendingFilters.offerId,
@@ -2407,10 +2447,17 @@ export function Dashboard() {
     if (!isValidOffer) {
       setPendingFilters((prev) => ({ ...prev, offerId: "" }));
     }
-  }, [offerOptions, pendingFilters.offerId]);
+  }, [
+    offerOptions,
+    offersCompanyId,
+    offersLoading,
+    pendingFilters.companyId,
+    pendingFilters.offerId,
+  ]);
 
   useEffect(() => {
     if (pendingProgramValues.length === 0) return;
+    if (programChoicesLoading || !programChoicesLoaded) return;
 
     const validProgramValues = new Set(programChoices.map((choice) => choice.value));
     const validSelectedPrograms = pendingProgramValues.filter((value) =>
@@ -2423,7 +2470,12 @@ export function Dashboard() {
         program: programFilterFromValues(validSelectedPrograms),
       }));
     }
-  }, [pendingProgramValues, programChoices]);
+  }, [
+    pendingProgramValues,
+    programChoices,
+    programChoicesLoaded,
+    programChoicesLoading,
+  ]);
 
   useEffect(() => {
     if (!appliedFilters.companyId) {

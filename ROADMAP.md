@@ -306,6 +306,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Paused/Suspended/Offboarded require a typed reason; Paused requires a return date and extends app-owned contract dates.
   - Remaining CRUD gaps: richer field coverage, archive/delete beyond lifecycle statuses, and bulk import.
 - `[~]` `[polish]` Clients list/card views and filters exist; Ethical Scaling now reads app-owned client rows.
+  - 2026-07-16 navigation-continuity candidate preserves the applied filter draft/result pair, page, rows per page, view, and sorting when leaving and returning; returning from Client Detail keeps the originating Clients URL, and list/card/notes/calendar client entry points are real links with right-click and Cmd/Ctrl-click support. Awaiting Jay QA before promotion. [qa]
   - 2026-06-20 Filtering Clients overview audit added strategic roster filters for milestone, renewal window, last-contact age, next-contact window, Success, Progress, and Buy-In. List/card/calendar views now share the same applied filter set for app-owned and mirrored clients.
   - 2026-06-20 Contact cadence follow-up added Last Contact and Next Contact sort options to List/Card views, using the same app-owned and mirrored contact date columns as the roster display.
   - 2026-06-20 CSM assignment audit added `Unassigned` to the Clients CSM filter so Admin/Director/Support users can find clients that still need a primary CSM.
@@ -537,6 +538,7 @@ Next session lock:
 - `[ ]` `[priority: medium]` CSM in-progress details.
 - `[ ]` `[priority: later]` CSM Reports AI summary can remain later if AI is not live.
 - `[~]` `[polish]` `[priority: medium]` Dashboard KPIs/charts exist; validate against canonical formulas.
+  - 2026-07-16 navigation-continuity candidate persists every applied Dashboard filter, including Date Range and Client Start Date, and waits for the matching async company/team/pathway/program options before validating restored selections. Awaiting Jay QA. [qa]
   - Charts read app-owned clients for pilot/migrated companies and fall back to the Glide mirror for mirror-only companies.
   - KPI cards now try `dashboard_kpi_counts_canonical` first, including offer and multi-program filters, then fall back to the prior app-owned/legacy calculation if the canonical RPC errors.
   - Performance follow-up v1 completed on 2026-06-06: Overview avoids hidden chart/upkeep loads and Charts lazy-loads heavier datasets by active tab.

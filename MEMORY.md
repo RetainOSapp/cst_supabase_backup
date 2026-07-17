@@ -80,6 +80,7 @@ npx supabase functions deploy prepare-login --project-ref zjauqflzxzsbpnivzsct -
 - 2026-07-14 Vercel dotted-route fix is deployed in production: the SPA rewrite no longer excludes all dotted paths. Glide client/table IDs may contain dots, and refreshing those React routes otherwise returns Vercel `404 NOT_FOUND` before the app loads. Static Vite assets and `favicon.svg` remain excluded; direct production refresh of a dotted Client Detail URL returned 200. Await Adam browser confirmation.
 - 2026-07-15 MM legacy renewal repair: corrected 815 client summaries whose `2075-01-01` migration placeholder conflicted with a positive contract duration, plus 27 matching migration-summary contract rows. Carol Weyrauch now renews 2026-08-04. The remaining 116 client records have no duration and 24 linked contract summaries are genuinely open-ended; they remain unchanged. `scripts/repair-mm-legacy-contract-placeholders.mjs` is idempotent; Clients defensively derives a date if legacy input recurs.
 - 2026-07-16 Client Detail polish keeps the summary/actions sticky below the app header and allows app-owned task edits from the client Tasks tab via the existing audited task function.
+- 2026-07-16 navigation-continuity candidate on `codex/navigation-continuity` preserves Dashboard/Clients filters and Clients page/view/sort state across navigation, uses real client links for new-tab behavior, and passes the production build. It is not committed, pushed, or deployed.
 - Full feature state and remaining QA belong in `ROADMAP.md`, not here.
 
 ## Routing
@@ -101,14 +102,6 @@ For historical context:
 1. Search `MEMORY_ARCHIVE.md` with `rg`.
 2. Promote only durable operational facts back into this file.
 3. Keep active `MEMORY.md` below 150 lines.
-
-## Security Rollout Release Candidate - 2026-07-13
-
-- Production Phases 0, 0.5, 1A, 1B, 1D, and 1E are deployed and Jay-QAed; Phase 1C mirror-policy work is intentionally deferred until remaining Glide companies migrate.
-- Current Advisors: Security `0 errors / 24 warnings / 6 info`; Performance `0 errors / 0 warnings / 40 info`. Remaining entries are classified/deferred in `SECURITY_PERFORMANCE_AUDIT.md`.
-- The clean local consolidation branch is `codex/security-source-consolidation` in `/private/tmp/retainos-security-source-consolidation`; it excludes Beacon and secrets and must not be pushed or merged without Jay's explicit approval.
-- Detailed rollout state, rollback steps, and verification evidence live in `SECURITY_ROLLOUT_PLAN.md`; do not expand this memory checkpoint with the rollout log.
-- 2026-07-13 correction: Jay approved the release; commits through `e4cda12` were fast-forwarded to production `main`, Vercel succeeded, and live app/login/bundle smoke passed. Beacon and Anthropic client code remain absent.
 
 ## Beacon Secure Rebuild Plan - 2026-07-13
 

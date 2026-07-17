@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   ProgramStatusPill,
   type ProgramChoice,
@@ -3331,7 +3331,7 @@ function ClientNotificationsBell() {
   );
 }
 export function Clients() {
-  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     capabilities,
@@ -3375,6 +3375,7 @@ export function Clients() {
   const [teamMembersLoading, setTeamMembersLoading] = useState(false);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [offersLoading, setOffersLoading] = useState(false);
+  const [offersCompanyId, setOffersCompanyId] = useState("");
   const [filterMilestones, setFilterMilestones] = useState<OfferMilestone[]>([]);
   const [filterMilestonesLoading, setFilterMilestonesLoading] = useState(false);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
@@ -3409,9 +3410,13 @@ export function Clients() {
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [totalClients, setTotalClients] = useState(0);
-  const [page, setPage] = useState(cachedState?.page ?? 1);
+  const [page, setPage] = useState(
+    cachedCompanyMatches ? (cachedState?.page ?? 1) : 1,
+  );
   const [pageSize, setPageSize] = useState(
-    cachedState?.pageSize ?? DEFAULT_PAGE_SIZE,
+    cachedCompanyMatches
+      ? (cachedState?.pageSize ?? DEFAULT_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE,
   );
   const [viewMode, setViewMode] = useState<ViewMode>(
     cachedViewModeMatchesCompany ? (cachedState?.viewMode ?? "list") : "list",
@@ -3419,10 +3424,10 @@ export function Clients() {
   const [clientListColumns, setClientListColumns] =
     useState<ClientListColumnKey[]>(DEFAULT_CLIENT_LIST_COLUMNS);
   const [sortField, setSortField] = useState<SortField>(
-    cachedState?.sortField ?? "client_name",
+    cachedCompanyMatches ? (cachedState?.sortField ?? "client_name") : "client_name",
   );
   const [sortDirection, setSortDirection] = useState<SortDirection>(
-    cachedState?.sortDirection ?? "asc",
+    cachedCompanyMatches ? (cachedState?.sortDirection ?? "asc") : "asc",
   );
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const statusFilterRef = useRef<HTMLFieldSetElement>(null);
@@ -3538,6 +3543,7 @@ export function Clients() {
     isUsingAppClients &&
     Boolean(appliedFilters.companyId || filters.companyId);
   const canQuickUpdateClients = capabilities.canQuickUpdate && isUsingAppClients;
+  const clientsReturnTo = `${location.pathname}${location.search}`;
 
   const handleMarkContacted = useCallback(
     async (client: ClientRow) => {
@@ -3707,25 +3713,37 @@ export function Clients() {
     if (!effectiveCompanyId || searchParams.get("companyId") === effectiveCompanyId) {
       return;
     }
-    setFilters((prev) => ({
-      ...prev,
-      companyId: effectiveCompanyId,
-      csmId: assignedTeamMemberId,
-      secondaryAssigneeId: "",
-      offerId: "",
-      milestoneId: "",
-    }));
-    setAppliedFilters((prev) => ({
-      ...prev,
-      companyId: effectiveCompanyId,
-      csmId: assignedTeamMemberId,
-      secondaryAssigneeId: "",
-      offerId: "",
-      milestoneId: "",
-    }));
-    setPage(1);
+    const stateAlreadyMatches =
+      filters.companyId === effectiveCompanyId &&
+      appliedFilters.companyId === effectiveCompanyId;
+    if (!stateAlreadyMatches) {
+      setFilters((prev) => ({
+        ...prev,
+        companyId: effectiveCompanyId,
+        csmId: assignedTeamMemberId,
+        secondaryAssigneeId: "",
+        offerId: "",
+        milestoneId: "",
+      }));
+      setAppliedFilters((prev) => ({
+        ...prev,
+        companyId: effectiveCompanyId,
+        csmId: assignedTeamMemberId,
+        secondaryAssigneeId: "",
+        offerId: "",
+        milestoneId: "",
+      }));
+      setPage(1);
+    }
     setSearchParams({ companyId: effectiveCompanyId }, { replace: true });
-  }, [assignedTeamMemberId, effectiveCompanyId, searchParams, setSearchParams]);
+  }, [
+    appliedFilters.companyId,
+    assignedTeamMemberId,
+    effectiveCompanyId,
+    filters.companyId,
+    searchParams,
+    setSearchParams,
+  ]);
   useEffect(() => {
     function syncRosterRefreshToken() {
       const nextToken =
@@ -3880,12 +3898,19 @@ export function Clients() {
   useEffect(() => {
     if (!filters.companyId) {
       setOffers([]);
+      setOffersCompanyId("");
       setOffersLoading(false);
+      return;
+    }
+    if (!appClientCompanyIdsLoaded) {
+      setOffersCompanyId("");
+      setOffersLoading(true);
       return;
     }
     let cancelled = false;
     async function loadOffers() {
       setOffersLoading(true);
+      setOffersCompanyId("");
       const usesAppOffers = appClientCompanyIds.has(filters.companyId);
       const { data, error } = usesAppOffers
         ? await supabase
@@ -3904,23 +3929,38 @@ export function Clients() {
       const rows = (data ?? []) as Offer[];
       setOffers(rows);
       if (
+        !error &&
         filters.offerId &&
         !rows.some((offer) => offer.glide_row_id === filters.offerId)
       ) {
         setFilters((prev) => ({ ...prev, offerId: "", milestoneId: "" }));
       }
+      setOffersCompanyId(error ? "" : filters.companyId);
       setOffersLoading(false);
     }
     void loadOffers();
     return () => {
       cancelled = true;
     };
-  }, [appClientCompanyIds, filters.companyId, filters.offerId]);
+  }, [
+    appClientCompanyIds,
+    appClientCompanyIdsLoaded,
+    filters.companyId,
+    filters.offerId,
+  ]);
 
   useEffect(() => {
     if (!filters.companyId) {
       setFilterMilestones([]);
       setFilterMilestonesLoading(false);
+      return;
+    }
+    if (
+      !appClientCompanyIdsLoaded ||
+      offersLoading ||
+      offersCompanyId !== filters.companyId
+    ) {
+      setFilterMilestonesLoading(true);
       return;
     }
     let cancelled = false;
@@ -3949,6 +3989,7 @@ export function Clients() {
       const rows = (data ?? []) as OfferMilestone[];
       setFilterMilestones(rows);
       if (
+        !error &&
         filters.milestoneId &&
         !rows.some((milestone) => milestone.glide_row_id === filters.milestoneId)
       ) {
@@ -3960,7 +4001,15 @@ export function Clients() {
     return () => {
       cancelled = true;
     };
-  }, [appClientCompanyIds, filters.companyId, filters.milestoneId, offers]);
+  }, [
+    appClientCompanyIds,
+    appClientCompanyIdsLoaded,
+    filters.companyId,
+    filters.milestoneId,
+    offers,
+    offersCompanyId,
+    offersLoading,
+  ]);
   useEffect(() => {
     if (!filters.companyId || programChoices.length > 0) return;
     let cancelled = false;
@@ -5240,9 +5289,7 @@ export function Clients() {
               onPageChange={setNoteResultsPage}
               teamMemberNameById={teamMemberNameById}
               renderClientAvatar={renderClientAvatar}
-              onOpenClient={(id) =>
-                navigate(`/clients/${encodeURIComponent(id)}`)
-              }
+              clientsReturnTo={clientsReturnTo}
             />
           ) : clientsError && viewMode !== "calendar" ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -5259,9 +5306,7 @@ export function Clients() {
               programChoices={displayProgramChoices}
               teamMemberNameById={teamMemberNameById}
               clientMeta={clientMeta}
-              onOpenClient={(id) =>
-                navigate(`/clients/${encodeURIComponent(id)}`)
-              }
+              clientsReturnTo={clientsReturnTo}
               onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
             />
           ) : clientsLoading ? (
@@ -5293,9 +5338,7 @@ export function Clients() {
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
               columns={clientListColumns}
-              onOpenClient={(id) =>
-                navigate(`/clients/${encodeURIComponent(id)}`)
-              }
+              clientsReturnTo={clientsReturnTo}
               onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
               onMarkContacted={
                 canQuickUpdateClients ? handleMarkContacted : undefined
@@ -5310,9 +5353,7 @@ export function Clients() {
               renderClientAvatar={renderClientAvatar}
               clientMeta={clientMeta}
               showArchetypes={selectedCompany?.enable_archetypes === true}
-              onOpenClient={(id) =>
-                navigate(`/clients/${encodeURIComponent(id)}`)
-              }
+              clientsReturnTo={clientsReturnTo}
               onQuickUpdate={canQuickUpdateClients ? setQuickUpdateClient : undefined}
               onMarkContacted={
                 canQuickUpdateClients ? handleMarkContacted : undefined
@@ -5377,7 +5418,7 @@ function ClientTable({
   renderClientAvatar,
   clientMeta,
   columns,
-  onOpenClient,
+  clientsReturnTo,
   onQuickUpdate,
   onMarkContacted,
   markingContactedClientIds,
@@ -5397,7 +5438,7 @@ function ClientTable({
     archetype: unknown;
   };
   columns: ClientListColumnKey[];
-  onOpenClient: (id: string) => void;
+  clientsReturnTo: string;
   onQuickUpdate?: (client: ClientRow) => void;
   onMarkContacted?: (client: ClientRow) => void;
   markingContactedClientIds?: Set<string>;
@@ -5435,13 +5476,13 @@ function ClientTable({
                   <div className="flex items-center gap-3">
                     {renderClientAvatar(client)}
                     <div className="min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => onOpenClient(client.glide_row_id)}
+                      <Link
+                        to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
+                        state={{ clientsReturnTo }}
                         className="truncate text-left text-sm font-semibold text-[#162b3e] hover:text-[#2b79c4] cursor-pointer"
                       >
                         {client.client_name ?? "Unnamed client"}
-                      </button>
+                      </Link>
                     </div>
                     {onMarkContacted ? (
                       <button
@@ -5532,7 +5573,7 @@ function ClientCards({
   renderClientAvatar,
   clientMeta,
   showArchetypes,
-  onOpenClient,
+  clientsReturnTo,
   onQuickUpdate,
   onMarkContacted,
   markingContactedClientIds,
@@ -5551,7 +5592,7 @@ function ClientCards({
     archetype: unknown;
   };
   showArchetypes: boolean;
-  onOpenClient: (id: string) => void;
+  clientsReturnTo: string;
   onQuickUpdate?: (client: ClientRow) => void;
   onMarkContacted?: (client: ClientRow) => void;
   markingContactedClientIds?: Set<string>;
@@ -5563,20 +5604,19 @@ function ClientCards({
         const isMarkingContacted =
           markingContactedClientIds?.has(client.glide_row_id) === true;
         return (
-          <div
+          <article
             key={client.glide_row_id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpenClient(client.glide_row_id)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onOpenClient(client.glide_row_id);
-              }
-            }}
-            className="rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm transition-all hover:border-[#59abf0] hover:shadow-md cursor-pointer"
+            className="group relative rounded-md border border-[#e4e9f0] bg-white p-5 shadow-sm transition-all hover:border-[#59abf0] hover:shadow-md"
           >
-            <div className="flex items-start justify-between gap-3">
+            <Link
+              to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
+              state={{ clientsReturnTo }}
+              className="retainos-focus absolute inset-0 rounded-md"
+              aria-label={`Open ${client.client_name ?? "client"}`}
+            >
+              <span className="sr-only">Open client</span>
+            </Link>
+            <div className="pointer-events-none relative flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 {renderClientAvatar(client, "h-10 w-10")}
                 <div className="min-w-0">
@@ -5594,7 +5634,7 @@ function ClientCards({
                 choices={programChoices}
               />
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <div className="pointer-events-none relative mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               <MiniMeta label="Buy In" value={<OutcomePill value={meta.buyIn} />} />
               <MiniMeta
                 label="Progress"
@@ -5609,7 +5649,7 @@ function ClientCards({
               <MiniMeta label="Pathway" value={displayValue(meta.pathway)} />
             </div>
             {(onQuickUpdate || onMarkContacted) && (
-              <div className="mt-4 flex justify-end gap-2">
+              <div className="pointer-events-none relative mt-4 flex justify-end gap-2">
                 {onMarkContacted ? (
                   <button
                     type="button"
@@ -5620,7 +5660,7 @@ function ClientCards({
                       event.stopPropagation();
                       onMarkContacted(client);
                     }}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#59abf0] bg-white text-[#2b79c4] shadow-sm transition-colors hover:bg-[#eaf4fe] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+                    className="pointer-events-auto relative z-10 inline-flex h-9 w-9 items-center justify-center rounded-md border border-[#59abf0] bg-white text-[#2b79c4] shadow-sm transition-colors hover:bg-[#eaf4fe] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                   >
                     {isMarkingContacted ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2b79c4] border-t-transparent" />
@@ -5636,13 +5676,13 @@ function ClientCards({
                     event.stopPropagation();
                     onQuickUpdate?.(client);
                   }}
-                  className="rounded-full border border-[#59abf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#2b79c4] transition-colors hover:bg-[#eaf4fe] cursor-pointer"
+                  className="pointer-events-auto relative z-10 rounded-full border border-[#59abf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#2b79c4] transition-colors hover:bg-[#eaf4fe] cursor-pointer"
                 >
                   Quick Update
                 </button>
               </div>
             )}
-          </div>
+          </article>
         );
       })}
     </div>
@@ -5673,7 +5713,7 @@ function NoteSearchPanel({
   onPageChange,
   teamMemberNameById,
   renderClientAvatar,
-  onOpenClient,
+  clientsReturnTo,
 }: {
   search: string;
   appliedSearch: string;
@@ -5690,7 +5730,7 @@ function NoteSearchPanel({
   onPageChange: (page: number) => void;
   teamMemberNameById: Map<string, string>;
   renderClientAvatar: (client: ClientRow, size?: string) => React.ReactNode;
-  onOpenClient: (id: string) => void;
+  clientsReturnTo: string;
 }) {
   const trimmedSearch = appliedSearch.trim();
   return (
@@ -5774,26 +5814,26 @@ function NoteSearchPanel({
                       <div className="flex min-w-0 items-center gap-3">
                         {renderClientAvatar(client, "h-10 w-10")}
                         <div className="min-w-0">
-                          <button
-                            type="button"
-                            onClick={() => onOpenClient(result.client_id)}
+                          <Link
+                            to={`/clients/${encodeURIComponent(result.client_id)}`}
+                            state={{ clientsReturnTo }}
                             className="block truncate text-left text-sm font-semibold text-[#162b3e] hover:text-[#2b79c4] cursor-pointer"
                           >
                             {result.client_name ?? "Unnamed client"}
-                          </button>
+                          </Link>
                           <div className="truncate text-xs text-[#586273]">
                             {teamMemberNameById.get(result.csm_team_member_id ?? "") ??
                               "Unassigned"}
                           </div>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onOpenClient(result.client_id)}
+                      <Link
+                        to={`/clients/${encodeURIComponent(result.client_id)}`}
+                        state={{ clientsReturnTo }}
                         className="shrink-0 text-sm font-semibold text-[#2b79c4] hover:text-[#162b3e] cursor-pointer"
                       >
                         View
-                      </button>
+                      </Link>
                     </div>
                   </div>
                 </article>
@@ -5881,7 +5921,7 @@ function ContactCalendar({
   programChoices,
   teamMemberNameById,
   clientMeta,
-  onOpenClient,
+  clientsReturnTo,
   onQuickUpdate,
 }: {
   mode: CalendarMode;
@@ -5898,7 +5938,7 @@ function ContactCalendar({
     onboarded: unknown;
     renewal: unknown;
   };
-  onOpenClient: (id: string) => void;
+  clientsReturnTo: string;
   onQuickUpdate?: (client: ClientRow) => void;
 }) {
   const todayKey = dateKey(new Date());
@@ -6070,14 +6110,14 @@ function ContactCalendar({
                       key={event.id}
                       className={`rounded-md border bg-white p-2 shadow-sm ${eventBorderClass(event.type)}`}
                     >
-                      <button
-                        type="button"
-                        onClick={() => onOpenClient(event.client.glide_row_id)}
+                      <Link
+                        to={`/clients/${encodeURIComponent(event.client.glide_row_id)}`}
+                        state={{ clientsReturnTo }}
                         className="block w-full truncate text-left text-xs font-semibold text-[#162b3e] hover:text-[#2b79c4]"
                         title={event.client.client_name ?? "Unnamed client"}
                       >
                         {event.client.client_name ?? "Unnamed client"}
-                      </button>
+                      </Link>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span
                           className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${eventTagClass(event.type)}`}
