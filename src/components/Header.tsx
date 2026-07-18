@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BeaconWidget } from "./beacon/BeaconWidget.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { loadUnifiedCompanies, loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
@@ -87,6 +87,7 @@ function RetainOsMark({ compact = false }: { compact?: boolean }) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [companyName, setCompanyName] = useState("");
   const [companies, setCompanies] = useState<SidebarCompany[]>([]);
@@ -160,6 +161,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     return local ? `${local.charAt(0).toUpperCase()}${local.slice(1)}` : "there";
   }, [email]);
 
+  function switchCompany(companyId: string) {
+    setViewAsCompanyId(companyId);
+    if (companyId) {
+      navigate(`/dashboard?companyId=${encodeURIComponent(companyId)}`);
+    }
+  }
+
   const nav = [
     { path: "/dashboard", label: "Dashboard", icon: "dashboard" as const, show: capabilities.canAccessDashboard },
     { path: "/daily-pulse", label: "Daily Pulse", icon: "pulse" as const, show: capabilities.canAccessClients },
@@ -194,7 +202,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <select
             aria-label="View as company"
             value={viewAsCompanyId}
-            onChange={(event) => setViewAsCompanyId(event.target.value)}
+            onChange={(event) => switchCompany(event.target.value)}
             disabled={companiesLoading}
             className="mt-2 block w-full rounded-md border border-white/10 bg-[#1e3a52] px-2.5 py-2 text-xs font-semibold text-white focus:border-[#59abf0] disabled:text-[#8fa3b8]"
           >

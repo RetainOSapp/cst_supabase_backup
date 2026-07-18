@@ -300,7 +300,7 @@ export function SaasClients() {
 
   function viewAsCompany(companyId: string) {
     setViewAsCompanyId(companyId);
-    navigate("/dashboard");
+    navigate(`/dashboard?companyId=${encodeURIComponent(companyId)}`);
   }
 
   async function activateAndInviteDirector(companyKey: string) {
