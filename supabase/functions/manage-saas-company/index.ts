@@ -19,6 +19,17 @@ const SUBSCRIPTION_TIERS = new Set([
   "pro_enterprise_dfy",
 ]);
 
+const DEFAULT_OUTCOME_DEFINITIONS = [
+  { outcome_type: "success", value: "yes", label: "Yes", position: 10, positive_rank: 2 },
+  { outcome_type: "success", value: "no", label: "No", position: 20, positive_rank: 1 },
+  { outcome_type: "progress", value: "green", label: "Green", position: 10, positive_rank: 3 },
+  { outcome_type: "progress", value: "yellow", label: "Yellow", position: 20, positive_rank: 2 },
+  { outcome_type: "progress", value: "red", label: "Red", position: 30, positive_rank: 1 },
+  { outcome_type: "buy_in", value: "green", label: "Green", position: 10, positive_rank: 3 },
+  { outcome_type: "buy_in", value: "yellow", label: "Yellow", position: 20, positive_rank: 2 },
+  { outcome_type: "buy_in", value: "red", label: "Red", position: 30, positive_rank: 1 },
+] as const;
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -280,6 +291,19 @@ Deno.serve(async (req) => {
       },
     });
     if (settingsError) throw settingsError;
+
+    const { error: outcomeError } = await supabase
+      .from("company_outcome_definitions")
+      .insert(
+        DEFAULT_OUTCOME_DEFINITIONS.map((definition) => ({
+          company_id: company.id,
+          ...definition,
+          is_default: true,
+          status: "active",
+          metadata: { seeded_from: "manage-saas-company" },
+        })),
+      );
+    if (outcomeError) throw outcomeError;
 
     await supabase.from("app_audit_events").insert({
       company_id: company.id,
