@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import {
@@ -6,6 +6,7 @@ import {
   loadUnifiedTeamMembers,
   type DataSource,
 } from "../lib/appOwnedData.ts";
+import { supabase } from "../lib/supabase.ts";
 
 type StatusFilter = "active" | "paused" | "archived";
 
@@ -22,6 +23,7 @@ interface CompanyRow {
   enable_call_ai_for_csms: boolean | null;
   migration_status?: string | null;
   source?: DataSource;
+  metadata?: Record<string, unknown> | null;
 }
 
 interface TeamRow {
@@ -72,7 +74,46 @@ function roleLabel(member: TeamRow) {
   return "CSM";
 }
 
-function AddSaasClientModal({ onClose }: { onClose: () => void }) {
+function AddSaasClientModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (companyKey: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [directorName, setDirectorName] = useState("");
+  const [directorEmail, setDirectorEmail] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [subscriptionTier, setSubscriptionTier] = useState("pro_enterprise_dfy");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-saas-company",
+      { body: { name, directorName, directorEmail, logoUrl, subscriptionTier } },
+    );
+    setSaving(false);
+    if (invokeError) {
+      const response = invokeError.context;
+      const responseBody = response instanceof Response
+        ? await response.json().catch(() => null)
+        : null;
+      setError(responseBody?.error ?? invokeError.message ?? "Unable to create workspace.");
+      return;
+    }
+    if (data?.error || !data?.company?.companyKey) {
+      setError(data?.error ?? "Unable to create workspace.");
+      return;
+    }
+    onCreated(String(data.company.companyKey));
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
@@ -81,14 +122,14 @@ function AddSaasClientModal({ onClose }: { onClose: () => void }) {
         onClick={onClose}
         className="absolute inset-0 bg-slate-900/40"
       />
-      <div className="relative w-full max-w-xl rounded-lg border border-gray-200 bg-white shadow-2xl">
+      <form onSubmit={handleSubmit} className="relative w-full max-w-xl rounded-lg border border-gray-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">
               Add New SaaS Client
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Read-only preview. Company creation is locked until write mode is approved.
+              Create a private RetainOS workspace for DFY installation. The Director invite is held until setup is complete.
             </p>
           </div>
           <button
@@ -101,30 +142,25 @@ function AddSaasClientModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <div className="space-y-4 px-6 py-5">
-          {[
-            ["Company Name", "Acme Inc"],
-            ["Director Name", "Jane Smith"],
-            ["Director Email", "jane@example.com"],
-          ].map(([label, placeholder]) => (
-            <div key={label}>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                {label}*
-              </label>
-              <input
-                disabled
-                placeholder={placeholder}
-                className="block w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500"
-              />
-            </div>
-          ))}
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Logo
-            </label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Company Name*</label>
+            <input required disabled={saving} value={name} onChange={(event) => setName(event.target.value)} placeholder="Acme Inc" className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50" />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">First Director*</label>
+              <input required disabled={saving} value={directorName} onChange={(event) => setDirectorName(event.target.value)} placeholder="Jane Smith" className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50" />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Director Email*</label>
+              <input required type="email" disabled={saving} value={directorEmail} onChange={(event) => setDirectorEmail(event.target.value)} placeholder="jane@example.com" className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50" />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Logo URL</label>
             <input
-              disabled
-              placeholder="Upload file"
-              className="block w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              type="url" disabled={saving} value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} placeholder="https://…"
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
             />
           </div>
           <div>
@@ -132,35 +168,37 @@ function AddSaasClientModal({ onClose }: { onClose: () => void }) {
               Subscription Tier
             </label>
             <select
-              disabled
-              className="block w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              disabled={saving} value={subscriptionTier} onChange={(event) => setSubscriptionTier(event.target.value)}
+              className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
             >
-              <option>Starter</option>
-              <option>Growth</option>
-              <option>Pro / Enterprise / DFY</option>
+              <option value="starter">Starter</option>
+              <option value="growth">Growth</option>
+              <option value="pro_enterprise_dfy">Pro / Enterprise / DFY</option>
             </select>
           </div>
           <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Company ID will be generated automatically when write mode is enabled.
+            A RetainOS workspace ID is generated automatically. No Glide/CST record, migration, or sync is created.
           </div>
+          {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
         </div>
         <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
           <button
             type="button"
             onClick={onClose}
+            disabled={saving}
             className="rounded-md border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Cancel
           </button>
           <button
-            type="button"
-            disabled
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white opacity-50"
+            type="submit"
+            disabled={saving}
+            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
           >
-            Submit
+            {saving ? "Creating…" : "Create Private Workspace"}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
@@ -175,6 +213,7 @@ export function SaasClients() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [activatingCompanyKey, setActivatingCompanyKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -264,6 +303,30 @@ export function SaasClients() {
     navigate("/dashboard");
   }
 
+  async function activateAndInviteDirector(companyKey: string) {
+    if (activatingCompanyKey) return;
+    setActivatingCompanyKey(companyKey);
+    setError(null);
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-saas-company",
+      { body: { action: "activate_and_invite_director", companyKey } },
+    );
+    setActivatingCompanyKey(null);
+    if (invokeError) {
+      const response = invokeError.context;
+      const responseBody = response instanceof Response
+        ? await response.json().catch(() => null)
+        : null;
+      setError(responseBody?.error ?? invokeError.message ?? "Unable to activate the Director.");
+      return;
+    }
+    if (data?.error) {
+      setError(data.error);
+      return;
+    }
+    window.location.reload();
+  }
+
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -348,6 +411,9 @@ export function SaasClients() {
             const director =
               team.find((member) => member.role_is_saa_s_admin) ?? team[0];
             const isViewing = viewAsCompanyId === company.glide_row_id;
+            const isPrivateSetup =
+              company.metadata?.data_origin === "retainos_native" &&
+              company.metadata?.onboarding_state === "private_setup";
 
             return (
               <article
@@ -376,8 +442,12 @@ export function SaasClients() {
                           : "No team configured"}
                       </p>
                     </div>
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                      {company.archived ? "Archived" : "Active"}
+                    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                      isPrivateSetup
+                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    }`}>
+                      {isPrivateSetup ? "Private setup" : company.archived ? "Archived" : "Active"}
                     </span>
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-gray-500">
@@ -411,6 +481,18 @@ export function SaasClients() {
                       {isViewing ? "Viewing" : "View as"}
                     </button>
                   </div>
+                  {isPrivateSetup ? (
+                    <button
+                      type="button"
+                      onClick={() => void activateAndInviteDirector(company.glide_row_id)}
+                      disabled={activatingCompanyKey !== null}
+                      className="mt-2 w-full rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                    >
+                      {activatingCompanyKey === company.glide_row_id
+                        ? "Activating…"
+                        : "Activate & invite Director"}
+                    </button>
+                  ) : null}
                 </div>
               </article>
             );
@@ -418,7 +500,16 @@ export function SaasClients() {
         </div>
       )}
 
-      {showAddModal && <AddSaasClientModal onClose={() => setShowAddModal(false)} />}
+      {showAddModal && (
+        <AddSaasClientModal
+          onClose={() => setShowAddModal(false)}
+          onCreated={(companyKey) => {
+            setShowAddModal(false);
+            setViewAsCompanyId(companyKey);
+            navigate(`/saas-clients/${encodeURIComponent(companyKey)}`);
+          }}
+        />
+      )}
     </div>
   );
 }

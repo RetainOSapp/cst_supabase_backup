@@ -227,7 +227,8 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - 2026-06-07: generic reconciliation command supports company name, app company id, and legacy Glide company id.
   - 2026-06-17 audit pass: app UI copy no longer presents migrated/write-mode surfaces as Ethical Scaling/pilot-only; generic reconcile/backfill scripts now require an explicit company selector instead of defaulting to Ethical Scaling. Remaining Ethical Scaling references are intentional historical docs, package aliases, and ES-specific seed/QA scripts.
   - Remaining downstream closure: decide when to promote the completed Ethical Scaling pilot company from `migration_status = 'pilot'` to `migration_status = 'migrated'`; run the explicit-selector migration/reconcile commands during Moves Method cutover prep.
-- `[ ]` `[priority: medium]` Convert SaaS Client/company management from disabled UI to controlled writes.
+- `[~]` `[qa: Jay]` `[priority: medium]` Convert SaaS Client/company management from disabled UI to controlled writes.
+  - 2026-07-18: SuperAdmins can create a fully app-owned RetainOS workspace in private DFY setup. It receives a RetainOS-generated scope key, default company settings, and audit trail; no Glide/CST row or sync is created. The seeded Director is stored without access until the SuperAdmin chooses **Activate & invite Director**. Awaiting Jay QA.
 - `[ ]` `[priority: medium]` CRUD SaaS Clients.
 - `[ ]` `[priority: medium]` SaaS Clients list filters: active, paused, archived.
 - `[x]` Ethical Scaling pilot CRUD company team members.
@@ -985,7 +986,7 @@ Use this section to validate route structure, navigation visibility, and role ac
 
 - `[x]` SaaS Clients list view.
 - `[x]` SaaS Client detail view.
-- `[~]` `[polish]` New SaaS Client modal exists with disabled submit.
+- `[~]` `[qa: Jay]` New SaaS Client modal creates a private DFY workspace; Director access is explicitly held until activation.
 - `[x]` View As / company support flow.
 - `[x]` Resources list view.
 - `[ ]` `[priority: medium]` New resource flow.
@@ -1146,9 +1147,9 @@ This section maps the CSV hierarchy matrix against the current app. Use it to de
 
 - `[x]` SuperAdmin can view existing SaaS Clients / Companies.
 - `[x]` SaaS Clients area is hidden from Director, CSM, Support, and Viewer.
-- `[~]` `[polish]` SuperAdmin can open Add SaaS Client modal for UX testing, but Submit is disabled.
+- `[~]` `[qa: Jay]` SuperAdmin can create a private app-owned SaaS Client workspace; Director invite is held until activation.
 - `[~]` `[polish]` SuperAdmin can open SaaS Client details and Team tab, but edit actions are disabled.
-- `[ ]` Create new SaaS Client.
+- `[~]` `[qa: Jay]` Create a new private-setup SaaS Client workspace.
 - `[ ]` Edit existing SaaS Client.
 - `[ ]` Remove / delete / block / archive SaaS Client.
 - `[ ]` Manage SaaS Client subscription.

@@ -16,6 +16,7 @@ export interface UnifiedCompany {
   enable_secondary_offers: boolean | null;
   enable_archetypes: boolean | null;
   enable_call_ai_for_csms: boolean | null;
+  metadata?: Record<string, unknown> | null;
   migration_status: MigrationStatus | "glide_mirror";
   source: DataSource;
 }
@@ -50,6 +51,7 @@ interface AppCompanyRow {
   view_override: string | null;
   updated_at: string | null;
   archived_at: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 interface MirrorCompanyRow {
@@ -115,6 +117,7 @@ function mapAppCompany(row: AppCompanyRow): UnifiedCompany | null {
     enable_secondary_offers: row.enable_secondary_offers,
     enable_archetypes: row.enable_archetypes,
     enable_call_ai_for_csms: row.enable_call_ai_for_csms,
+    metadata: row.metadata,
     migration_status: row.migration_status,
     source: "app_owned",
   };
@@ -182,7 +185,7 @@ export async function loadUnifiedCompanies() {
     supabase
       .from("companies")
       .select(
-        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, view_override, updated_at, archived_at",
+        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, view_override, updated_at, archived_at, metadata",
       )
       .in("migration_status", ["pilot", "migrated"])
       .order("name", { ascending: true }),
@@ -219,7 +222,7 @@ export async function loadUnifiedCompanyByLegacyId(legacyCompanyId: string) {
     supabase
       .from("companies")
       .select(
-        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, view_override, updated_at, archived_at",
+        "id, public_company_id, legacy_glide_row_id, name, status, migration_status, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, view_override, updated_at, archived_at, metadata",
       )
       .eq("legacy_glide_row_id", legacyCompanyId)
       .in("migration_status", ["pilot", "migrated"])
