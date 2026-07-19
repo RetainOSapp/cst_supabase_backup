@@ -384,6 +384,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - Current write coverage follows New Client v1 fields; phone, contract monthly value/notes, next steps, director notes, freeform notes, and custom fields are preview/export only until a broader create/import server path is approved.
   - Jay QAed the skeleton and preview/import flow as a strong starting point. Keep as a migration safety net, but prioritize other high-impact migration features first.
   - QA checklist and template columns: `CSV_BULK_IMPORT_EXPORT.md`.
+  - 2026-07-18 Sales Kick private-workspace import completed from source hash `6b6cc58a…`: 120 Front End clients, 116 contracts, 117 inferred current milestones, 119 last-contact dates, and 922 custom-field values. The approved CSM split is Ben 51 / Aaron Rapoza 33 / Gio 29 / Ben McLellan fallback 7. Historic task templates were suppressed (0 created). Cole Gordon, Justin Nelson, Matt, and Brian Waldron were intentionally left without an imported contract for manual review.
 - `[x]` Zapier client creation webhook with required server-validated `company_id`.
   - 2026-06-07: `zapier-create-client` Edge Function deployed with JWT verification disabled and protected by `ZAPIER_CLIENT_WEBHOOK_SECRET`.
   - It accepts app-owned company UUID or legacy Glide company id, creates app-owned clients, optional initial contract, history, and audit events.
