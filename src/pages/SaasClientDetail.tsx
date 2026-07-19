@@ -57,6 +57,7 @@ interface TeamRow {
   role_read_only_user: boolean | null;
   capacity_number: number | null;
   is_archived: boolean | null;
+  invite_held?: boolean;
 }
 
 interface AppTeamRow {
@@ -70,7 +71,7 @@ interface AppTeamRow {
   is_read_only: boolean | null;
   hide_from_csm_list: boolean | null;
   capacity_number: number | null;
-  status: "active" | "archived";
+  status: "active" | "pending" | "archived";
 }
 
 interface CompanyOfferRow {
@@ -405,6 +406,7 @@ function mapAppTeamMember(member: AppTeamRow, legacyCompanyId: string): TeamRow 
     role_read_only_user: member.role === "viewer" || member.is_read_only === true,
     capacity_number: member.capacity_number,
     is_archived: member.status === "archived",
+    invite_held: member.status === "pending",
   };
 }
 
@@ -511,6 +513,11 @@ function TeamMemberCard({
           >
             {member.capacity_number ?? "No"} Capacity %
           </span>
+          {member.invite_held ? (
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+              Invite held
+            </span>
+          ) : null}
         </div>
       </div>
     </article>
@@ -521,6 +528,7 @@ function NewTeamMemberModal({
   companyName,
   companyLegacyId,
   canManage,
+  canHoldInvite,
   member,
   onClose,
   onSaved,
@@ -529,6 +537,7 @@ function NewTeamMemberModal({
   companyName: string;
   companyLegacyId: string;
   canManage: boolean;
+  canHoldInvite: boolean;
   member?: TeamRow | null;
   onClose: () => void;
   onSaved: (message?: string) => void;
@@ -547,6 +556,7 @@ function NewTeamMemberModal({
   const [hideFromCsmList, setHideFromCsmList] = useState(
     member?.role_hide_from_csm_list === true,
   );
+  const [holdInvite, setHoldInvite] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -569,6 +579,7 @@ function NewTeamMemberModal({
           role,
           capacityNumber: capacityNumber === "" ? null : Number(capacityNumber),
           hideFromCsmList,
+          holdInvite: !isEditing && holdInvite,
         },
       },
     );
@@ -594,10 +605,15 @@ function NewTeamMemberModal({
     }
 
     const invite = data?.invite as
-      | { sent?: boolean; error?: string; loginUrl?: string }
+      | { sent?: boolean; held?: boolean; error?: string; loginUrl?: string }
       | undefined;
     if (isEditing) {
       onSaved("Team member updated.");
+      return;
+    }
+
+    if (invite?.held) {
+      onSaved("Team member added. Their invite is held and they cannot access RetainOS yet.");
       return;
     }
 
@@ -735,6 +751,18 @@ function NewTeamMemberModal({
               />
               The assigned person does not manage clients.
             </label>
+            {!isEditing && canHoldInvite ? (
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  disabled={!canManage || saving}
+                  checked={holdInvite}
+                  onChange={(event) => setHoldInvite(event.target.checked)}
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                Add now, but hold their login invite and access until later.
+              </label>
+            ) : null}
             <div
               className={`rounded-md border px-4 py-3 text-sm ${
                 canManage
@@ -5786,7 +5814,7 @@ export function SaasClientDetail({
                 active={teamStatusFilter === "active"}
                 onClick={() => setTeamStatusFilter("active")}
               >
-                Active
+                Current team
               </TeamStatusButton>
               <TeamStatusButton
                 active={teamStatusFilter === "archived"}
@@ -5965,6 +5993,7 @@ export function SaasClientDetail({
           companyName={companyName}
           companyLegacyId={companyId ?? ""}
           canManage={canManagePilotTeam}
+          canHoldInvite={isSuperAdmin && canManagePilotTeam}
           member={editingMember}
           onClose={handleCloseTeamModal}
           onSaved={handleTeamSaved}

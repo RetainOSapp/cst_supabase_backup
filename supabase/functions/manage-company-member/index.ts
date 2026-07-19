@@ -53,6 +53,10 @@ function normalizeCapacity(value: unknown) {
   return Math.max(0, Math.min(1000, num));
 }
 
+function wantsHeldInvite(value: unknown) {
+  return value === true;
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   if (
@@ -217,6 +221,14 @@ Deno.serve(async (req) => {
       }
       if (!role) return jsonResponse({ error: "Valid role is required." }, 400);
 
+      const holdInvite = wantsHeldInvite(body.holdInvite);
+      if (holdInvite && actor.role !== "super_admin") {
+        return jsonResponse(
+          { error: "Only a SuperAdmin can hold a team invite during private setup." },
+          403,
+        );
+      }
+
       const payload = {
         company_id: company.id,
         email,
@@ -226,10 +238,11 @@ Deno.serve(async (req) => {
         is_read_only: role === "viewer",
         hide_from_csm_list: Boolean(body.hideFromCsmList),
         capacity_number: normalizeCapacity(body.capacityNumber),
-        status: "active",
+        status: holdInvite ? "pending" : "active",
         metadata: {
           created_from: "manage-company-member",
           actor_role: actor.role,
+          invite_status: holdInvite ? "held" : "sent",
         },
       };
 
@@ -240,7 +253,9 @@ Deno.serve(async (req) => {
         .single();
       if (error) throw error;
 
-      const invite = await sendLoginInvite(supabase, email);
+      const invite = holdInvite
+        ? { sent: false, held: true, provisioned: false }
+        : await sendLoginInvite(supabase, email);
 
       await supabase.from("app_audit_events").insert({
         company_id: company.id,
@@ -251,9 +266,11 @@ Deno.serve(async (req) => {
         entity_table: "company_members",
         entity_id: member.id,
         title: "Company member created",
-        summary: `${name} was added as ${role}.${
-          invite.sent ? " Login email sent." : " Login email failed."
-        }`,
+        summary: holdInvite
+          ? `${name} was added as ${role}; the login invite is held.`
+          : `${name} was added as ${role}.${
+              invite.sent ? " Login email sent." : " Login email failed."
+            }`,
         after_data: member,
         metadata: { invite },
       });
@@ -332,9 +349,9 @@ Deno.serve(async (req) => {
         .maybeSingle();
       if (memberError) throw memberError;
       if (!member) return jsonResponse({ error: "Member not found." }, 404);
-      if (member.status !== "active") {
+      if (member.status !== "active" && member.status !== "pending") {
         return jsonResponse(
-          { error: "Only active team members can receive login invites." },
+          { error: "Only current team members can receive login invites." },
           400,
         );
       }
@@ -349,6 +366,28 @@ Deno.serve(async (req) => {
 
       const invite = await sendLoginInvite(supabase, email);
 
+      let activatedMember = member;
+      if (invite.sent && member.status === "pending") {
+        const { data, error: activationError } = await supabase
+          .from("company_members")
+          .update({
+            status: "active",
+            metadata: {
+              ...(member.metadata && typeof member.metadata === "object"
+                ? member.metadata
+                : {}),
+              invite_status: "sent",
+              invite_sent_at: new Date().toISOString(),
+            },
+          })
+          .eq("id", member.id)
+          .eq("company_id", company.id)
+          .select("*")
+          .single();
+        if (activationError) throw activationError;
+        activatedMember = data;
+      }
+
       await supabase.from("app_audit_events").insert({
         company_id: company.id,
         actor_auth_user_id: userData.user.id,
@@ -362,11 +401,11 @@ Deno.serve(async (req) => {
         summary: invite.sent
           ? `Login email sent to ${member.name ?? member.email}.`
           : `Login email failed for ${member.name ?? member.email}.`,
-        after_data: member,
+        after_data: activatedMember,
         metadata: { invite },
       });
 
-      return jsonResponse({ ok: true, member, invite });
+      return jsonResponse({ ok: true, member: activatedMember, invite });
     }
 
     if (action === "archive") {
