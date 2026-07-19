@@ -67,6 +67,11 @@ interface MirrorCompanyRow {
   enable_call_ai_for_csms: boolean | null;
 }
 
+interface MirrorCompanyVisibilityOverride {
+  legacy_glide_row_id: string;
+  visibility: "hidden" | "archived";
+}
+
 interface AppTeamMemberRow {
   id: string;
   legacy_glide_row_id: string | null;
@@ -181,7 +186,7 @@ function mapMirrorTeamMember(member: MirrorTeamMemberRow): UnifiedTeamMember {
 }
 
 export async function loadUnifiedCompanies() {
-  const [appResult, mirrorResult] = await Promise.all([
+  const [appResult, mirrorResult, overrideResult] = await Promise.all([
     supabase
       .from("companies")
       .select(
@@ -195,10 +200,20 @@ export async function loadUnifiedCompanies() {
         "glide_row_id, name, archived, admin_access_id, synced_at, view_override, enable_secondary_assignee, enable_call_ai_for_csms",
       )
       .order("name", { ascending: true }),
+    supabase
+      .from("company_mirror_visibility_overrides")
+      .select("legacy_glide_row_id, visibility"),
   ]);
 
   if (appResult.error) throw appResult.error;
   if (mirrorResult.error) throw mirrorResult.error;
+  if (overrideResult.error) throw overrideResult.error;
+
+  const visibilityByLegacyId = new Map(
+    ((overrideResult.data ?? []) as MirrorCompanyVisibilityOverride[]).map(
+      (override) => [override.legacy_glide_row_id, override.visibility],
+    ),
+  );
 
   const byLegacyId = new Map<string, UnifiedCompany>();
   for (const row of (appResult.data ?? []) as AppCompanyRow[]) {
@@ -207,8 +222,12 @@ export async function loadUnifiedCompanies() {
   }
 
   for (const row of (mirrorResult.data ?? []) as MirrorCompanyRow[]) {
+    const visibility = visibilityByLegacyId.get(row.glide_row_id);
+    if (visibility === "hidden") continue;
     if (!byLegacyId.has(row.glide_row_id)) {
-      byLegacyId.set(row.glide_row_id, mapMirrorCompany(row));
+      const company = mapMirrorCompany(row);
+      if (visibility === "archived") company.archived = true;
+      byLegacyId.set(row.glide_row_id, company);
     }
   }
 
@@ -218,7 +237,7 @@ export async function loadUnifiedCompanies() {
 }
 
 export async function loadUnifiedCompanyByLegacyId(legacyCompanyId: string) {
-  const [appResult, mirrorResult] = await Promise.all([
+  const [appResult, mirrorResult, overrideResult] = await Promise.all([
     supabase
       .from("companies")
       .select(
@@ -234,18 +253,27 @@ export async function loadUnifiedCompanyByLegacyId(legacyCompanyId: string) {
       )
       .eq("glide_row_id", legacyCompanyId)
       .maybeSingle(),
+    supabase
+      .from("company_mirror_visibility_overrides")
+      .select("legacy_glide_row_id, visibility")
+      .eq("legacy_glide_row_id", legacyCompanyId)
+      .maybeSingle(),
   ]);
 
   if (appResult.error) throw appResult.error;
   if (mirrorResult.error) throw mirrorResult.error;
+  if (overrideResult.error) throw overrideResult.error;
+
+  if (overrideResult.data?.visibility === "hidden") return null;
 
   const appCompany = appResult.data
     ? mapAppCompany(appResult.data as AppCompanyRow)
     : null;
   if (appCompany) return appCompany;
-  return mirrorResult.data
-    ? mapMirrorCompany(mirrorResult.data as MirrorCompanyRow)
-    : null;
+  if (!mirrorResult.data) return null;
+  const mirrorCompany = mapMirrorCompany(mirrorResult.data as MirrorCompanyRow);
+  if (overrideResult.data?.visibility === "archived") mirrorCompany.archived = true;
+  return mirrorCompany;
 }
 
 export async function loadUnifiedTeamMembers(companies: UnifiedCompany[]) {
