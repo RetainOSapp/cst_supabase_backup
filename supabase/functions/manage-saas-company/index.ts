@@ -156,37 +156,66 @@ Deno.serve(async (req) => {
 
       const { data: existingMember, error: existingMemberError } = await supabase
         .from("company_members")
-        .select("id, email")
+        .select("id, legacy_glide_row_id, email, name, role, status, metadata")
         .eq("company_id", company.id)
         .ilike("email", directorEmail)
-        .eq("status", "active")
+        .in("status", ["active", "pending"])
         .maybeSingle();
       if (existingMemberError) throw existingMemberError;
-      if (existingMember) {
+      if (existingMember?.status === "active") {
         return jsonResponse(
           { error: "This Director is already active in the workspace." },
           409,
         );
       }
 
-      const { data: member, error: memberError } = await supabase
-        .from("company_members")
-        .insert({
-          company_id: company.id,
-          legacy_glide_row_id: retainOsKey("retm"),
-          email: directorEmail,
-          name: directorName,
-          role: "director",
-          is_read_only: false,
-          hide_from_csm_list: false,
-          status: "active",
-          metadata: { created_from: "manage-saas-company", invite_status: "sent" },
-        })
-        .select("id, legacy_glide_row_id, email, name, role")
+      const invite = await sendLoginInvite(supabase, directorEmail);
+      if (!invite.sent) {
+        return jsonResponse(
+          { error: `Login email could not be sent: ${invite.error ?? "Unknown delivery error"}` },
+          502,
+        );
+      }
+
+      const memberPayload = existingMember
+        ? {
+            status: "active",
+            name: directorName,
+            role: "director",
+            is_read_only: false,
+            hide_from_csm_list: false,
+            metadata: {
+              ...(existingMember.metadata && typeof existingMember.metadata === "object"
+                ? existingMember.metadata
+                : {}),
+              invite_status: "sent",
+              invite_sent_at: new Date().toISOString(),
+              activated_from_pending: true,
+            },
+          }
+        : {
+            company_id: company.id,
+            legacy_glide_row_id: retainOsKey("retm"),
+            email: directorEmail,
+            name: directorName,
+            role: "director",
+            is_read_only: false,
+            hide_from_csm_list: false,
+            status: "active",
+            metadata: { created_from: "manage-saas-company", invite_status: "sent" },
+          };
+      const memberRequest = existingMember
+        ? supabase
+            .from("company_members")
+            .update(memberPayload)
+            .eq("id", existingMember.id)
+            .eq("company_id", company.id)
+        : supabase.from("company_members").insert(memberPayload);
+      const { data: member, error: memberError } = await memberRequest
+        .select("id, legacy_glide_row_id, email, name, role, status")
         .single();
       if (memberError) throw memberError;
 
-      const invite = await sendLoginInvite(supabase, directorEmail);
       const nextMetadata = {
         ...metadata,
         onboarding_state: "active",
