@@ -552,6 +552,7 @@ Next session lock:
   - Performance follow-up v1 completed on 2026-06-06: Overview avoids hidden chart/upkeep loads and Charts lazy-loads heavier datasets by active tab.
   - App-owned offboarded, retention, and renewal/up-for-renewal formulas were hardened against Ethical Scaling pilot data sources.
   - Retention now includes `client_retention_recorded` events for same-program renewals.
+  - 2026-07-20: Backfilled three verified Moves Method contracts that were classified as Renewal by the retired Contract Type control but lacked the separate retention event used by Dashboard. Future-dated contracts were intentionally excluded.
   - 2026-07-04 Moves Method QA fix: Up For Renewal no longer treats "no Dashboard Date Range" as unbounded all-time renewal coverage. Default is overdue through next 30 days; explicit Date Range still wins.
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
