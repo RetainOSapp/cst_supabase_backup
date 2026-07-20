@@ -1474,6 +1474,7 @@ The current Glide model starts with Companies. Companies own team members, group
   - `manage-client-offboard` is legacy unless intentionally revived.
 - `[~]` `[polish]` Client update history view.
   - Pilot view reads `client_history_events`; full Glide-style audit/change log is still future work.
+  - 2026-07-20: History now resolves the already-recorded RetainOS member actor to a visible name, while mirrored CST entries retain their imported `modified_by` attribution; no history backfill was required.
 - `[ ]` Track call attendance.
 - `[~]` `[polish]` Task create/edit/complete/dismiss flows.
   - 2026-06-18 local Tasks V1.5 pass adds edit/complete/reopen/dismiss/archive/status-drag behavior for app-owned companies.

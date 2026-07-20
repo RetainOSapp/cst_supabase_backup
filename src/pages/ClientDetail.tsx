@@ -40,6 +40,7 @@ type ClientRow = Record<string, unknown> & {
 };
 interface TeamMember {
   glide_row_id: string;
+  app_member_id?: string | null;
   name: string | null;
   is_archived?: boolean | null;
   role_hide_from_csm_list?: boolean | null;
@@ -7176,6 +7177,20 @@ function getHistorySourceLabel(event: ClientHistoryEventRow) {
   return null;
 }
 
+function historyActorName(
+  event: ClientHistoryEventRow,
+  teamMemberNameById: Map<string, string>,
+) {
+  const importedBy = event.metadata?.modified_by;
+  if (typeof importedBy === "string" && importedBy.trim()) {
+    return importedBy.trim();
+  }
+
+  const actorMemberId = event.actor_member_id;
+  if (typeof actorMemberId !== "string" || !actorMemberId) return "";
+  return teamMemberNameById.get(actorMemberId) ?? "";
+}
+
 function legacyHistoryTitle(changeType: string) {
   const normalized = changeType.replace(/_/g, "-").toLowerCase();
   const compact = normalized.replace(/[\s-]+/g, "");
@@ -7517,11 +7532,13 @@ function historyActionEventId(event: ClientHistoryEventRow) {
 
 function HistorySection({
   events,
+  teamMemberNameById,
   canManageHistory,
   onChangeDate,
   onDelete,
 }: {
   events: ClientHistoryEventRow[];
+  teamMemberNameById: Map<string, string>;
   canManageHistory: boolean;
   onChangeDate: (event: ClientHistoryEventRow, eventDate: string) => Promise<void>;
   onDelete: (event: ClientHistoryEventRow) => Promise<void>;
@@ -7638,10 +7655,7 @@ function HistorySection({
         const sourceLabel = getHistorySourceLabel(event);
         const isLegacyHistory = event.source === "cst_mirror";
         const recordingUrl = historyRecordingUrl(event);
-        const modifiedBy =
-          typeof event.metadata?.modified_by === "string"
-            ? event.metadata.modified_by
-            : "";
+        const modifiedBy = historyActorName(event, teamMemberNameById);
 
         return (
           <article
@@ -8330,6 +8344,7 @@ export function ClientDetail() {
             setTeamMembers(
               (appMembers ?? []).map((member) => ({
                 glide_row_id: member.legacy_glide_row_id ?? member.id,
+                app_member_id: member.id,
                 name: member.name,
                 is_archived: member.status === "archived",
                 role_hide_from_csm_list: member.hide_from_csm_list,
@@ -8361,13 +8376,15 @@ export function ClientDetail() {
     );
   }, [client, teamMembers]);
   const teamMemberNameById = useMemo(
-    () =>
-      new Map(
-        teamMembers.map((member) => [
-          member.glide_row_id,
-          member.name ?? "Unassigned",
-        ]),
-      ),
+    () => {
+      const names = new Map<string, string>();
+      for (const member of teamMembers) {
+        const name = member.name ?? "Unassigned";
+        names.set(member.glide_row_id, name);
+        if (member.app_member_id) names.set(member.app_member_id, name);
+      }
+      return names;
+    },
     [teamMembers],
   );
   const displayLookup = useMemo(() => {
@@ -8769,6 +8786,7 @@ export function ClientDetail() {
       ) : activeTab === "history" ? (
         <HistorySection
           events={historyEvents}
+          teamMemberNameById={teamMemberNameById}
           canManageHistory={canManageHistory}
           onChangeDate={changeHistoryDate}
           onDelete={deleteHistoryEvent}
