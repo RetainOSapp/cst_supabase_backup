@@ -1490,6 +1490,7 @@ The current Glide model starts with Companies. Companies own team members, group
 
 - `[~]` `[polish]` CSM Reports dashboard.
   - V1 focuses on profile update compliance, not AI summaries.
+  - 2026-07-20: Dashboard renewal eligibility is now limited to current Front End and Back End clients in both the UI and canonical KPI function; offboarded, paused, and suspended clients remain historical records but cannot inflate renewal counts.
 - `[~]` `[polish]` CSM Reports filters.
 - `[ ]` Replace AI Insights placeholder with approved generation path.
 - `[ ]` Define dashboard AI prompt inputs and stored output format.

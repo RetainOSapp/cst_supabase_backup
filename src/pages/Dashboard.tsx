@@ -2827,7 +2827,10 @@ export function Dashboard() {
       const currentSummaryRenewingIds = new Set<string>();
 
       reportClients.forEach((client) => {
-        if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+        if (![
+          "front-end",
+          "back-end",
+        ].includes(client.program_status_value ?? "")) return;
         if (churnedIds.has(client.glide_row_id)) return;
         const contractEnd = calculatedContractEndDate(client);
         if (
@@ -2851,7 +2854,10 @@ export function Dashboard() {
         if (!contract.client_id || !contract.end_date) return;
         const client = clientById.get(contract.client_id);
         if (!client) return;
-        if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+        if (![
+          "front-end",
+          "back-end",
+        ].includes(client.program_status_value ?? "")) return;
         if (churnedIds.has(contract.client_id)) return;
         if (
           isInDateRange(
@@ -3823,7 +3829,10 @@ export function Dashboard() {
       if (detailKey === "renewing" || detailKey === "active-renewing") {
         currentSummaryRenewingIds = new Set<string>();
         reportClients.forEach((client) => {
-          if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+          if (![
+            "front-end",
+            "back-end",
+          ].includes(client.program_status_value ?? "")) return;
           const contractEnd = calculatedContractEndDate(client);
           if (
             contractEnd &&
@@ -4046,7 +4055,10 @@ export function Dashboard() {
         renewingIds = new Set<string>();
         currentSummaryRenewingIds.forEach((id) => renewingIds.add(id));
         reportClients.forEach((client) => {
-          if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+          if (![
+            "front-end",
+            "back-end",
+          ].includes(client.program_status_value ?? "")) return;
           if (churnedIds.has(client.glide_row_id)) return;
           const contractEnd = calculatedContractEndDate(client);
           if (
@@ -4070,7 +4082,10 @@ export function Dashboard() {
           if (!contract.client_id || !contract.end_date) return;
           const client = clientById.get(contract.client_id);
           if (!client) return;
-          if (["paused", "suspended"].includes(client.program_status_value ?? "")) return;
+          if (![
+            "front-end",
+            "back-end",
+          ].includes(client.program_status_value ?? "")) return;
           if (churnedIds.has(contract.client_id)) return;
           if (
             isInDateRange(
