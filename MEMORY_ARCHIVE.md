@@ -2298,3 +2298,8 @@ to keep the startup router below 150 lines.
 - The clean local consolidation branch is `codex/security-source-consolidation` in `/private/tmp/retainos-security-source-consolidation`; it excludes Beacon and secrets and must not be pushed or merged without Jay's explicit approval.
 - Detailed rollout state, rollback steps, and verification evidence live in `SECURITY_ROLLOUT_PLAN.md`; do not expand this memory checkpoint with the rollout log.
 - 2026-07-13 correction: Jay approved the release; commits through `e4cda12` were fast-forwarded to production `main`, Vercel succeeded, and live app/login/bundle smoke passed. Beacon and Anthropic client code remain absent.
+
+## Archived From Active Memory - 2026-07-20
+
+- 2026-07-14 morning QA: all Section A local/static checks and G1/G2 code review passed; independent Terra review found no P0/P1 issue. The worktree has no Docker/PostgreSQL/local Supabase runtime, so database execution, concurrency, live authorization, and rollback tests require an approved isolated staging target.
+- 2026-07-14 secret checkpoint: Jay stored `OPENAI_API_KEY` directly in Supabase project `zjauqflzxzsbpnivzsct`; CLI verification confirmed only the secret name, never its value. Beacon remains paused with 0 entitlements, 0 allowances, and 0 usage events; no frontend deploy, enablement, or provider call occurred.

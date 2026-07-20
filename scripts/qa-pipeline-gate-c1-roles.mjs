@@ -92,20 +92,27 @@ try {
   ) {
     throw new Error("Gate F company isolation is not intact.");
   }
-  const itemsBefore = await service.from("client_pipeline_items").select("id,updated_at").eq("company_id", ethical.id).order("id");
+  const itemsBefore = await service.from("client_pipeline_items").select("id,company_id,updated_at").in("company_id", [ethical.id, moves.id]).order("id");
   if (itemsBefore.error) throw itemsBefore.error;
-  const runsBefore = await service.from("pipeline_automation_runs").select("id,updated_at").eq("company_id", ethical.id).order("id");
+  const runsBefore = await service.from("pipeline_automation_runs").select("id,created_at").eq("company_id", ethical.id).order("id");
   if (runsBefore.error) throw runsBefore.error;
 
   const members = await service.from("company_members").select("id,name,role,status,is_read_only,auth_user_id").eq("company_id", ethical.id);
   if (members.error) throw members.error;
+  const movesMembers = await service.from("company_members").select("id,name,role,status,is_read_only,auth_user_id").eq("company_id", moves.id);
+  if (movesMembers.error) throw movesMembers.error;
   const exact = (name) => {
     const member = members.data?.find((row) => row.name?.trim() === name);
     if (!member || member.auth_user_id) throw new Error(`${name} is unavailable for temporary role QA.`);
     return member;
   };
+  const exactMoves = (name) => {
+    const member = movesMembers.data?.find((row) => row.name?.trim() === name);
+    if (!member || member.auth_user_id) throw new Error(`${name} is unavailable for temporary MM role QA.`);
+    return member;
+  };
   const directorMember = exact("Jay Goncalves");
-  const csmMember = exact("Emily Hawkins");
+  const csmMember = exactMoves("Marc Meny");
   const supportFixture = exact("Test member 2");
   const viewerFixture = exact("Lauren Perry");
   const readonlyFixture = exact("Adam Molloy");
@@ -122,18 +129,18 @@ try {
 
   const csm = await makeActor("csm", csmMember.id);
   actors.push(csm);
-  const csmWorkspace = await expectStatus("CSM workspace", invoke(workspaceUrl, csm.token, { action: "workspace", companyLegacyId: ethical.legacy_glide_row_id }), [200]);
+  const csmWorkspace = await expectStatus("CSM workspace", invoke(workspaceUrl, csm.token, { action: "workspace", companyLegacyId: moves.legacy_glide_row_id }), [200]);
   const csmItemNames = (csmWorkspace.payload.items ?? []).map((item) => item.client_name_snapshot).sort();
-  if (JSON.stringify(csmItemNames) !== JSON.stringify(["Physical Achievement Center"])) {
+  if (JSON.stringify(csmItemNames) !== JSON.stringify(["Melissa Moore", "Merrilyn Sikorski"])) {
     throw new Error(`CSM scope mismatch: ${JSON.stringify(csmItemNames)}`);
   }
-  const richik = itemsBefore.data?.find((item) => item.id === "a596bbfb-a528-42f6-89ab-860042671919");
-  if (!richik) throw new Error("The approved Richik scope-denial fixture is missing.");
+  const unassignedItem = itemsBefore.data?.find((item) => item.id === "80076e6e-dfdf-4276-b632-d3de5e389a0d");
+  if (!unassignedItem) throw new Error("The approved Kristin Rega scope-denial fixture is missing.");
   await expectStatus("CSM unassigned write denial", invoke(workspaceUrl, csm.token, {
-    action: "update_item", companyLegacyId: ethical.legacy_glide_row_id, itemId: richik.id,
+    action: "update_item", companyLegacyId: moves.legacy_glide_row_id, itemId: unassignedItem.id,
     note: "This denied request must not write.",
   }), [403]);
-  await expectStatus("CSM cross-tenant denial", invoke(workspaceUrl, csm.token, { action: "workspace", companyLegacyId: moves.legacy_glide_row_id }), [403]);
+  await expectStatus("CSM cross-tenant denial", invoke(workspaceUrl, csm.token, { action: "workspace", companyLegacyId: ethical.legacy_glide_row_id }), [403]);
 
   const viewer = await makeActor("viewer", viewerFixture.id);
   actors.push(viewer);
@@ -148,12 +155,12 @@ try {
   expectDisabledWorkspace("Read-only Director workspace", readonlyWorkspace, "viewer");
   await expectStatus("Read-only Director config denial", invoke(configurationUrl, readonly.token, { action: "list_configuration", companyLegacyId: ethical.legacy_glide_row_id }), [403]);
 
-  const itemsAfter = await service.from("client_pipeline_items").select("id,updated_at").eq("company_id", ethical.id).order("id");
+  const itemsAfter = await service.from("client_pipeline_items").select("id,company_id,updated_at").in("company_id", [ethical.id, moves.id]).order("id");
   if (itemsAfter.error) throw itemsAfter.error;
   if (JSON.stringify(itemsAfter.data) !== JSON.stringify(itemsBefore.data)) {
     throw new Error("Role QA unexpectedly changed Pipeline items.");
   }
-  const runsAfter = await service.from("pipeline_automation_runs").select("id,updated_at").eq("company_id", ethical.id).order("id");
+  const runsAfter = await service.from("pipeline_automation_runs").select("id,created_at").eq("company_id", ethical.id).order("id");
   if (runsAfter.error || JSON.stringify(runsAfter.data) !== JSON.stringify(runsBefore.data)) {
     throw new Error("Role QA changed the automation run ledger.");
   }

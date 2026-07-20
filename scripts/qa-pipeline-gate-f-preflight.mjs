@@ -77,6 +77,11 @@ const members = await rows(
   service.from("company_members").select("company_id,role,status,is_read_only,auth_user_id").in("company_id", companyIds),
   "company members",
 );
+const authUsers = await service.auth.admin.listUsers({ page: 1, perPage: 1000 });
+if (authUsers.error) throw new Error(`auth users: ${authUsers.error.message}`);
+const temporaryPipelineUsers = authUsers.data.users
+  .filter((user) => user.email?.startsWith("pipeline-gate-c1-"))
+  .map((user) => user.id);
 const roleReadiness = {};
 for (const company of companies) {
   roleReadiness[company.name] = members
@@ -112,6 +117,7 @@ for (const [name, expected] of Object.entries(expectedGates)) {
 }
 if (unsafePipelines.length) failures.push(`${unsafePipelines.length} Pipeline configuration(s) are not safely paused`);
 if (pendingScheduledActivations !== 0) failures.push(`${pendingScheduledActivations} scheduled activation(s) remain pending`);
+if (temporaryPipelineUsers.length) failures.push(`${temporaryPipelineUsers.length} temporary Pipeline auth identity/identities remain`);
 for (const [name, status] of Object.entries(anonymousStatuses)) {
   if (status !== 401) failures.push(`${name}: anonymous request expected 401, received ${status}`);
 }
@@ -136,6 +142,7 @@ console.log(JSON.stringify({
   scheduleOutcomes,
   anonymousStatuses,
   roleReadiness,
+  temporaryPipelineUsers: temporaryPipelineUsers.length,
   failures,
 }, null, 2));
 

@@ -151,8 +151,25 @@ Stop and roll back/repair before broader access if any of these occur:
 
 ## Approval boundary
 
-This preparation gate is complete when the read-only preflight passes and the packet is reviewed. The next separate authorization is:
+This preparation gate became executable when Jay provided the separate authorization:
 
 > **Approve Pipeline Gate F frontend release.**
 
-That approval authorizes building the fresh-main release candidate, final verification, commit/push to `main`, Vercel verification, and the bounded post-release smoke described here. It does not authorize enabling Sales Kick, enabling Viewer access, unpausing automation, or broad rollout beyond the already configured ES/MM visibility.
+That approval authorized building the fresh-main release candidate, final verification, commit/push to `main`, Vercel verification, and the bounded post-release smoke described here. It did not authorize enabling Sales Kick, enabling Viewer access, unpausing automation, or broad rollout beyond the already configured ES/MM visibility.
+
+## Release closure
+
+- Production commit: `fb4e3da` (`release Pipeline workflows and early renewals`)
+- Production base: `a0859d36a1fa52f2998fd00ddc1eb71a1d0fb3d8`
+- Vercel bundle: `assets/index-cBDhoZ9O.js`
+- Public smoke: `/` 200 and `/login` 200
+- Director: ES workspace and configuration allowed
+- Support: ES workspace allowed; configuration denied
+- Assigned CSM: MM shows exactly Melissa Moore and Merrilyn Sikorski
+- CSM denial: unassigned MM item write denied; ES cross-tenant workspace denied
+- Inactive Viewer: denied; active Viewer with Viewer gate off receives disabled/empty workspace
+- Read-only Director: disabled/empty workspace; configuration denied
+- Smoke residue: zero Pipeline writes, zero automation-run changes, zero temporary auth identities
+- Final safety state: ES/MM enabled, Sales Kick disabled, Viewer access off everywhere, all automation paused, zero pending activations
+
+The in-app browser had no authenticated production session, so the automated visible smoke ended at the healthy login page. Jay's authenticated visual click-through remains the final human observation check; server-side role enforcement and cleanup are complete.

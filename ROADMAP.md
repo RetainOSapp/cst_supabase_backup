@@ -94,6 +94,17 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
+## Pipeline Release - 2026-07-20
+
+- `[x]` Pipeline Phases 0-4, early-renewal scheduling, and the Gate F frontend release are live.
+  - Jay approved Gates A-F and passed the resettable/manual workflow QA. Production commit `fb4e3da` was transplanted onto fresh main and Vercel serves `assets/index-cBDhoZ9O.js`; `/` and `/login` return 200.
+  - Production verification passed: Pipeline 55/55 + 47/47 + 20/20, build, Beacon 44 Edge tests + 87 DB + Edge source + 27 frontend, and milestone ordering 3/3.
+  - Bounded role smoke passed Director, Support, assigned/unassigned CSM, Viewer-off, read-only, inactive, and cross-tenant enforcement with zero Pipeline writes, zero automation-run changes, and zero temporary identities.
+  - ES and MM are visible with Viewer access off and all automation paused. Sales Kick remains disabled. There are zero pending scheduled activations.
+- `[~]` `[qa]` Observe the Pipeline release with MM for one week before broad rollout or advanced automation/reporting.
+  - Remaining human check: Jay signs into production and visually confirms ES/MM navigation, workspace, drawers, Admin Pipelines, and existing Dashboard/Clients/Tasks/Beacon surfaces. No business-data mutation is required.
+  - Sales Kick enablement, Viewer access, renewal scan/scheduler automation, Daily Pulse integration, forecasts, conversion funnels, AI analysis, Slack/email reminders, and broader rollout remain separate decisions.
+
 ## Current Foundation
 
 - `[x]` Vite + React + TypeScript app connected to Supabase backup tables.
