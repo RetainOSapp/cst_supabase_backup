@@ -57,6 +57,13 @@ const CHURN_REASON_COLOR_MAP: Record<string, string> = {
   other: "#94a3b8",
   Other: "#94a3b8",
 };
+const PROGRAM_STATUS_COLOR_MAP: Record<string, string> = {
+  "front-end": "#10b981",
+  "back-end": "#3b82f6",
+  paused: "#f59e0b",
+  suspended: "#f97316",
+  "off-boarded": "#64748b",
+};
 
 type DashboardTab = "overview" | "charts" | "ai";
 
@@ -1878,6 +1885,22 @@ export function Dashboard() {
     () => programValuesFromFilter(appliedFilters.program),
     [appliedFilters.program],
   );
+  const statusDistributionLabels = useMemo(() => {
+    const labels = new Map<string, string>(Object.entries(programStatusLabels));
+    if (
+      labels.get("paused") === DEFAULT_PROGRAM_STATUS_LABELS.paused &&
+      appliedCompany?.program_paused_override
+    ) {
+      labels.set("paused", appliedCompany.program_paused_override);
+    }
+    if (
+      labels.get("suspended") === DEFAULT_PROGRAM_STATUS_LABELS.suspended &&
+      appliedCompany?.program_suspended_override
+    ) {
+      labels.set("suspended", appliedCompany.program_suspended_override);
+    }
+    return labels;
+  }, [appliedCompany, programStatusLabels]);
 
   const availableTeamMembers = useMemo(
     () => teamMembers.filter(managesClients),
@@ -4730,7 +4753,11 @@ export function Dashboard() {
       }
 
       setChartData({
-        programDistribution: countBy(clients, (client) => client.program_status_value),
+        programDistribution: countBy(
+          clients,
+          (client) => client.program_status_value,
+          statusDistributionLabels,
+        ),
         buyInDistribution: countBy(
           clients,
           (client) => client.outcomes_buy_in_for_filtering,
@@ -4783,6 +4810,7 @@ export function Dashboard() {
     teamMemberNameById,
     reportVersion,
     rpcFilterParams,
+    statusDistributionLabels,
   ]);
 
   useEffect(() => {
@@ -5275,16 +5303,17 @@ export function Dashboard() {
           ) : (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               <ChartCard
-                title="Program Distribution"
-                subtitle="Clients grouped by current program status"
+                title="Status Distribution"
+                subtitle="Clients grouped by current status"
               >
                 <DonutChart
                   data={chartData.programDistribution}
+                  colorMap={PROGRAM_STATUS_COLOR_MAP}
                   onItemClick={
                     canUseDashboardDrilldowns
                       ? (item) =>
                           openChartDetail(
-                            "Program Distribution",
+                            "Status Distribution",
                             item,
                             (client) => client.program_status_value,
                           )

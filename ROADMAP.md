@@ -555,6 +555,7 @@ Next session lock:
   - 2026-07-04 Moves Method QA fix: Up For Renewal no longer treats "no Dashboard Date Range" as unbounded all-time renewal coverage. Default is overdue through next 30 days; explicit Date Range still wins.
   - Program filter supports multi-select.
   - Program Distribution, Buy-in, Progress, and Clients By Offer support client-list drilldowns.
+  - 2026-07-20: Status Distribution resolves each company’s custom status label (for example, MIA) and uses stable status-based colours; the card and drill-down no longer use the legacy “Program” wording.
   - `[qa]` When an Offer filter is applied in Dashboard > Charts, the Clients By Offer chart switches to Clients By Milestone for that selected offer/pathway and keeps client-list drilldowns.
   - 2026-07-02 Loom polish: dashboard-visible copy now uses Pathway for the filter, all-pathways option, chart title, subtitle, and drilldown title. Internal database/query names still use `offer` where that is the current schema contract.
   - 2026-06-17 readiness packet prepared in `DASHBOARD_FORMULA_VALIDATION.md` with current formulas, sources, weak spots, and migration-day checks. Full confidence still waits for Moves Method or another larger migrated company.
