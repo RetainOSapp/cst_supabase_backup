@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.101.1";
 
 export type SupabaseServiceClient = ReturnType<typeof createClient>;
 

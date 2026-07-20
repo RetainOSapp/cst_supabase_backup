@@ -1,6 +1,6 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.101.1";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -13,6 +13,16 @@ const WRITER_ROLES = new Set(["director", "support", "csm"]);
 const ACTIVE_STATUS_VALUES = new Set(["front-end", "back-end"]);
 const RETENTION_TYPES = new Set(["none", "renewal", "upsell"]);
 const CONTRACT_ACTIONS = new Set(["create", "update", "archive", "delete"]);
+
+class AuthError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AuthError";
+    this.status = status;
+  }
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -41,6 +51,16 @@ function parseAllowlist(value: string | undefined) {
       .map((email) => email.trim().toLowerCase())
       .filter(Boolean),
   );
+}
+
+function exactEmailQuery<T>(query: T, email: string) {
+  const builder = query as T & {
+    eq: (column: string, value: string) => T;
+    ilike: (column: string, pattern: string) => T;
+  };
+  return /[\\%_*]/.test(email)
+    ? builder.eq("email", email)
+    : builder.ilike("email", email);
 }
 
 function getBearerToken(req: Request) {
@@ -77,6 +97,30 @@ function normalizeContractType(value: unknown) {
     : "standard";
 }
 
+function persistedContractType(value: unknown, retentionType = "none") {
+  if (retentionType === "renewal") return "renewal";
+  // Client Detail's Front End -> Back End choice is the next primary renewal
+  // contract. Expansion Pipeline purchases use the separate add_on path.
+  if (retentionType === "upsell") return "renewal";
+  const normalized = normalizeContractType(value);
+  return normalized === "renewal" || normalized === "add_on"
+    ? normalized
+    : "standard";
+}
+
+function billingCadence(value: unknown, endDate: string | null) {
+  const normalized = cleanText(value).toLowerCase();
+  if (["fixed_term", "month_to_month", "open_ended", "unknown"].includes(normalized)) {
+    return normalized;
+  }
+  return endDate ? "fixed_term" : "open_ended";
+}
+
+function contractCurrency(value: unknown) {
+  const normalized = cleanText(value).toUpperCase();
+  return /^[A-Z]{3}$/.test(normalized) ? normalized : "USD";
+}
+
 function calculateDays(startDate: string | null, endDate: string | null) {
   if (!startDate || !endDate) return null;
   const start = new Date(startDate);
@@ -103,115 +147,49 @@ function dateKey(value: string | null | undefined) {
   return date.toISOString().slice(0, 10);
 }
 
-function isContractCurrent(contract: Record<string, unknown>) {
-  if (contract.archived_at) return false;
-  if (String(contract.status ?? "").toLowerCase() === "archived") return false;
-  const endDate =
-    typeof contract.end_date === "string"
-      ? contract.end_date
-      : calculateEndDate(
-          typeof contract.start_date === "string" ? contract.start_date : null,
-          typeof contract.contract_days === "number"
-            ? contract.contract_days
-            : Number.isFinite(Number(contract.contract_days))
-              ? Number(contract.contract_days)
-              : null,
-        );
-  const endKey = dateKey(endDate);
-  if (!endKey) return true;
-  return endKey >= new Date().toISOString().slice(0, 10);
-}
-
-function contractSortValue(contract: Record<string, unknown>) {
-  const endDate =
-    typeof contract.end_date === "string"
-      ? contract.end_date
-      : calculateEndDate(
-          typeof contract.start_date === "string" ? contract.start_date : null,
-          typeof contract.contract_days === "number"
-            ? contract.contract_days
-            : Number.isFinite(Number(contract.contract_days))
-              ? Number(contract.contract_days)
-              : null,
-        );
-  const parsedEnd = endDate ? new Date(endDate).getTime() : Number.MAX_SAFE_INTEGER;
-  const parsedCreated =
-    typeof contract.created_at === "string"
-      ? new Date(contract.created_at).getTime()
-      : 0;
-  return {
-    end: Number.isNaN(parsedEnd) ? Number.MAX_SAFE_INTEGER : parsedEnd,
-    created: Number.isNaN(parsedCreated) ? 0 : parsedCreated,
-  };
-}
-
 async function syncClientContractSummary(
   supabase: ReturnType<typeof createClient>,
+  companyId: string,
   clientId: string,
-  clientLegacyId: string,
+  _clientLegacyId: string,
 ) {
-  const { data: contractRows, error: latestError } = await supabase
-    .from("client_contracts")
-    .select("*")
-    .eq("client_id", clientLegacyId)
-    .is("archived_at", null)
-    .or("status.is.null,status.neq.archived")
-    .order("end_date", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false })
-    .limit(100);
+  const { data, error } = await supabase.rpc(
+    "refresh_client_contract_summary",
+    { p_company_id: companyId, p_client_id: clientId, p_as_of: new Date().toISOString() },
+  );
+  if (error) throw error;
+  const updatedClient = Array.isArray(data) ? data[0] : data;
+  return { latestContract: null, updatedClient };
+}
 
-  if (latestError) throw latestError;
-
-  const [latestContract = null] = (contractRows ?? [])
-    .filter((contract) => isContractCurrent(contract))
-    .sort((a, b) => {
-      const aValue = contractSortValue(a);
-      const bValue = contractSortValue(b);
-      if (bValue.end !== aValue.end) return bValue.end - aValue.end;
-      return bValue.created - aValue.created;
-    });
-
-  const latestContractEndDate =
-    latestContract?.end_date ??
-    calculateEndDate(
-      latestContract?.start_date ?? null,
-      latestContract?.contract_days ?? null,
-    );
-  const updatePayload: Record<string, unknown> = latestContract
-    ? {
-        current_contract_start_date: latestContract.start_date,
-        current_contract_of_days: latestContract.contract_days,
-        current_contract_end_date: latestContractEndDate,
-        current_contract_end_date_for_filtering: latestContractEndDate,
-        current_contract_monthly_value: latestContract.monthly_value,
-        current_contract_reference_link: latestContract.reference_link,
-        current_contract_notes: latestContract.notes,
-        current_contract_auto_renew: latestContract.auto_renew,
-      }
-    : {
-        current_contract_start_date: null,
-        current_contract_of_days: null,
-        current_contract_end_date: null,
-        current_contract_end_date_for_filtering: null,
-        current_contract_monthly_value: null,
-        current_contract_reference_link: null,
-        current_contract_notes: null,
-        current_contract_auto_renew: null,
-      };
-
-  const { data: updatedClient, error: updateClientError } = await supabase
-    .from("clients")
-    .update(updatePayload)
-    .eq("id", clientId)
-    .select("*")
-    .single();
-
-  if (updateClientError) throw updateClientError;
-  return { latestContract, updatedClient };
+async function reconcileScheduledActivation(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  contractId: string,
+  action: "archive" | "delete" | "update",
+  scheduledFor: string | null,
+  actor: { role: string; memberId: string | null },
+  actorAuthUserId: string,
+) {
+  const { data, error } = await supabase.rpc(
+    "reconcile_scheduled_contract_activation",
+    {
+      p_company_id: companyId,
+      p_contract_id: contractId,
+      p_action: action,
+      p_scheduled_for: scheduledFor,
+      p_actor_auth_user_id: actorAuthUserId,
+      p_actor_member_id: actor.memberId,
+      p_actor_role: actor.role,
+    },
+  );
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] ?? null : data ?? null;
 }
 
 async function resolveActor(
   supabase: ReturnType<typeof createClient>,
+  authUserId: string,
   userEmail: string,
   companyId: string,
 ) {
@@ -224,18 +202,34 @@ async function resolveActor(
     return { role: "super_admin", memberId: null, legacyMemberId: null };
   }
 
-  const { data, error } = await supabase
+  const selectFields = "id, legacy_glide_row_id, role, status, is_read_only";
+  const { data: byAuthUserId, error: byAuthUserIdError } = await supabase
     .from("company_members")
-    .select("id, legacy_glide_row_id, role, status")
+    .select(selectFields)
     .eq("company_id", companyId)
-    .ilike("email", userEmail)
-    .eq("status", "active")
-    .limit(1)
+    .eq("auth_user_id", authUserId)
     .maybeSingle();
+  if (byAuthUserIdError) throw byAuthUserIdError;
 
-  if (error) throw error;
+  let data = byAuthUserId;
+  if (!data) {
+    const emailQuery = exactEmailQuery(
+      supabase
+        .from("company_members")
+        .select(selectFields)
+        .eq("company_id", companyId),
+      userEmail,
+    );
+    const { data: byEmail, error: byEmailError } = await emailQuery.maybeSingle();
+    if (byEmailError) throw byEmailError;
+    data = byEmail;
+  }
 
-  if (data && WRITER_ROLES.has(data.role)) {
+  if (
+    data?.status === "active" &&
+    data.is_read_only !== true &&
+    WRITER_ROLES.has(data.role)
+  ) {
     return {
       role: data.role as string,
       memberId: data.id as string,
@@ -243,7 +237,7 @@ async function resolveActor(
     };
   }
 
-  throw new Error("You do not have permission to manage contracts.");
+  throw new AuthError("You do not have permission to manage contracts.", 403);
 }
 
 function actorAssignmentIds(actor: Awaited<ReturnType<typeof resolveActor>>) {
@@ -330,7 +324,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    const actor = await resolveActor(supabase, userEmail, company.id);
+    const actor = await resolveActor(
+      supabase,
+      userData.user.id,
+      userEmail,
+      company.id,
+    );
 
     if (actor.role === "csm") {
       const assignmentIds = actorAssignmentIds(actor);
@@ -359,6 +358,10 @@ Deno.serve(async (req) => {
       ? cleanText(body.retentionType)
       : "none";
     const retentionTargetStatus = cleanText(body.retentionTargetStatus);
+    const requestedStatusTransition = cleanText(body.programStatusTransition) || "immediate";
+    if (!["immediate", "on_contract_start"].includes(requestedStatusTransition)) {
+      return jsonResponse({ error: "Choose when the Back End transition should happen." }, 400);
+    }
     const markSuccess = body.markSuccess === true;
     const currentProgramStatus =
       typeof client.program_status_value === "string"
@@ -373,6 +376,23 @@ Deno.serve(async (req) => {
     const contractDays =
       nullableNumber(body.contractDays) ?? calculateDays(startDate, endDate);
     const effectiveEndDate = endDate ?? calculateEndDate(startDate, contractDays);
+    const today = new Date().toISOString().slice(0, 10);
+    const startsInFuture = Boolean(startDate && dateKey(startDate)! > today);
+    if (
+      requestedStatusTransition === "on_contract_start" &&
+      (retentionType !== "upsell" || currentProgramStatus !== "front-end" || !startsInFuture)
+    ) {
+      return jsonResponse(
+        { error: "A scheduled Back End move requires a Front End client and a future contract start date." },
+        400,
+      );
+    }
+    const scheduleFutureActivation =
+      startsInFuture && (retentionType === "renewal" || retentionType === "upsell");
+    const applyTargetStatusNow =
+      scheduleFutureActivation &&
+      retentionType === "upsell" &&
+      requestedStatusTransition === "immediate";
     const monthlyValue = nullableNumber(body.monthlyValue);
     const totalContractValue =
       nullableNumber(body.totalContractValue) ??
@@ -437,8 +457,19 @@ Deno.serve(async (req) => {
 
       if (contractError) throw contractError;
 
+      await reconcileScheduledActivation(
+        supabase,
+        company.id,
+        existingContract.id,
+        "archive",
+        null,
+        actor,
+        userData.user.id,
+      );
+
       const { updatedClient } = await syncClientContractSummary(
         supabase,
+        company.id,
         client.id,
         clientLegacyId,
       );
@@ -535,6 +566,16 @@ Deno.serve(async (req) => {
 
       if (historyError) throw historyError;
 
+      await reconcileScheduledActivation(
+        supabase,
+        company.id,
+        existingContract.id,
+        "delete",
+        null,
+        actor,
+        userData.user.id,
+      );
+
       const { error: deleteError } = await supabase
         .from("client_contracts")
         .delete()
@@ -544,6 +585,7 @@ Deno.serve(async (req) => {
 
       const { updatedClient } = await syncClientContractSummary(
         supabase,
+        company.id,
         client.id,
         clientLegacyId,
       );
@@ -594,6 +636,15 @@ Deno.serve(async (req) => {
         );
       }
 
+      const { data: pendingActivation, error: pendingActivationError } = await supabase
+        .from("scheduled_contract_activations")
+        .select("id")
+        .eq("company_id", company.id)
+        .eq("contract_id", existingContract.id)
+        .eq("status", "pending")
+        .maybeSingle();
+      if (pendingActivationError) throw pendingActivationError;
+
       const updatePayload = {
         start_date: startDate,
         end_date: endDate,
@@ -603,7 +654,16 @@ Deno.serve(async (req) => {
         reference_link: nullableText(body.referenceLink),
         notes: nullableText(body.notes),
         auto_renew: body.autoRenew === true,
-        status: nullableText(body.status) ?? "active",
+        status: pendingActivation ? "pending" : nullableText(body.status) ?? "active",
+        contract_type: persistedContractType(
+          body.contractType ?? existingContract.contract_type ??
+            (existingContract.metadata as Record<string, unknown> | null)?.contract_type,
+        ),
+        billing_cadence: billingCadence(
+          body.billingCadence ?? existingContract.billing_cadence,
+          endDate,
+        ),
+        currency_code: contractCurrency(body.currencyCode ?? existingContract.currency_code),
         metadata: {
           ...(existingContract.metadata ?? {}),
           contract_type: normalizeContractType(
@@ -625,8 +685,21 @@ Deno.serve(async (req) => {
 
       if (contractError) throw contractError;
 
+      if (pendingActivation) {
+        await reconcileScheduledActivation(
+          supabase,
+          company.id,
+          existingContract.id,
+          "update",
+          startDate,
+          actor,
+          userData.user.id,
+        );
+      }
+
       const { updatedClient } = await syncClientContractSummary(
         supabase,
+        company.id,
         client.id,
         clientLegacyId,
       );
@@ -722,6 +795,143 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === "create" && retentionType === "renewal") {
+      const { data: pipelineSettings, error: pipelineSettingsError } = await supabase
+        .from("company_settings")
+        .select("enable_pipeline")
+        .eq("company_id", company.id)
+        .maybeSingle();
+      if (pipelineSettingsError) throw pipelineSettingsError;
+
+      if (pipelineSettings?.enable_pipeline === true) {
+        const { data: renewalPipelines, error: renewalPipelinesError } = await supabase
+          .from("company_pipelines")
+          .select("id")
+          .eq("company_id", company.id)
+          .eq("pipeline_type", "renewal")
+          .eq("is_enabled", true)
+          .is("archived_at", null);
+        if (renewalPipelinesError) throw renewalPipelinesError;
+
+        const pipelineIds = (renewalPipelines ?? []).map((row) => row.id);
+        if (pipelineIds.length > 0) {
+          const { data: candidates, error: candidatesError } = await supabase
+            .from("client_pipeline_items")
+            .select("id")
+            .eq("company_id", company.id)
+            .eq("client_id", client.id)
+            .eq("lifecycle_status", "open")
+            .is("archived_at", null)
+            .in("pipeline_id", pipelineIds)
+            .limit(2);
+          if (candidatesError) throw candidatesError;
+          if ((candidates ?? []).length > 1) {
+            return jsonResponse(
+              {
+                error:
+                  "More than one open renewal item matches this client. Close the exact item from Pipeline before creating the renewal contract.",
+              },
+              409,
+            );
+          }
+          if ((candidates ?? []).length === 1) {
+            if (scheduleFutureActivation) {
+              const { data: scheduledResult, error: scheduledError } = await supabase.rpc(
+                "create_scheduled_retention_contract",
+                {
+                  p_company_id: company.id,
+                  p_client_id: client.id,
+                  p_pipeline_item_id: (candidates ?? [])[0].id,
+                  p_start_date: startDate,
+                  p_end_date: endDate,
+                  p_contract_days: contractDays,
+                  p_monthly_value: monthlyValue,
+                  p_total_contract_value: totalContractValue,
+                  p_reference_link: nullableText(body.referenceLink),
+                  p_notes: nullableText(body.notes),
+                  p_auto_renew: body.autoRenew === true,
+                  p_currency_code: contractCurrency(body.currencyCode),
+                  p_retention_type: retentionType,
+                  p_target_status: nextProgramStatus,
+                  p_apply_target_status_now: applyTargetStatusNow,
+                  p_mark_success: markSuccess,
+                  p_actor_auth_user_id: userData.user.id,
+                  p_actor_member_id: actor.memberId,
+                  p_actor_role: actor.role,
+                  p_source: "pipeline_workspace",
+                },
+              );
+              if (scheduledError) throw scheduledError;
+              const scheduled = (Array.isArray(scheduledResult) ? scheduledResult[0] : scheduledResult) as Record<string, unknown> | null;
+              return jsonResponse({ ok: true, ...(scheduled ?? {}), pipelineItem: scheduled?.item ?? null });
+            }
+            const { data: result, error: closeError } = await supabase.rpc(
+              "create_contract_and_close_pipeline_item",
+              {
+                p_company_id: company.id,
+                p_item_id: (candidates ?? [])[0].id,
+                p_start_date: startDate,
+                p_end_date: endDate,
+                p_contract_days: contractDays,
+                p_monthly_value: monthlyValue,
+                p_total_contract_value: totalContractValue,
+                p_auto_renew: body.autoRenew === true,
+                p_note: nullableText(body.notes),
+                p_target_offer_id: null,
+                p_actor_auth_user_id: userData.user.id,
+                p_actor_member_id: actor.memberId,
+                p_actor_role: actor.role,
+                p_retention_target_status: nextProgramStatus,
+                p_mark_success: markSuccess,
+              },
+            );
+            if (closeError) throw closeError;
+            const resolved = (Array.isArray(result) ? result[0] : result) as
+              | Record<string, unknown>
+              | null;
+            return jsonResponse({
+              ok: true,
+              ...(resolved ?? {}),
+              event: null,
+              retentionEvent: null,
+              pipelineItem: resolved?.item ?? null,
+            });
+          }
+        }
+      }
+    }
+
+    if (action === "create" && scheduleFutureActivation) {
+      const { data: scheduledResult, error: scheduledError } = await supabase.rpc(
+        "create_scheduled_retention_contract",
+        {
+          p_company_id: company.id,
+          p_client_id: client.id,
+          p_pipeline_item_id: null,
+          p_start_date: startDate,
+          p_end_date: endDate,
+          p_contract_days: contractDays,
+          p_monthly_value: monthlyValue,
+          p_total_contract_value: totalContractValue,
+          p_reference_link: nullableText(body.referenceLink),
+          p_notes: nullableText(body.notes),
+          p_auto_renew: body.autoRenew === true,
+          p_currency_code: contractCurrency(body.currencyCode),
+          p_retention_type: retentionType,
+          p_target_status: nextProgramStatus,
+          p_apply_target_status_now: applyTargetStatusNow,
+          p_mark_success: markSuccess,
+          p_actor_auth_user_id: userData.user.id,
+          p_actor_member_id: actor.memberId,
+          p_actor_role: actor.role,
+          p_source: "contract_create",
+        },
+      );
+      if (scheduledError) throw scheduledError;
+      const scheduled = (Array.isArray(scheduledResult) ? scheduledResult[0] : scheduledResult) as Record<string, unknown> | null;
+      return jsonResponse({ ok: true, ...(scheduled ?? {}) });
+    }
+
     const glideRowId = `contract_${crypto.randomUUID()}`;
     const contractPayload = {
       company_id: company.id,
@@ -737,8 +947,11 @@ Deno.serve(async (req) => {
       notes: nullableText(body.notes),
       auto_renew: body.autoRenew === true,
       status: nullableText(body.status) ?? "active",
+      contract_type: persistedContractType(body.contractType, retentionType),
+      billing_cadence: billingCadence(body.billingCadence, endDate),
+      currency_code: contractCurrency(body.currencyCode),
       metadata: {
-        contract_type: normalizeContractType(body.contractType),
+        contract_type: persistedContractType(body.contractType, retentionType),
         created_in: "retainos_contract_write_pilot",
         actor_role: actor.role,
       },
@@ -780,6 +993,7 @@ Deno.serve(async (req) => {
 
     const { updatedClient } = await syncClientContractSummary(
       supabase,
+      company.id,
       client.id,
       clientLegacyId,
     );
@@ -887,7 +1101,14 @@ Deno.serve(async (req) => {
       retentionEvent,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, 500);
+    const message = error instanceof AuthError
+      ? error.message
+      : error instanceof Error
+      ? error.message
+      : "Unexpected error";
+    return jsonResponse(
+      { error: message },
+      error instanceof AuthError ? error.status : 500,
+    );
   }
 });

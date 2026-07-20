@@ -18,6 +18,7 @@ type IconName =
   | "clients"
   | "resources"
   | "tasks"
+  | "pipeline"
   | "call-ai"
   | "groups"
   | "admin"
@@ -58,6 +59,9 @@ function NavIcon({ name }: { name: IconName }) {
   if (name === "tasks") {
     return <svg {...common}><path d="m9 11 3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" {...strokeProps} /></svg>;
   }
+  if (name === "pipeline") {
+    return <svg {...common}><path d="M3 5h18l-7 8v5l-4 2v-7z" {...strokeProps} /></svg>;
+  }
   if (name === "call-ai") {
     return <svg {...common}><path d="M12 3v3M12 18v3M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M3 12h3M18 12h3M5.64 18.36l2.12-2.12M16.24 7.76l2.12-2.12M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" {...strokeProps} /></svg>;
   }
@@ -92,6 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [companyName, setCompanyName] = useState("");
   const [companies, setCompanies] = useState<SidebarCompany[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(false);
+  const [pipelineVisible, setPipelineVisible] = useState(false);
   const {
     capabilities,
     email,
@@ -122,6 +127,32 @@ export function AppShell({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [effectiveCompanyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPipelineVisible(false);
+    if (!effectiveCompanyId || !capabilities.canAccessPipeline) return;
+
+    supabase.functions
+      .invoke("manage-pipeline-workspace", {
+        body: {
+          action: "access",
+          companyLegacyId: effectiveCompanyId,
+        },
+      })
+      .then(({ data, error }) => {
+        if (cancelled || error || data?.error) return;
+        const viewerAllowed = role !== "viewer" || data?.viewerAccess === true;
+        setPipelineVisible(data?.enabled === true && viewerAllowed);
+      })
+      .catch(() => {
+        if (!cancelled) setPipelineVisible(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [capabilities.canAccessPipeline, effectiveCompanyId, role]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,6 +205,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     { path: "/clients", label: "Clients", icon: "clients" as const, show: capabilities.canAccessClients },
     { path: "/csm-reports", label: "CSM Reports", icon: "reports" as const, show: capabilities.canAccessCsmReports },
     { path: "/tasks", label: "Tasks", icon: "tasks" as const, show: capabilities.canAccessTasks },
+    { path: "/pipeline", label: "Pipeline", icon: "pipeline" as const, show: pipelineVisible },
     { path: "/call-ai", label: "Call AI", icon: "call-ai" as const, show: capabilities.canAccessCallAi },
     { path: "/groups", label: "Groups", icon: "groups" as const, show: capabilities.canAccessClients },
     { path: "/resources", label: "Resources", icon: "resources" as const, show: capabilities.canAccessResources },

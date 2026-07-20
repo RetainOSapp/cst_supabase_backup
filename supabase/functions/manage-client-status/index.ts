@@ -1,6 +1,6 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.101.1";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -17,6 +17,16 @@ const ALLOWED_STATUS_VALUES = new Set([
   "suspended",
   "off-boarded",
 ]);
+
+class AuthError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AuthError";
+    this.status = status;
+  }
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -60,6 +70,16 @@ function parseAllowlist(value: string | undefined) {
       .map((email) => email.trim().toLowerCase())
       .filter(Boolean),
   );
+}
+
+function exactEmailQuery<T>(query: T, email: string) {
+  const builder = query as T & {
+    eq: (column: string, value: string) => T;
+    ilike: (column: string, pattern: string) => T;
+  };
+  return /[\\%_*]/.test(email)
+    ? builder.eq("email", email)
+    : builder.ilike("email", email);
 }
 
 function getBearerToken(req: Request) {
@@ -122,6 +142,7 @@ function daysBetween(startIso: string, endIso: string) {
 
 async function resolveActor(
   supabase: ReturnType<typeof createClient>,
+  authUserId: string,
   userEmail: string,
   companyId: string,
 ) {
@@ -134,18 +155,34 @@ async function resolveActor(
     return { role: "super_admin", memberId: null, legacyMemberId: null };
   }
 
-  const { data, error } = await supabase
+  const selectFields = "id, legacy_glide_row_id, role, status, is_read_only";
+  const { data: byAuthUserId, error: byAuthUserIdError } = await supabase
     .from("company_members")
-    .select("id, legacy_glide_row_id, role, status")
+    .select(selectFields)
     .eq("company_id", companyId)
-    .ilike("email", userEmail)
-    .eq("status", "active")
-    .limit(1)
+    .eq("auth_user_id", authUserId)
     .maybeSingle();
+  if (byAuthUserIdError) throw byAuthUserIdError;
 
-  if (error) throw error;
+  let data = byAuthUserId;
+  if (!data) {
+    const emailQuery = exactEmailQuery(
+      supabase
+        .from("company_members")
+        .select(selectFields)
+        .eq("company_id", companyId),
+      userEmail,
+    );
+    const { data: byEmail, error: byEmailError } = await emailQuery.maybeSingle();
+    if (byEmailError) throw byEmailError;
+    data = byEmail;
+  }
 
-  if (data && WRITER_ROLES.has(data.role)) {
+  if (
+    data?.status === "active" &&
+    data.is_read_only !== true &&
+    WRITER_ROLES.has(data.role)
+  ) {
     return {
       role: data.role as string,
       memberId: data.id as string,
@@ -153,7 +190,10 @@ async function resolveActor(
     };
   }
 
-  throw new Error("You do not have permission to change this client status.");
+  throw new AuthError(
+    "You do not have permission to change this client status.",
+    403,
+  );
 }
 
 function actorAssignmentIds(actor: {
@@ -260,7 +300,12 @@ Deno.serve(async (req) => {
       );
     }
 
-    const actor = await resolveActor(supabase, userEmail, company.id);
+    const actor = await resolveActor(
+      supabase,
+      userData.user.id,
+      userEmail,
+      company.id,
+    );
 
     if (actor.role === "csm") {
       const assignmentIds = actorAssignmentIds(actor);
@@ -366,6 +411,8 @@ Deno.serve(async (req) => {
             good_fit_for_offer: goodFitForOffer,
             recorded_at: now,
             recorded_by_role: actor.role,
+            actor_auth_user_id: userData.user.id,
+            actor_member_id: actor.memberId,
           }
         : null;
 
@@ -539,7 +586,14 @@ Deno.serve(async (req) => {
       updatedContract,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unexpected error";
-    return jsonResponse({ error: message }, 500);
+    const message = error instanceof AuthError
+      ? error.message
+      : error instanceof Error
+      ? error.message
+      : "Unexpected error";
+    return jsonResponse(
+      { error: message },
+      error instanceof AuthError ? error.status : 500,
+    );
   }
 });

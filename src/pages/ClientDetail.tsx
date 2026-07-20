@@ -15,6 +15,7 @@ import {
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 import { uploadClientImage } from "../lib/clientImageUpload.ts";
+import { loadPipelineWorkspace } from "../lib/pipeline.ts";
 import { ClientAdvocacyPanel } from "../components/ClientAdvocacyPanel.tsx";
 import {
   buildAdvocacyEventDrafts,
@@ -759,6 +760,9 @@ function isCurrentSummaryContract(contract: Record<string, unknown>) {
 
 function getContractStatus(contract: Record<string, unknown>) {
   const status = valueFrom(contract, ["status"]);
+  if (typeof status === "string" && status.toLowerCase() === "pending") {
+    return "Pending";
+  }
   if (typeof status === "string" && status.toLowerCase() === "archived") {
     return "Archived";
   }
@@ -778,7 +782,7 @@ function contractMatchesFilter(
   const status = getContractStatus(contract);
   if (filter === "archived") return status === "Archived";
   if (filter === "old") return status === "Expired";
-  return status === "Active" || status === "Open";
+  return status === "Active" || status === "Open" || status === "Pending";
 }
 
 function isAppOwnedContract(contract: Record<string, unknown>) {
@@ -3495,6 +3499,9 @@ function NewContractModal({
   const [retentionTargetStatus, setRetentionTargetStatus] = useState(
     currentProgramStatus || "front-end",
   );
+  const [programStatusTransition, setProgramStatusTransition] = useState<
+    "immediate" | "on_contract_start"
+  >("immediate");
   const [markSuccess, setMarkSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -3523,6 +3530,7 @@ function NewContractModal({
           status,
           retentionType: isEditing ? "none" : retentionType,
           retentionTargetStatus,
+          programStatusTransition,
           markSuccess: isEditing ? false : markSuccess,
         },
       },
@@ -3588,7 +3596,17 @@ function NewContractModal({
                 <input
                   type="date"
                   value={startDate}
-                  onChange={(event) => setStartDate(event.target.value)}
+                  onChange={(event) => {
+                    const nextStartDate = event.target.value;
+                    setStartDate(nextStartDate);
+                    if (retentionType === "upsell") {
+                      setProgramStatusTransition(
+                        nextStartDate > new Date().toISOString().slice(0, 10)
+                          ? "on_contract_start"
+                          : "immediate",
+                      );
+                    }
+                  }}
                   className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
                 />
               </label>
@@ -3686,8 +3704,14 @@ function NewContractModal({
                     setMarkSuccess(nextType !== "none");
                     if (nextType === "upsell") {
                       setRetentionTargetStatus("back-end");
+                      setProgramStatusTransition(
+                        startDate > new Date().toISOString().slice(0, 10)
+                          ? "on_contract_start"
+                          : "immediate",
+                      );
                     } else if (nextType === "renewal") {
                       setRetentionTargetStatus(currentProgramStatus || "front-end");
+                      setProgramStatusTransition("immediate");
                     }
                   }}
                   disabled={!canRecordRetention}
@@ -3715,6 +3739,38 @@ function NewContractModal({
                       : "Front End restart"}
                   .
                 </p>
+              ) : null}
+              {retentionType === "upsell" ? (
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-indigo-700">
+                    Move to Back End
+                  </span>
+                  <select
+                    value={programStatusTransition}
+                    onChange={(event) =>
+                      setProgramStatusTransition(
+                        event.target.value as "immediate" | "on_contract_start",
+                      )
+                    }
+                    className="block w-full rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-900"
+                  >
+                    <option
+                      value="on_contract_start"
+                      disabled={!startDate || startDate <= new Date().toISOString().slice(0, 10)}
+                    >
+                      On contract start date{startDate ? ` (${startDate})` : ""}
+                    </option>
+                    <option value="immediate">Now</option>
+                  </select>
+                  <span className="mt-1 block text-xs text-indigo-700">
+                    For an early renewal, keep the client in Front End until the new contract begins.
+                  </span>
+                </label>
+              ) : null}
+              {retentionType !== "none" && startDate > new Date().toISOString().slice(0, 10) ? (
+                <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                  Retention is recorded now. This contract remains Pending and becomes current automatically on {startDate}.
+                </div>
               ) : null}
               {retentionType !== "none" ? (
                 <label className="mt-3 flex items-center gap-2 text-sm font-medium text-indigo-900">
@@ -5379,6 +5435,8 @@ function ContractCard({
             className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
               status === "Active"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : status === "Pending"
+                  ? "border-sky-200 bg-sky-50 text-sky-700"
                 : status === "Expired" || status === "Archived"
                   ? "border-slate-200 bg-slate-50 text-slate-700"
                   : "border-gray-200 bg-gray-50 text-gray-600"
@@ -7942,6 +8000,7 @@ export function ClientDetail() {
   const [editingMilestoneCompletion, setEditingMilestoneCompletion] =
     useState<ClientMilestoneRow | null>(null);
   const [changingPathway, setChangingPathway] = useState(false);
+  const [canAddExpansionOpportunity, setCanAddExpansionOpportunity] = useState(false);
   useEffect(() => {
     if (!clientId) return;
     let cancelled = false;
@@ -8367,6 +8426,22 @@ export function ClientDetail() {
       cancelled = true;
     };
   }, [capabilities.canViewOnlyAssignedClients, clientId, effectiveCompanyId, teamMemberId]);
+  useEffect(() => {
+    let cancelled = false;
+    setCanAddExpansionOpportunity(false);
+    if (!effectiveCompanyId || !client || !isAppOwnedClient || !capabilities.canEditClient) return;
+    loadPipelineWorkspace(effectiveCompanyId)
+      .then((workspace) => {
+        if (cancelled) return;
+        const clientIsInAuthorizedScope = workspace.clients.some((row) => row.id === client.glide_row_id || row.glide_row_id === client.glide_row_id);
+        const expansionEnabled = workspace.pipelines.some((pipeline) => pipeline.is_enabled && pipeline.pipeline_type === "expansion");
+        setCanAddExpansionOpportunity(workspace.enabled && workspace.canWrite && clientIsInAuthorizedScope && expansionEnabled);
+      })
+      .catch(() => {
+        if (!cancelled) setCanAddExpansionOpportunity(false);
+      });
+    return () => { cancelled = true; };
+  }, [capabilities.canEditClient, client, effectiveCompanyId, isAppOwnedClient]);
   const csmName = useMemo(() => {
     if (!client?.csm_team_member_id) return "Unassigned";
     return (
@@ -8708,6 +8783,7 @@ export function ClientDetail() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {canAddExpansionOpportunity ? <Link to={`/pipeline?new=expansion&client=${encodeURIComponent(client.glide_row_id)}`} className="retainos-button-secondary">Add expansion opportunity</Link> : null}
             {canChangeStatus ? (
               <button
                 type="button"

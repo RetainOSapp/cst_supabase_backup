@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AiFeaturesPanel } from "../components/beacon/AiFeaturesPanel.tsx";
+import { PipelineSetup } from "../components/pipeline/PipelineSetup.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { loadUnifiedCompanyByLegacyId } from "../lib/appOwnedData.ts";
 import {
@@ -18,7 +19,7 @@ import {
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 
-type DetailTab = "team" | "customization" | "pathways" | "settings";
+type DetailTab = "team" | "customization" | "pathways" | "pipelines" | "settings";
 type TeamSource = "mirror" | "app_owned";
 type PathwaySource = "mirror" | "app_owned";
 type CustomizationSource = "mirror" | "app_owned";
@@ -154,9 +155,15 @@ interface CompanyTaskTemplateRow {
   id?: string;
   name: string;
   description?: string | null;
-  trigger_type: "manual" | "client_created" | "milestone_completed";
+  trigger_type:
+    | "manual"
+    | "client_created"
+    | "milestone_completed"
+    | "pipeline_stage_entered";
   applies_to_offer_id?: string | null;
   applies_to_milestone_id?: string | null;
+  applies_to_pipeline_id?: string | null;
+  applies_to_pipeline_stage_id?: string | null;
   assign_to_type: "assigned_csm" | "director" | "support" | "specific_member" | "unassigned";
   assigned_member_legacy_id?: string | null;
   due_offset_days: number;
@@ -167,6 +174,22 @@ interface CompanyTaskTemplateRow {
   is_enabled: boolean;
   position?: number | null;
   metadata?: Record<string, unknown> | null;
+  archived_at?: string | null;
+}
+
+interface CompanyTaskPipelineOption {
+  id: string;
+  name: string;
+  is_enabled: boolean;
+  archived_at?: string | null;
+}
+
+interface CompanyTaskPipelineStageOption {
+  id: string;
+  pipeline_id: string;
+  name: string;
+  position?: number | null;
+  is_enabled: boolean;
   archived_at?: string | null;
 }
 
@@ -198,6 +221,8 @@ interface CompanySettingsRow {
   enable_embeds: boolean;
   enable_zapier_client_create: boolean;
   allow_status_change_retention: boolean;
+  enable_pipeline: boolean;
+  enable_pipeline_viewer_access: boolean;
   client_list_columns?: ClientListColumnKey[];
   program_status_labels?: ProgramStatusLabelMap;
   metadata?: Record<string, unknown> | null;
@@ -2570,6 +2595,8 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_embeds: false,
     enable_zapier_client_create: false,
     allow_status_change_retention: false,
+    enable_pipeline: false,
+    enable_pipeline_viewer_access: false,
     client_list_columns: normalizeClientListColumns(null),
     program_status_labels: DEFAULT_PROGRAM_STATUS_LABELS,
     metadata: {
@@ -2893,6 +2920,8 @@ function TaskTemplatesModal({
     trigger_type: "client_created",
     applies_to_offer_id: "",
     applies_to_milestone_id: "",
+    applies_to_pipeline_id: "",
+    applies_to_pipeline_stage_id: "",
     assign_to_type: "assigned_csm",
     assigned_member_legacy_id: "",
     due_offset_days: 0,
@@ -2909,6 +2938,10 @@ function TaskTemplatesModal({
   const [freshMilestones, setFreshMilestones] = useState<
     CompanyOfferMilestoneRow[] | null
   >(null);
+  const [pipelineOptions, setPipelineOptions] = useState<CompanyTaskPipelineOption[]>([]);
+  const [pipelineStageOptions, setPipelineStageOptions] = useState<
+    CompanyTaskPipelineStageOption[]
+  >([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const availableOffers = freshOffers ?? offers;
   const availableMilestones = freshMilestones ?? milestones;
@@ -2944,9 +2977,29 @@ function TaskTemplatesModal({
       milestone.name ?? "Unnamed milestone",
     ]),
   );
+  const activePipelines = pipelineOptions
+    .filter((pipeline) => pipeline.is_enabled && !pipeline.archived_at)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const activePipelineStages = pipelineStageOptions
+    .filter(
+      (stage) =>
+        stage.is_enabled &&
+        !stage.archived_at &&
+        stage.pipeline_id === draft.applies_to_pipeline_id,
+    )
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const pipelineNameById = new Map(
+    pipelineOptions.map((pipeline) => [pipeline.id, pipeline.name]),
+  );
+  const pipelineStageNameById = new Map(
+    pipelineStageOptions.map((stage) => [stage.id, stage.name]),
+  );
   const missingMilestoneTriggerFields =
     draft.trigger_type === "milestone_completed" &&
     (!draft.applies_to_offer_id || !draft.applies_to_milestone_id);
+  const missingPipelineTriggerFields =
+    draft.trigger_type === "pipeline_stage_entered" &&
+    (!draft.applies_to_pipeline_id || !draft.applies_to_pipeline_stage_id);
 
   useEffect(() => {
     let cancelled = false;
@@ -2969,7 +3022,8 @@ function TaskTemplatesModal({
         return;
       }
 
-      const [offersResult, milestonesResult] = await Promise.all([
+      const [offersResult, milestonesResult, pipelinesResult, pipelineStagesResult] =
+        await Promise.all([
         supabase
           .from("company_offers")
           .select("glide_row_id, name, status")
@@ -2981,6 +3035,20 @@ function TaskTemplatesModal({
           .select("glide_row_id, offer_id, name, position, status")
           .eq("company_id", appCompany.id)
           .eq("status", "active")
+          .order("position", { ascending: true }),
+        supabase
+          .from("company_pipelines")
+          .select("id, name, is_enabled, archived_at")
+          .eq("company_id", appCompany.id)
+          .eq("is_enabled", true)
+          .is("archived_at", null)
+          .order("position", { ascending: true }),
+        supabase
+          .from("company_pipeline_stages")
+          .select("id, pipeline_id, name, position, is_enabled, archived_at")
+          .eq("company_id", appCompany.id)
+          .eq("is_enabled", true)
+          .is("archived_at", null)
           .order("position", { ascending: true }),
       ]);
 
@@ -3000,6 +3068,25 @@ function TaskTemplatesModal({
           milestonesResult.error,
         );
       }
+      if (!pipelinesResult.error) {
+        setPipelineOptions(
+          (pipelinesResult.data ?? []) as CompanyTaskPipelineOption[],
+        );
+      } else {
+        console.error("Failed to refresh task template pipelines:", pipelinesResult.error);
+        setPipelineOptions([]);
+      }
+      if (!pipelineStagesResult.error) {
+        setPipelineStageOptions(
+          (pipelineStagesResult.data ?? []) as CompanyTaskPipelineStageOption[],
+        );
+      } else {
+        console.error(
+          "Failed to refresh task template pipeline stages:",
+          pipelineStagesResult.error,
+        );
+        setPipelineStageOptions([]);
+      }
       setOptionsLoading(false);
     }
 
@@ -3017,6 +3104,9 @@ function TaskTemplatesModal({
     if (template.trigger_type === "milestone_completed") {
       return "Auto-create when a milestone is completed";
     }
+    if (template.trigger_type === "pipeline_stage_entered") {
+      return "Auto-create when a Pipeline stage is entered";
+    }
     return "Preset available in New Task";
   }
 
@@ -3028,6 +3118,8 @@ function TaskTemplatesModal({
       trigger_type: "client_created",
       applies_to_offer_id: "",
       applies_to_milestone_id: "",
+      applies_to_pipeline_id: "",
+      applies_to_pipeline_stage_id: "",
       assign_to_type: "assigned_csm",
       assigned_member_legacy_id: "",
       due_offset_days: 0,
@@ -3047,6 +3139,8 @@ function TaskTemplatesModal({
       description: template.description ?? "",
       applies_to_offer_id: template.applies_to_offer_id ?? "",
       applies_to_milestone_id: template.applies_to_milestone_id ?? "",
+      applies_to_pipeline_id: template.applies_to_pipeline_id ?? "",
+      applies_to_pipeline_stage_id: template.applies_to_pipeline_stage_id ?? "",
       assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
       priority: template.priority ?? "",
       recurring_is_recurring: template.recurring_is_recurring === true,
@@ -3072,6 +3166,8 @@ function TaskTemplatesModal({
       description: template.description ?? "",
       applies_to_offer_id: template.applies_to_offer_id ?? "",
       applies_to_milestone_id: template.applies_to_milestone_id ?? "",
+      applies_to_pipeline_id: template.applies_to_pipeline_id ?? "",
+      applies_to_pipeline_stage_id: template.applies_to_pipeline_stage_id ?? "",
       assigned_member_legacy_id: template.assigned_member_legacy_id ?? "",
       priority: template.priority ?? "",
       recurring_is_recurring: template.recurring_is_recurring === true,
@@ -3098,6 +3194,8 @@ function TaskTemplatesModal({
           triggerType: draft.trigger_type,
           appliesToOfferId: draft.applies_to_offer_id || null,
           appliesToMilestoneId: draft.applies_to_milestone_id || null,
+          appliesToPipelineId: draft.applies_to_pipeline_id || null,
+          appliesToPipelineStageId: draft.applies_to_pipeline_stage_id || null,
           assignToType: draft.assign_to_type,
           assignedMemberLegacyId: draft.assigned_member_legacy_id || null,
           dueOffsetDays: draft.due_offset_days,
@@ -3208,6 +3306,16 @@ function TaskTemplatesModal({
                             ) ?? "Unknown milestone"}
                           </p>
                         ) : null}
+                        {template.trigger_type === "pipeline_stage_entered" ? (
+                          <p className="mt-1 text-xs text-[#667085]">
+                            {pipelineNameById.get(template.applies_to_pipeline_id ?? "") ??
+                              "Unknown pipeline"}{" "}
+                            /{" "}
+                            {pipelineStageNameById.get(
+                              template.applies_to_pipeline_stage_id ?? "",
+                            ) ?? "Unknown stage"}
+                          </p>
+                        ) : null}
                       </div>
                       <span
                         className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
@@ -3309,6 +3417,10 @@ function TaskTemplatesModal({
                     value: "milestone_completed",
                     label: "When milestone is completed",
                   },
+                  {
+                    value: "pipeline_stage_entered",
+                    label: "When Pipeline stage is entered",
+                  },
                   { value: "manual", label: "Preset in New Task modal" },
                 ]}
                 onChange={(value) =>
@@ -3316,46 +3428,81 @@ function TaskTemplatesModal({
                     ...current,
                     trigger_type: value as CompanyTaskTemplateRow["trigger_type"],
                     applies_to_offer_id:
-                      value === "milestone_completed"
-                        ? current.applies_to_offer_id
+                      value === "pipeline_stage_entered"
+                        ? ""
                         : current.applies_to_offer_id,
                     applies_to_milestone_id:
                       value === "milestone_completed"
                         ? current.applies_to_milestone_id
                         : "",
+                    applies_to_pipeline_id:
+                      value === "pipeline_stage_entered"
+                        ? current.applies_to_pipeline_id
+                        : "",
+                    applies_to_pipeline_stage_id:
+                      value === "pipeline_stage_entered"
+                        ? current.applies_to_pipeline_stage_id
+                        : "",
                   }))
                 }
               />
-              <label className="block text-sm font-medium text-[#344054]">
-                {draft.trigger_type === "milestone_completed"
-                  ? "Pathway"
-                  : "Applies to pathway"}
-                <select
-                  disabled={disabled || saving}
-                  value={draft.applies_to_offer_id ?? ""}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      applies_to_offer_id: event.target.value,
-                      applies_to_milestone_id: "",
-                    }))
-                  }
-                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
-                >
-                  <option value="">
-                    {draft.trigger_type === "milestone_completed"
-                      ? optionsLoading
-                        ? "Refreshing pathways..."
-                        : "Choose pathway"
-                      : "All pathways"}
-                  </option>
-                  {activeOffers.map((offer) => (
-                    <option key={offer.glide_row_id} value={offer.glide_row_id}>
-                      {offer.name ?? "Unnamed pathway"}
+              {draft.trigger_type === "pipeline_stage_entered" ? (
+                <label className="block text-sm font-medium text-[#344054]">
+                  Pipeline
+                  <select
+                    disabled={disabled || saving || optionsLoading}
+                    value={draft.applies_to_pipeline_id ?? ""}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        applies_to_pipeline_id: event.target.value,
+                        applies_to_pipeline_stage_id: "",
+                      }))
+                    }
+                    className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                  >
+                    <option value="">
+                      {optionsLoading ? "Refreshing pipelines..." : "Choose pipeline"}
                     </option>
-                  ))}
-                </select>
-              </label>
+                    {activePipelines.map((pipeline) => (
+                      <option key={pipeline.id} value={pipeline.id}>
+                        {pipeline.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="block text-sm font-medium text-[#344054]">
+                  {draft.trigger_type === "milestone_completed"
+                    ? "Pathway"
+                    : "Applies to pathway"}
+                  <select
+                    disabled={disabled || saving}
+                    value={draft.applies_to_offer_id ?? ""}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        applies_to_offer_id: event.target.value,
+                        applies_to_milestone_id: "",
+                      }))
+                    }
+                    className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                  >
+                    <option value="">
+                      {draft.trigger_type === "milestone_completed"
+                        ? optionsLoading
+                          ? "Refreshing pathways..."
+                          : "Choose pathway"
+                        : "All pathways"}
+                    </option>
+                    {activeOffers.map((offer) => (
+                      <option key={offer.glide_row_id} value={offer.glide_row_id}>
+                        {offer.name ?? "Unnamed pathway"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {draft.trigger_type === "milestone_completed" ? (
                 <label className="block text-sm font-medium text-[#344054]">
                   Milestone completed
@@ -3383,6 +3530,37 @@ function TaskTemplatesModal({
                         value={milestone.glide_row_id}
                       >
                         {milestone.name ?? "Unnamed milestone"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {draft.trigger_type === "pipeline_stage_entered" ? (
+                <label className="block text-sm font-medium text-[#344054]">
+                  Pipeline stage entered
+                  <select
+                    disabled={
+                      disabled || saving || optionsLoading || !draft.applies_to_pipeline_id
+                    }
+                    value={draft.applies_to_pipeline_stage_id ?? ""}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        applies_to_pipeline_stage_id: event.target.value,
+                      }))
+                    }
+                    className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+                  >
+                    <option value="">
+                      {optionsLoading
+                        ? "Refreshing stages..."
+                        : draft.applies_to_pipeline_id
+                          ? "Choose stage"
+                          : "Choose pipeline first"}
+                    </option>
+                    {activePipelineStages.map((stage) => (
+                      <option key={stage.id} value={stage.id}>
+                        {stage.name}
                       </option>
                     ))}
                   </select>
@@ -3534,7 +3712,12 @@ function TaskTemplatesModal({
               </button>
               <button
                 type="submit"
-                disabled={disabled || saving || missingMilestoneTriggerFields}
+                disabled={
+                  disabled ||
+                  saving ||
+                  missingMilestoneTriggerFields ||
+                  missingPipelineTriggerFields
+                }
                 className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 {saving ? "Saving..." : editing ? "Save template" : "Create template"}
@@ -3994,6 +4177,8 @@ function CompanySettingsSetup({
           enableEmbeds: draft.enable_embeds,
           enableZapierClientCreate: draft.enable_zapier_client_create,
           allowStatusChangeRetention: draft.allow_status_change_retention,
+          enablePipeline: draft.enable_pipeline,
+          enablePipelineViewerAccess: draft.enable_pipeline_viewer_access,
           clientListColumns: clientListColumns(draft),
           programStatusLabels: programStatusLabels(draft),
           contactTouchSetsNextContact: contactTouchSetsNextContact(draft),
@@ -4432,6 +4617,33 @@ function CompanySettingsSetup({
               }))
             }
           />
+          <SettingsFlag
+            label="Pipeline"
+            description="Enable the Pipeline workspace for configured renewal and expansion workflows. Pipelines remain independently enabled in the Pipelines tab."
+            checked={draft.enable_pipeline}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_pipeline: checked,
+                enable_pipeline_viewer_access: checked
+                  ? current.enable_pipeline_viewer_access
+                  : false,
+              }))
+            }
+          />
+          <SettingsFlag
+            label="Viewer Pipeline access"
+            description="Allow Viewer accounts to open a read-only Pipeline workspace. Viewer writes always remain denied."
+            checked={draft.enable_pipeline_viewer_access}
+            disabled={disabled || !draft.enable_pipeline}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_pipeline_viewer_access: checked,
+              }))
+            }
+          />
         </div>
       </section>
 
@@ -4454,13 +4666,27 @@ function CompanySettingsSetup({
             Manage task templates
           </button>
         </div>
-        <div className="grid gap-3 p-4 md:grid-cols-4">
+        <div className="grid gap-3 p-4 md:grid-cols-5">
           <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
               Templates
             </div>
             <div className="mt-1 text-lg font-semibold text-[#101828]">
               {taskTemplates.length}
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              Pipeline
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {
+                taskTemplates.filter(
+                  (template) =>
+                    template.is_enabled &&
+                    template.trigger_type === "pipeline_stage_entered",
+                ).length
+              }
             </div>
           </div>
           <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
@@ -5415,7 +5641,7 @@ export function SaasClientDetail({
           supabase
             .from("company_settings")
             .select(
-              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, allow_status_change_retention, metadata, updated_at",
+              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, allow_status_change_retention, enable_pipeline, enable_pipeline_viewer_access, metadata, updated_at",
             )
             .eq("company_id", appCompany.id)
             .maybeSingle(),
@@ -5436,7 +5662,7 @@ export function SaasClientDetail({
           supabase
             .from("company_task_templates")
             .select(
-              "id, name, description, trigger_type, applies_to_offer_id, applies_to_milestone_id, assign_to_type, assigned_member_legacy_id, due_offset_days, recurring_is_recurring, recurring_interval_days, priority, status_value, is_enabled, position, metadata, archived_at",
+              "id, name, description, trigger_type, applies_to_offer_id, applies_to_milestone_id, applies_to_pipeline_id, applies_to_pipeline_stage_id, assign_to_type, assigned_member_legacy_id, due_offset_days, recurring_is_recurring, recurring_interval_days, priority, status_value, is_enabled, position, metadata, archived_at",
             )
             .eq("company_id", appCompany.id)
             .is("archived_at", null)
@@ -5798,6 +6024,12 @@ export function SaasClientDetail({
             Pathways & Milestones
           </TabButton>
           <TabButton
+            active={activeTab === "pipelines"}
+            onClick={() => setActiveTab("pipelines")}
+          >
+            Pipelines
+          </TabButton>
+          <TabButton
             active={activeTab === "settings"}
             onClick={() => setActiveTab("settings")}
           >
@@ -5956,6 +6188,14 @@ export function SaasClientDetail({
             }}
           />
         )
+      ) : activeTab === "pipelines" ? (
+        <PipelineSetup
+          companyLegacyId={companyId ?? ""}
+          isAppOwned={teamSource === "app_owned"}
+          canManage={
+            teamSource === "app_owned" && canManageCompanyDefinitions
+          }
+        />
       ) : (
         settingsLoading && settingsSource === "mirror" && !companySettings.id ? (
           <div className="flex items-center justify-center py-20">

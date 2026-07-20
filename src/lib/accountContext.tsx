@@ -35,6 +35,9 @@ export interface AccountCapabilities {
   canAccessClients: boolean;
   canAccessResources: boolean;
   canAccessTasks: boolean;
+  canAccessPipeline: boolean;
+  canManagePipelineItems: boolean;
+  canConfigurePipelines: boolean;
   canAccessCallAi: boolean;
   canAccessTables: boolean;
   canAccessAdminHub: boolean;
@@ -107,6 +110,9 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
     canAccessClients: canSeeClientData,
     canAccessResources: canSeeClientData || isViewer,
     canAccessTasks: canWork,
+    canAccessPipeline: canWork || isViewer,
+    canManagePipelineItems: canWork,
+    canConfigurePipelines: isSuperAdmin || isDirector,
     canAccessCallAi: isSuperAdmin || isDirector || isSupport,
     canAccessTables: isSuperAdmin,
     canAccessAdminHub: isSuperAdmin || isDirector,

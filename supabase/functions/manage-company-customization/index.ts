@@ -1,6 +1,6 @@
 /// <reference path="../_shared/deno.d.ts" />
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.101.1";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -76,6 +76,7 @@ const TASK_TEMPLATE_TRIGGERS = new Set([
   "manual",
   "client_created",
   "milestone_completed",
+  "pipeline_stage_entered",
 ]);
 const TASK_TEMPLATE_ASSIGNEES = new Set([
   "assigned_csm",
@@ -92,6 +93,8 @@ const TASK_STATUSES = new Set([
   "dismissed",
   "archived",
 ]);
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const NOTIFICATION_TYPES = new Set([
   "next_contact_due",
   "renewal_due",
@@ -148,6 +151,16 @@ const DEFAULT_CHURN_REASONS = [
   },
 ];
 
+class AuthError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AuthError";
+    this.status = status;
+  }
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -162,6 +175,16 @@ function cleanText(value: unknown) {
 function nullableText(value: unknown) {
   const text = cleanText(value);
   return text || null;
+}
+
+function exactEmailQuery<T>(query: T, email: string) {
+  const builder = query as T & {
+    eq: (column: string, value: string) => T;
+    ilike: (column: string, pattern: string) => T;
+  };
+  return /[\\%_*]/.test(email)
+    ? builder.eq("email", email)
+    : builder.ilike("email", email);
 }
 
 function normalizeNotificationMetadata(
@@ -289,6 +312,7 @@ function parseOptions(value: unknown) {
 
 async function assertCanManageCompany(
   supabase: ReturnType<typeof createClient>,
+  authUserId: string,
   userEmail: string,
   companyId: string,
 ) {
@@ -300,19 +324,38 @@ async function assertCanManageCompany(
     return { role: "super_admin", memberId: null };
   }
 
-  const { data, error } = await supabase
+  const selectFields = "id, role, status, is_read_only";
+  const { data: byAuth, error: byAuthError } = await supabase
     .from("company_members")
-    .select("id, role, status")
+    .select(selectFields)
     .eq("company_id", companyId)
-    .ilike("email", userEmail)
-    .eq("status", "active")
-    .limit(1)
+    .eq("auth_user_id", authUserId)
     .maybeSingle();
-  if (error) throw error;
-  if (data && data.role === "director") {
-    return { role: "director", memberId: data.id as string };
+  if (byAuthError) throw byAuthError;
+  let membership = byAuth;
+  if (!membership) {
+    const emailQuery = exactEmailQuery(
+      supabase
+        .from("company_members")
+        .select(selectFields)
+        .eq("company_id", companyId),
+      userEmail,
+    );
+    const { data: byEmail, error: byEmailError } = await emailQuery.maybeSingle();
+    if (byEmailError) throw byEmailError;
+    membership = byEmail;
   }
-  throw new Error("You do not have permission to manage company customization.");
+  if (
+    membership?.status === "active" &&
+    membership.role === "director" &&
+    membership.is_read_only !== true
+  ) {
+    return { role: "director", memberId: membership.id as string };
+  }
+  throw new AuthError(
+    "You do not have permission to manage company customization.",
+    403,
+  );
 }
 
 Deno.serve(async (req) => {
@@ -369,6 +412,7 @@ Deno.serve(async (req) => {
 
     const actor = await assertCanManageCompany(
       supabase,
+      userData.user.id,
       normalizeEmail(userData.user.email),
       company.id,
     );
@@ -456,7 +500,7 @@ Deno.serve(async (req) => {
             .single();
       if (saveError) throw saveError;
 
-      await supabase
+      const { error: companySettingsMirrorError } = await supabase
         .from("companies")
         .update({
           enable_secondary_assignee: payload.enable_secondary_assignee,
@@ -465,8 +509,9 @@ Deno.serve(async (req) => {
           enable_call_ai_for_csms: payload.enable_call_ai_for_csms,
         })
         .eq("id", company.id);
+      if (companySettingsMirrorError) throw companySettingsMirrorError;
 
-      await supabase.from("app_audit_events").insert({
+      const { error: settingsAuditError } = await supabase.from("app_audit_events").insert({
         company_id: company.id,
         actor_auth_user_id: userData.user.id,
         actor_member_id: actor.memberId,
@@ -480,8 +525,34 @@ Deno.serve(async (req) => {
         before_data: existing,
         after_data: saved,
       });
+      if (settingsAuditError) throw settingsAuditError;
 
-      return jsonResponse({ ok: true, item: saved });
+      const enablePipeline = Boolean(body.enablePipeline);
+      const enablePipelineViewerAccess =
+        enablePipeline && Boolean(body.enablePipelineViewerAccess);
+      let finalSettings = saved;
+      if (
+        saved.enable_pipeline !== enablePipeline ||
+        saved.enable_pipeline_viewer_access !== enablePipelineViewerAccess
+      ) {
+        const { data: gatedSettings, error: gateError } = await supabase.rpc(
+          "update_company_pipeline_gates_with_audit",
+          {
+            p_company_id: company.id,
+            p_enable_pipeline: enablePipeline,
+            p_enable_pipeline_viewer_access: enablePipelineViewerAccess,
+            p_actor_auth_user_id: userData.user.id,
+            p_actor_member_id: actor.memberId,
+            p_actor_role: actor.role,
+          },
+        );
+        if (gateError) throw gateError;
+        finalSettings = Array.isArray(gatedSettings)
+          ? gatedSettings[0]
+          : gatedSettings;
+      }
+
+      return jsonResponse({ ok: true, item: finalSettings });
     }
 
     if (action === "update_notification_preferences") {
@@ -830,7 +901,9 @@ Deno.serve(async (req) => {
           }
         }
 
-        const appliesToOfferId = nullableText(body.appliesToOfferId);
+        const appliesToOfferId = triggerType === "pipeline_stage_entered"
+          ? null
+          : nullableText(body.appliesToOfferId);
         if (appliesToOfferId) {
           const { data: offer, error: offerError } = await supabase
             .from("company_offers")
@@ -871,6 +944,57 @@ Deno.serve(async (req) => {
           }
         }
 
+        const appliesToPipelineId = triggerType === "pipeline_stage_entered"
+          ? nullableText(body.appliesToPipelineId)
+          : null;
+        if (triggerType === "pipeline_stage_entered" && !appliesToPipelineId) {
+          return jsonResponse({ error: "Choose a pipeline for this trigger." }, 400);
+        }
+        const appliesToPipelineStageId = triggerType === "pipeline_stage_entered"
+          ? nullableText(body.appliesToPipelineStageId)
+          : null;
+        if (triggerType === "pipeline_stage_entered" && !appliesToPipelineStageId) {
+          return jsonResponse({ error: "Choose a pipeline stage for this trigger." }, 400);
+        }
+        if (
+          appliesToPipelineId &&
+          appliesToPipelineStageId &&
+          (!UUID_PATTERN.test(appliesToPipelineId) ||
+            !UUID_PATTERN.test(appliesToPipelineStageId))
+        ) {
+          return jsonResponse({ error: "Choose a valid Pipeline and stage." }, 400);
+        }
+        if (appliesToPipelineId) {
+          const { data: pipeline, error: pipelineError } = await supabase
+            .from("company_pipelines")
+            .select("id, is_enabled, archived_at")
+            .eq("id", appliesToPipelineId)
+            .eq("company_id", company.id)
+            .maybeSingle();
+          if (pipelineError) throw pipelineError;
+          if (!pipeline || pipeline.is_enabled !== true || pipeline.archived_at) {
+            return jsonResponse(
+              { error: "Template pipeline is not enabled for this company." },
+              400,
+            );
+          }
+
+          const { data: stage, error: stageError } = await supabase
+            .from("company_pipeline_stages")
+            .select("id, pipeline_id, is_enabled, archived_at")
+            .eq("id", appliesToPipelineStageId)
+            .eq("pipeline_id", appliesToPipelineId)
+            .eq("company_id", company.id)
+            .maybeSingle();
+          if (stageError) throw stageError;
+          if (!stage || stage.is_enabled !== true || stage.archived_at) {
+            return jsonResponse(
+              { error: "Template stage is not enabled in the selected pipeline." },
+              400,
+            );
+          }
+        }
+
         const payload = {
           company_id: company.id,
           name,
@@ -878,6 +1002,8 @@ Deno.serve(async (req) => {
           trigger_type: triggerType,
           applies_to_offer_id: appliesToOfferId,
           applies_to_milestone_id: appliesToMilestoneId,
+          applies_to_pipeline_id: appliesToPipelineId,
+          applies_to_pipeline_stage_id: appliesToPipelineStageId,
           assign_to_type: assignToType,
           assigned_member_legacy_id: assignedMemberLegacyId,
           due_offset_days: requiredBoundedInteger(body.dueOffsetDays, 0, 0, 365),
@@ -1238,8 +1364,14 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error(error);
     return jsonResponse(
-      { error: error instanceof Error ? error.message : "Unexpected error." },
-      500,
+      {
+        error: error instanceof AuthError
+          ? error.message
+          : error instanceof Error
+          ? error.message
+          : "Unexpected error.",
+      },
+      error instanceof AuthError ? error.status : 500,
     );
   }
 });

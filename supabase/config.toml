@@ -16,6 +16,24 @@ verify_jwt = true
 [functions.manage-client-task]
 verify_jwt = true
 
+[functions.manage-client-contract]
+verify_jwt = true
+
+[functions.manage-client-status]
+verify_jwt = true
+
+[functions.manage-company-customization]
+verify_jwt = true
+
+[functions.manage-company-pipeline]
+verify_jwt = true
+
+[functions.manage-pipeline-workspace]
+verify_jwt = true
+
+[functions.manage-pipeline-automation]
+verify_jwt = true
+
 [functions.manage-integration-review]
 verify_jwt = true
 
