@@ -4005,6 +4005,28 @@ export type Database = {
           retained_events: Json
         }[]
       }
+      dashboard_renewal_cohort_counts_fast: {
+        Args: {
+          p_assigned_team_member_id?: string
+          p_client_start_date_from?: string
+          p_client_start_date_to?: string
+          p_company_id: string
+          p_csm_id?: string
+          p_date_range_end?: string
+          p_date_range_start?: string
+          p_offer_id?: string
+          p_program_values?: string[]
+          p_secondary_assignee_id?: string
+        }
+        Returns: {
+          renewal_cohort_client_ids: string[]
+          renewal_cohort_clients: number
+          renewal_cohort_events: Json
+          retained_client_ids: string[]
+          retained_clients: number
+          retained_events: Json
+        }[]
+      }
       exec_sql: { Args: { sql: string }; Returns: undefined }
       generate_company_notifications: {
         Args: {

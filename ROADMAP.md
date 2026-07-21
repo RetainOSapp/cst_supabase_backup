@@ -1531,6 +1531,7 @@ These formulas matter when RetainOS moves away from read-only Glide mirror field
 - `[~]` `[polish]` Retention Percentage.
   - Formula source: `# of Renewals / Total # of Clients Eligible for Renewal x 100`.
   - Current state: dashboard computes retention through the app-owned formula path for pilot/migrated companies and includes `client_retention_recorded` events.
+  - 2026-07-21: selected reporting periods now use an all-status contract-end cohort and match retention to that cohort (rather than counting unrelated event-month activity). The Dashboard keeps the active renewal work-queue number and shows it as `active / all contracts ending`; legacy status transitions require successor-contract evidence before counting as retained.
   - Renewal/retention transitions: Front End -> Front End, Front End -> Back End, and Back End -> Back End.
   - Front End -> Back End should be broken out as renewal/upsell.
   - Pilot v1: New Contract can write `client_retention_recorded` for same-program renewals and FE -> BE upsells.

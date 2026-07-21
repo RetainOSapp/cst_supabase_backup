@@ -436,6 +436,26 @@ interface DashboardRetentionFastRow {
     | null;
 }
 
+interface DashboardRenewalCohortFastRow {
+  renewal_cohort_clients: number | string | null;
+  renewal_cohort_client_ids: string[] | null;
+  renewal_cohort_events:
+    | Array<{
+        client_id?: string | null;
+        contract_end_date?: string | null;
+      }>
+    | null;
+  retained_clients: number | string | null;
+  retained_client_ids: string[] | null;
+  retained_events:
+    | Array<{
+        client_id?: string | null;
+        contract_end_date?: string | null;
+        retained_at?: string | null;
+      }>
+    | null;
+}
+
 interface OfferKpiContractRow {
   client_id: string | null;
   end_date: string | null;
@@ -1680,6 +1700,7 @@ export function Dashboard() {
   const [churnedClientsCount, setChurnedClientsCount] = useState<number | null>(null);
   const [churnPercentage, setChurnPercentage] = useState<number | null>(null);
   const [renewingClientsCount, setRenewingClientsCount] = useState<number | null>(null);
+  const [renewalCohortClients, setRenewalCohortClients] = useState<number | null>(null);
   const [retentionPercentage, setRetentionPercentage] = useState<number | null>(null);
   const [activeRenewingClients, setActiveRenewingClients] = useState<number | null>(null);
   const [primaryKpiLoading, setPrimaryKpiLoading] = useState(false);
@@ -2510,6 +2531,7 @@ export function Dashboard() {
       setChurnedClientsCount(null);
       setChurnPercentage(null);
       setRenewingClientsCount(null);
+      setRenewalCohortClients(null);
       setRetentionPercentage(null);
       setActiveRenewingClients(null);
       closeDetailDrawer();
@@ -2628,6 +2650,7 @@ export function Dashboard() {
         setChurnPercentage(null);
         setRetainedClients(null);
         setRenewingClientsCount(null);
+        setRenewalCohortClients(null);
         setRetentionPercentage(null);
         setActiveRenewingClients(null);
         setPrimaryKpiLoading(false);
@@ -2680,6 +2703,11 @@ export function Dashboard() {
       if (clientIds.length === 0) {
         setRetainedClients(0);
         setRenewingClientsCount(0);
+        setRenewalCohortClients(
+          appliedFilters.dateRange.startDate || appliedFilters.dateRange.endDate
+            ? 0
+            : null,
+        );
         setRetentionPercentage(0);
         setActiveRenewingClients(0);
         setRetentionKpiLoading(false);
@@ -2687,6 +2715,9 @@ export function Dashboard() {
       }
 
       const renewalDateRange = appliedRenewalDateRange;
+      const hasExplicitRenewalPeriod = Boolean(
+        appliedFilters.dateRange.startDate || appliedFilters.dateRange.endDate,
+      );
       const allowStatusChangeRetention = appliedUsesAppClients
         ? await loadStatusChangeRetentionSetting(appliedAppCompany?.id)
         : false;
@@ -2714,6 +2745,27 @@ export function Dashboard() {
             p_assigned_team_member_id: assignedTeamMemberId || null,
           })
         : Promise.resolve({ data: [], error: null });
+      const renewalCohortQuery =
+        appliedUsesAppClients && hasExplicitRenewalPeriod
+          ? supabase.rpc("dashboard_renewal_cohort_counts_fast", {
+              p_company_id: appliedFilters.companyId,
+              p_csm_id: appliedFilters.csmId || null,
+              p_secondary_assignee_id:
+                appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId
+                  ? appliedFilters.secondaryAssigneeId
+                  : null,
+              p_program_values:
+                appliedProgramValues.length > 0 ? appliedProgramValues : null,
+              p_offer_id: appliedFilters.offerId || null,
+              p_client_start_date_from:
+                appliedFilters.clientStartDate.startDate || null,
+              p_client_start_date_to:
+                appliedFilters.clientStartDate.endDate || null,
+              p_date_range_start: appliedFilters.dateRange.startDate || null,
+              p_date_range_end: appliedFilters.dateRange.endDate || null,
+              p_assigned_team_member_id: assignedTeamMemberId || null,
+            })
+          : Promise.resolve({ data: [], error: null });
       const appHistoryQuery = appliedUsesAppClients
         ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
             supabase
@@ -2778,12 +2830,14 @@ export function Dashboard() {
         appContractsResult,
         legacyContractsResult,
         retentionFastResult,
+        renewalCohortResult,
       ] = await Promise.all([
         appHistoryQuery,
         legacyHistoryQuery,
         appContractsQuery,
         legacyContractsQuery,
         retentionFastQuery,
+        renewalCohortQuery,
       ]);
 
       if (cancelled) return;
@@ -2802,6 +2856,9 @@ export function Dashboard() {
       }
       if (retentionFastResult.error) {
         console.error("Failed to load fast dashboard retention:", retentionFastResult.error);
+      }
+      if (renewalCohortResult.error) {
+        console.error("Failed to load dashboard renewal cohort:", renewalCohortResult.error);
       }
 
       const retainedIds = new Set<string>();
@@ -2893,12 +2950,29 @@ export function Dashboard() {
         }
       });
 
-      setRetainedClients(retainedEventCount);
-      setRenewingClientsCount(renewingIds.size);
+      const renewalCohortRow = (
+        (renewalCohortResult.data ?? []) as DashboardRenewalCohortFastRow[]
+      )[0];
+      const hasRenewalCohortResult =
+        hasExplicitRenewalPeriod && !renewalCohortResult.error;
+      const reportedRetainedClients = hasRenewalCohortResult
+        ? Number(renewalCohortRow?.retained_clients ?? 0)
+        : retainedEventCount;
+      const reportedRenewalCohortClients = hasRenewalCohortResult
+        ? Number(renewalCohortRow?.renewal_cohort_clients ?? 0)
+        : renewingIds.size;
+
+      setRetainedClients(reportedRetainedClients);
+      setRenewingClientsCount(reportedRenewalCohortClients);
+      setRenewalCohortClients(
+        hasRenewalCohortResult ? reportedRenewalCohortClients : null,
+      );
       setRetentionPercentage(
-        renewingIds.size === 0
+        reportedRenewalCohortClients === 0
           ? 0
-          : Math.round((retainedEventCount / renewingIds.size) * 100),
+          : Math.round(
+              (reportedRetainedClients / reportedRenewalCohortClients) * 100,
+            ),
       );
       setActiveRenewingClients(
         [...currentSummaryRenewingIds].filter((id) => {
@@ -2916,9 +2990,11 @@ export function Dashboard() {
       setPrimaryKpiLoading(true);
       setRetentionKpiLoading(true);
 
-      const { data, error } = await supabase.rpc(
-        "dashboard_kpi_counts_actor_scoped",
-        {
+      const hasExplicitRenewalPeriod = Boolean(
+        appliedFilters.dateRange.startDate || appliedFilters.dateRange.endDate,
+      );
+      const [canonicalResult, renewalCohortResult] = await Promise.all([
+        supabase.rpc("dashboard_kpi_counts_actor_scoped", {
           p_company_id: rpcFilterParams.p_company_id,
           p_csm_id: assignedTeamMemberId || rpcFilterParams.p_csm_id,
           p_secondary_assignee_id: rpcFilterParams.p_secondary_assignee_id,
@@ -2928,8 +3004,29 @@ export function Dashboard() {
           p_client_start_date_to: rpcFilterParams.p_client_start_date_to,
           p_date_range_start: rpcFilterParams.p_date_range_start,
           p_date_range_end: rpcFilterParams.p_date_range_end,
-        },
-      );
+        }),
+        appliedUsesAppClients && hasExplicitRenewalPeriod
+          ? supabase.rpc("dashboard_renewal_cohort_counts_fast", {
+              p_company_id: appliedFilters.companyId,
+              p_csm_id: appliedFilters.csmId || null,
+              p_secondary_assignee_id:
+                appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId
+                  ? appliedFilters.secondaryAssigneeId
+                  : null,
+              p_program_values:
+                appliedProgramValues.length > 0 ? appliedProgramValues : null,
+              p_offer_id: appliedFilters.offerId || null,
+              p_client_start_date_from:
+                appliedFilters.clientStartDate.startDate || null,
+              p_client_start_date_to:
+                appliedFilters.clientStartDate.endDate || null,
+              p_date_range_start: appliedFilters.dateRange.startDate || null,
+              p_date_range_end: appliedFilters.dateRange.endDate || null,
+              p_assigned_team_member_id: assignedTeamMemberId || null,
+            })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      const { data, error } = canonicalResult;
 
       if (cancelled) return true;
 
@@ -2943,6 +3040,7 @@ export function Dashboard() {
         setChurnPercentage(null);
         setRetainedClients(null);
         setRenewingClientsCount(null);
+        setRenewalCohortClients(null);
         setRetentionPercentage(null);
         setActiveRenewingClients(null);
         setPrimaryKpiLoading(false);
@@ -2959,11 +3057,36 @@ export function Dashboard() {
       setChurnPercentage(
         row?.churn_percentage == null ? 0 : Number(row.churn_percentage),
       );
-      setRetainedClients(Number(row?.retained_clients ?? 0));
-      setRenewingClientsCount(Number(row?.renewing_clients ?? 0));
-      setRetentionPercentage(
-        row?.retention_percentage == null ? 0 : Number(row.retention_percentage),
-      );
+      if (hasExplicitRenewalPeriod && !renewalCohortResult.error) {
+        const renewalCohortRow = (
+          (renewalCohortResult.data ?? []) as DashboardRenewalCohortFastRow[]
+        )[0];
+        const cohortClients = Number(
+          renewalCohortRow?.renewal_cohort_clients ?? 0,
+        );
+        const cohortRetained = Number(renewalCohortRow?.retained_clients ?? 0);
+        setRetainedClients(cohortRetained);
+        setRenewingClientsCount(cohortClients);
+        setRenewalCohortClients(cohortClients);
+        setRetentionPercentage(
+          cohortClients === 0
+            ? 0
+            : Math.round((cohortRetained / cohortClients) * 100),
+        );
+      } else {
+        if (renewalCohortResult.error) {
+          console.error(
+            "Failed to load canonical dashboard renewal cohort:",
+            renewalCohortResult.error,
+          );
+        }
+        setRetainedClients(Number(row?.retained_clients ?? 0));
+        setRenewingClientsCount(Number(row?.renewing_clients ?? 0));
+        setRenewalCohortClients(null);
+        setRetentionPercentage(
+          row?.retention_percentage == null ? 0 : Number(row.retention_percentage),
+        );
+      }
       setActiveRenewingClients(Number(row?.active_renewing_clients ?? 0));
       setPrimaryKpiLoading(false);
       setRetentionKpiLoading(false);
@@ -3878,6 +4001,9 @@ export function Dashboard() {
         ) &&
         clientIds.length > 0
       ) {
+        const hasExplicitRenewalPeriod = Boolean(
+          appliedFilters.dateRange.startDate || appliedFilters.dateRange.endDate,
+        );
         const allowStatusChangeRetention = appliedUsesAppClients
           ? await loadStatusChangeRetentionSetting(appliedAppCompany?.id)
           : false;
@@ -3903,8 +4029,31 @@ export function Dashboard() {
               p_date_range_start: detailRenewalDateRange.startDate || null,
               p_date_range_end: detailRenewalDateRange.endDate || null,
               p_assigned_team_member_id: assignedTeamMemberId || null,
-            })
+          })
           : Promise.resolve({ data: [], error: null });
+        const renewalCohortQuery =
+          appliedUsesAppClients &&
+          hasExplicitRenewalPeriod &&
+          ["retained", "renewing"].includes(detailKey)
+            ? supabase.rpc("dashboard_renewal_cohort_counts_fast", {
+                p_company_id: appliedFilters.companyId,
+                p_csm_id: appliedFilters.csmId || null,
+                p_secondary_assignee_id:
+                  appliedShowSecondaryFilter && appliedFilters.secondaryAssigneeId
+                    ? appliedFilters.secondaryAssigneeId
+                    : null,
+                p_program_values:
+                  appliedProgramValues.length > 0 ? appliedProgramValues : null,
+                p_offer_id: appliedFilters.offerId || null,
+                p_client_start_date_from:
+                  appliedFilters.clientStartDate.startDate || null,
+                p_client_start_date_to:
+                  appliedFilters.clientStartDate.endDate || null,
+                p_date_range_start: appliedFilters.dateRange.startDate || null,
+                p_date_range_end: appliedFilters.dateRange.endDate || null,
+                p_assigned_team_member_id: assignedTeamMemberId || null,
+              })
+            : Promise.resolve({ data: [], error: null });
         const appHistoryQuery = appliedUsesAppClients
           ? fetchDashboardRowsInChunksPaged<AppKpiHistoryRow>(clientIds, (chunk, from, to) =>
               supabase
@@ -3971,12 +4120,14 @@ export function Dashboard() {
           appContractsResult,
           legacyContractsResult,
           retentionFastResult,
+          renewalCohortResult,
         ] = await Promise.all([
           appHistoryQuery,
           legacyHistoryQuery,
           appContractsQuery,
           legacyContractsQuery,
           retentionFastQuery,
+          renewalCohortQuery,
         ]);
 
         if (cancelled) return;
@@ -3995,6 +4146,9 @@ export function Dashboard() {
         }
         if (retentionFastResult.error) {
           console.error("Failed to load fast KPI detail retention:", retentionFastResult.error);
+        }
+        if (renewalCohortResult.error) {
+          console.error("Failed to load KPI detail renewal cohort:", renewalCohortResult.error);
         }
 
         retainedIds = new Set<string>();
@@ -4121,6 +4275,57 @@ export function Dashboard() {
             recordRenewalDate(contract.client_id, contract.end_date);
           }
         });
+
+        if (
+          appliedUsesAppClients &&
+          hasExplicitRenewalPeriod &&
+          !renewalCohortResult.error
+        ) {
+          const cohortRow = (
+            (renewalCohortResult.data ?? []) as DashboardRenewalCohortFastRow[]
+          )[0];
+          if (detailKey === "retained") {
+            retainedIds = new Set<string>();
+            retainedEventRows = [];
+            const retainedEvents = cohortRow?.retained_events ?? [];
+            const retainedClientIds =
+              retainedEvents.length > 0
+                ? retainedEvents.flatMap((event) =>
+                    event.client_id ? [event.client_id] : [],
+                  )
+                : cohortRow?.retained_client_ids ?? [];
+            retainedClientIds.forEach((clientId) => {
+              const client = clientById.get(clientId);
+              if (!client) return;
+              retainedIds.add(clientId);
+              retainedEventRows.push({
+                client,
+                retainedAt:
+                  retainedEvents.find((event) => event.client_id === clientId)
+                    ?.retained_at ?? null,
+              });
+            });
+          }
+          if (detailKey === "renewing") {
+            renewingIds = new Set<string>();
+            const cohortEvents = cohortRow?.renewal_cohort_events ?? [];
+            const cohortClientIds =
+              cohortEvents.length > 0
+                ? cohortEvents.flatMap((event) =>
+                    event.client_id ? [event.client_id] : [],
+                  )
+                : cohortRow?.renewal_cohort_client_ids ?? [];
+            cohortClientIds.forEach((clientId) => {
+              if (!clientById.has(clientId)) return;
+              renewingIds.add(clientId);
+              recordRenewalDate(
+                clientId,
+                cohortEvents.find((event) => event.client_id === clientId)
+                  ?.contract_end_date,
+              );
+            });
+          }
+        }
       }
 
       if (detailKey === "retained") {
@@ -5151,6 +5356,7 @@ export function Dashboard() {
             <RetentionPercentageKpi
               percentage={retentionPercentage}
               renewingClientsCount={renewingClientsCount}
+              isCohortBased={renewalCohortClients !== null}
               loading={retentionKpiLoading}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
@@ -5161,6 +5367,7 @@ export function Dashboard() {
             />
             <UpForRenewalKpi
               value={activeRenewingClients}
+              totalEndingInPeriod={renewalCohortClients}
               loading={retentionKpiLoading}
               onOpenInfo={openKpiInfoModal}
               onOpenList={
