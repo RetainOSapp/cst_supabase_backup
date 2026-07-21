@@ -1852,6 +1852,7 @@ This phase should happen after core wiring/write-mode foundations are stable. Us
   - KPI/Charts/CSMs/AI tabs.
   - Export button.
   - Filters for user, date range, program, offer where applicable.
+  - 2026-07-21: Client Health includes a fifth, drillable Suspended-status card. Its title uses each workspace's configurable status label (for example, Moves Method's “MIA”) rather than a hard-coded name.
 - `[ ]` Dashboard chart visual/data Phase 2.
   - Use Recharts with a clean shadcn-chart-inspired visual treatment.
   - Use the existing RetainOS HiFi palette and keep labels visible for the first pass.

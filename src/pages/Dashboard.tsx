@@ -16,6 +16,7 @@ import { FrontEndClientsKpi } from "../components/dashboard/kpis/FrontEndClients
 import { OffBoardedClientsKpi } from "../components/dashboard/kpis/OffBoardedClientsKpi.tsx";
 import { RetainedClientsKpi } from "../components/dashboard/kpis/RetainedClientsKpi.tsx";
 import { RetentionPercentageKpi } from "../components/dashboard/kpis/RetentionPercentageKpi.tsx";
+import { SuspendedClientsKpi } from "../components/dashboard/kpis/SuspendedClientsKpi.tsx";
 import { UpForRenewalKpi } from "../components/dashboard/kpis/UpForRenewalKpi.tsx";
 import { ComingSoonModal, ComingSoonPanel } from "../components/ComingSoon.tsx";
 import { supabase } from "../lib/supabase.ts";
@@ -73,6 +74,7 @@ type KpiDetailKey =
   | "active"
   | "front-end"
   | "back-end"
+  | "suspended"
   | "off-boarded"
   | "retained"
   | "churned"
@@ -1695,6 +1697,7 @@ export function Dashboard() {
   const [activeClients, setActiveClients] = useState<number | null>(null);
   const [frontEndClients, setFrontEndClients] = useState<number | null>(null);
   const [backEndClients, setBackEndClients] = useState<number | null>(null);
+  const [suspendedClients, setSuspendedClients] = useState<number | null>(null);
   const [offBoardedClients, setOffBoardedClients] = useState<number | null>(null);
   const [retainedClients, setRetainedClients] = useState<number | null>(null);
   const [churnedClientsCount, setChurnedClientsCount] = useState<number | null>(null);
@@ -2010,13 +2013,16 @@ export function Dashboard() {
     if (activeDetailKey === "active") return "Active Clients";
     if (activeDetailKey === "front-end") return "Front-end Clients";
     if (activeDetailKey === "back-end") return "Back-end Clients";
+    if (activeDetailKey === "suspended") {
+      return `${statusDistributionLabels.get("suspended") ?? DEFAULT_PROGRAM_STATUS_LABELS.suspended} Clients`;
+    }
     if (activeDetailKey === "off-boarded") return "Off-boarded Clients";
     if (activeDetailKey === "retained") return "Retained Clients";
     if (activeDetailKey === "churned") return "Churned Clients";
     if (activeDetailKey === "renewing") return "Clients Up For Renewal";
     if (activeDetailKey === "active-renewing") return "Active Clients Up For Renewal";
     return "";
-  }, [activeDetailKey]);
+  }, [activeDetailKey, statusDistributionLabels]);
 
   const detailPageCount = Math.max(1, Math.ceil(detailTotalCount / DETAIL_PAGE_SIZE));
   const detailStart = detailTotalCount === 0 ? 0 : (detailPage - 1) * DETAIL_PAGE_SIZE + 1;
@@ -2526,6 +2532,7 @@ export function Dashboard() {
       setActiveClients(null);
       setFrontEndClients(null);
       setBackEndClients(null);
+      setSuspendedClients(null);
       setOffBoardedClients(null);
       setRetainedClients(null);
       setChurnedClientsCount(null);
@@ -2645,6 +2652,7 @@ export function Dashboard() {
         setActiveClients(null);
         setFrontEndClients(null);
         setBackEndClients(null);
+        setSuspendedClients(null);
         setOffBoardedClients(null);
         setChurnedClientsCount(null);
         setChurnPercentage(null);
@@ -2674,6 +2682,9 @@ export function Dashboard() {
       const backEnd = reportClients.filter(
         (client) => client.program_status_value === "back-end",
       );
+      const suspended = reportClients.filter(
+        (client) => client.program_status_value === "suspended",
+      );
       const offBoarded = clients.filter(
         (client) =>
           client.program_status_value === "off-boarded" &&
@@ -2694,6 +2705,7 @@ export function Dashboard() {
       setActiveClients(active.length);
       setFrontEndClients(frontEnd.length);
       setBackEndClients(backEnd.length);
+      setSuspendedClients(suspended.length);
       setOffBoardedClients(offBoarded.length);
       setChurnedClientsCount(churned.length);
       const churnBase = frontEnd.length + backEnd.length + offBoarded.length;
@@ -3035,6 +3047,7 @@ export function Dashboard() {
         setActiveClients(null);
         setFrontEndClients(null);
         setBackEndClients(null);
+        setSuspendedClients(null);
         setOffBoardedClients(null);
         setChurnedClientsCount(null);
         setChurnPercentage(null);
@@ -3052,6 +3065,7 @@ export function Dashboard() {
       setActiveClients(Number(row?.active_clients ?? 0));
       setFrontEndClients(Number(row?.front_end_clients ?? 0));
       setBackEndClients(Number(row?.back_end_clients ?? 0));
+      setSuspendedClients(Number(row?.suspended_clients ?? 0));
       setOffBoardedClients(Number(row?.off_boarded_clients ?? 0));
       setChurnedClientsCount(Number(row?.churned_clients ?? 0));
       setChurnPercentage(
@@ -4372,6 +4386,9 @@ export function Dashboard() {
         if (detailKey === "front-end" || detailKey === "back-end") {
           return client.program_status_value === detailKey;
         }
+        if (detailKey === "suspended") {
+          return client.program_status_value === "suspended";
+        }
         if (detailKey === "off-boarded") {
           return (
             client.program_status_value === "off-boarded" &&
@@ -5227,7 +5244,7 @@ export function Dashboard() {
               Client Health
             </h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <ActiveClientsKpi
               value={activeClients}
               loading={primaryKpiLoading}
@@ -5255,6 +5272,20 @@ export function Dashboard() {
               onOpenList={
                 canUseDashboardDrilldowns
                   ? () => openDetailDrawer("back-end")
+                  : undefined
+              }
+            />
+            <SuspendedClientsKpi
+              value={suspendedClients}
+              label={
+                statusDistributionLabels.get("suspended") ??
+                DEFAULT_PROGRAM_STATUS_LABELS.suspended
+              }
+              loading={primaryKpiLoading}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("suspended")
                   : undefined
               }
             />
