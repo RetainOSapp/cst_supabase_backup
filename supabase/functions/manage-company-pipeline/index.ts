@@ -52,7 +52,7 @@ const STARTERS = [
     name: "Expansion",
     pipelineType: "expansion",
     position: 20,
-    valueSource: "fixed",
+    valueSource: "none",
     stages: [
       { name: "Opportunity Identified", color: "#5B8DEF", stageType: "open" },
       { name: "Call Set", color: "#6C9BD2", stageType: "open" },

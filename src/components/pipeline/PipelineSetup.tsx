@@ -48,7 +48,17 @@ async function invokeConfiguration(
     "manage-company-pipeline",
     { body },
   );
-  if (error) throw error;
+  if (error) {
+    const response = (error as { context?: unknown }).context;
+    if (response instanceof Response) {
+      const responseBody = await response.clone().json().catch(() => null);
+      const message = responseBody?.error;
+      if (typeof message === "string" && message.trim()) {
+        throw new Error(message);
+      }
+    }
+    throw error;
+  }
   if (data?.error) throw new Error(String(data.error));
   return (data ?? {}) as Record<string, unknown>;
 }
