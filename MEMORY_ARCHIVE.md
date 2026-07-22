@@ -2303,3 +2303,7 @@ to keep the startup router below 150 lines.
 
 - 2026-07-14 morning QA: all Section A local/static checks and G1/G2 code review passed; independent Terra review found no P0/P1 issue. The worktree has no Docker/PostgreSQL/local Supabase runtime, so database execution, concurrency, live authorization, and rollback tests require an approved isolated staging target.
 - 2026-07-14 secret checkpoint: Jay stored `OPENAI_API_KEY` directly in Supabase project `zjauqflzxzsbpnivzsct`; CLI verification confirmed only the secret name, never its value. Beacon remains paused with 0 entitlements, 0 allowances, and 0 usage events; no frontend deploy, enablement, or provider call occurred.
+
+## Archived From Active Memory - 2026-07-22
+
+- No implementation, provider secret, migration, deploy, entitlement, commit, or quarantine restore occurred. Preserve `BEACON_PROTOTYPE_REFERENCE_DO_NOT_COMMIT/` and `retainos-conversation-ai-scope.md` as intentional untracked work.

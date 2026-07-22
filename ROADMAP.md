@@ -758,7 +758,8 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[x]` Multiple assignee/CSM filtering, including secondary assignee matches.
 - `[ ]` `[priority: medium]` Create clients manually.
 - `[ ]` `[priority: high]` Create clients via CSV import.
-- `[ ]` `[priority: high]` Create clients automatically through Zapier webhook with required server-validated `company_id`.
+- `[~]` `[polish]` `[priority: high]` Create clients automatically through Zapier webhook with required server-validated `company_id`.
+  - 2026-07-22 Sales Kick setup exposed that unmapped optional `{{...}}` values from the copyable Zapier JSON template were interpreted as literal member/pathway IDs. Exact unresolved placeholders now behave as omitted optional values, and invalid CSM/pathway/secondary configuration returns an actionable 400 instead of a generic 500. Awaiting Sales Kick retry QA.
 - `[ ]` `[priority: later]` Support individual client and group/cohort client management models.
 - `[ ]` `[priority: medium]` Assign multiple CSMs to a single client for different service offerings.
 - `[~]` `[polish]` Quick Update write workflow for recording client interactions.
@@ -918,7 +919,8 @@ Use this section to connect feature work into operational flows. A feature is no
 
 - `[~]` `[polish]` `[priority: medium]` New client can be created manually.
 - `[ ]` `[priority: high]` New client can be imported from CSV with preview and validation.
-- `[ ]` `[priority: high]` New client can be created from Zapier with required `company_id`.
+- `[~]` `[polish]` `[priority: high]` New client can be created from Zapier with required `company_id`.
+  - Company-scoped token authentication is live; Sales Kick retry QA remains after the 2026-07-22 optional-placeholder compatibility correction.
 - `[~]` `[polish]` `[priority: medium]` Client can be assigned to company, offer, pathway, milestone, CSM, and optional group/cohort.
   - 2026-06-20 Secondary Assignee is live for app-owned pilot/migrated clients when the company feature gate is enabled: create/edit UI, server validation, CSM access scope, Clients/Dashboard filters, and draft resource. Awaiting Jay QA before promoting.
   - 2026-06-20 CSM assignment resource audit added an `Unassigned` Clients CSM filter and documented the RetainOS flow for assigning automation-created or manually created clients that still need an owner.

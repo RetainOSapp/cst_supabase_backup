@@ -26,7 +26,12 @@ type JsonRecord = Record<string, unknown>;
 class RequestValidationError extends Error {}
 
 function cleanText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  // Zapier leaves unmapped fields from copied JSON templates as literal
+  // placeholders. Optional placeholders must behave like omitted values.
+  if (/^\{\{[^{}]+\}\}$/.test(text)) return "";
+  return text;
 }
 
 function nullableText(value: unknown) {
@@ -518,7 +523,9 @@ async function resolveAssignableMember(
   );
 
   if (!member || member.hide_from_csm_list === true) {
-    throw new Error("Assigned CSM is not an active client manager.");
+    throw new RequestValidationError(
+      "Assigned CSM is not an active visible client manager. Use an active CSM email or member ID, or leave assigned_to blank.",
+    );
   }
 
   return member.legacy_glide_row_id ?? member.id;
@@ -540,7 +547,11 @@ async function resolveOffer(
     .eq("status", "active")
     .maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error("Pathway ID is not active for this company.");
+  if (!data) {
+    throw new RequestValidationError(
+      "Pathway ID is not active for this company. Use an active pathway ID or leave pathway_id blank.",
+    );
+  }
 
   return data.glide_row_id;
 }
@@ -564,7 +575,9 @@ async function resolveOfferMilestone(
     .maybeSingle();
   if (error) throw error;
   if (!data) {
-    throw new Error("Secondary milestone ID is not active for the selected secondary pathway.");
+    throw new RequestValidationError(
+      "Secondary milestone ID is not active for the selected secondary pathway.",
+    );
   }
 
   return data;
@@ -581,7 +594,9 @@ async function assertSecondaryPathwaysEnabled(
     .maybeSingle();
   if (error) throw error;
   if (data?.enable_secondary_offers !== true) {
-    throw new Error("Secondary Pathway must be enabled in company settings first.");
+    throw new RequestValidationError(
+      "Secondary Pathway must be enabled in company settings first.",
+    );
   }
 }
 
