@@ -95,6 +95,7 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[~]` `[qa]` Sales Kick timeline labels and retired import-field cleanup.
   - 2026-07-22: contract checkpoint labels are company-configurable across Client Detail and Daily Pulse. Sales Kick's unused onboarding/diagnostic checkpoint is disabled; its Strategic Review remains 45 days before contract end. Moves Method retains Peak Diagnostic wording.
   - Sales Kick now keeps only Slack Channel Name active: seven CSV-only definitions were archived and their 803 import-created values deleted; all 119 Slack values were preserved. Jay should confirm Adam Hetherington's timeline and Quick Update after the production frontend deploy.
+  - 2026-07-22 timing-card polish removes the nested-card layout, uses consistent single-card padding/dividers, and gives labels and schedule controls responsive two-column space. Awaiting Jay visual QA.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
 ## Pipeline Release - 2026-07-20

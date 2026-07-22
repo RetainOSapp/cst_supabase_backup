@@ -2790,16 +2790,24 @@ function SettingsFlag({
   description,
   checked,
   disabled,
+  embedded = false,
   onChange,
 }: {
   label: string;
   description: string;
   checked: boolean;
   disabled: boolean;
+  embedded?: boolean;
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex items-start gap-3 rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+    <label
+      className={`flex items-start gap-3 ${
+        embedded
+          ? ""
+          : "rounded-md border border-[#e4e9f0] bg-white px-4 py-3"
+      }`}
+    >
       <input
         type="checkbox"
         checked={checked}
@@ -2828,9 +2836,9 @@ function ReminderTimingInput({
     const recurrence =
       preference.metadata?.recurrence === "recurring" ? "recurring" : "once";
     return (
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
-        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
-          Timeline and Daily Pulse label
+      <div className="mt-5 grid gap-4 border-t border-[#e4e9f0] pt-5 sm:grid-cols-2">
+        <label className="block text-xs font-medium text-[#475467] sm:col-span-2">
+          Display label
           <input
             type="text"
             maxLength={80}
@@ -2843,24 +2851,27 @@ function ReminderTimingInput({
             onChange={(event) =>
               onChange({ metadata: { label: event.target.value } })
             }
-            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            className="mt-2 block h-11 w-full rounded-md border border-[#d0d5dd] bg-white px-3 text-sm text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
           />
+          <span className="mt-1.5 block text-[11px] font-normal text-[#667085]">
+            Used on the client timeline and in Daily Pulse.
+          </span>
         </label>
-        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
-          Signal behavior
+        <label className="block text-xs font-medium text-[#475467]">
+          Schedule
           <select
             disabled={disabled}
             value={recurrence}
             onChange={(event) =>
               onChange({ metadata: { recurrence: event.target.value } })
             }
-            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            className="mt-2 block h-11 w-full rounded-md border border-[#d0d5dd] bg-white px-3 text-sm text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
           >
             <option value="once">One-time checkpoint after onboarding</option>
             <option value="recurring">Recurring check-in cadence</option>
           </select>
         </label>
-        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+        <label className="block text-xs font-medium text-[#475467]">
           {recurrence === "recurring" ? "Repeat every X days" : "Days after onboarding"}
           <input
             type="number"
@@ -2871,9 +2882,9 @@ function ReminderTimingInput({
             onChange={(event) =>
               onChange({ lead_days: Number(event.target.value) || 56 })
             }
-            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            className="mt-2 block h-11 w-full rounded-md border border-[#d0d5dd] bg-white px-3 text-sm text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
           />
-          <span className="mt-1 block text-[11px] normal-case tracking-normal text-[#667085]">
+          <span className="mt-1.5 block text-[11px] font-normal text-[#667085]">
             {recurrence === "recurring"
               ? "Example: 30 creates a monthly check-in signal."
               : "Example: 56 creates an eight-week checkpoint."}
@@ -2885,9 +2896,9 @@ function ReminderTimingInput({
 
   if (preference.notification_type === "strategic_review_due") {
     return (
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
-          Timeline and Daily Pulse label
+      <div className="mt-5 grid gap-4 border-t border-[#e4e9f0] pt-5 sm:grid-cols-2">
+        <label className="block text-xs font-medium text-[#475467]">
+          Display label
           <input
             type="text"
             maxLength={80}
@@ -2900,11 +2911,14 @@ function ReminderTimingInput({
             onChange={(event) =>
               onChange({ metadata: { label: event.target.value } })
             }
-            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            className="mt-2 block h-11 w-full rounded-md border border-[#d0d5dd] bg-white px-3 text-sm text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
           />
+          <span className="mt-1.5 block text-[11px] font-normal text-[#667085]">
+            Used on the client timeline and in Daily Pulse.
+          </span>
         </label>
-        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
-          Days before contract/program end
+        <label className="block text-xs font-medium text-[#475467]">
+          Days before contract end
           <input
             type="number"
             min="0"
@@ -2914,9 +2928,9 @@ function ReminderTimingInput({
             onChange={(event) =>
               onChange({ lead_days: Number(event.target.value) || 0 })
             }
-            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            className="mt-2 block h-11 w-full rounded-md border border-[#d0d5dd] bg-white px-3 text-sm text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
           />
-          <span className="mt-1 block text-[11px] normal-case tracking-normal text-[#667085]">
+          <span className="mt-1.5 block text-[11px] font-normal text-[#667085]">
             Example: 35 creates a five-week pre-renewal review signal.
           </span>
         </label>
@@ -4845,7 +4859,7 @@ function CompanySettingsSetup({
                 </h4>
                 <p className="mt-1 text-xs text-[#667085]">{group.description}</p>
               </div>
-              <div className="grid gap-3 lg:grid-cols-2">
+              <div className="grid gap-4 xl:grid-cols-2">
                 {group.types.map((notificationType) => {
                   const preference =
                     DEFAULT_NOTIFICATION_PREFERENCES.find(
@@ -4859,13 +4873,14 @@ function CompanySettingsSetup({
                   return (
                     <div
                       key={notificationType}
-                      className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3"
+                      className="rounded-lg border border-[#e4e9f0] bg-white p-5 shadow-sm"
                     >
                       <SettingsFlag
                         label={copy.label}
                         description={copy.description}
                         checked={current.in_app_enabled}
                         disabled={disabled}
+                        embedded
                         onChange={(checked) =>
                           setPreferenceDraft((preferences) =>
                             mergeNotificationPreferences(preferences).map((item) =>
