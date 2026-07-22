@@ -2828,7 +2828,24 @@ function ReminderTimingInput({
     const recurrence =
       preference.metadata?.recurrence === "recurring" ? "recurring" : "once";
     return (
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+          Timeline and Daily Pulse label
+          <input
+            type="text"
+            maxLength={80}
+            disabled={disabled}
+            value={
+              typeof preference.metadata?.label === "string"
+                ? preference.metadata.label
+                : "Onboarding checkpoint"
+            }
+            onChange={(event) =>
+              onChange({ metadata: { label: event.target.value } })
+            }
+            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+          />
+        </label>
         <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
           Signal behavior
           <select
@@ -2868,23 +2885,42 @@ function ReminderTimingInput({
 
   if (preference.notification_type === "strategic_review_due") {
     return (
-      <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
-        Days before contract/program end
-        <input
-          type="number"
-          min="0"
-          max="365"
-          disabled={disabled}
-          value={preference.lead_days}
-          onChange={(event) =>
-            onChange({ lead_days: Number(event.target.value) || 0 })
-          }
-          className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
-        />
-        <span className="mt-1 block text-[11px] normal-case tracking-normal text-[#667085]">
-          Example: 35 creates a five-week pre-renewal review signal.
-        </span>
-      </label>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+          Timeline and Daily Pulse label
+          <input
+            type="text"
+            maxLength={80}
+            disabled={disabled}
+            value={
+              typeof preference.metadata?.label === "string"
+                ? preference.metadata.label
+                : "Strategic Review"
+            }
+            onChange={(event) =>
+              onChange({ metadata: { label: event.target.value } })
+            }
+            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+          />
+        </label>
+        <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#586273]">
+          Days before contract/program end
+          <input
+            type="number"
+            min="0"
+            max="365"
+            disabled={disabled}
+            value={preference.lead_days}
+            onChange={(event) =>
+              onChange({ lead_days: Number(event.target.value) || 0 })
+            }
+            className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm normal-case tracking-normal text-[#101828] shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+          />
+          <span className="mt-1 block text-[11px] normal-case tracking-normal text-[#667085]">
+            Example: 35 creates a five-week pre-renewal review signal.
+          </span>
+        </label>
+      </div>
     );
   }
 

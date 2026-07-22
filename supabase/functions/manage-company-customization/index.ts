@@ -191,14 +191,23 @@ function normalizeNotificationMetadata(
   notificationType: string,
   metadata: unknown,
 ) {
-  if (notificationType !== "diagnostic_due") return {};
   const raw =
     metadata && typeof metadata === "object"
       ? (metadata as Record<string, unknown>)
       : {};
-  return {
-    recurrence: raw.recurrence === "recurring" ? "recurring" : "once",
-  };
+  const normalized: Record<string, unknown> = {};
+  if (
+    notificationType === "diagnostic_due" ||
+    notificationType === "strategic_review_due"
+  ) {
+    const label = cleanText(raw.label).slice(0, 80);
+    if (label) normalized.label = label;
+  }
+  if (notificationType === "diagnostic_due") {
+    normalized.recurrence =
+      raw.recurrence === "recurring" ? "recurring" : "once";
+  }
+  return normalized;
 }
 
 function metadataRecord(value: unknown) {

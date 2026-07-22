@@ -188,13 +188,14 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreference[] = [
     in_app_enabled: true,
     email_enabled: false,
     lead_days: 56,
-    metadata: { recurrence: "once" },
+    metadata: { recurrence: "once", label: "Onboarding checkpoint" },
   },
   {
     notification_type: "strategic_review_due",
     in_app_enabled: true,
     email_enabled: false,
     lead_days: 35,
+    metadata: { label: "Strategic Review" },
   },
 ];
 
@@ -328,6 +329,16 @@ export function enabledNotificationTypes(preferences: NotificationPreference[]) 
       .filter((preference) => preference.in_app_enabled)
       .map((preference) => preference.notification_type),
   );
+}
+
+export function notificationPreferenceLabel(
+  preference: NotificationPreference | undefined,
+  fallback: string,
+) {
+  const label = preference?.metadata?.label;
+  return typeof label === "string" && label.trim()
+    ? label.trim().slice(0, 80)
+    : fallback;
 }
 
 export async function loadCompanyWorkspaceDefaults(

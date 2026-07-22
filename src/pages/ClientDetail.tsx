@@ -10,6 +10,7 @@ import {
   applyProgramStatusLabels,
   loadCompanyNotificationPreferences,
   mergeNotificationPreferences,
+  notificationPreferenceLabel,
   normalizeProgramStatusLabels,
   type NotificationPreference,
 } from "../lib/companySettings.ts";
@@ -6006,6 +6007,14 @@ function PathwaysSection({
     diagnosticPreference?.metadata?.recurrence === "recurring"
       ? "recurring"
       : "once";
+  const diagnosticLabel = notificationPreferenceLabel(
+    diagnosticPreference,
+    "Onboarding checkpoint",
+  );
+  const strategicReviewLabel = notificationPreferenceLabel(
+    strategicReviewPreference,
+    "Strategic Review",
+  );
   const diagnosticMarkers: ProgramTimelineMarker[] =
     diagnosticPreference?.in_app_enabled === false
       ? []
@@ -6016,7 +6025,7 @@ function PathwaysSection({
             },
             (_, index) => ({
               key: `diagnostic-${index + 1}`,
-              label: `Configured check-in ${index + 1}`,
+              label: `${diagnosticLabel} ${index + 1}`,
               day: diagnosticDay * (index + 1),
               tone: "amber" as ProgramTimelineMarkerTone,
               position: "bottom" as const,
@@ -6025,7 +6034,7 @@ function PathwaysSection({
         : [
             {
               key: "peak-diagnostic",
-              label: "Peak Diagnostic",
+              label: diagnosticLabel,
               day: diagnosticDay,
               tone: "amber",
               position: "bottom",
@@ -6043,7 +6052,7 @@ function PathwaysSection({
       : [
           {
             key: "strategic-review",
-            label: "Strategic review",
+            label: strategicReviewLabel,
             day: strategicReviewDay,
             tone: "orange" as ProgramTimelineMarkerTone,
             position: "bottom" as const,
@@ -6294,8 +6303,8 @@ function PathwaysSection({
               Program Timeline
             </div>
             <p className="mt-1 text-sm text-[#6c7684]">
-              Read-only operating map using contract/program timing and
-              company-configured Daily Pulse checkpoints.
+              Read-only contract map using company-configured checkpoints.
+              Pathway milestones are tracked separately below.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

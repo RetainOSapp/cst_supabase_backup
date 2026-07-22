@@ -13,6 +13,7 @@ import {
   loadCompanyWorkspaceDefaults,
   loadCompanyNotificationPreferences,
   mergeNotificationPreferences,
+  notificationPreferenceLabel,
   programStatusChoicesWithLabels,
   type ProgramStatusLabelMap,
   type NotificationPreference,
@@ -471,9 +472,20 @@ function buildPulseSections(
     diagnosticPreference?.metadata?.recurrence === "recurring"
       ? "recurring"
       : "once";
+  const diagnosticLabel = notificationPreferenceLabel(
+    diagnosticPreference,
+    "Onboarding checkpoint",
+  );
+  const strategicReviewPreference = preferenceByType.get(
+    "strategic_review_due",
+  );
+  const strategicReviewLabel = notificationPreferenceLabel(
+    strategicReviewPreference,
+    "Strategic Review",
+  );
   const strategicReviewLeadDays = Math.max(
     0,
-    preferenceByType.get("strategic_review_due")?.lead_days ?? 35,
+    strategicReviewPreference?.lead_days ?? 35,
   );
 
   const sections: PulseSection[] = [];
@@ -592,14 +604,14 @@ function buildPulseSections(
       id: `diagnostics-${window}`,
       title:
         window === "today"
-          ? "Peak Diagnostics Due Today"
+          ? `${diagnosticLabel} Due Today`
           : window === "week"
-            ? "Peak Diagnostics Due This Week"
-            : "Peak Diagnostics Due This Month",
+            ? `${diagnosticLabel} Due This Week`
+            : `${diagnosticLabel} Due This Month`,
       description:
         diagnosticRecurrence === "recurring"
-          ? `Active clients due for recurring Peak Diagnostic check-ins every ${diagnosticCadenceDays} days from onboarding.`
-          : `Active clients due for their one-time Peak Diagnostic ${diagnosticCadenceDays} days from onboarding.`,
+          ? `Active clients due for recurring ${diagnosticLabel} check-ins every ${diagnosticCadenceDays} days from onboarding.`
+          : `Active clients due for their one-time ${diagnosticLabel} ${diagnosticCadenceDays} days from onboarding.`,
       items: activeClients
         .map((client) => {
           const dueDate =
@@ -622,8 +634,8 @@ function buildPulseSections(
           return makeItem(
             `diagnostics-${window}`,
             client,
-            "Peak Diagnostic",
-            `Peak Diagnostic is due ${formatDate(dateOnlyIso(dueDate))}`,
+            diagnosticLabel,
+            `${diagnosticLabel} is due ${formatDate(dateOnlyIso(dueDate))}`,
             "blue",
             dateOnlyIso(dueDate),
           );
@@ -637,12 +649,12 @@ function buildPulseSections(
       id: `strategic-review-${window}`,
       title:
         window === "today"
-          ? "Strategic Reviews Today"
+          ? `${strategicReviewLabel} Today`
           : window === "week"
-            ? "Strategic Reviews This Week"
-            : "Strategic Reviews This Month",
+            ? `${strategicReviewLabel} This Week`
+            : `${strategicReviewLabel} This Month`,
       description:
-        `Active clients ${strategicReviewLeadDays} days before renewal or contract end for strategic review planning.`,
+        `Active clients ${strategicReviewLeadDays} days before renewal or contract end for ${strategicReviewLabel} planning.`,
       items: activeClients
         .map((client) => {
           const contractEnd = parseDate(client.current_contract_end_date_for_filtering);
@@ -656,14 +668,14 @@ function buildPulseSections(
           return makeItem(
             `strategic-review-${window}`,
             client,
-            completion ? "SR complete" : "SR pending",
+            completion ? `${strategicReviewLabel} complete` : `${strategicReviewLabel} pending`,
             completion
-              ? `Strategic Review completed ${formatDate(completion.completed_at)}${
+              ? `${strategicReviewLabel} completed ${formatDate(completion.completed_at)}${
                   completion.completed_by_name
                     ? ` by ${completion.completed_by_name}`
                     : ""
                 }. Renewal date is ${formatDate(client.current_contract_end_date_for_filtering)}`
-              : `Strategic Review due before renewal on ${formatDate(client.current_contract_end_date_for_filtering)}`,
+              : `${strategicReviewLabel} due before renewal on ${formatDate(client.current_contract_end_date_for_filtering)}`,
             completion ? "green" : "amber",
             dueAt,
             undefined,

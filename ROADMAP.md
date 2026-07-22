@@ -92,6 +92,9 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[x]` Moves Method Phase 4 launch QA handoff passed.
   - 2026-07-04 Jay QA passed: QA client pathway progression completed both milestones and reached 100%; Bye Bye Panic still loads through mirror fallback; MM writes persist on real app-owned clients; all 30 latest CST screenshot clients were found in RetainOS app-owned data. Temporary role-QA users/client were deleted after QA, and MM app-owned clients now match the CST mirror snapshot at 4,485 / 4,485.
 - `[ ]` Next expected QA queue source: a new intentionally queued build/deploy, or the Official Company Rollout Checklist when Jay calls a company cutover day.
+- `[~]` `[qa]` Sales Kick timeline labels and retired import-field cleanup.
+  - 2026-07-22: contract checkpoint labels are company-configurable across Client Detail and Daily Pulse. Sales Kick's unused onboarding/diagnostic checkpoint is disabled; its Strategic Review remains 45 days before contract end. Moves Method retains Peak Diagnostic wording.
+  - Sales Kick now keeps only Slack Channel Name active: seven CSV-only definitions were archived and their 803 import-created values deleted; all 119 Slack values were preserved. Jay should confirm Adam Hetherington's timeline and Quick Update after the production frontend deploy.
 - `[x]` 2026-06-17 hygiene check: every active `[~]` item has a reason tag; do not treat the full roadmap as a QA queue.
 
 ## Pipeline Release - 2026-07-20
@@ -258,6 +261,7 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - 2026-06-12 hardening clarified that custom fields are company-level recurring update fields consumed by Quick Update and Client Detail > Outcomes, not a Client Details profile-only setup.
   - 2026-06-15 Jay QA passed the grouped Customization sections, Quick Update custom field usage, and Client Detail > Outcomes custom field usage after admin header/button polish.
   - 2026-06-20 resource/webhook audit: New Client Webhook now accepts modern `custom_fields` object/array payloads and legacy `customfield1..customfield7` slots, validates them against active company custom fields, and writes `client_custom_field_values` on client creation. `zapier-create-client` redeployed.
+  - 2026-07-22 company-specific checkpoint polish: diagnostic and Strategic Review labels now live in notification-preference metadata and drive both Client Detail's contract timeline and Daily Pulse instead of using global Moves Method wording.
 - `[ ]` `[priority: medium]` Company customization V2.
   - Optional custom field display on client list/import/export.
   - Richer client/account management settings and client list column presets.
