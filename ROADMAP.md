@@ -100,10 +100,11 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - Jay approved Gates A-F and passed the resettable/manual workflow QA. Production commit `fb4e3da` was transplanted onto fresh main and Vercel serves `assets/index-cBDhoZ9O.js`; `/` and `/login` return 200.
   - Production verification passed: Pipeline 55/55 + 47/47 + 20/20, build, Beacon 44 Edge tests + 87 DB + Edge source + 27 frontend, and milestone ordering 3/3.
   - Bounded role smoke passed Director, Support, assigned/unassigned CSM, Viewer-off, read-only, inactive, and cross-tenant enforcement with zero Pipeline writes, zero automation-run changes, and zero temporary identities.
-  - ES and MM are visible with Viewer access off and all automation paused. Sales Kick remains disabled. There are zero pending scheduled activations.
+  - ES is visible; MM was disabled after the video setup; Sales Kick's master gate was enabled by Jay on 2026-07-22 while it still had zero definitions/stages/items. Viewer access remains off and all automation paused. There are zero pending scheduled activations.
+  - 2026-07-22 navigation correction: the sidebar access check no longer hides a master-enabled company merely because it has not created starter pipelines. Company Settings now emits an immediate visibility refresh after save, so enabling/disabling Pipeline updates the sidebar without leaving or refreshing the page. Empty configuration remains explicit and does not silently create business workflows.
 - `[~]` `[qa]` Observe the Pipeline release with MM for one week before broad rollout or advanced automation/reporting.
   - Remaining human check: Jay signs into production and visually confirms ES/MM navigation, workspace, drawers, Admin Pipelines, and existing Dashboard/Clients/Tasks/Beacon surfaces. No business-data mutation is required.
-  - Sales Kick enablement, Viewer access, renewal scan/scheduler automation, Daily Pulse integration, forecasts, conversion funnels, AI analysis, Slack/email reminders, and broader rollout remain separate decisions.
+  - Sales Kick pipeline definitions/items, Viewer access, renewal scan/scheduler automation, Daily Pulse integration, forecasts, conversion funnels, AI analysis, Slack/email reminders, and broader rollout remain separate decisions.
 
 ## Current Foundation
 

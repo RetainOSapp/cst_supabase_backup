@@ -97,6 +97,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [companies, setCompanies] = useState<SidebarCompany[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(false);
   const [pipelineVisible, setPipelineVisible] = useState(false);
+  const [pipelineVisibilityVersion, setPipelineVisibilityVersion] = useState(0);
   const {
     capabilities,
     email,
@@ -129,6 +130,19 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [effectiveCompanyId]);
 
   useEffect(() => {
+    const refreshPipelineVisibility = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyLegacyId?: string }>).detail;
+      if (!detail?.companyLegacyId || detail.companyLegacyId === effectiveCompanyId) {
+        setPipelineVisibilityVersion((current) => current + 1);
+      }
+    };
+    window.addEventListener("retainos:pipeline-visibility-changed", refreshPipelineVisibility);
+    return () => {
+      window.removeEventListener("retainos:pipeline-visibility-changed", refreshPipelineVisibility);
+    };
+  }, [effectiveCompanyId]);
+
+  useEffect(() => {
     let cancelled = false;
     setPipelineVisible(false);
     if (!effectiveCompanyId || !capabilities.canAccessPipeline) return;
@@ -152,7 +166,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [capabilities.canAccessPipeline, effectiveCompanyId, role]);
+  }, [capabilities.canAccessPipeline, effectiveCompanyId, pipelineVisibilityVersion, role]);
 
   useEffect(() => {
     let cancelled = false;

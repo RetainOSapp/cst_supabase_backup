@@ -4212,6 +4212,11 @@ function CompanySettingsSetup({
       return;
     }
     setSaved(true);
+    window.dispatchEvent(
+      new CustomEvent("retainos:pipeline-visibility-changed", {
+        detail: { companyLegacyId },
+      }),
+    );
     onReload();
   }
 

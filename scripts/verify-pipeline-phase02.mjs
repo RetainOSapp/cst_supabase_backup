@@ -323,6 +323,13 @@ check(
   /path:\s*["']\/tasks["'][\s\S]*path:\s*["']\/pipeline["'][\s\S]*path:\s*["']\/call-ai["']/i.test(header),
 );
 check(
+  "sidebar visibility follows the saved master gate even before starter pipelines exist",
+  /if\s*\(action\s*===\s*["']access["']\)[\s\S]{0,260}enabled:\s*settings\.enabled/i.test(workspaceFunction) &&
+    !/if\s*\(action\s*===\s*["']access["']\)[\s\S]{0,500}company_pipelines/i.test(workspaceFunction) &&
+    /retainos:pipeline-visibility-changed/i.test(header) &&
+    /retainos:pipeline-visibility-changed/i.test(admin),
+);
+check(
   "Admin Hub exposes a Pipelines tab before Company Settings",
   /Pipelines[\s\S]*Company Settings/i.test(admin) && /pipeline/i.test(admin),
 );

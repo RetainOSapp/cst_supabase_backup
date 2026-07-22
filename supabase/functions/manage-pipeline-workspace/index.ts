@@ -368,15 +368,8 @@ Deno.serve(async (req) => {
     const settings = await loadSettings(supabase, company.id);
 
     if (action === "access") {
-      const { count, error } = await supabase
-        .from("company_pipelines")
-        .select("id", { count: "exact", head: true })
-        .eq("company_id", company.id)
-        .eq("is_enabled", true)
-        .is("archived_at", null);
-      if (error) throw error;
       return respond({
-        enabled: settings.enabled && (count ?? 0) > 0,
+        enabled: settings.enabled,
         viewerAccess: settings.viewerAccess,
         actorRole: actor.role,
       });
