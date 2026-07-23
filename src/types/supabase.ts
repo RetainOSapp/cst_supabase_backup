@@ -2958,12 +2958,14 @@ export type Database = {
           enable_archetypes: boolean
           enable_call_ai_for_csms: boolean
           enable_embeds: boolean
+          enable_suspended_auto_offboard: boolean
           enable_secondary_assignee: boolean
           enable_secondary_offers: boolean
           enable_zapier_client_create: boolean
           id: string
           metadata: Json
           profile_upkeep_freshness_days: number
+          suspended_auto_offboard_days: number
           updated_at: string
         }
         Insert: {
@@ -2976,12 +2978,14 @@ export type Database = {
           enable_archetypes?: boolean
           enable_call_ai_for_csms?: boolean
           enable_embeds?: boolean
+          enable_suspended_auto_offboard?: boolean
           enable_secondary_assignee?: boolean
           enable_secondary_offers?: boolean
           enable_zapier_client_create?: boolean
           id?: string
           metadata?: Json
           profile_upkeep_freshness_days?: number
+          suspended_auto_offboard_days?: number
           updated_at?: string
         }
         Update: {
@@ -2994,12 +2998,14 @@ export type Database = {
           enable_archetypes?: boolean
           enable_call_ai_for_csms?: boolean
           enable_embeds?: boolean
+          enable_suspended_auto_offboard?: boolean
           enable_secondary_assignee?: boolean
           enable_secondary_offers?: boolean
           enable_zapier_client_create?: boolean
           id?: string
           metadata?: Json
           profile_upkeep_freshness_days?: number
+          suspended_auto_offboard_days?: number
           updated_at?: string
         }
         Relationships: [

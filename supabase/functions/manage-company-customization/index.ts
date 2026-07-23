@@ -469,6 +469,15 @@ Deno.serve(async (req) => {
         enable_embeds: Boolean(body.enableEmbeds),
         enable_zapier_client_create: Boolean(body.enableZapierClientCreate),
         allow_status_change_retention: Boolean(body.allowStatusChangeRetention),
+        enable_suspended_auto_offboard: Boolean(
+          body.enableSuspendedAutoOffboard,
+        ),
+        suspended_auto_offboard_days: requiredBoundedInteger(
+          body.suspendedAutoOffboardDays,
+          28,
+          1,
+          365,
+        ),
         metadata: {
           ...existingMetadata,
           ...(hasContactTouchSettings

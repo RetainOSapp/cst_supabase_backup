@@ -403,6 +403,7 @@ type OfferKpiClientRow = Record<string, unknown> & {
   client_age_date_onboarded: string | null;
   client_age_date_offboarded: string | null;
   client_age_date_offboarded_for_filtering: string | null;
+  churn_reason_value?: string | null;
   current_contract_start_date: string | null;
   current_contract_of_days: number | null;
   current_contract_end_date: string | null;
@@ -1384,8 +1385,7 @@ function isLegacyContractEndPlaceholder(date: Date | null) {
 function calculatedOffboardedDate(client: OfferKpiClientRow) {
   return (
     dateFromValue(client.client_age_date_offboarded) ??
-    dateFromValue(client.client_age_date_offboarded_for_filtering) ??
-    calculatedContractEndDate(client)
+    dateFromValue(client.client_age_date_offboarded_for_filtering)
   );
 }
 
@@ -1400,7 +1400,13 @@ function isChurnedClient(client: OfferKpiClientRow, startDate: string, endDate: 
   if (client.program_status_value !== "off-boarded") return false;
   const offboarded = calculatedOffboardedDate(client);
   const contractEnd = calculatedContractEndDate(client);
-  if (!offboarded || !contractEnd || offboarded >= contractEnd) return false;
+  if (!offboarded) return false;
+  if (
+    client.churn_reason_value !== "auto_suspended_timeout" &&
+    (!contractEnd || offboarded >= contractEnd)
+  ) {
+    return false;
+  }
   return isInDateRange(offboarded, startDate, endDate);
 }
 
@@ -2579,6 +2585,7 @@ export function Dashboard() {
         "client_age_date_onboarded",
         "client_age_date_offboarded",
         "client_age_date_offboarded_for_filtering",
+        "churn_reason_value",
         "current_contract_start_date",
         "current_contract_of_days",
         "current_contract_end_date",
@@ -3796,6 +3803,7 @@ export function Dashboard() {
         "client_age_date_onboarded",
         "client_age_date_offboarded",
         "client_age_date_offboarded_for_filtering",
+        "churn_reason_value",
         "current_contract_start_date",
         "current_contract_of_days",
         "current_contract_end_date",

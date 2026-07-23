@@ -221,6 +221,8 @@ interface CompanySettingsRow {
   enable_embeds: boolean;
   enable_zapier_client_create: boolean;
   allow_status_change_retention: boolean;
+  enable_suspended_auto_offboard: boolean;
+  suspended_auto_offboard_days: number;
   enable_pipeline: boolean;
   enable_pipeline_viewer_access: boolean;
   client_list_columns?: ClientListColumnKey[];
@@ -2595,6 +2597,8 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_embeds: false,
     enable_zapier_client_create: false,
     allow_status_change_retention: false,
+    enable_suspended_auto_offboard: false,
+    suspended_auto_offboard_days: 28,
     enable_pipeline: false,
     enable_pipeline_viewer_access: false,
     client_list_columns: normalizeClientListColumns(null),
@@ -4227,6 +4231,8 @@ function CompanySettingsSetup({
           enableEmbeds: draft.enable_embeds,
           enableZapierClientCreate: draft.enable_zapier_client_create,
           allowStatusChangeRetention: draft.allow_status_change_retention,
+          enableSuspendedAutoOffboard: draft.enable_suspended_auto_offboard,
+          suspendedAutoOffboardDays: draft.suspended_auto_offboard_days,
           enablePipeline: draft.enable_pipeline,
           enablePipelineViewerAccess: draft.enable_pipeline_viewer_access,
           clientListColumns: clientListColumns(draft),
@@ -4273,6 +4279,8 @@ function CompanySettingsSetup({
   const disabled = !canManage || saving;
   const selectedClientListColumns = clientListColumns(draft);
   const selectedProgramStatusLabels = programStatusLabels(draft);
+  const suspendedStatusLabel =
+    selectedProgramStatusLabels.suspended || "Suspended";
 
   async function handleIntegrationTokenAction(
     action: "create" | "revoke" | "revoke_all",
@@ -4529,6 +4537,56 @@ function CompanySettingsSetup({
               />
             </label>
           ))}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            {suspendedStatusLabel} lifecycle automation
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Optionally offboard clients who remain {suspendedStatusLabel} beyond
+            a company-defined grace period.
+          </p>
+        </div>
+        <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <SettingsFlag
+            label={`Automatically offboard ${suspendedStatusLabel} clients`}
+            description={`Start the timer when a client is marked ${suspendedStatusLabel}. Returning to another status before the deadline cancels the automatic offboard.`}
+            checked={draft.enable_suspended_auto_offboard}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                enable_suspended_auto_offboard: checked,
+              }))
+            }
+          />
+          <label className="block text-sm font-medium text-[#344054]">
+            Days before offboarding
+            <input
+              type="number"
+              min="1"
+              max="365"
+              disabled={disabled || !draft.enable_suspended_auto_offboard}
+              value={draft.suspended_auto_offboard_days}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  suspended_auto_offboard_days: Math.min(
+                    365,
+                    Math.max(1, Number(event.target.value) || 28),
+                  ),
+                }))
+              }
+              className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm disabled:bg-[#f7f9fc] disabled:text-[#667085]"
+            />
+            <span className="mt-2 block text-xs leading-5 text-[#667085]">
+              Existing dated {suspendedStatusLabel} clients use their recorded
+              status date. Records without one are never automated.
+            </span>
+          </label>
         </div>
       </section>
 
@@ -5697,7 +5755,7 @@ export function SaasClientDetail({
           supabase
             .from("company_settings")
             .select(
-              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, allow_status_change_retention, enable_pipeline, enable_pipeline_viewer_access, metadata, updated_at",
+              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, allow_status_change_retention, enable_suspended_auto_offboard, suspended_auto_offboard_days, enable_pipeline, enable_pipeline_viewer_access, metadata, updated_at",
             )
             .eq("company_id", appCompany.id)
             .maybeSingle(),
