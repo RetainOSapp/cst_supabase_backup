@@ -2311,3 +2311,4 @@ to keep the startup router below 150 lines.
 ## Archived From Active Memory - 2026-07-23
 
 - 2026-07-14 final stress correction: `20260714020000` (`9d59bd01454cdf0d2a1937f635c612eb7ee36c5a20bcad6239478a79957f0f7d`) and `beacon-chat` are live. Unique partial client/business/CSM matching is authorized-scope-first with program/CSM disambiguation; red/yellow any-dimension health is one bounded call and supports CSM filtering. DB 76/76, Edge 43/43. Retest four questions; Moves remains off.
+- 2026-07-14 Vercel dotted-route fix is deployed in production: the SPA rewrite no longer excludes all dotted paths. Glide client/table IDs may contain dots, and refreshing those React routes otherwise returns Vercel `404 NOT_FOUND` before the app loads. Static Vite assets and `favicon.svg` remain excluded; direct production refresh of a dotted Client Detail URL returned 200. Await Adam browser confirmation.

@@ -3819,6 +3819,7 @@ export type Database = {
           p_company_id: string
           p_csm_id?: string
           p_date_range_end?: string
+          p_date_range_start?: string
           p_offer_id?: string
           p_program_values?: string[]
           p_secondary_assignee_id?: string

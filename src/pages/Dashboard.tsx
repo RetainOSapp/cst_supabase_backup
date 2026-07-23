@@ -484,6 +484,8 @@ const DASHBOARD_CLIENT_PROFILE_FIELDS = [
   "next_steps_value",
   "csm_date_of_last_contact",
   "csm_date_of_next_contact",
+  "client_age_date_offboarded",
+  "client_age_date_offboarded_for_filtering",
   "offer_milestones_current_milestone_change_date",
   "outcomes_progress_date",
   "outcomes_buy_in_date",
@@ -1384,6 +1386,13 @@ function calculatedOffboardedDate(client: OfferKpiClientRow) {
     dateFromValue(client.client_age_date_offboarded) ??
     dateFromValue(client.client_age_date_offboarded_for_filtering) ??
     calculatedContractEndDate(client)
+  );
+}
+
+function recordedOffboardedDate(client: ChartClientRow) {
+  return (
+    dateFromValue(client.client_age_date_offboarded) ??
+    dateFromValue(client.client_age_date_offboarded_for_filtering)
   );
 }
 
@@ -4537,6 +4546,7 @@ export function Dashboard() {
           p_offer_id: rpcFilterParams.p_offer_id,
           p_client_start_date_from: rpcFilterParams.p_client_start_date_from,
           p_client_start_date_to: rpcFilterParams.p_client_start_date_to,
+          p_date_range_start: rpcFilterParams.p_date_range_start,
           p_date_range_end: rpcFilterParams.p_date_range_end,
         };
         const [chartResult, churnReasonResult] = await Promise.all([
@@ -4758,6 +4768,16 @@ export function Dashboard() {
             mapAppChartClientRow,
           )
         : ((clientRows ?? []) as unknown as ChartClientRow[]));
+      const churnChartClients = clients.filter(
+        (client) =>
+          client.program_status_value === "off-boarded" &&
+          chartKey(client.churn_reason_value) !== "not-set" &&
+          isInDateRange(
+            recordedOffboardedDate(client),
+            appliedFilters.dateRange.startDate,
+            appliedFilters.dateRange.endDate,
+          ),
+      );
       const activeClientsForWorkload = clients.filter(
         (client) =>
           isActiveClientStatus(client.program_status_value) &&
@@ -4989,7 +5009,7 @@ export function Dashboard() {
           (client) => client.outcomes_progress_for_filtering,
         ),
         churnReasonDistribution: countByOrdered(
-          clients.filter((client) => chartKey(client.churn_reason_value) !== "not-set"),
+          churnChartClients,
           (client) => client.churn_reason_value,
           churnReasonNameByValue,
           churnReasonOrderByValue,
@@ -5597,7 +5617,7 @@ export function Dashboard() {
               </ChartCard>
               <ChartCard
                 title="Churn Reason"
-                subtitle="Clients grouped by recorded churn/offboarding reason"
+                subtitle="Clients offboarded in the selected reporting period, grouped by reason"
               >
                 <DonutChart
                   data={chartData.churnReasonDistribution}
@@ -5609,7 +5629,14 @@ export function Dashboard() {
                           openChartDetail(
                             "Churn Reason",
                             item,
-                            (client) => client.churn_reason_value,
+                            (client) =>
+                              isInDateRange(
+                                recordedOffboardedDate(client),
+                                appliedFilters.dateRange.startDate,
+                                appliedFilters.dateRange.endDate,
+                              )
+                                ? client.churn_reason_value
+                                : null,
                           )
                       : undefined
                   }
