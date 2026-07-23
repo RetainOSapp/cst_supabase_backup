@@ -2001,7 +2001,7 @@ Use this section as the “what good looks like” checklist before migrating re
 - `[x]` Dashboard supports company, CSM, date, program/status, and offer-style filtering where currently wired.
 - `[ ]` Dashboard supports cohort/date range filtering equivalent to Glide.
 - `[~]` `[polish]` Dashboard includes active clients, upgrades, renewals, pauses, offboardings, churn percentage, retention, chart breakdowns, offboardings by CSM, and CSM workload where data is available.
-  - 2026-07-23 correction: Churn Reasons is an event-period chart. Its aggregate, standard dashboard path, and client drilldown now require a real recorded offboard date inside the selected reporting period; contract end is never substituted. The production function is applied, while the frontend release and Jay/MM QA remain. [qa]
+  - 2026-07-23 correction: Churn Reasons is an event-period chart. Its aggregate, standard dashboard path, and client drilldown now require a real recorded offboard date inside the selected reporting period; contract end is never substituted. Migration `20260723120000` and source `a5b3a2b` are live; Jay/MM QA remains. [qa]
 - `[~]` `[polish]` Dashboard chart segments are clickable and can drill into the clients behind the number where wired.
 - `[ ]` Dashboard supports CSM capacity if enabled for a company.
 - `[ ]` Dashboard includes Call AI rollups:
