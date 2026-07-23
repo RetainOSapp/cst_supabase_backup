@@ -15,6 +15,7 @@ import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { Tasks } from "./pages/Tasks.tsx";
 import { Pipeline } from "./pages/Pipeline.tsx";
 import { CallAi } from "./pages/CallAi.tsx";
+import { CallIntelligencePreview } from "./pages/CallIntelligencePreview.tsx";
 import { Resources } from "./pages/Resources.tsx";
 import { SaasClients } from "./pages/SaasClients.tsx";
 import { SaasClientDetail } from "./pages/SaasClientDetail.tsx";
@@ -236,6 +237,10 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route
+        path="/call-intelligence-preview"
+        element={<CallIntelligencePreview />}
+      />
       <Route
         path="/*"
         element={

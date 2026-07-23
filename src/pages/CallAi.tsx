@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { CallIntelligenceDemo } from "../components/call-ai/CallIntelligenceDemo.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
@@ -87,6 +88,9 @@ function integrationClientLabel(client: IntegrationReviewClientOption) {
 
 export function CallAi() {
   const { effectiveCompanyId, capabilities, role } = useAccountContext();
+  const [activeTab, setActiveTab] = useState<"intelligence" | "reconciliation">(
+    "intelligence",
+  );
   const [companyAppId, setCompanyAppId] = useState("");
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<IntegrationIntakeEventRow[]>([]);
@@ -306,6 +310,14 @@ export function CallAi() {
     );
   }
 
+  if (activeTab === "intelligence") {
+    return (
+      <CallIntelligenceDemo
+        onShowReconciliation={() => setActiveTab("reconciliation")}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -326,6 +338,24 @@ export function CallAi() {
         >
           Refresh queue
         </button>
+      </div>
+
+      <div className="border-b border-[#dfe5ec]">
+        <nav className="-mb-px flex gap-6" aria-label="Call AI sections">
+          <button
+            type="button"
+            onClick={() => setActiveTab("intelligence")}
+            className="border-b-2 border-transparent px-1 pb-3 text-sm font-semibold text-[#667085] hover:border-[#cbd2dc] hover:text-[#162b3e]"
+          >
+            Call Intelligence
+          </button>
+          <button
+            type="button"
+            className="border-b-2 border-[#59abf0] px-1 pb-3 text-sm font-bold text-[#162b3e]"
+          >
+            Reconciliation
+          </button>
+        </nav>
       </div>
 
       <section className="grid gap-4 md:grid-cols-4">

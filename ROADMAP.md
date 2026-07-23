@@ -31,6 +31,9 @@ Use this as the only canonical list for "what should Jay QA next?" Other `[~]`
 items may still be open for polish, downstream wiring, migration validation, or
 mixed reasons, but they are not active Jay QA asks unless copied here.
 
+- `[~]` `[qa]` Call Intelligence lead-demo mockup.
+  - 2026-07-23 isolated frontend-only preview built on `codex/call-intelligence-demo` from current `origin/main`: interactive filters, assigned/unassigned queues, sample call detail, quality rubric, red/green signals, add-on analysis, transcript, manual transcript modal, and responsive shell.
+  - Both `/call-ai` tabs are represented; the existing authenticated Reconciliation implementation remains intact. `/call-intelligence-preview` is a sample-data-only Loom route and makes no Supabase or AI-provider call. Jay visual/demo-flow QA remains; this does not close any real ingestion, schema, prompt, provider, or migration-parity item.
 - `[x]` 2026-06-15 V1 closure QA is complete for Company Customization, Company Settings, Client Contracts/Renewals, Official Company Rollout Checklist, and the Ethical Scaling mirror-dependency/backfill slice.
 - `[x]` 2026-06-17 Client lifecycle/program closeout QA passed with Josh Garvey assigned to Ben; lifecycle controlled-write and offboarding items can be closed.
 - `[x]` Lifecycle closeout promoted the client lifecycle controlled-write and offboarding items to `[x]`; dashboard/CSM/notification proof remains Moves Method migration-day validation.
@@ -727,6 +730,7 @@ Goal: add higher-tier intelligence and scale features after the first migrated c
   - Preserve Glide parity from Jay's structured outputs, prompts, processing rules, and presentation before adding V2 intelligence.
   - Accept provider-agnostic transcript payloads through the existing Zapier/recorder pattern first; use Jay's Fathom Zap for controlled local and pilot QA.
   - Freeze model, reasoning, transcript retention, cost limit, and API-key isolation after representative transcript evals; do not assume Beacon's model/budget is correct for long-form analysis.
+  - 2026-07-23 demo checkpoint: the frontend-only sample-data dashboard/detail experience is built on `codex/call-intelligence-demo` for lead Looms and visual product QA. It is intentionally not connected to app-owned calls, prompts, ingestion, or an AI provider.
 - `[ ]` `[priority: high]` Deploy and validate the existing company-scoped Call AI transcript-token/webhook foundation.
 - `[ ]` `[priority: high]` Automatic transcript ingestion through Zapier plus Fathom or equivalent recorder payloads.
 - `[ ]` `[priority: high]` Fixed and company-specific parity prompts managed through a controlled server path.
