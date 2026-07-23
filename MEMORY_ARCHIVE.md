@@ -2307,3 +2307,7 @@ to keep the startup router below 150 lines.
 ## Archived From Active Memory - 2026-07-22
 
 - No implementation, provider secret, migration, deploy, entitlement, commit, or quarantine restore occurred. Preserve `BEACON_PROTOTYPE_REFERENCE_DO_NOT_COMMIT/` and `retainos-conversation-ai-scope.md` as intentional untracked work.
+
+## Archived From Active Memory - 2026-07-23
+
+- 2026-07-14 final stress correction: `20260714020000` (`9d59bd01454cdf0d2a1937f635c612eb7ee36c5a20bcad6239478a79957f0f7d`) and `beacon-chat` are live. Unique partial client/business/CSM matching is authorized-scope-first with program/CSM disambiguation; red/yellow any-dimension health is one bounded call and supports CSM filtering. DB 76/76, Edge 43/43. Retest four questions; Moves remains off.

@@ -14,6 +14,7 @@
     "pipeline:verify": "node scripts/verify-pipeline-phase02.mjs",
     "pipeline:verify:phase34": "node scripts/verify-pipeline-phase34.mjs",
     "pipeline:verify:early-renewal": "node scripts/verify-pipeline-early-renewal.mjs",
+    "dashboard:verify:renewal-reporting": "node scripts/verify-dashboard-renewal-reporting.mjs",
     "preview": "vite preview",
     "db:apply:sql": "node scripts/apply-sql-file.mjs",
     "db:apply:release-gate": "node scripts/apply-release-gate-sql-file.mjs",
