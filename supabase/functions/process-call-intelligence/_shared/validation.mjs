@@ -26,13 +26,30 @@ function object(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
+function boundedString(value, min, max) {
+  return (
+    typeof value === "string" &&
+    value.length >= min &&
+    value.length <= max
+  );
+}
+
+function exactKeys(value, keys) {
+  if (!object(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return (
+    actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index])
+  );
+}
+
 function evidence(value) {
   return (
-    object(value) &&
-    typeof value.timestamp === "string" &&
+    exactKeys(value, ["timestamp", "speaker_role", "quote"]) &&
+    boundedString(value.timestamp, 0, 32) &&
     ["client", "team_member", "unknown"].includes(value.speaker_role) &&
-    typeof value.quote === "string" &&
-    value.quote.length <= 240
+    boundedString(value.quote, 1, 240)
   );
 }
 
@@ -42,7 +59,7 @@ function evidenceList(value, max = 3) {
 
 function signal(value) {
   return (
-    object(value) &&
+    exactKeys(value, ["label", "confidence", "evidence"]) &&
     SENTIMENTS.has(value.label) &&
     CONFIDENCE.has(value.confidence) &&
     evidenceList(value.evidence)
@@ -51,9 +68,9 @@ function signal(value) {
 
 function score(value) {
   return (
-    object(value) &&
+    exactKeys(value, ["score", "rationale", "evidence"]) &&
     SCORE_VALUES.has(value.score) &&
-    typeof value.rationale === "string" &&
+    boundedString(value.rationale, 1, 600) &&
     evidenceList(value.evidence)
   );
 }
@@ -61,12 +78,30 @@ function score(value) {
 export function validateStructuredV2(value) {
   const errors = [];
   if (!object(value)) return { ok: false, errors: ["result_not_object"] };
+  if (
+    !exactKeys(value, [
+      "schema_version",
+      "call_type",
+      "title_label",
+      "summary",
+      "client_sentiment",
+      "team_member_sentiment",
+      "negative_signals",
+      "positive_signals",
+      "client_pain_points",
+      "next_steps",
+      "call_score",
+      "archetype",
+    ])
+  ) {
+    errors.push("root_properties");
+  }
   if (value.schema_version !== "call_intelligence.v2") {
     errors.push("schema_version");
   }
   if (!CALL_TYPES.has(value.call_type)) errors.push("call_type");
-  if (typeof value.title_label !== "string") errors.push("title_label");
-  if (typeof value.summary !== "string") errors.push("summary");
+  if (!boundedString(value.title_label, 1, 160)) errors.push("title_label");
+  if (!boundedString(value.summary, 1, 2_500)) errors.push("summary");
   if (!signal(value.client_sentiment)) errors.push("client_sentiment");
   if (!signal(value.team_member_sentiment)) {
     errors.push("team_member_sentiment");
@@ -77,11 +112,12 @@ export function validateStructuredV2(value) {
       value[key].length > 3 ||
       !value[key].every(
         (item) =>
-          object(item) &&
-          typeof item.label === "string" &&
-          typeof item.summary === "string" &&
+          exactKeys(item, ["label", "summary", "emotions", "evidence"]) &&
+          boundedString(item.label, 1, 100) &&
+          boundedString(item.summary, 1, 500) &&
           Array.isArray(item.emotions) &&
-          item.emotions.every((emotion) => typeof emotion === "string") &&
+          item.emotions.length <= 3 &&
+          item.emotions.every((emotion) => boundedString(emotion, 1, 60)) &&
           evidenceList(item.evidence),
       )
     ) {
@@ -93,8 +129,8 @@ export function validateStructuredV2(value) {
     value.client_pain_points.length > 10 ||
     !value.client_pain_points.every(
       (item) =>
-        object(item) &&
-        typeof item.summary === "string" &&
+        exactKeys(item, ["summary", "evidence"]) &&
+        boundedString(item.summary, 1, 500) &&
         evidenceList(item.evidence),
     )
   ) {
@@ -105,10 +141,11 @@ export function validateStructuredV2(value) {
     value.next_steps.length > 12 ||
     !value.next_steps.every(
       (item) =>
-        object(item) &&
-        typeof item.owner === "string" &&
-        typeof item.action === "string" &&
+        exactKeys(item, ["owner", "action", "due_date", "evidence"]) &&
+        boundedString(item.owner, 0, 160) &&
+        boundedString(item.action, 1, 500) &&
         typeof item.due_date === "string" &&
+        (item.due_date === "" || /^\d{4}-\d{2}-\d{2}$/.test(item.due_date)) &&
         evidenceList(item.evidence),
     )
   ) {
@@ -121,7 +158,13 @@ export function validateStructuredV2(value) {
     value.call_score?.action_plan,
   ];
   if (
-    !object(value.call_score) ||
+    !exactKeys(value.call_score, [
+      "total",
+      "agenda",
+      "team_member_energy",
+      "recap",
+      "action_plan",
+    ]) ||
     !dimensions.every(score) ||
     !Number.isInteger(value.call_score.total) ||
     value.call_score.total !==
@@ -130,7 +173,7 @@ export function validateStructuredV2(value) {
     errors.push("call_score");
   }
   if (
-    !object(value.archetype) ||
+    !exactKeys(value.archetype, ["label", "confidence", "evidence"]) ||
     !ARCHETYPES.has(value.archetype.label) ||
     !CONFIDENCE.has(value.archetype.confidence) ||
     !evidenceList(value.archetype.evidence)

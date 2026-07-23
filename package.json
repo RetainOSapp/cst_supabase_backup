@@ -11,6 +11,7 @@
     "beacon:verify:edge": "node scripts/verify-beacon-edge.mjs",
     "beacon:verify:frontend": "node scripts/verify-beacon-frontend.mjs",
     "call-intelligence:test:edge": "node --test supabase/functions/ingest-call-intelligence/tests/*.test.mjs supabase/functions/process-call-intelligence/tests/*.test.mjs",
+    "call-intelligence:test:eval": "node --test scripts/call-intelligence-eval-score.test.mjs",
     "call-intelligence:verify:db": "node scripts/verify-call-intelligence-foundation.mjs",
     "call-intelligence:verify:edge": "node scripts/verify-call-intelligence-edge.mjs",
     "call-intelligence:verify:frontend": "node scripts/verify-call-intelligence-frontend.mjs",

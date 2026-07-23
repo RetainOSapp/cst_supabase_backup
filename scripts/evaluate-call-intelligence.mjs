@@ -2,12 +2,18 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
   createStructuredResponsesProvider,
+  pricingFromEnv,
+  usageCostMicros,
 } from "../supabase/functions/process-call-intelligence/_shared/provider.mjs";
 import {
   STRUCTURED_V2_INSTRUCTIONS,
   STRUCTURED_V2_SCHEMA,
 } from "../supabase/functions/process-call-intelligence/_shared/structured-v2.mjs";
 import { validateStructuredV2 } from "../supabase/functions/process-call-intelligence/_shared/validation.mjs";
+import {
+  scoreStructuredResult,
+  summarizeEvaluation,
+} from "./lib/call-intelligence-eval-score.mjs";
 
 const args = new Set(process.argv.slice(2));
 const valueAfter = (name, fallback) => {
@@ -82,6 +88,21 @@ if (!apiKey) {
   );
 }
 
+const pricing = pricingFromEnv({
+  CALL_INTELLIGENCE_PRICE_CARD_VERSION:
+    process.env.CALL_INTELLIGENCE_PRICE_CARD_VERSION,
+  CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS:
+    process.env.CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS,
+  CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS:
+    process.env.CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS,
+  CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS:
+    process.env.CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS,
+});
+if (!pricing.version) {
+  throw new Error("CALL_INTELLIGENCE_PRICE_CARD_VERSION is required.");
+}
+manifest.priceCardVersion = pricing.version;
+
 const provider = createStructuredResponsesProvider({ apiKey });
 const results = [];
 for (const profileName of profiles) {
@@ -110,6 +131,7 @@ for (const profileName of profiles) {
         promptKey: prompt.prompt_key,
         output: response.text,
         usage: response.usage,
+        costMicros: usageCostMicros(response.usage, pricing),
         latencyMs: response.latencyMs,
       });
     }
@@ -133,7 +155,14 @@ for (const profileName of profiles) {
     callResult.structuredV2 = {
       output: parsed,
       validation,
+      score: scoreStructuredResult({
+        output: parsed,
+        validation,
+        transcript: call.transcript,
+        expectations: call.expectations,
+      }),
       usage: response.usage,
+      costMicros: usageCostMicros(response.usage, pricing),
       latencyMs: response.latencyMs,
     };
     results.push(callResult);
@@ -149,7 +178,15 @@ const outputPath = resolve(
 await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(
   outputPath,
-  `${JSON.stringify({ manifest, results }, null, 2)}\n`,
+  `${JSON.stringify(
+    {
+      manifest,
+      summary: summarizeEvaluation(results),
+      results,
+    },
+    null,
+    2,
+  )}\n`,
   "utf8",
 );
 console.log(`Wrote private evaluation results to ${outputPath}`);

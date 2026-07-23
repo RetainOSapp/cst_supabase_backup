@@ -145,9 +145,12 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
 
 ## Local evidence — 2026-07-23
 
-- Edge/provider/dispatch tests: 13/13.
-- Database contract verification: 36/36, including immutable price lineage and
-  database-side cost recomputation.
+- Edge/provider/dispatch tests: 14/14.
+- Evaluation scoring tests: 3/3.
+- Database/dependency/rollback contract verification: 53/53, including
+  immutable price lineage, database-side cost recomputation, compatibility with
+  existing token/intake/AI-policy dependencies, and the current RPC rollback
+  signature.
 - Edge/source security verification: 33/33.
 - Frontend/security/privacy verification: 19/19.
 - Production TypeScript/Vite build: pass.
@@ -161,3 +164,5 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
 - Real Supabase migration/runtime, private-corpus paid evaluation, company
   token, entitlement, allowance, Zapier switch, provider call, and production
   deploy remain explicit rollout gates in `CALL_INTELLIGENCE_ROLLOUT.md`.
+- Requirement-by-requirement evidence and remaining runtime gates are recorded
+  in `CALL_INTELLIGENCE_COMPLETION_AUDIT.md`.

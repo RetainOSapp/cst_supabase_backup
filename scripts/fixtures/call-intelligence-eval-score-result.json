@@ -1,0 +1,64 @@
+{
+  "schema_version": "call_intelligence.v2",
+  "call_type": "renewal",
+  "title_label": "Renewal discussion",
+  "summary": "The client is positive and both participants agreed on next steps.",
+  "client_sentiment": {
+    "label": "positive",
+    "confidence": "high",
+    "evidence": [
+      {
+        "timestamp": "00:00:08",
+        "speaker_role": "client",
+        "quote": "The implementation is working well"
+      }
+    ]
+  },
+  "team_member_sentiment": {
+    "label": "positive",
+    "confidence": "medium",
+    "evidence": []
+  },
+  "negative_signals": [],
+  "positive_signals": [
+    {
+      "label": "Implementation confidence",
+      "summary": "The client reports positive implementation progress.",
+      "emotions": ["confidence"],
+      "evidence": [
+        {
+          "timestamp": "00:00:08",
+          "speaker_role": "client",
+          "quote": "The implementation is working well"
+        }
+      ]
+    }
+  ],
+  "client_pain_points": [],
+  "next_steps": [
+    {
+      "owner": "Team Member",
+      "action": "Send the renewal proposal.",
+      "due_date": "",
+      "evidence": [
+        {
+          "timestamp": "00:00:20",
+          "speaker_role": "team_member",
+          "quote": "I will send the renewal proposal by Friday"
+        }
+      ]
+    }
+  ],
+  "call_score": {
+    "total": 20,
+    "agenda": { "score": 5, "rationale": "Clear agenda.", "evidence": [] },
+    "team_member_energy": { "score": 5, "rationale": "Engaged.", "evidence": [] },
+    "recap": { "score": 5, "rationale": "Clear recap.", "evidence": [] },
+    "action_plan": { "score": 5, "rationale": "Owners named.", "evidence": [] }
+  },
+  "archetype": {
+    "label": "insufficient_evidence",
+    "confidence": "low",
+    "evidence": []
+  }
+}

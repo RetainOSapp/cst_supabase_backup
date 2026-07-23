@@ -6,11 +6,34 @@ const migrationPath =
 const rollbackPath =
   "supabase/rollbacks/20260723200000_call_intelligence_v1_foundation.sql";
 const configPath = "supabase/config.toml";
+const generatedTypesPath = "src/types/supabase.ts";
+const aiFoundationPath =
+  "supabase/migrations/20260714010000_ai_feature_foundation.sql";
+const aiServiceRpcPath =
+  "supabase/migrations/20260714012000_beacon_service_rpcs.sql";
+const roleAuthorityPath =
+  "supabase/migrations/20260713010000_security_phase1a_role_authority.sql";
+const companyReadPolicyPath =
+  "supabase/migrations/20260713021000_security_phase1b_company_reads.sql";
 
-const [migration, rollback, config] = await Promise.all([
+const [
+  migration,
+  rollback,
+  config,
+  generatedTypes,
+  aiFoundation,
+  aiServiceRpcs,
+  roleAuthority,
+  companyReadPolicy,
+] = await Promise.all([
   readFile(migrationPath, "utf8"),
   readFile(rollbackPath, "utf8"),
   readFile(configPath, "utf8"),
+  readFile(generatedTypesPath, "utf8"),
+  readFile(aiFoundationPath, "utf8"),
+  readFile(aiServiceRpcPath, "utf8"),
+  readFile(roleAuthorityPath, "utf8"),
+  readFile(companyReadPolicyPath, "utf8"),
 ]);
 
 const checks = [
@@ -44,10 +67,31 @@ const checks = [
   ["database cost recomputation", /v_recomputed_cost_micros[\s\S]+cost does not match price lineage/],
   ["pre-traffic rollback warning", /PRE-TRAFFIC \/ DISPOSABLE-ENVIRONMENT rollback only/],
   ["rollback drops usage first", /drop table if exists public\.call_intelligence_usage_events/],
+  [
+    "rollback drops current claim signature",
+    /claim_call_intelligence_run\(\s*uuid, text, text, bigint, text, bigint, bigint, bigint\s*\)/,
+  ],
   ["JWT-off inbound function", /\[functions\.ingest-call-intelligence\]\s+verify_jwt = false/],
   ["JWT-on management function", /\[functions\.manage-call-intelligence\]\s+verify_jwt = true/],
   ["JWT-on worker function", /\[functions\.process-call-intelligence\]\s+verify_jwt = true/],
 ];
+
+function generatedTableBlock(name) {
+  const marker = `      ${name}: {`;
+  const start = generatedTypes.indexOf(marker);
+  assert.notEqual(start, -1, `generated types must contain ${name}`);
+  const nextTable = generatedTypes
+    .slice(start + marker.length)
+    .search(/^      [a-z0-9_]+: \{$/m);
+  return nextTable < 0
+    ? generatedTypes.slice(start)
+    : generatedTypes.slice(start, start + marker.length + nextTable);
+}
+
+const companySecretTypes = generatedTableBlock("company_integration_secrets");
+const intakeEventTypes = generatedTableBlock("integration_intake_events");
+const clientTypes = generatedTableBlock("clients");
+const companySettingTypes = generatedTableBlock("company_settings");
 
 let passed = 0;
 for (const [label, pattern] of checks) {
@@ -79,4 +123,94 @@ assert.doesNotMatch(
 );
 passed += 1;
 
-console.log(`Call Intelligence database contract: ${passed}/${checks.length + 3} passed`);
+const dependencyChecks = [
+  [
+    "company token hash dependency",
+    companySecretTypes,
+    /token_hash: string/,
+  ],
+  [
+    "company token usage dependency",
+    companySecretTypes,
+    /last_used_from: string \| null/,
+  ],
+  [
+    "intake external event dependency",
+    intakeEventTypes,
+    /external_event_id: string \| null/,
+  ],
+  [
+    "intake match dependency",
+    intakeEventTypes,
+    /matched_client_id: string \| null/,
+  ],
+  [
+    "client secondary identity dependency",
+    clientTypes,
+    /client_email_secondary: string \| null/,
+  ],
+  [
+    "client tertiary identity dependency",
+    clientTypes,
+    /client_email_tertiary: string \| null/,
+  ],
+  [
+    "client primary assignment dependency",
+    clientTypes,
+    /csm_team_member_id: string \| null/,
+  ],
+  [
+    "client secondary assignment dependency",
+    clientTypes,
+    /csm_secondary_assignee_id: string \| null/,
+  ],
+  [
+    "company setting dependency",
+    companySettingTypes,
+    /enable_call_ai_for_csms: boolean/,
+  ],
+  [
+    "global AI control dependency",
+    aiFoundation,
+    /create table if not exists public\.ai_feature_global_controls[\s\S]+max_reserve_cost_micros_per_request/,
+  ],
+  [
+    "AI entitlement dependency",
+    aiFoundation,
+    /create table if not exists public\.company_ai_feature_entitlements/,
+  ],
+  [
+    "AI allowance dependency",
+    aiFoundation,
+    /create table if not exists public\.company_ai_feature_allowances[\s\S]+meter_type[\s\S]+limit_value/,
+  ],
+  [
+    "allowance period dependency",
+    aiServiceRpcs,
+    /create or replace function public\.beacon_allowance_period/,
+  ],
+  [
+    "super-admin policy dependency",
+    roleAuthority,
+    /create or replace function public\.is_retainos_super_admin_bound/,
+  ],
+  [
+    "actor company policy dependency",
+    companyReadPolicy,
+    /create or replace function public\.current_actor_app_policy_company_id/,
+  ],
+  [
+    "actor role and member policy dependencies",
+    companyReadPolicy,
+    /current_actor_app_policy_role[\s\S]+current_actor_app_policy_member_ids/,
+  ],
+];
+
+for (const [label, source, pattern] of dependencyChecks) {
+  assert.match(source, pattern, label);
+  passed += 1;
+}
+
+console.log(
+  `Call Intelligence database contract: ${passed}/${checks.length + 3 + dependencyChecks.length} passed`,
+);

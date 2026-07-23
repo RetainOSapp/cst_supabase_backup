@@ -14,6 +14,7 @@ const evidenceRef = {
     },
     quote: {
       type: "string",
+      minLength: 1,
       maxLength: 240,
       description: "A short verbatim excerpt supporting the claim.",
     },
@@ -103,8 +104,8 @@ export const STRUCTURED_V2_SCHEMA = {
         "other",
       ],
     },
-    title_label: { type: "string", maxLength: 160 },
-    summary: { type: "string", maxLength: 2_500 },
+    title_label: { type: "string", minLength: 1, maxLength: 160 },
+    summary: { type: "string", minLength: 1, maxLength: 2_500 },
     client_sentiment: signal,
     team_member_sentiment: signal,
     negative_signals: {
@@ -125,7 +126,7 @@ export const STRUCTURED_V2_SCHEMA = {
         additionalProperties: false,
         required: ["summary", "evidence"],
         properties: {
-          summary: { type: "string", maxLength: 500 },
+          summary: { type: "string", minLength: 1, maxLength: 500 },
           evidence: evidenceArray,
         },
       },
@@ -139,7 +140,7 @@ export const STRUCTURED_V2_SCHEMA = {
         required: ["owner", "action", "due_date", "evidence"],
         properties: {
           owner: { type: "string", maxLength: 160 },
-          action: { type: "string", maxLength: 500 },
+          action: { type: "string", minLength: 1, maxLength: 500 },
           due_date: {
             type: "string",
             description:

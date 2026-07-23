@@ -8,7 +8,7 @@ drop function if exists public.finalize_call_intelligence_run(
 );
 drop function if exists public.mark_call_intelligence_run_dispatched(uuid);
 drop function if exists public.claim_call_intelligence_run(
-  uuid, text, text, bigint
+  uuid, text, text, bigint, text, bigint, bigint, bigint
 );
 drop function if exists public.can_read_call_intelligence_call(uuid, uuid, text);
 

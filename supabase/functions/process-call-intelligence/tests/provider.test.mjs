@@ -144,3 +144,28 @@ test("accepts a valid V2 result and rejects a non-additive total", () => {
   assert.equal(validateStructuredV2(invalid).ok, false);
   assert.ok(validateStructuredV2(invalid).errors.includes("call_score"));
 });
+
+test("rejects unexpected properties, oversized text, and non-ISO due dates", () => {
+  const unexpected = structuredClone(validResult);
+  unexpected.secret = "must not be stored";
+  assert.ok(
+    validateStructuredV2(unexpected).errors.includes("root_properties"),
+  );
+
+  const oversized = structuredClone(validResult);
+  oversized.summary = "x".repeat(2_501);
+  assert.ok(validateStructuredV2(oversized).errors.includes("summary"));
+
+  const invalidDueDate = structuredClone(validResult);
+  invalidDueDate.next_steps = [
+    {
+      owner: "Synthetic Owner",
+      action: "Send the plan.",
+      due_date: "Friday",
+      evidence: [],
+    },
+  ];
+  assert.ok(
+    validateStructuredV2(invalidDueDate).errors.includes("next_steps"),
+  );
+});

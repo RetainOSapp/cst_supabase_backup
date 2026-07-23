@@ -103,6 +103,8 @@ npm run call-intelligence:eval -- --corpus .call-intelligence-private/fathom-zap
 5. Promotion requires schema validity, exact 0–28 arithmetic, correct
    attribution, supported evidence, injection resistance, acceptable cost, and
    no automatic client-profile/Notes/Next Steps writes.
+   The evaluator writes per-profile legacy/structured token, cost, latency,
+   schema-pass, evidence-grounding, expectation, and hard-promotion rates.
 6. Pin model, reasoning, prompt version, price lineage, and transcript retention
    before pilot enablement.
 
