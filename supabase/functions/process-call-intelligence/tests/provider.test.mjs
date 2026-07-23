@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   conservativeReservationMicros,
   createStructuredResponsesProvider,
+  pricingForModel,
   ProviderError,
+  STANDARD_PRICE_CARD_VERSION,
   usageCostMicros,
 } from "../_shared/provider.mjs";
 import { validateStructuredV2 } from "../_shared/validation.mjs";
@@ -69,6 +71,28 @@ test("calculates actual and conservative reservation cost", () => {
   );
 });
 
+test("pins the official standard price card per model", () => {
+  assert.deepEqual(pricingForModel("gpt-5.6-luna"), {
+    version: STANDARD_PRICE_CARD_VERSION,
+    inputMicrosPerMillion: 1_000_000,
+    cachedInputMicrosPerMillion: 100_000,
+    outputMicrosPerMillion: 6_000_000,
+  });
+  assert.deepEqual(pricingForModel("gpt-5.6-terra"), {
+    version: STANDARD_PRICE_CARD_VERSION,
+    inputMicrosPerMillion: 2_500_000,
+    cachedInputMicrosPerMillion: 250_000,
+    outputMicrosPerMillion: 15_000_000,
+  });
+  assert.deepEqual(pricingForModel("gpt-5.6-sol"), {
+    version: STANDARD_PRICE_CARD_VERSION,
+    inputMicrosPerMillion: 5_000_000,
+    cachedInputMicrosPerMillion: 500_000,
+    outputMicrosPerMillion: 30_000_000,
+  });
+  assert.throws(() => pricingForModel("gpt-5.6-unknown"));
+});
+
 test("sends a non-stored strict structured Responses request", async () => {
   let outbound;
   const provider = createStructuredResponsesProvider({
@@ -78,6 +102,7 @@ test("sends a non-stored strict structured Responses request", async () => {
       return new Response(
         JSON.stringify({
           id: "resp_test",
+          service_tier: "default",
           output_text: JSON.stringify(validResult),
           output: [],
           usage: {
@@ -102,11 +127,54 @@ test("sends a non-stored strict structured Responses request", async () => {
   });
   assert.equal(outbound.url, "https://api.openai.com/v1/responses");
   assert.equal(outbound.body.store, false);
+  assert.equal(outbound.body.service_tier, "default");
+  assert.deepEqual(outbound.body.prompt_cache_options, { mode: "explicit" });
   assert.equal(outbound.body.text.format.type, "json_schema");
   assert.equal(outbound.body.text.format.strict, true);
   assert.match(outbound.body.input[0].content[0].text, /untrusted call transcript/);
   assert.equal(response.providerRequestId, "resp_test");
   assert.equal(response.usage.reasoningTokens, 50);
+});
+
+test("rejects a response billed outside the pinned pricing assumptions", async () => {
+  const provider = createStructuredResponsesProvider({
+    apiKey: "test-only-key",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          id: "resp_priority",
+          service_tier: "priority",
+          output_text: JSON.stringify(validResult),
+          output: [],
+          usage: {
+            input_tokens: 1_000,
+            input_tokens_details: {
+              cached_tokens: 0,
+              cache_write_tokens: 100,
+            },
+            output_tokens: 200,
+            output_tokens_details: { reasoning_tokens: 50 },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+  });
+  await assert.rejects(
+    () =>
+      provider.analyze({
+        model: "gpt-5.6-terra",
+        reasoningEffort: "medium",
+        instructions: "test",
+        transcript: "test",
+        outputSchema: { type: "object" },
+        maxOutputTokens: 2_000,
+        safetyIdentifier: "call_intelligence_test",
+      }),
+    (error) =>
+      error instanceof ProviderError &&
+      error.category === "provider_malformed_response" &&
+      error.costUncertain,
+  );
 });
 
 test("does not retry an ambiguous network failure", async () => {

@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
+  conservativeReservationMicros,
   createStructuredResponsesProvider,
-  pricingFromEnv,
+  pricingForModel,
   usageCostMicros,
 } from "../supabase/functions/process-call-intelligence/_shared/provider.mjs";
 import {
@@ -73,6 +74,37 @@ const manifest = {
   plannedProviderCalls:
     corpus.calls.length * profiles.length * (legacy.fixed.length + 1),
 };
+manifest.priceCardVersions = Object.fromEntries(
+  profiles.map((profileName) => {
+    const model = allowedProfiles[profileName].model;
+    return [profileName, pricingForModel(model).version];
+  }),
+);
+manifest.conservativeMaximumCostMicrosByProfile = Object.fromEntries(
+  profiles.map((profileName) => {
+    const pricing = pricingForModel(allowedProfiles[profileName].model);
+    let total = 0;
+    for (const call of corpus.calls) {
+      for (const prompt of legacy.fixed) {
+        total += conservativeReservationMicros({
+          inputCharacters: call.transcript.length + prompt.prompt_text.length,
+          maxOutputTokens: 4_000,
+          pricing,
+        });
+      }
+      total += conservativeReservationMicros({
+        inputCharacters:
+          call.transcript.length + STRUCTURED_V2_INSTRUCTIONS.length,
+        maxOutputTokens: 12_000,
+        pricing,
+      });
+    }
+    return [profileName, total];
+  }),
+);
+manifest.conservativeMaximumCostMicros = Object.values(
+  manifest.conservativeMaximumCostMicrosByProfile,
+).reduce((total, value) => total + value, 0);
 
 if (!execute) {
   console.log(JSON.stringify(manifest, null, 2));
@@ -88,25 +120,11 @@ if (!apiKey) {
   );
 }
 
-const pricing = pricingFromEnv({
-  CALL_INTELLIGENCE_PRICE_CARD_VERSION:
-    process.env.CALL_INTELLIGENCE_PRICE_CARD_VERSION,
-  CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS:
-    process.env.CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS,
-  CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS:
-    process.env.CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS,
-  CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS:
-    process.env.CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS,
-});
-if (!pricing.version) {
-  throw new Error("CALL_INTELLIGENCE_PRICE_CARD_VERSION is required.");
-}
-manifest.priceCardVersion = pricing.version;
-
 const provider = createStructuredResponsesProvider({ apiKey });
 const results = [];
 for (const profileName of profiles) {
   const profile = allowedProfiles[profileName];
+  const pricing = pricingForModel(profile.model);
   for (const call of corpus.calls) {
     const callResult = {
       callId: call.id,

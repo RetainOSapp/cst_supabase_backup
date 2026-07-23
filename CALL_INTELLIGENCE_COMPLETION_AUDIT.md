@@ -37,15 +37,15 @@ is not treated as proof of production runtime behavior.
 
 ## Current verification matrix
 
-- Edge/provider/dispatch tests: 14/14.
+- Edge/provider/dispatch tests: 16/16.
 - Evaluation scorer tests: 3/3.
 - Database/dependency/rollback contract: 53/53.
-- Edge/source security: 33/33.
+- Edge/source security: 35/35.
 - Frontend/security/privacy: 19/19.
 - TypeScript/Vite production build: pass.
 - Synthetic evaluation manifest: 27 planned calls, dry-run only.
 - Five-call private Fathom corpus: 253,045 characters, ignored by Git;
-  45 planned Terra-medium calls, dry-run only.
+  45 planned Terra-medium calls, conservative $5.26 ceiling, dry-run only.
 - Browser QA: list, detail, URL navigation, filtering, desktop, and mobile pass.
 
 ## External gates
@@ -53,9 +53,9 @@ is not treated as proof of production runtime behavior.
 The local implementation objective is satisfied. Full end-to-end completion
 remains unproven until:
 
-1. a server-only OpenAI key and reviewed price card are available to the local
-   private evaluator;
-2. the paid private-corpus evaluation meets schema, grounding, attribution,
+1. a server-only OpenAI key is made available to the local private evaluator;
+2. the paid private-corpus evaluation, using the reviewed and pinned
+   `openai-standard-2026-07-23` price card, meets schema, grounding, attribution,
    injection, quality, latency, and cost promotion gates;
 3. Jay explicitly approves the disabled-first production migration, paused
    function deployment, hidden frontend release, and Ethical Scaling pilot;

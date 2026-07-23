@@ -19,12 +19,17 @@ Prefer a dedicated `CALL_INTELLIGENCE_OPENAI_API_KEY` so Call Intelligence can
 be rotated and observed independently. If omitted, the worker can use the
 existing server-only `OPENAI_API_KEY`; no browser key is ever used.
 
-Set an immutable price card before processing:
+The release candidate contains a model-scoped immutable standard-tier price card
+versioned `openai-standard-2026-07-23`, based on OpenAI's published prices:
 
-- `CALL_INTELLIGENCE_PRICE_CARD_VERSION`
-- `CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS`
-- `CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS`
-- `CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS`
+- Luna: $1 input / $0.10 cached input / $6 output per 1M tokens.
+- Terra: $2.50 input / $0.25 cached input / $15 output per 1M tokens.
+- Sol: $5 input / $0.50 cached input / $30 output per 1M tokens.
+
+Provider calls explicitly select the standard service tier and explicit prompt
+caching mode without breakpoints. This keeps the stored rates accurate by
+preventing priority-tier charges and implicit cache-write charges. Review and
+version the price card whenever OpenAI pricing changes.
 
 The candidate starts with `gpt-5.6-terra` at medium reasoning. The private
 evaluation decides whether Terra-low or Luna-low is acceptable and whether any

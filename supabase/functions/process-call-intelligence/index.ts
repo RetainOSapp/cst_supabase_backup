@@ -10,7 +10,7 @@ import { sha256Hex } from "../ingest-call-intelligence/_shared/contracts.mjs";
 import {
   conservativeReservationMicros,
   createStructuredResponsesProvider,
-  pricingFromEnv,
+  pricingForModel,
   ProviderError,
   usageCostMicros,
 } from "./_shared/provider.mjs";
@@ -25,19 +25,6 @@ const ALLOWED_REASONING = new Set(["low", "medium", "high"]);
 
 function cleanText(value: unknown, maxLength = 256) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
-}
-
-function envObject() {
-  return {
-    CALL_INTELLIGENCE_PRICE_CARD_VERSION:
-      Deno.env.get("CALL_INTELLIGENCE_PRICE_CARD_VERSION"),
-    CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS:
-      Deno.env.get("CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS"),
-    CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS:
-      Deno.env.get("CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS"),
-    CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS:
-      Deno.env.get("CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS"),
-  };
 }
 
 async function preliminaryRun(supabase, runId: string) {
@@ -150,10 +137,7 @@ Deno.serve(async (req) => {
         Number(Deno.env.get("CALL_INTELLIGENCE_MAX_OUTPUT_TOKENS") ?? 12_000),
       ),
     );
-    pricing = pricingFromEnv(envObject());
-    if (!pricing.version) {
-      throw new Error("Missing CALL_INTELLIGENCE_PRICE_CARD_VERSION.");
-    }
+    pricing = pricingForModel(model);
 
     const supabase = createServiceClient();
     const preliminary = await preliminaryRun(supabase, runId);

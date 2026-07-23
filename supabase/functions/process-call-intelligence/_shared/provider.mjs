@@ -8,29 +8,35 @@ export class ProviderError extends Error {
   }
 }
 
-function positiveInteger(value, name) {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new Error(`Missing or invalid ${name}.`);
-  }
-  return parsed;
-}
+// Pinned to OpenAI standard-tier pricing published on 2026-07-23. A code
+// version makes every stored usage event reproducible and prevents a model
+// override from accidentally using another model's rates. Update this registry
+// and its version together after reviewing the official pricing page.
+export const STANDARD_PRICE_CARD_VERSION = "openai-standard-2026-07-23";
+const STANDARD_PRICE_CARDS = Object.freeze({
+  "gpt-5.6-luna": Object.freeze({
+    inputMicrosPerMillion: 1_000_000,
+    cachedInputMicrosPerMillion: 100_000,
+    outputMicrosPerMillion: 6_000_000,
+  }),
+  "gpt-5.6-terra": Object.freeze({
+    inputMicrosPerMillion: 2_500_000,
+    cachedInputMicrosPerMillion: 250_000,
+    outputMicrosPerMillion: 15_000_000,
+  }),
+  "gpt-5.6-sol": Object.freeze({
+    inputMicrosPerMillion: 5_000_000,
+    cachedInputMicrosPerMillion: 500_000,
+    outputMicrosPerMillion: 30_000_000,
+  }),
+});
 
-export function pricingFromEnv(env) {
+export function pricingForModel(model) {
+  const rates = STANDARD_PRICE_CARDS[model];
+  if (!rates) throw new Error("Unsupported Call Intelligence price card model.");
   return {
-    version: String(env.CALL_INTELLIGENCE_PRICE_CARD_VERSION ?? "").trim(),
-    inputMicrosPerMillion: positiveInteger(
-      env.CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS,
-      "CALL_INTELLIGENCE_INPUT_MICROS_PER_MILLION_TOKENS",
-    ),
-    cachedInputMicrosPerMillion: positiveInteger(
-      env.CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS,
-      "CALL_INTELLIGENCE_CACHED_INPUT_MICROS_PER_MILLION_TOKENS",
-    ),
-    outputMicrosPerMillion: positiveInteger(
-      env.CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS,
-      "CALL_INTELLIGENCE_OUTPUT_MICROS_PER_MILLION_TOKENS",
-    ),
+    version: STANDARD_PRICE_CARD_VERSION,
+    ...rates,
   };
 }
 
@@ -83,6 +89,7 @@ async function rejectionCategory(response) {
 function hasValidUsage(payload) {
   const usage = payload?.usage;
   return (
+    payload?.service_tier === "default" &&
     Number.isInteger(usage?.input_tokens) &&
     usage.input_tokens >= 0 &&
     Number.isInteger(usage?.output_tokens) &&
@@ -94,6 +101,10 @@ function hasValidUsage(payload) {
         usage.input_tokens_details.cached_tokens >= 0 &&
         usage.input_tokens_details.cached_tokens <= usage.input_tokens
       )
+    ) &&
+    (
+      usage.input_tokens_details?.cache_write_tokens == null ||
+      usage.input_tokens_details.cache_write_tokens === 0
     ) &&
     (
       usage.output_tokens_details?.reasoning_tokens == null ||
@@ -165,6 +176,11 @@ export function createStructuredResponsesProvider({
           },
         ],
         store: false,
+        // The pinned price card is standard-tier pricing. Explicitly select
+        // that tier and disable implicit cache writes so billing cannot drift
+        // to priority rates or the separate 1.25x cache-write rate.
+        service_tier: "default",
+        prompt_cache_options: { mode: "explicit" },
         max_output_tokens: maxOutputTokens,
         safety_identifier: safetyIdentifier,
       };

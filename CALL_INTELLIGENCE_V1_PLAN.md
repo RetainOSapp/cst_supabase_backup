@@ -126,6 +126,8 @@ support, usage accounting, and no automatic client-profile write.
 - Committed tests use invented names, domains, URLs, IDs, and transcript text.
 - Transcript access is separated from list/metrics access.
 - Provider requests use `store: false`.
+- Provider requests explicitly use the standard service tier and disable
+  implicit cache writes so the pinned model-scoped price card stays accurate.
 - Logs and audit rows contain IDs, states, counts, hashes, and bounded safe
   diagnostics only.
 - Transcript retention/deletion controls remain a rollout decision. Until then,
@@ -145,20 +147,21 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
 
 ## Local evidence — 2026-07-23
 
-- Edge/provider/dispatch tests: 14/14.
+- Edge/provider/dispatch tests: 16/16.
 - Evaluation scoring tests: 3/3.
 - Database/dependency/rollback contract verification: 53/53, including
   immutable price lineage, database-side cost recomputation, compatibility with
   existing token/intake/AI-policy dependencies, and the current RPC rollback
   signature.
-- Edge/source security verification: 33/33.
+- Edge/source security verification: 35/35.
 - Frontend/security/privacy verification: 19/19.
 - Production TypeScript/Vite build: pass.
 - Evaluation harness: dry-run pass; 3 synthetic calls, 8 legacy prompts plus
   structured V2, 27 planned Terra-medium calls. No paid provider call occurred.
 - Jay's five real Fathom/Zapier examples are converted locally into a
   git-ignored 253,045-character private corpus. Its Terra-medium dry-run plans
-  45 calls; no transcript was printed or committed and no paid call occurred.
+  45 calls with a conservative $5.26 ceiling; no transcript was printed or
+  committed and no paid call occurred.
 - Browser QA: desktop 1440×1000 and mobile 320×900, list/detail/filter/URL
   behavior, no horizontal overflow.
 - Real Supabase migration/runtime, private-corpus paid evaluation, company
