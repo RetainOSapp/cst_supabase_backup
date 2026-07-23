@@ -11,6 +11,8 @@ node_modules/
 dist/
 dist-ssr/
 graphify-out/
+.call-intelligence-private/
+outputs/call-intelligence-eval/
 
 logs
 *.log

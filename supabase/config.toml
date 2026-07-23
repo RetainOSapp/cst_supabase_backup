@@ -7,6 +7,9 @@ verify_jwt = false
 [functions.ingest-client-call-summary]
 verify_jwt = false
 
+[functions.ingest-call-intelligence]
+verify_jwt = false
+
 [functions.webhook-update-client]
 verify_jwt = false
 
@@ -38,6 +41,12 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.manage-integration-token]
+verify_jwt = true
+
+[functions.manage-call-intelligence]
+verify_jwt = true
+
+[functions.process-call-intelligence]
 verify_jwt = true
 
 [functions.manage-resource]

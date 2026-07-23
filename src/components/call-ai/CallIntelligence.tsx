@@ -1,0 +1,858 @@
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { supabase } from "../../lib/supabase.ts";
+
+type Sentiment =
+  | "positive"
+  | "neutral"
+  | "negative"
+  | "insufficient_evidence";
+
+interface AnalysisSummary {
+  schemaVersion: string | null;
+  callType: string | null;
+  titleLabel: string | null;
+  summary: string | null;
+  clientSentiment: Sentiment | null;
+  teamMemberSentiment: Sentiment | null;
+  callScore: number | null;
+}
+
+interface CallRow {
+  id: string;
+  client_id: string | null;
+  assigned_member_id: string | null;
+  provider: string;
+  title: string;
+  occurred_at: string;
+  duration_seconds: number | null;
+  recording_url: string | null;
+  share_url: string | null;
+  match_status: string;
+  processing_status: string;
+  match_reason: string | null;
+  last_error_category: string | null;
+  client: {
+    id: string;
+    client_name: string | null;
+    client_business: string | null;
+    client_email: string | null;
+  } | null;
+  assignedMember: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+  analysis: AnalysisSummary | null;
+}
+
+interface Metrics {
+  totalCalls: number;
+  averageScore: number | null;
+  clientSentiment: Record<Sentiment, number>;
+  teamMemberSentiment: Record<Sentiment, number>;
+  needsReconciliation: number;
+}
+
+interface StructuredAnalysis {
+  schema_version: string;
+  call_type: string;
+  title_label: string;
+  summary: string;
+  client_sentiment: {
+    label: Sentiment;
+    confidence: string;
+    evidence: Evidence[];
+  };
+  team_member_sentiment: {
+    label: Sentiment;
+    confidence: string;
+    evidence: Evidence[];
+  };
+  negative_signals: Signal[];
+  positive_signals: Signal[];
+  client_pain_points: Array<{ summary: string; evidence: Evidence[] }>;
+  next_steps: Array<{
+    owner: string;
+    action: string;
+    due_date: string;
+    evidence: Evidence[];
+  }>;
+  call_score: {
+    total: number;
+    agenda: ScoreDimension;
+    team_member_energy: ScoreDimension;
+    recap: ScoreDimension;
+    action_plan: ScoreDimension;
+  };
+  archetype: {
+    label: string;
+    confidence: string;
+    evidence: Evidence[];
+  };
+}
+
+interface Evidence {
+  timestamp: string;
+  speaker_role: string;
+  quote: string;
+}
+
+interface Signal {
+  label: string;
+  summary: string;
+  emotions: string[];
+  evidence: Evidence[];
+}
+
+interface ScoreDimension {
+  score: number;
+  rationale: string;
+  evidence: Evidence[];
+}
+
+interface DetailResponse {
+  call: CallRow;
+  transcript: {
+    transcript_text: string;
+    character_count: number;
+    source_format: string;
+  } | null;
+  participants: Array<{
+    id: string;
+    name: string | null;
+    email_normalized: string | null;
+    participant_kind: string;
+    provider_role: string;
+  }>;
+  runs: Array<{
+    id: string;
+    prompt_definition_id: string;
+    prompt_version: string;
+    run_kind: string;
+    status: string;
+    model: string | null;
+    result_schema_version: string | null;
+    result_json: StructuredAnalysis | null;
+    result_text: string | null;
+    error_category: string | null;
+    created_at: string;
+    completed_at: string | null;
+  }>;
+  onDemandPrompts: Array<{
+    id: string;
+    prompt_key: string;
+    name: string;
+    version: string;
+    scope: string;
+  }>;
+}
+
+interface Access {
+  role: string;
+  canReconcile: boolean;
+  canRun: boolean;
+}
+
+export interface CallIntelligenceDevelopmentFixture {
+  calls: CallRow[];
+  metrics: Metrics;
+  access: Access;
+  details: Record<string, DetailResponse>;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDuration(seconds: number | null) {
+  if (seconds == null) return "--";
+  return `${Math.round(seconds / 60)} min`;
+}
+
+function clientLabel(call: CallRow) {
+  return (
+    call.client?.client_name ||
+    call.client?.client_business ||
+    call.client?.client_email ||
+    "Unmatched client"
+  );
+}
+
+function initials(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "--";
+}
+
+const sentimentStyles: Record<Sentiment, string> = {
+  positive: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  neutral: "border-amber-200 bg-amber-50 text-amber-700",
+  negative: "border-red-200 bg-red-50 text-red-700",
+  insufficient_evidence: "border-slate-200 bg-slate-50 text-slate-600",
+};
+
+function SentimentBadge({ value }: { value: Sentiment | null | undefined }) {
+  if (!value) return <span className="text-sm text-[#98a2b3]">Pending</span>;
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${sentimentStyles[value]}`}
+    >
+      {value.replaceAll("_", " ")}
+    </span>
+  );
+}
+
+function StatusBadge({ value }: { value: string }) {
+  const style =
+    value === "completed"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : value === "failed"
+        ? "border-red-200 bg-red-50 text-red-700"
+        : value === "needs_reconciliation"
+          ? "border-amber-200 bg-amber-50 text-amber-800"
+          : "border-blue-200 bg-blue-50 text-blue-700";
+  return (
+    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${style}`}>
+      {value.replaceAll("_", " ")}
+    </span>
+  );
+}
+
+function EvidenceList({ evidence }: { evidence: Evidence[] }) {
+  if (!evidence?.length) return null;
+  return (
+    <ul className="mt-2 space-y-1 text-xs text-[#667085]">
+      {evidence.map((item, index) => (
+        <li key={`${item.timestamp}-${index}`}>
+          {item.timestamp ? `${item.timestamp} · ` : ""}
+          <span className="capitalize">{item.speaker_role.replaceAll("_", " ")}</span>
+          {item.quote ? ` — “${item.quote}”` : ""}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function CallIntelligence({
+  companyId,
+  onShowReconciliation,
+  developmentFixture,
+}: {
+  companyId: string;
+  onShowReconciliation: () => void;
+  developmentFixture?: CallIntelligenceDevelopmentFixture;
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedCallId = searchParams.get("call");
+  const [calls, setCalls] = useState<CallRow[]>([]);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [access, setAccess] = useState<Access | null>(null);
+  const [detail, setDetail] = useState<DetailResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [clientFilter, setClientFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("all");
+  const [monthFilter, setMonthFilter] = useState("all");
+  const [sentimentFilter, setSentimentFilter] = useState("all");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      if (developmentFixture) {
+        setCalls(developmentFixture.calls);
+        setMetrics(developmentFixture.metrics);
+        setAccess(developmentFixture.access);
+        setLoading(false);
+        return;
+      }
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "manage-call-intelligence",
+        { body: { action: "list", companyId, limit: 200 } },
+      );
+      if (cancelled) return;
+      if (invokeError || data?.error) {
+        setError(
+          data?.error ||
+            invokeError?.message ||
+            "Call Intelligence could not be loaded.",
+        );
+        setCalls([]);
+        setMetrics(null);
+        setAccess(null);
+      } else {
+        setCalls(data.calls ?? []);
+        setMetrics(data.metrics ?? null);
+        setAccess(data.access ?? null);
+      }
+      setLoading(false);
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, developmentFixture, reloadKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDetail() {
+      if (!selectedCallId) {
+        setDetail(null);
+        return;
+      }
+      setDetailLoading(true);
+      setError(null);
+      if (developmentFixture) {
+        const fixtureDetail = developmentFixture.details[selectedCallId] ?? null;
+        setDetail(fixtureDetail);
+        setError(
+          fixtureDetail
+            ? null
+            : "The selected development fixture was not found.",
+        );
+        setDetailLoading(false);
+        return;
+      }
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "manage-call-intelligence",
+        {
+          body: {
+            action: "detail",
+            companyId,
+            callId: selectedCallId,
+          },
+        },
+      );
+      if (cancelled) return;
+      if (invokeError || data?.error) {
+        setError(data?.error || invokeError?.message || "Call could not be loaded.");
+        setDetail(null);
+      } else {
+        setDetail(data as DetailResponse);
+      }
+      setDetailLoading(false);
+    }
+    void loadDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, developmentFixture, selectedCallId, reloadKey]);
+
+  const months = useMemo(
+    () =>
+      [...new Set(calls.map((call) => call.occurred_at.slice(0, 7)))]
+        .sort()
+        .reverse(),
+    [calls],
+  );
+  const teamMembers = useMemo(
+    () =>
+      [...new Set(calls.map((call) => call.assignedMember?.name).filter(Boolean))]
+        .sort() as string[],
+    [calls],
+  );
+  const filteredCalls = useMemo(() => {
+    const clientQuery = clientFilter.trim().toLowerCase();
+    return calls.filter((call) => {
+      if (
+        clientQuery &&
+        !clientLabel(call).toLowerCase().includes(clientQuery) &&
+        !call.title.toLowerCase().includes(clientQuery)
+      ) {
+        return false;
+      }
+      if (
+        teamFilter !== "all" &&
+        call.assignedMember?.name !== teamFilter
+      ) {
+        return false;
+      }
+      if (monthFilter !== "all" && !call.occurred_at.startsWith(monthFilter)) {
+        return false;
+      }
+      if (
+        sentimentFilter !== "all" &&
+        call.analysis?.clientSentiment !== sentimentFilter
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [calls, clientFilter, monthFilter, sentimentFilter, teamFilter]);
+
+  function openCall(callId: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "intelligence");
+    next.set("call", callId);
+    setSearchParams(next);
+  }
+
+  function closeCall() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("call");
+    setSearchParams(next);
+  }
+
+  async function runAction(action: "reprocess" | "run_on_demand", promptId?: string) {
+    if (!selectedCallId || actionBusy) return;
+    setActionBusy(promptId || action);
+    setError(null);
+    setSuccess(null);
+    if (developmentFixture) {
+      setSuccess(
+        action === "reprocess"
+          ? "Development preview: a fresh analysis would be queued."
+          : "Development preview: the on-demand analysis would be queued.",
+      );
+      setActionBusy(null);
+      return;
+    }
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-call-intelligence",
+      {
+        body: {
+          action,
+          companyId,
+          callId: selectedCallId,
+          ...(promptId ? { promptId } : {}),
+        },
+      },
+    );
+    if (invokeError || data?.error) {
+      setError(data?.error || invokeError?.message || "Action failed.");
+    } else {
+      setSuccess(
+        action === "reprocess"
+          ? "A fresh analysis was queued."
+          : "The on-demand analysis was queued.",
+      );
+      setReloadKey((value) => value + 1);
+    }
+    setActionBusy(null);
+  }
+
+  if (selectedCallId) {
+    const analysisRun = detail?.runs.find(
+      (run) => run.status === "succeeded" && run.result_json,
+    );
+    const analysis = analysisRun?.result_json ?? null;
+    const onDemandRuns =
+      detail?.runs.filter((run) => run.run_kind === "on_demand") ?? [];
+
+    return (
+      <div className="space-y-6">
+        <button
+          type="button"
+          onClick={closeCall}
+          className="text-sm font-semibold text-[#2b79c4] hover:text-[#162b3e]"
+        >
+          ← Back to Call Intelligence
+        </button>
+        {error ? (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
+        {success ? (
+          <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {success}
+          </div>
+        ) : null}
+        {detailLoading || !detail ? (
+          <div className="flex justify-center py-20">
+            <div className="h-9 w-9 animate-spin rounded-full border-b-2 border-[#5b4cf0]" />
+          </div>
+        ) : (
+          <>
+            <header className="rounded-2xl bg-gradient-to-r from-[#17243a] to-[#243956] px-6 py-6 text-white shadow-sm">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#9fc7f3]">
+                    {analysis?.call_type?.replaceAll("_", " ") || "Call Intelligence"}
+                  </p>
+                  <h1 className="mt-2 text-3xl font-bold">
+                    {clientLabel(detail.call)} · {analysis?.title_label || detail.call.title}
+                  </h1>
+                  <p className="mt-2 text-sm text-[#d8e3f1]">
+                    {formatDate(detail.call.occurred_at)} · {formatDuration(detail.call.duration_seconds)}
+                    {detail.call.assignedMember?.name
+                      ? ` · ${detail.call.assignedMember.name}`
+                      : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {detail.call.recording_url ? (
+                    <a
+                      href={detail.call.recording_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg border border-white/30 bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20"
+                    >
+                      Open recording
+                    </a>
+                  ) : null}
+                  {access?.canReconcile ? (
+                    <button
+                      type="button"
+                      disabled={Boolean(actionBusy)}
+                      onClick={() => void runAction("reprocess")}
+                      className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-[#17243a] disabled:opacity-50"
+                    >
+                      {actionBusy === "reprocess" ? "Queuing…" : "Reprocess"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </header>
+
+            <section className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Client sentiment</p>
+                <div className="mt-3"><SentimentBadge value={analysis?.client_sentiment.label} /></div>
+              </div>
+              <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Team sentiment</p>
+                <div className="mt-3"><SentimentBadge value={analysis?.team_member_sentiment.label} /></div>
+              </div>
+              <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Call score</p>
+                <p className="mt-2 text-3xl font-bold text-[#17243a]">
+                  {analysis ? `${analysis.call_score.total}/28` : "Pending"}
+                </p>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-[#e4e9f0] bg-white p-6">
+              <h2 className="text-xl font-bold text-[#17243a]">Summary</h2>
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#344054]">
+                {analysis?.summary || "The base analysis has not completed yet."}
+              </p>
+            </section>
+
+            {analysis ? (
+              <>
+                <section className="grid gap-5 lg:grid-cols-2">
+                  <div className="rounded-xl border border-red-100 bg-white p-6">
+                    <h2 className="text-lg font-bold text-[#17243a]">Red flags</h2>
+                    {analysis.negative_signals.length === 0 ? (
+                      <p className="mt-3 text-sm text-[#667085]">No supported red flags.</p>
+                    ) : (
+                      <div className="mt-4 space-y-4">
+                        {analysis.negative_signals.map((signal, index) => (
+                          <div key={`${signal.label}-${index}`}>
+                            <p className="font-semibold text-red-700">{signal.label}</p>
+                            <p className="mt-1 text-sm text-[#344054]">{signal.summary}</p>
+                            <EvidenceList evidence={signal.evidence} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-emerald-100 bg-white p-6">
+                    <h2 className="text-lg font-bold text-[#17243a]">Green lights</h2>
+                    {analysis.positive_signals.length === 0 ? (
+                      <p className="mt-3 text-sm text-[#667085]">No supported green lights.</p>
+                    ) : (
+                      <div className="mt-4 space-y-4">
+                        {analysis.positive_signals.map((signal, index) => (
+                          <div key={`${signal.label}-${index}`}>
+                            <p className="font-semibold text-emerald-700">{signal.label}</p>
+                            <p className="mt-1 text-sm text-[#344054]">{signal.summary}</p>
+                            <EvidenceList evidence={signal.evidence} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="grid gap-5 lg:grid-cols-2">
+                  <div className="rounded-xl border border-[#e4e9f0] bg-white p-6">
+                    <h2 className="text-lg font-bold text-[#17243a]">Client pain points</h2>
+                    <ul className="mt-4 space-y-3 text-sm text-[#344054]">
+                      {analysis.client_pain_points.map((item, index) => (
+                        <li key={index}>
+                          <span className="mr-2 text-[#5b4cf0]">•</span>{item.summary}
+                          <EvidenceList evidence={item.evidence} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="rounded-xl border border-[#e4e9f0] bg-white p-6">
+                    <h2 className="text-lg font-bold text-[#17243a]">Next steps</h2>
+                    <ul className="mt-4 space-y-3 text-sm text-[#344054]">
+                      {analysis.next_steps.map((item, index) => (
+                        <li key={index}>
+                          <span className="font-semibold">{item.owner || "Unassigned"}:</span>{" "}
+                          {item.action}
+                          {item.due_date ? ` · ${item.due_date}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-[#e4e9f0] bg-white p-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-bold text-[#17243a]">Call score</h2>
+                    <span className="text-2xl font-bold text-[#5b4cf0]">{analysis.call_score.total}/28</span>
+                  </div>
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    {[
+                      ["Agenda", analysis.call_score.agenda],
+                      ["Team-member energy", analysis.call_score.team_member_energy],
+                      ["Recap", analysis.call_score.recap],
+                      ["Action plan", analysis.call_score.action_plan],
+                    ].map(([label, dimension]) => {
+                      const item = dimension as ScoreDimension;
+                      return (
+                        <div key={label as string} className="rounded-lg bg-[#f7f8fc] p-4">
+                          <div className="flex justify-between gap-3">
+                            <p className="font-semibold text-[#17243a]">{label as string}</p>
+                            <span className="font-bold text-[#5b4cf0]">{item.score}/7</span>
+                          </div>
+                          <p className="mt-2 text-sm text-[#667085]">{item.rationale}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              </>
+            ) : null}
+
+            <section className="rounded-xl border border-[#e4e9f0] bg-white p-6">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-[#17243a]">On-demand prompts</h2>
+                  <p className="mt-1 text-sm text-[#667085]">Run an approved company prompt against this transcript.</p>
+                </div>
+                {access?.canRun ? (
+                  <div className="flex flex-wrap gap-2">
+                    {detail.onDemandPrompts.map((prompt) => (
+                      <button
+                        key={prompt.id}
+                        type="button"
+                        disabled={Boolean(actionBusy)}
+                        onClick={() => void runAction("run_on_demand", prompt.id)}
+                        className="rounded-lg border border-[#d0d5dd] bg-white px-3 py-2 text-sm font-semibold text-[#344054] hover:border-[#5b4cf0] disabled:opacity-50"
+                      >
+                        {actionBusy === prompt.id ? "Queuing…" : prompt.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              {onDemandRuns.length > 0 ? (
+                <div className="mt-5 space-y-3">
+                  {onDemandRuns.map((run) => (
+                    <article key={run.id} className="rounded-lg bg-[#f7f8fc] p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-[#17243a]">
+                          On-demand analysis · {formatDate(run.created_at)}
+                        </p>
+                        <StatusBadge value={run.status} />
+                      </div>
+                      {run.result_text ? (
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[#344054]">{run.result_text}</p>
+                      ) : run.error_category ? (
+                        <p className="mt-2 text-sm text-red-700">{run.error_category}</p>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+
+            <details className="rounded-xl border border-[#e4e9f0] bg-white p-6">
+              <summary className="cursor-pointer text-lg font-bold text-[#17243a]">
+                Transcript · {detail.transcript?.character_count.toLocaleString() ?? 0} characters
+              </summary>
+              <pre className="mt-4 max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-lg bg-[#f7f8fc] p-4 font-sans text-sm leading-6 text-[#344054]">
+                {detail.transcript?.transcript_text || "Transcript unavailable."}
+              </pre>
+            </details>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5b4cf0]">
+            Call AI
+          </p>
+          <h1 className="mt-1 text-3xl font-bold text-[#17243a]">Call Intelligence</h1>
+          <p className="mt-2 text-sm text-[#667085]">
+            Client sentiment, team performance, call quality, and evidence-backed insights.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {metrics?.needsReconciliation ? (
+            <button
+              type="button"
+              onClick={onShowReconciliation}
+              className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800"
+            >
+              Reconcile {metrics.needsReconciliation}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setReloadKey((value) => value + 1)}
+            className="retainos-button-secondary px-4 py-2 text-sm"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {error ? (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl border border-[#e4e9f0] bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Total calls reviewed</p>
+          <p className="mt-2 text-3xl font-bold text-[#17243a]">{metrics?.totalCalls ?? 0}</p>
+        </div>
+        <div className="rounded-xl border border-[#e4e9f0] bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Average call score</p>
+          <p className="mt-2 text-3xl font-bold text-[#17243a]">
+            {metrics?.averageScore == null ? "--" : `${metrics.averageScore.toFixed(1)}/28`}
+          </p>
+        </div>
+        <div className="rounded-xl border border-[#e4e9f0] bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Client sentiment</p>
+          <div className="mt-3 flex gap-4 text-sm">
+            <span className="font-bold text-emerald-600">{metrics?.clientSentiment.positive ?? 0} positive</span>
+            <span className="font-bold text-red-600">{metrics?.clientSentiment.negative ?? 0} negative</span>
+          </div>
+        </div>
+        <div className="rounded-xl border border-[#e4e9f0] bg-white p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Team sentiment</p>
+          <div className="mt-3 flex gap-4 text-sm">
+            <span className="font-bold text-emerald-600">{metrics?.teamMemberSentiment.positive ?? 0} positive</span>
+            <span className="font-bold text-red-600">{metrics?.teamMemberSentiment.negative ?? 0} negative</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-[#e4e9f0] bg-white p-5 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+            Client or title
+            <input
+              value={clientFilter}
+              onChange={(event) => setClientFilter(event.target.value)}
+              placeholder="Search calls"
+              className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 text-sm normal-case tracking-normal text-[#17243a]"
+            />
+          </label>
+          <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+            Team member
+            <select
+              value={teamFilter}
+              onChange={(event) => setTeamFilter(event.target.value)}
+              className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 text-sm normal-case tracking-normal text-[#17243a]"
+            >
+              <option value="all">All</option>
+              {teamMembers.map((member) => <option key={member}>{member}</option>)}
+            </select>
+          </label>
+          <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+            Month
+            <select
+              value={monthFilter}
+              onChange={(event) => setMonthFilter(event.target.value)}
+              className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 text-sm normal-case tracking-normal text-[#17243a]"
+            >
+              <option value="all">All</option>
+              {months.map((month) => <option key={month} value={month}>{month}</option>)}
+            </select>
+          </label>
+          <label className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+            Client sentiment
+            <select
+              value={sentimentFilter}
+              onChange={(event) => setSentimentFilter(event.target.value)}
+              className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 text-sm normal-case tracking-normal text-[#17243a]"
+            >
+              <option value="all">All</option>
+              <option value="positive">Positive</option>
+              <option value="neutral">Neutral</option>
+              <option value="negative">Negative</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-xl border border-[#e4e9f0] bg-white shadow-sm">
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <div className="h-9 w-9 animate-spin rounded-full border-b-2 border-[#5b4cf0]" />
+          </div>
+        ) : filteredCalls.length === 0 ? (
+          <div className="px-6 py-14 text-center">
+            <h2 className="text-lg font-semibold text-[#17243a]">No calls found</h2>
+            <p className="mt-2 text-sm text-[#667085]">
+              New Fathom calls will appear after the Call Intelligence webhook is enabled.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-[#e4e9f0]">
+            {filteredCalls.map((call) => (
+              <button
+                key={call.id}
+                type="button"
+                onClick={() => openCall(call.id)}
+                className="grid w-full gap-3 px-5 py-4 text-left transition hover:bg-[#f8f9fc] md:grid-cols-[minmax(220px,1.4fr)_minmax(150px,1fr)_130px_130px_90px] md:items-center"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#eef0ff] text-sm font-bold text-[#5b4cf0]">
+                    {initials(clientLabel(call))}
+                  </span>
+                  <div>
+                    <p className="font-semibold text-[#17243a]">{call.title}</p>
+                    <p className="mt-0.5 text-sm text-[#667085]">{clientLabel(call)}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-[#344054]">{call.assignedMember?.name || "Unassigned"}</p>
+                  <p className="mt-0.5 text-xs text-[#98a2b3]">{formatDate(call.occurred_at)} · {formatDuration(call.duration_seconds)}</p>
+                </div>
+                <SentimentBadge value={call.analysis?.clientSentiment} />
+                <SentimentBadge value={call.analysis?.teamMemberSentiment} />
+                <div className="flex items-center justify-between gap-3 md:justify-end">
+                  <span className="font-bold text-[#17243a]">
+                    {call.analysis?.callScore == null ? "--" : `${call.analysis.callScore}/28`}
+                  </span>
+                  {call.processing_status !== "completed" ? <StatusBadge value={call.processing_status} /> : null}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}

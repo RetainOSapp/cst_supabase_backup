@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { CallIntelligenceDemo } from "../components/call-ai/CallIntelligenceDemo.tsx";
+import { Link, useSearchParams } from "react-router-dom";
+import { CallIntelligence } from "../components/call-ai/CallIntelligence.tsx";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
 
@@ -88,9 +88,7 @@ function integrationClientLabel(client: IntegrationReviewClientOption) {
 
 export function CallAi() {
   const { effectiveCompanyId, capabilities, role } = useAccountContext();
-  const [activeTab, setActiveTab] = useState<"intelligence" | "reconciliation">(
-    "intelligence",
-  );
+  const [searchParams, setSearchParams] = useSearchParams();
   const [companyAppId, setCompanyAppId] = useState("");
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<IntegrationIntakeEventRow[]>([]);
@@ -114,7 +112,19 @@ export function CallAi() {
     Record<string, string>
   >({});
 
-  const canReview = capabilities.canAccessCallAi && role !== "csm";
+  const canAccess = capabilities.canAccessCallAi;
+  const canReview = canAccess && (role === "super_admin" || role === "director");
+  const activeTab =
+    canReview && searchParams.get("tab") === "reconciliation"
+      ? "reconciliation"
+      : "intelligence";
+
+  function setActiveTab(tab: "intelligence" | "reconciliation") {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tab);
+    if (tab === "reconciliation") next.delete("call");
+    setSearchParams(next);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -260,16 +270,34 @@ export function CallAi() {
     setReviewAction(`${eventId}:${action}`);
     setError(null);
     setSuccess(null);
+    const event = events.find((item) => item.id === eventId);
+    const callId = event
+      ? integrationValue(event, ["call_intelligence_call_id"])
+      : null;
+    const isCallIntelligence =
+      event?.integration_type === "call_ai_transcript" && Boolean(callId);
+    const invocation = isCallIntelligence
+      ? {
+          name: "manage-call-intelligence",
+          body: {
+            action: action === "match" ? "reconcile" : action,
+            companyId: effectiveCompanyId,
+            callId,
+            clientId: selectedClientId || undefined,
+          },
+        }
+      : {
+          name: "manage-integration-review",
+          body: {
+            action,
+            companyLegacyId: effectiveCompanyId,
+            eventId,
+            clientId: selectedClientId || undefined,
+          },
+        };
     const { data, error: invokeError } = await supabase.functions.invoke(
-      "manage-integration-review",
-      {
-        body: {
-          action,
-          companyLegacyId: effectiveCompanyId,
-          eventId,
-          clientId: selectedClientId || undefined,
-        },
-      },
+      invocation.name,
+      { body: invocation.body },
     );
     setReviewAction(null);
 
@@ -291,12 +319,12 @@ export function CallAi() {
     setReloadKey((key) => key + 1);
   }
 
-  if (!canReview) {
+  if (!canAccess) {
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm">
         <h1 className="text-lg font-semibold text-gray-900">You do not have access here</h1>
         <p className="mt-2 text-sm text-gray-600">
-          Call AI review is available for Directors, Support, and Super Admins.
+          Call Intelligence is not enabled for your role or company.
         </p>
       </div>
     );
@@ -312,7 +340,8 @@ export function CallAi() {
 
   if (activeTab === "intelligence") {
     return (
-      <CallIntelligenceDemo
+      <CallIntelligence
+        companyId={effectiveCompanyId}
         onShowReconciliation={() => setActiveTab("reconciliation")}
       />
     );
@@ -600,16 +629,18 @@ export function CallAi() {
                           >
                             Match to client
                           </button>
-                          <button
-                            type="button"
-                            disabled={actionBusy}
-                            onClick={() =>
-                              handleReviewAction(event.id, "retry")
-                            }
-                            className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Retry apply
-                          </button>
+                          {event.integration_type !== "call_ai_transcript" ? (
+                            <button
+                              type="button"
+                              disabled={actionBusy}
+                              onClick={() =>
+                                handleReviewAction(event.id, "retry")
+                              }
+                              className="retainos-button-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Retry apply
+                            </button>
+                          ) : null}
                         </div>
                         <button
                           type="button"

@@ -94,7 +94,10 @@ function isAccountRole(value: unknown): value is AccountRole {
   );
 }
 
-function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
+function capabilitiesForRole(
+  role: AccountRole | null,
+  callAiForCsms = false,
+): AccountCapabilities {
   const isSuperAdmin = role === "super_admin";
   const isDirector = role === "director";
   const isCsm = role === "csm";
@@ -113,7 +116,8 @@ function capabilitiesForRole(role: AccountRole | null): AccountCapabilities {
     canAccessPipeline: canWork || isViewer,
     canManagePipelineItems: canWork,
     canConfigurePipelines: isSuperAdmin || isDirector,
-    canAccessCallAi: isSuperAdmin || isDirector || isSupport,
+    canAccessCallAi:
+      isSuperAdmin || isDirector || isSupport || (isCsm && callAiForCsms),
     canAccessTables: isSuperAdmin,
     canAccessAdminHub: isSuperAdmin || isDirector,
     canUseCompanySwitcher: isSuperAdmin,
@@ -137,6 +141,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<AccountRole | null>(null);
   const [companyId, setCompanyId] = useState("");
   const [teamMemberId, setTeamMemberId] = useState("");
+  const [callAiForCsms, setCallAiForCsms] = useState(false);
   const [viewAsCompanyId, setStoredViewAsCompanyId] = useState(
     readStoredViewAsCompanyId,
   );
@@ -227,7 +232,38 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   const isSuperAdmin = role === "super_admin";
   const effectiveCompanyId = isSuperAdmin ? viewAsCompanyId : companyId;
-  const capabilities = useMemo(() => capabilitiesForRole(role), [role]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCallAiSetting() {
+      setCallAiForCsms(false);
+      if (role !== "csm" || !effectiveCompanyId) return;
+      const { data: company, error: companyError } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("legacy_glide_row_id", effectiveCompanyId)
+        .in("migration_status", ["pilot", "migrated"])
+        .maybeSingle();
+      if (cancelled || companyError || !company?.id) return;
+      const { data: settings, error: settingsError } = await supabase
+        .from("company_settings")
+        .select("enable_call_ai_for_csms")
+        .eq("company_id", company.id)
+        .maybeSingle();
+      if (!cancelled && !settingsError) {
+        setCallAiForCsms(settings?.enable_call_ai_for_csms === true);
+      }
+    }
+    void loadCallAiSetting();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCompanyId, role]);
+
+  const capabilities = useMemo(
+    () => capabilitiesForRole(role, callAiForCsms),
+    [callAiForCsms, role],
+  );
 
   const setViewAsCompanyId = useCallback((companyId: string) => {
     setStoredViewAsCompanyId(companyId);

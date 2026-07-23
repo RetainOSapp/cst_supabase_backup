@@ -31,9 +31,11 @@ Use this as the only canonical list for "what should Jay QA next?" Other `[~]`
 items may still be open for polish, downstream wiring, migration validation, or
 mixed reasons, but they are not active Jay QA asks unless copied here.
 
-- `[~]` `[qa]` Call Intelligence lead-demo mockup.
-  - 2026-07-23 isolated frontend-only preview built on `codex/call-intelligence-demo` from current `origin/main`: interactive filters, assigned/unassigned queues, sample call detail, quality rubric, red/green signals, add-on analysis, transcript, manual transcript modal, and responsive shell.
-  - Both `/call-ai` tabs are represented; the existing authenticated Reconciliation implementation remains intact. `/call-intelligence-preview` is a sample-data-only Loom route and makes no Supabase or AI-provider call. Jay visual/demo-flow QA remains; this does not close any real ingestion, schema, prompt, provider, or migration-parity item.
+- `[~]` `[qa]` Call Intelligence V1 local release candidate.
+  - 2026-07-23 isolated `codex/call-intelligence-v1` candidate is built from verified `origin/main`; the dirty Pipeline workspace remains untouched.
+  - Local scope now includes provider-agnostic Fathom/Zapier intake, company-token auth, one-client deterministic matching/dedupe/reconciliation, separate transcript storage, role/RLS gates, durable budgeted AI processing, exact Glide prompt preservation, structured V2 output, on-demand prompts, and real `/call-ai` list/detail plumbing. The public mock route was removed; the responsive development fixture is DEV-only.
+  - Automated evidence passes: Edge/provider/dispatch 13/13, DB contract 36/36 (including immutable price lineage/database cost recomputation), Edge/source security 33/33, frontend/security/privacy 19/19, production build, eval dry-run, and browser QA at 1440px/320px with no horizontal overflow. The five real Zap runs are a git-ignored 253,045-character private corpus; Terra-medium plans 45 paid calls but none were executed.
+  - Jay QA remains production-pilot-only after separately approved disabled DB/function/frontend rollout and private-corpus model evaluation: one known-client call, replay/dedupe, unknown and multi-client reconciliation, structured output, one on-demand prompt, role scope, hard-budget/global-pause denial, and rollback. No production change or paid provider call has occurred.
 - `[x]` 2026-06-15 V1 closure QA is complete for Company Customization, Company Settings, Client Contracts/Renewals, Official Company Rollout Checklist, and the Ethical Scaling mirror-dependency/backfill slice.
 - `[x]` 2026-06-17 Client lifecycle/program closeout QA passed with Josh Garvey assigned to Ben; lifecycle controlled-write and offboarding items can be closed.
 - `[x]` Lifecycle closeout promoted the client lifecycle controlled-write and offboarding items to `[x]`; dashboard/CSM/notification proof remains Moves Method migration-day validation.
@@ -724,19 +726,23 @@ Goal: add higher-tier intelligence and scale features after the first migrated c
 - `[ ]` `[priority: later]` Groups / cohort management.
   - Deliberately late priority. Groups can be built after client migration because it is not blocking the Ethical Scaling pilot or early client migrations.
   - Future scope: CRUD groups, group list/detail views, group-client assignment flow, and group-scoped filters/reporting.
-- `[ ]` `[priority: high]` Call Intelligence V1 removes the Call AI dependency blocking Erica Jordan, Shopanova, and Bye Bye Panic from app-owned migration.
+- `[~]` `[mixed]` `[priority: high]` Call Intelligence V1 removes the Call AI dependency blocking Erica Jordan, Shopanova, and Bye Bye Panic from app-owned migration.
   - Existing foundations: company-scoped `call_ai_transcript` tokens, planned RetainOS webhook contract, integration intake/reconciliation queue, Call AI page, and server-side AI entitlement/cost controls.
   - Add a `Call Intelligence` tab beside the existing reconciliation experience, wired to app-owned call/analysis records and the approved low/high-fidelity screens.
   - Preserve Glide parity from Jay's structured outputs, prompts, processing rules, and presentation before adding V2 intelligence.
   - Accept provider-agnostic transcript payloads through the existing Zapier/recorder pattern first; use Jay's Fathom Zap for controlled local and pilot QA.
   - Freeze model, reasoning, transcript retention, cost limit, and API-key isolation after representative transcript evals; do not assume Beacon's model/budget is correct for long-form analysis.
-  - 2026-07-23 demo checkpoint: the frontend-only sample-data dashboard/detail experience is built on `codex/call-intelligence-demo` for lead Looms and visual product QA. It is intentionally not connected to app-owned calls, prompts, ingestion, or an AI provider.
-- `[ ]` `[priority: high]` Deploy and validate the existing company-scoped Call AI transcript-token/webhook foundation.
-- `[ ]` `[priority: high]` Automatic transcript ingestion through Zapier plus Fathom or equivalent recorder payloads.
-- `[ ]` `[priority: high]` Fixed and company-specific parity prompts managed through a controlled server path.
+  - 2026-07-23 local release candidate implements the full disabled foundation and real UI. Remaining blockers are private-corpus paid model selection, transcript retention decision, approved production migration/function/frontend rollout, a company token/allowance, and Jay's end-to-end pilot QA.
+- `[~]` `[mixed]` `[priority: high]` Deploy and validate the existing company-scoped Call AI transcript-token/webhook foundation.
+  - Local secure candidate and rollout/rollback scripts exist; production apply/deploy and runtime readback remain.
+- `[~]` `[mixed]` `[priority: high]` Automatic transcript ingestion through Zapier plus Fathom or equivalent recorder payloads.
+  - Local endpoint, strict contract, dedupe, matching/reconciliation, and Zapier handoff exist; real pilot delivery remains.
+- `[~]` `[mixed]` `[priority: high]` Fixed and company-specific parity prompts managed through a controlled server path.
+  - Eight exact fixed Glide prompts and seven company on-demand examples are immutable/local; private-corpus comparison and production seed/runtime remain.
 - `[ ]` `[priority: medium]` Add new meeting transcript and run Call Intelligence manually.
 - `[ ]` `[priority: low]` Dashboard AI Insights generation.
-- `[ ]` `[priority: later]` Call AI summaries, red flags, green lights, sentiment, archetype, and call score.
+- `[~]` `[mixed]` `[priority: high]` Call AI summaries, red flags, green lights, sentiment, archetype, and call score.
+  - Structured V2 schema, validation, evidence, deterministic 0–28 total, storage, and UI are local; model-quality promotion and pilot QA remain.
 - `[ ]` `[priority: medium]` Automated flagging for churn risk, renewals, and RGAs.
 - `[ ]` `[priority: later]` Stripe billing/subscriptions and tier enforcement.
 - `[ ]` `[priority: later]` Google SSO.
@@ -794,14 +800,15 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 
 #### Call AI Integration
 
-- `[ ]` `[priority: high]` Call Intelligence V1 is migration-critical because three remaining companies depend on Glide Call AI.
+- `[~]` `[mixed]` `[priority: high]` Call Intelligence V1 is migration-critical because three remaining companies depend on Glide Call AI.
   - Keep the current Call AI page reconciliation experience and add a second `Call Intelligence` tab for matched calls, analysis states, and results.
   - Ship provider-agnostic authenticated transcript intake, idempotency, client matching/review, server-side structured analysis, app-owned persistence, audit, and bounded retries/costs.
   - Use Jay-provided Glide formats/prompts and low/high-fidelity screens as the parity contract; begin with Jay's Fathom-to-Zapier QA flow.
+  - 2026-07-23 local release candidate implements this boundary; private eval, disabled production rollout, and Jay pilot QA remain.
 - `[ ]` `[priority: medium]` Upload and process meeting transcripts manually.
-- `[ ]` `[priority: high]` Automatically ingest meeting transcripts through Zapier plus Fathom or equivalent integration.
-- `[ ]` `[priority: high]` Fixed and company-specific controlled prompts for sentiment, grading, summaries, and the agreed structured outputs.
-- `[ ]` `[priority: later]` On-demand analysis for specific call scenarios.
+- `[~]` `[mixed]` `[priority: high]` Automatically ingest meeting transcripts through Zapier plus Fathom or equivalent integration.
+- `[~]` `[mixed]` `[priority: high]` Fixed and company-specific controlled prompts for sentiment, grading, summaries, and the agreed structured outputs.
+- `[~]` `[mixed]` `[priority: high]` On-demand analysis for specific call scenarios.
 - `[ ]` `[priority: later]` Call sharing between team members.
 - `[ ]` `[priority: later]` Weekly automated reports on call analysis metrics.
 - `[ ]` `[priority: later]` Red flag identification and escalation alerts.
@@ -1068,7 +1075,8 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[ ]` `[priority: later]` Beacon controlled write tools after the read-only beta is validated.
   - Treat each write action as a separately allow-listed capability with role/client authorization, user confirmation, idempotency, audit, and rollback. Existing application write permission never automatically grants Beacon write authority.
 - `[~]` `[polish]` `[priority: medium]` CSM Reports updated-clients list and client detail flow.
-- `[~]` `[downstream]` `[priority: high]` Call AI reconciliation exists; add the Call Intelligence tab and app-owned analysis list/results plumbing.
+- `[~]` `[mixed]` `[priority: high]` Call AI reconciliation exists; add the Call Intelligence tab and app-owned analysis list/results plumbing.
+  - Real actor-scoped list/detail/actions are locally wired; production data model/Edge rollout and pilot QA remain.
 - `[ ]` `[priority: medium]` New meeting transcript flow.
 - `[ ]` `[priority: later]` Call analysis detail view and share-with-team action.
 - `[x]` Tasks list view.
@@ -2032,13 +2040,14 @@ Use this section as the “what good looks like” checklist before migrating re
 
 - `[ ]` Call AI supports manual transcript upload/paste.
 - `[ ]` Call AI supports selecting or matching the transcript to a client.
-- `[ ]` Call AI stores transcript, summary, score, green lights, red flags, and action plan.
-- `[ ]` Call AI scores agenda, CSM energy, story/support provided, and action plan out of 7 each, for a total score out of 28.
+- `[~]` `[mixed]` Call AI stores transcript, summary, score, green lights, red flags, and action plan.
+- `[~]` `[mixed]` Call AI scores agenda, CSM energy, recap, and action plan out of 7 each, for a total score out of 28.
 - `[ ]` Call AI results can be used by CSMs to update the client profile after a call.
-- `[ ]` Fathom integration or equivalent can automatically ingest transcripts when ready.
+- `[~]` `[mixed]` Fathom integration or equivalent can automatically ingest transcripts when ready.
   - 2026-06-10 Resources now includes setup-guide foundations for transcript payloads and call-summary/notes payloads. These are documentation/planning surfaces only; live ingestion, matching, AI analysis, and call history remain later.
   - 2026-06-11 update: the lighter call-summary-to-next-steps webhook is now implemented as `ingest-client-call-summary`; full transcript ingestion and AI analysis still remain later.
-- `[ ]` Transcript-to-client matching works by client identity/email where possible.
+- `[~]` `[mixed]` Transcript-to-client matching works by client identity/email where possible.
+  - Deterministic active-client email matching and Director reconciliation are locally implemented; production runtime/pilot evidence remains.
 
 ### Migration Readiness
 

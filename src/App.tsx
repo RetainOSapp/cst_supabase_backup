@@ -15,11 +15,11 @@ import { ClientDetail } from "./pages/ClientDetail.tsx";
 import { Tasks } from "./pages/Tasks.tsx";
 import { Pipeline } from "./pages/Pipeline.tsx";
 import { CallAi } from "./pages/CallAi.tsx";
-import { CallIntelligencePreview } from "./pages/CallIntelligencePreview.tsx";
 import { Resources } from "./pages/Resources.tsx";
 import { SaasClients } from "./pages/SaasClients.tsx";
 import { SaasClientDetail } from "./pages/SaasClientDetail.tsx";
 import { ComingSoonPage } from "./components/ComingSoon.tsx";
+import { CallIntelligenceDevelopmentPreview } from "./components/call-ai/CallIntelligenceDevelopmentPreview.tsx";
 
 function NoPermission() {
   return (
@@ -238,8 +238,14 @@ export function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
-        path="/call-intelligence-preview"
-        element={<CallIntelligencePreview />}
+        path="/__dev/call-intelligence"
+        element={
+          import.meta.env.DEV ? (
+            <CallIntelligenceDevelopmentPreview />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
       />
       <Route
         path="/*"

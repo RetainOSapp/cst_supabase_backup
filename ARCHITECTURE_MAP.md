@@ -121,6 +121,30 @@ graphify explain "Glide Data Integration"
 graphify explain "Glide to Supabase Sync"
 ```
 
+### Call Intelligence V1
+
+Call Intelligence is separate from the lightweight
+`ingest-client-call-summary` Notes/Next Steps integration.
+
+`ingest-call-intelligence` -> company `call_ai_transcript` token -> strict
+provider payload -> deterministic same-company participant/client matching ->
+separate call/transcript/participant tables -> reconciliation or queued run.
+
+`process-call-intelligence` uses service-role-only claim/dispatch/finalize RPCs,
+the global `call_analysis` pause, company entitlement, hard allowance, immutable
+price lineage, and a server-only OpenAI key. Ambiguous dispatched work is not
+automatically retried.
+
+`manage-call-intelligence` is the actor-scoped browser boundary for
+list/detail/reconciliation/reprocess/on-demand actions. SuperAdmin/Director have
+company-wide management, Support is matched read-only, CSM requires the company
+setting plus assigned-client scope, and Viewer is denied. Browser code does not
+query the six new tables directly.
+
+The frontend lives in the `Call Intelligence` tab of `/call-ai`; the existing
+Reconciliation tab remains. Call Intelligence never automatically writes client
+Notes, Next Steps, contact dates, outcomes, or profile fields.
+
 ## Graphify Workflow
 
 Start a session with one or two anchored checks when the work is non-trivial:
