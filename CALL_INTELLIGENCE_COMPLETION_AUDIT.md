@@ -29,7 +29,7 @@ is not treated as proof of production runtime behavior.
 | Evidence grounding and attribution | Proven locally | 42/42 retained private citations plus 4/4 adversarial citations valid; two collision calls quarantined before provider spend | Pilot observation |
 | Legacy-vs-structured model evaluation | Complete locally | 59/59 provider requests; cost/latency/schema/evidence and independent semantic review; $2.878853 cumulative spend | Production pilot observation |
 | On-demand prompts | Proven locally | seven company prompt seeds, authorized queue/dispatch path, real UI action | One pilot prompt result |
-| Real Call Intelligence UI | Proven in hidden production | Ready Vercel deployment; production bundle contains product UI and excludes DEV fixture; deterministic matched-client labels and evidence-to-transcript highlight passed desktop/mobile QA | Authenticated production pilot QA |
+| Real Call Intelligence UI | Proven in ES manual pilot | Ready Vercel deployment; production bundle contains product UI and secure manual upload; deterministic matched-client labels and evidence-to-transcript highlight passed desktop/mobile QA | Jay's first authenticated transcript upload |
 | Existing reconciliation preserved | Proven locally | `/call-ai` URL-tab implementation and frontend gate | Production navigation QA |
 | No automatic client-profile writes | Proven locally | no client update path in ingest/manage/process; source gate | Pilot observation |
 | Rollout and rollback | Proven through disabled Phase B | migrations/hashes/readback, corrected prompt rollback, function versions, denial probes | Pilot operational rollback |

@@ -31,7 +31,7 @@ Use this as the only canonical list for "what should Jay QA next?" Other `[~]`
 items may still be open for polish, downstream wiring, migration validation, or
 mixed reasons, but they are not active Jay QA asks unless copied here.
 
-- `[~]` `[qa]` Call Intelligence V1 local release candidate.
+- `[~]` `[qa]` Call Intelligence V1 Ethical Scaling manual pilot.
   - 2026-07-23 isolated `codex/call-intelligence-v1` candidate is built from verified `origin/main`; the dirty Pipeline workspace remains untouched.
   - Local scope now includes provider-agnostic Fathom/Zapier intake, company-token auth, one-client deterministic matching/dedupe/reconciliation, separate transcript storage, role/RLS gates, durable budgeted AI processing, exact Glide prompt preservation, structured V2 output, on-demand prompts, and real `/call-ai` list/detail plumbing. The public mock route was removed; the responsive development fixture is DEV-only.
   - Automated evidence passes: Edge/provider/dispatch 20/20, eval scorer/harness 5/5, DB/dependency/rollback contract 54/54, Edge/source security 56/56, frontend/security/privacy 19/19, production build, and browser QA at 1440px/320px. Official OpenAI docs confirm Luna/Terra/Sol API identifiers, strict Responses structured output including string `pattern`, and Terra-medium as the balanced starting point. Model-scoped `openai-standard-2026-07-23` pricing is pinned; calls force standard tier and disable implicit cache writes.
@@ -42,7 +42,8 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
   - 2026-07-24 private visual QA viewer is ready locally: six use cases cover three successful real analyses, two zero-cost role-collision quarantines, and one injection-resistance result. It provides side-by-side transcript/evidence navigation, full analysis, quality ratings, browser-local feedback, and JSON export. Artifact checks pass 19/19; interactive QA passed at 1440×900 and 390×844 with no page overflow. The generated viewer and call data remain Git-ignored and localhost-only. [qa]
   - 2026-07-24 feedback closure adds representative sentiment-evidence guidance, Sales / Discovery classification, deterministic matched-client summary labels, RetainOS product UI, evidence-to-transcript highlighting, and separated real/security-test costs. No provider request was made. Gates now pass Edge 21/21, eval 5/5, DB 56/56, source 56/56, frontend 23/23, QA viewer 21/21, build, and desktop/mobile browser QA. [qa]
   - 2026-07-24 disabled production Phases A–C are live through `90655e0`: both additive migrations applied with recorded hashes; six tables and quality-v4 prompts read back; all three functions are active with correct JWT configuration; invalid/missing token and anonymous probes deny. Vercel is Ready at `app.retainos.ai`; the production bundle contains the product UI, excludes the DEV fixture, and contains no provider credential material. Global `call_analysis` remains paused with zero entitlements, allowances, tokens, customer records, usage, and provider spend. [qa]
-  - Jay QA remains the separately gated Ethical Scaling pilot: one known-client call, replay/dedupe, unknown and multi-client reconciliation, structured output, one on-demand prompt, role scope, hard-budget/global-pause denial, and rollback. Human pilot QA must pass before enabling any company.
+  - 2026-07-24 the secure manual-upload release is live through `b713b33`; management v2 remains JWT-on and anonymous upload denies. Policy release `20260724160000`, zero-usage rounding correction `20260724161000`, and ES-only activation `20260724162000` are applied. Ethical Scaling is the only `call_analysis` pilot, with a one-time $1 hard cap at $0 used. No webhook token, calls, transcripts, runs, usage, provider spend, or Zapier automation exists yet. [qa]
+  - Jay QA now starts with one authenticated known-client 1:1 transcript upload and review of output/evidence/cost. Automatic replay/dedupe, unknown and multi-client reconciliation, one on-demand prompt, role scope, hard-budget/global-pause denial, and rollback follow only after the first manual result passes.
 - `[x]` 2026-06-15 V1 closure QA is complete for Company Customization, Company Settings, Client Contracts/Renewals, Official Company Rollout Checklist, and the Ethical Scaling mirror-dependency/backfill slice.
 - `[x]` 2026-06-17 Client lifecycle/program closeout QA passed with Josh Garvey assigned to Ben; lifecycle controlled-write and offboarding items can be closed.
 - `[x]` Lifecycle closeout promoted the client lifecycle controlled-write and offboarding items to `[x]`; dashboard/CSM/notification proof remains Moves Method migration-day validation.
@@ -746,7 +747,7 @@ Goal: add higher-tier intelligence and scale features after the first migrated c
   - Local endpoint, strict contract, dedupe, matching/reconciliation, and Zapier handoff exist; real pilot delivery remains.
 - `[~]` `[mixed]` `[priority: high]` Fixed and company-specific parity prompts managed through a controlled server path.
   - Eight exact fixed Glide prompts and seven company on-demand examples are immutable/local; private-corpus comparison and production seed/runtime remain.
-- `[ ]` `[priority: medium]` Add new meeting transcript and run Call Intelligence manually.
+- `[x]` Add new meeting transcript and run Call Intelligence manually.
 - `[ ]` `[priority: low]` Dashboard AI Insights generation.
 - `[~]` `[mixed]` `[priority: high]` Call AI summaries, red flags, green lights, sentiment, archetype, and call score.
   - Structured V2 schema, validation, evidence, deterministic 0–28 total, storage, and UI are local; model-quality promotion and pilot QA remain.
@@ -813,7 +814,7 @@ Use this as the top-level product taxonomy. The detailed sections below track im
   - Ship provider-agnostic authenticated transcript intake, idempotency, client matching/review, server-side structured analysis, app-owned persistence, audit, and bounded retries/costs.
   - Use Jay-provided Glide formats/prompts and low/high-fidelity screens as the parity contract; begin with Jay's Fathom-to-Zapier QA flow.
   - 2026-07-23 local release candidate implements this boundary; private eval, disabled production rollout, and Jay pilot QA remain.
-- `[ ]` `[priority: medium]` Upload and process meeting transcripts manually.
+- `[x]` Upload and process meeting transcripts manually.
 - `[~]` `[mixed]` `[priority: high]` Automatically ingest meeting transcripts through Zapier plus Fathom or equivalent integration.
 - `[~]` `[mixed]` `[priority: high]` Fixed and company-specific controlled prompts for sentiment, grading, summaries, and the agreed structured outputs.
 - `[~]` `[mixed]` `[priority: high]` On-demand analysis for specific call scenarios.
@@ -1085,7 +1086,7 @@ Use this section to validate route structure, navigation visibility, and role ac
 - `[~]` `[polish]` `[priority: medium]` CSM Reports updated-clients list and client detail flow.
 - `[~]` `[mixed]` `[priority: high]` Call AI reconciliation exists; add the Call Intelligence tab and app-owned analysis list/results plumbing.
   - Real actor-scoped list/detail/actions are locally wired; production data model/Edge rollout and pilot QA remain.
-- `[ ]` `[priority: medium]` New meeting transcript flow.
+- `[x]` New meeting transcript flow.
 - `[ ]` `[priority: later]` Call analysis detail view and share-with-team action.
 - `[x]` Tasks list view.
 - `[~]` `[polish]` `[priority: low]` New Task flow.

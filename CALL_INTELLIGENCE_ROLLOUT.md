@@ -1,7 +1,8 @@
 # Call Intelligence V1: Disabled-First Rollout
 
-Status: Phases A–C are live disabled. Jay approved Phases A–C on 2026-07-24.
-Pilot enablement remains separately gated.
+Status: Phases A–C are live and the Ethical Scaling authenticated-manual-upload
+pilot is enabled with a one-time $1 hard cap. Webhook/Zapier enablement remains
+separately gated.
 
 ## Release candidate
 
@@ -9,9 +10,10 @@ Pilot enablement remains separately gated.
   `/private/tmp/cst-call-intelligence-v1`
 - Merged with verified `origin/main` at `d9d5fae`; the dirty Pipeline workspace
   is untouched.
-- Production database, Edge boundaries, and hidden frontend are deployed while
-  globally paused. No token, entitlement, allowance, call, transcript, run,
-  usage event, provider call, or Zapier change has occurred.
+- Production database, Edge boundaries, and frontend are deployed. Ethical
+  Scaling is the sole `call_analysis` pilot entitlement with a one-time
+  100-cent hard allowance. No webhook token, call, transcript, run, usage
+  event, provider call, or Zapier change exists before Jay's first upload.
 - V1 boundary: one RetainOS client account per call; multiple company members
   and participants from that same client are supported.
 
@@ -158,12 +160,33 @@ npm run call-intelligence:eval -- --corpus .call-intelligence-private/fathom-zap
 
 ## Phase E — Ethical Scaling pilot
 
-1. Create one company-scoped `call_ai_transcript` token.
-2. Create a pilot `call_analysis` entitlement and small hard USD-cent allowance.
-3. Keep CSM access off initially; use SuperAdmin/Director.
+Manual-pilot checkpoint completed 2026-07-24:
+
+- secure `+ Add transcript` form released in production commit `b713b33`;
+- `manage-call-intelligence` v2 is active with JWT verification and anonymous
+  manual-upload denial confirmed at 401;
+- policy-release migration `20260724160000` applied at
+  `ed90d76c424efaaa1d83b5138c59ca66f7da96780ab1a131110b1455b8129a9a`;
+- zero-usage display correction `20260724161000` applied at
+  `2357d9378c9d0d97b18300ac5260cf2d09c6332cd457864e870e71eb18e234f4`;
+- ES-only activation `20260724162000` applied at
+  `2141c928b283b364ccc64e3edf8cbddbdd858e2185a20b1e4082a9444648c8a5`;
+- global `call_analysis` is active at config v2; Ethical Scaling is the only
+  pilot entitlement and its one-time 100-cent hard allowance reads 0 used;
+- no `call_ai_transcript` token exists, so only authenticated
+  SuperAdmin/Director manual upload is possible;
+- CSM processing access, all other companies, webhooks, and Zapier remain off.
+
+Next:
+
+1. Jay uploads one known-client 1:1 transcript and reviews the result.
+2. Validate the first call's structured output, evidence navigation, usage, and
+   exact provider cost.
+3. Create one company-scoped `call_ai_transcript` token only after the manual
+   pilot passes.
 4. Configure the separate Zap from
    `CALL_INTELLIGENCE_ZAPIER_CONTRACT.md`.
-5. Test known-client ingestion, exact replay/dedupe, unknown-client
+5. Test automatic known-client ingestion, exact replay/dedupe, unknown-client
    reconciliation, same-client multi-participant, deliberate multi-client hold,
    structured analysis, one on-demand prompt, hard allowance, and global pause.
 6. Confirm the existing call-summary/Notes Zap is unchanged.

@@ -10,6 +10,18 @@ const promptSeedPath =
   "supabase/migrations/20260723201000_call_intelligence_prompt_seed.sql";
 const promptSeedRollbackPath =
   "supabase/rollbacks/20260723201000_call_intelligence_prompt_seed.sql";
+const adminPolicyReleasePath =
+  "supabase/migrations/20260724160000_call_intelligence_admin_policy_release.sql";
+const adminPolicyRollbackPath =
+  "supabase/rollbacks/20260724160000_call_intelligence_admin_policy_release.sql";
+const allowanceRoundingFixPath =
+  "supabase/migrations/20260724161000_ai_allowance_zero_rounding_fix.sql";
+const allowanceRoundingRollbackPath =
+  "supabase/rollbacks/20260724161000_ai_allowance_zero_rounding_fix.sql";
+const esManualPilotPath =
+  "supabase/migrations/20260724162000_enable_es_call_intelligence_manual_pilot.sql";
+const esManualPilotRollbackPath =
+  "supabase/rollbacks/20260724162000_enable_es_call_intelligence_manual_pilot.sql";
 const configPath = "supabase/config.toml";
 const generatedTypesPath = "src/types/supabase.ts";
 const aiFoundationPath =
@@ -26,6 +38,12 @@ const [
   rollback,
   promptSeed,
   promptSeedRollback,
+  adminPolicyRelease,
+  adminPolicyRollback,
+  allowanceRoundingFix,
+  allowanceRoundingRollback,
+  esManualPilot,
+  esManualPilotRollback,
   config,
   generatedTypes,
   aiFoundation,
@@ -37,6 +55,12 @@ const [
   readFile(rollbackPath, "utf8"),
   readFile(promptSeedPath, "utf8"),
   readFile(promptSeedRollbackPath, "utf8"),
+  readFile(adminPolicyReleasePath, "utf8"),
+  readFile(adminPolicyRollbackPath, "utf8"),
+  readFile(allowanceRoundingFixPath, "utf8"),
+  readFile(allowanceRoundingRollbackPath, "utf8"),
+  readFile(esManualPilotPath, "utf8"),
+  readFile(esManualPilotRollbackPath, "utf8"),
   readFile(configPath, "utf8"),
   readFile(generatedTypesPath, "utf8"),
   readFile(aiFoundationPath, "utf8"),
@@ -95,6 +119,79 @@ assert.match(
   /structured_v2_quality_v4/,
   "prompt seed rollback removes current structured version",
 );
+
+const adminPolicyChecks = [
+  [
+    "admin policy releases only Beacon and Call Intelligence",
+    adminPolicyRelease,
+    /p_feature_key not in \('beacon', 'call_analysis'\)/,
+  ],
+  [
+    "admin policy keeps other features fail closed",
+    adminPolicyRelease,
+    /Only released AI features may be configured/,
+  ],
+  [
+    "admin policy requires the installed guard",
+    adminPolicyRelease,
+    /Expected AI Features release guard was not found/,
+  ],
+  [
+    "admin policy rollback restores Beacon-only management",
+    adminPolicyRollback,
+    /p_feature_key <> 'beacon'/,
+  ],
+  [
+    "admin policy rollback preserves operational rows",
+    adminPolicyRollback,
+    /preserving existing[\s\S]+entitlement, allowance, usage, and audit rows/,
+  ],
+  [
+    "zero usage uses integer consumed division",
+    allowanceRoundingFix,
+    /sum\(event\.actual_cost_micros\), 0\)::bigint \+ 9999\) \/ 10000/,
+  ],
+  [
+    "zero usage uses integer reserved division",
+    allowanceRoundingFix,
+    /sum\(reservation\.reserved_cost_micros\), 0\)::bigint \+ 9999\) \/ 10000/,
+  ],
+  [
+    "zero-usage correction is reversible",
+    allowanceRoundingRollback,
+    /v_buggy_consumed[\s\S]+v_buggy_reserved/,
+  ],
+  [
+    "ES pilot starts tokenless",
+    esManualPilot,
+    /integration_type = 'call_ai_transcript'[\s\S]+pilot must begin without tokens or traffic/,
+  ],
+  [
+    "ES pilot has one-dollar hard stop",
+    esManualPilot,
+    /limit_value = 100[\s\S]+allowance\.hard_stop/,
+  ],
+  [
+    "ES pilot is the only enabled company",
+    esManualPilot,
+    /company_id <> v_company_id[\s\S]+status in \('pilot', 'enabled'\)/,
+  ],
+  [
+    "ES pilot source is authenticated manual upload",
+    esManualPilot,
+    /'pilot_source', 'authenticated_manual_upload'/,
+  ],
+  [
+    "ES pilot rollback pauses global before closing company policy",
+    esManualPilotRollback,
+    /update public\.ai_feature_global_controls[\s\S]+update public\.company_ai_feature_entitlements[\s\S]+update public\.company_ai_feature_allowances/,
+  ],
+  [
+    "ES pilot rollback preserves evidence",
+    esManualPilotRollback,
+    /Preserve call,[\s\S]+transcript, run, usage, and audit evidence/,
+  ],
+];
 
 function generatedTableBlock(name) {
   const marker = `      ${name}: {`;
@@ -232,6 +329,11 @@ for (const [label, source, pattern] of dependencyChecks) {
   passed += 1;
 }
 
+for (const [label, source, pattern] of adminPolicyChecks) {
+  assert.match(source, pattern, label);
+  passed += 1;
+}
+
 execFileSync(
   process.execPath,
   ["scripts/sync-call-intelligence-structured-seed.mjs", "--check"],
@@ -240,5 +342,5 @@ execFileSync(
 passed += 1;
 
 console.log(
-  `Call Intelligence database contract: ${passed}/${checks.length + 6 + dependencyChecks.length} passed`,
+  `Call Intelligence database contract: ${passed}/${checks.length + 6 + dependencyChecks.length + adminPolicyChecks.length} passed`,
 );

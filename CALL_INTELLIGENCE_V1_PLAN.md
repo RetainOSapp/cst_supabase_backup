@@ -1,9 +1,10 @@
 # Call Intelligence V1
 
-Status: disabled production release through Phases A–C on 2026-07-24.
-Database, Edge boundaries, and the hidden frontend are live while globally
-paused. Nothing in this plan authorizes a provider call, company entitlement,
-allowance, token creation, Zapier change, or pilot enablement.
+Status: Ethical Scaling authenticated-manual-upload pilot on 2026-07-24.
+Database, Edge boundaries, and the frontend are live; ES alone has a one-time
+$1 hard allowance. No webhook token or Zapier automation is enabled. The first
+provider call is authorized only when Jay submits one known-client transcript
+through the authenticated product form.
 
 ## Product boundary
 
