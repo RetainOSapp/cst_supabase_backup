@@ -42,6 +42,8 @@ assert.equal(
 assert.equal(payload.summary.eligibleCalls, 3);
 assert.equal(payload.summary.privateEvidence, 42);
 assert.equal(payload.summary.adversarialEvidence, 4);
+assert.equal(payload.summary.realCallCostMicros, 274_668);
+assert.equal(payload.summary.securityTestCostMicros, 11_858);
 assert.equal(payload.summary.costMicros, 286_526);
 
 assert.doesNotMatch(
@@ -51,5 +53,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  `Call Intelligence private QA viewer: ${checks.length + 8}/${checks.length + 8} passed`,
+  `Call Intelligence private QA viewer: ${checks.length + 10}/${checks.length + 10} passed`,
 );

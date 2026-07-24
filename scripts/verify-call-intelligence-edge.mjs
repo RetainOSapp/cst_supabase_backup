@@ -103,7 +103,7 @@ const checks = [
   ["JWT-on worker", config, /\[functions\.process-call-intelligence\]\s+verify_jwt = true/],
   ["bounded transcript", contract, /MAX_TRANSCRIPT_CHARACTERS = 500_000/],
   ["replay artifacts stay private", replay, /must be inside \.call-intelligence-private/],
-  ["central prompt version", promptVersion, /structured_v2_quality_v3/],
+  ["central prompt version", promptVersion, /structured_v2_quality_v4/],
   ["ingest uses central prompt version", ingest, /STRUCTURED_V2_PROMPT_VERSION/],
   ["management uses central prompt version", manage, /STRUCTURED_V2_PROMPT_VERSION/],
 ];

@@ -86,6 +86,45 @@ function integrationClientLabel(client: IntegrationReviewClientOption) {
   return detail ? `${label} - ${detail}` : label;
 }
 
+function CallAiTabs({
+  activeTab,
+  onSelect,
+}: {
+  activeTab: "intelligence" | "reconciliation";
+  onSelect: (tab: "intelligence" | "reconciliation") => void;
+}) {
+  return (
+    <div className="border-b border-[#dfe5ec]">
+      <nav className="-mb-px flex gap-6" aria-label="Call AI sections">
+        <button
+          type="button"
+          onClick={() => onSelect("intelligence")}
+          aria-current={activeTab === "intelligence" ? "page" : undefined}
+          className={`border-b-2 px-1 pb-3 text-sm font-semibold transition ${
+            activeTab === "intelligence"
+              ? "border-[#59abf0] text-[#162b3e]"
+              : "border-transparent text-[#667085] hover:border-[#cbd2dc] hover:text-[#162b3e]"
+          }`}
+        >
+          Call Intelligence
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelect("reconciliation")}
+          aria-current={activeTab === "reconciliation" ? "page" : undefined}
+          className={`border-b-2 px-1 pb-3 text-sm font-semibold transition ${
+            activeTab === "reconciliation"
+              ? "border-[#59abf0] text-[#162b3e]"
+              : "border-transparent text-[#667085] hover:border-[#cbd2dc] hover:text-[#162b3e]"
+          }`}
+        >
+          Reconciliation
+        </button>
+      </nav>
+    </div>
+  );
+}
+
 export function CallAi() {
   const { effectiveCompanyId, capabilities, role } = useAccountContext();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -340,10 +379,15 @@ export function CallAi() {
 
   if (activeTab === "intelligence") {
     return (
-      <CallIntelligence
-        companyId={effectiveCompanyId}
-        onShowReconciliation={() => setActiveTab("reconciliation")}
-      />
+      <div className="space-y-6">
+        {canReview ? (
+          <CallAiTabs activeTab={activeTab} onSelect={setActiveTab} />
+        ) : null}
+        <CallIntelligence
+          companyId={effectiveCompanyId}
+          onShowReconciliation={() => setActiveTab("reconciliation")}
+        />
+      </div>
     );
   }
 
@@ -369,23 +413,7 @@ export function CallAi() {
         </button>
       </div>
 
-      <div className="border-b border-[#dfe5ec]">
-        <nav className="-mb-px flex gap-6" aria-label="Call AI sections">
-          <button
-            type="button"
-            onClick={() => setActiveTab("intelligence")}
-            className="border-b-2 border-transparent px-1 pb-3 text-sm font-semibold text-[#667085] hover:border-[#cbd2dc] hover:text-[#162b3e]"
-          >
-            Call Intelligence
-          </button>
-          <button
-            type="button"
-            className="border-b-2 border-[#59abf0] px-1 pb-3 text-sm font-bold text-[#162b3e]"
-          >
-            Reconciliation
-          </button>
-        </nav>
-      </div>
+      <CallAiTabs activeTab={activeTab} onSelect={setActiveTab} />
 
       <section className="grid gap-4 md:grid-cols-4">
         <div className="rounded-lg border border-[#e4e9f0] bg-white p-4 shadow-sm">

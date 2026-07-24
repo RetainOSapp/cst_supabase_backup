@@ -11,6 +11,7 @@ const SCORE_VALUES = new Set([0, 1, 3, 5, 7]);
 const CALL_TYPES = new Set([
   "onboarding",
   "check_in",
+  "sales_discovery",
   "renewal",
   "upsell",
   "escalation",

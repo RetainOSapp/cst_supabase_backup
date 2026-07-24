@@ -115,6 +115,7 @@ export const STRUCTURED_V2_SCHEMA = {
       enum: [
         "onboarding",
         "check_in",
+        "sales_discovery",
         "renewal",
         "upsell",
         "escalation",
@@ -241,6 +242,10 @@ Evidence rules:
   summarize, add ellipses, or combine speakers inside an evidence quote;
 - before returning, verify each normalized evidence quote occurs contiguously
   inside the cited transcript utterance; remove the evidence item if it does not;
+- for sentiment, select a semantically complete and representative quote that
+  directly demonstrates the returned label; avoid ambiguous fragments, double
+  negatives, hedged agreement, or technically valid excerpts that require
+  missing context to understand;
 - except for the two-moment archetype rule below, use at most one evidence item
   per claim and prefer an empty evidence array to a quote that is not exact;
 - every returned pain point and next step must carry one valid evidence item;
@@ -254,6 +259,14 @@ Evidence rules:
 - an unresolved refund, cancellation, trust, delivery, or value concern is a
   strong negative signal;
 - a due date must be empty unless explicitly agreed in the transcript.
+
+Call type rules:
+- use sales_discovery when the primary purpose is qualifying, diagnosing,
+  proposing, or deciding whether to begin a commercial engagement;
+- do not label a pre-sale conversation as onboarding merely because setup,
+  payment, agreement, or kickoff next steps are discussed;
+- use onboarding only after the client has already committed to the engagement
+  and the primary purpose is beginning delivery or setting expectations.
 
 Score each dimension with exactly 0, 1, 3, 5, or 7:
 - 0: absent or genuinely not assessable;

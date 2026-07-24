@@ -1,7 +1,7 @@
 -- Safe only while no run references these prompt snapshots.
 
 delete from public.call_intelligence_prompt_definitions
-where version in ('legacy_v1', 'structured_v2_evidence_v2')
+where version in ('legacy_v1', 'structured_v2_quality_v4')
   and (
     scope = 'fixed'
     or prompt_key in (

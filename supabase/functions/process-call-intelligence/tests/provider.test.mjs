@@ -183,6 +183,9 @@ test("sends a non-stored strict structured Responses request", async () => {
     STRUCTURED_V2_SCHEMA.properties.archetype.properties.evidence.maxItems,
     2,
   );
+  assert.ok(
+    STRUCTURED_V2_SCHEMA.properties.call_type.enum.includes("sales_discovery"),
+  );
 });
 
 test("builds a minimal trusted role map from matched participant rows", () => {
@@ -386,6 +389,15 @@ test("accepts a valid V2 result and rejects a non-additive total", () => {
   invalid.call_score.total = 19;
   assert.equal(validateStructuredV2(invalid).ok, false);
   assert.ok(validateStructuredV2(invalid).errors.includes("call_score"));
+});
+
+test("accepts sales discovery as a first-class call type", () => {
+  const salesDiscovery = structuredClone(validResult);
+  salesDiscovery.call_type = "sales_discovery";
+  assert.deepEqual(validateStructuredV2(salesDiscovery), {
+    ok: true,
+    errors: [],
+  });
 });
 
 test("rejects unexpected properties, oversized text, and non-ISO due dates", () => {

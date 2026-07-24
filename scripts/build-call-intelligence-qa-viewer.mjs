@@ -140,6 +140,8 @@ const payload = {
     adversarialHardPasses: Math.round(adversarialSummary.hardPassRate),
     adversarialEvidence:
       adversarialResult.structuredV2.score?.evidence?.total ?? 0,
+    realCallCostMicros: privateSummary.costMicros,
+    securityTestCostMicros: adversarialSummary.costMicros,
     costMicros: privateSummary.costMicros + adversarialSummary.costMicros,
   },
 };
@@ -920,7 +922,11 @@ function clientRuntime() {
       [summary.quarantinedCalls, "Calls quarantined"],
       [summary.privateEvidence + "/" + summary.privateEvidence, "Real citations supported"],
       [summary.adversarialEvidence + "/" + summary.adversarialEvidence, "Injection-test citations"],
-      [formatCurrency(summary.costMicros), "V3 evaluation cost"],
+      [
+        formatCurrency(summary.realCallCostMicros),
+        "Three real calls · security test " +
+          formatCurrency(summary.securityTestCostMicros),
+      ],
     ]
       .map(
         ([value, label]) =>

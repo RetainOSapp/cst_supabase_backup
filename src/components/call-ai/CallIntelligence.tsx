@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "../../lib/supabase.ts";
 
@@ -185,6 +185,23 @@ function clientLabel(call: CallRow) {
   );
 }
 
+function clientDescriptor(call: CallRow) {
+  const person = call.client?.client_name || call.client?.client_email;
+  const company = call.client?.client_business;
+  if (person && company && person !== company) return `${person} · ${company}`;
+  return person || company || "Unmatched client";
+}
+
+function formatCallType(value: string | null | undefined) {
+  if (!value) return "Call Intelligence";
+  const labels: Record<string, string> = {
+    sales_discovery: "Sales / Discovery",
+    quarterly_review: "Quarterly review",
+    onboarding: "Onboarding",
+  };
+  return labels[value] || value.replaceAll("_", " ");
+}
+
 function initials(value: string) {
   return value
     .split(/\s+/)
@@ -228,15 +245,28 @@ function StatusBadge({ value }: { value: string }) {
   );
 }
 
-function EvidenceList({ evidence }: { evidence: Evidence[] }) {
+function EvidenceList({
+  evidence,
+  onSelect,
+}: {
+  evidence: Evidence[];
+  onSelect?: (evidence: Evidence) => void;
+}) {
   if (!evidence?.length) return null;
   return (
     <ul className="mt-2 space-y-1 text-xs text-[#667085]">
       {evidence.map((item, index) => (
         <li key={`${item.timestamp}-${index}`}>
-          {item.timestamp ? `${item.timestamp} · ` : ""}
-          <span className="capitalize">{item.speaker_role.replaceAll("_", " ")}</span>
-          {item.quote ? ` — “${item.quote}”` : ""}
+          <button
+            type="button"
+            onClick={() => onSelect?.(item)}
+            className="rounded text-left leading-5 transition hover:bg-[#eef7ff] hover:text-[#1f5f96] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#59abf0]"
+            title="Show this evidence in the transcript"
+          >
+            {item.timestamp ? `${item.timestamp} · ` : ""}
+            <span className="capitalize">{item.speaker_role.replaceAll("_", " ")}</span>
+            {item.quote ? ` — “${item.quote}”` : ""}
+          </button>
         </li>
       ))}
     </ul>
@@ -268,6 +298,9 @@ export function CallIntelligence({
   const [teamFilter, setTeamFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
   const [sentimentFilter, setSentimentFilter] = useState("all");
+  const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const transcriptRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -352,6 +385,11 @@ export function CallIntelligence({
       cancelled = true;
     };
   }, [companyId, developmentFixture, selectedCallId, reloadKey]);
+
+  useEffect(() => {
+    setSelectedEvidence(null);
+    setTranscriptOpen(false);
+  }, [selectedCallId]);
 
   const months = useMemo(
     () =>
@@ -446,6 +484,19 @@ export function CallIntelligence({
     setActionBusy(null);
   }
 
+  function selectEvidence(evidence: Evidence) {
+    setSelectedEvidence(evidence);
+    setTranscriptOpen(true);
+  }
+
+  useEffect(() => {
+    if (!selectedEvidence || !transcriptOpen) return;
+    const timer = window.setTimeout(() => {
+      transcriptRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [selectedEvidence, transcriptOpen]);
+
   if (selectedCallId) {
     const analysisRun = detail?.runs.find(
       (run) => run.status === "succeeded" && run.result_json,
@@ -483,13 +534,13 @@ export function CallIntelligence({
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#9fc7f3]">
-                    {analysis?.call_type?.replaceAll("_", " ") || "Call Intelligence"}
+                    {formatCallType(analysis?.call_type)}
                   </p>
                   <h1 className="mt-2 text-3xl font-bold">
-                    {clientLabel(detail.call)} · {analysis?.title_label || detail.call.title}
+                    {analysis?.title_label || detail.call.title}
                   </h1>
                   <p className="mt-2 text-sm text-[#d8e3f1]">
-                    {formatDate(detail.call.occurred_at)} · {formatDuration(detail.call.duration_seconds)}
+                    {clientDescriptor(detail.call)} · {formatDate(detail.call.occurred_at)} · {formatDuration(detail.call.duration_seconds)}
                     {detail.call.assignedMember?.name
                       ? ` · ${detail.call.assignedMember.name}`
                       : ""}
@@ -524,10 +575,12 @@ export function CallIntelligence({
               <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Client sentiment</p>
                 <div className="mt-3"><SentimentBadge value={analysis?.client_sentiment.label} /></div>
+                <EvidenceList evidence={analysis?.client_sentiment.evidence ?? []} onSelect={selectEvidence} />
               </div>
               <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Team sentiment</p>
                 <div className="mt-3"><SentimentBadge value={analysis?.team_member_sentiment.label} /></div>
+                <EvidenceList evidence={analysis?.team_member_sentiment.evidence ?? []} onSelect={selectEvidence} />
               </div>
               <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Call score</p>
@@ -538,7 +591,14 @@ export function CallIntelligence({
             </section>
 
             <section className="rounded-xl border border-[#e4e9f0] bg-white p-6">
-              <h2 className="text-xl font-bold text-[#17243a]">Summary</h2>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-xl font-bold text-[#17243a]">Summary</h2>
+                {detail.call.client?.client_name ? (
+                  <p className="text-sm font-semibold text-[#2b79c4]">
+                    Matched client: {detail.call.client.client_name}
+                  </p>
+                ) : null}
+              </div>
               <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#344054]">
                 {analysis?.summary || "The base analysis has not completed yet."}
               </p>
@@ -557,7 +617,7 @@ export function CallIntelligence({
                           <div key={`${signal.label}-${index}`}>
                             <p className="font-semibold text-red-700">{signal.label}</p>
                             <p className="mt-1 text-sm text-[#344054]">{signal.summary}</p>
-                            <EvidenceList evidence={signal.evidence} />
+                            <EvidenceList evidence={signal.evidence} onSelect={selectEvidence} />
                           </div>
                         ))}
                       </div>
@@ -573,7 +633,7 @@ export function CallIntelligence({
                           <div key={`${signal.label}-${index}`}>
                             <p className="font-semibold text-emerald-700">{signal.label}</p>
                             <p className="mt-1 text-sm text-[#344054]">{signal.summary}</p>
-                            <EvidenceList evidence={signal.evidence} />
+                            <EvidenceList evidence={signal.evidence} onSelect={selectEvidence} />
                           </div>
                         ))}
                       </div>
@@ -588,7 +648,7 @@ export function CallIntelligence({
                       {analysis.client_pain_points.map((item, index) => (
                         <li key={index}>
                           <span className="mr-2 text-[#5b4cf0]">•</span>{item.summary}
-                          <EvidenceList evidence={item.evidence} />
+                          <EvidenceList evidence={item.evidence} onSelect={selectEvidence} />
                         </li>
                       ))}
                     </ul>
@@ -601,6 +661,7 @@ export function CallIntelligence({
                           <span className="font-semibold">{item.owner || "Unassigned"}:</span>{" "}
                           {item.action}
                           {item.due_date ? ` · ${item.due_date}` : ""}
+                          <EvidenceList evidence={item.evidence} onSelect={selectEvidence} />
                         </li>
                       ))}
                     </ul>
@@ -627,6 +688,7 @@ export function CallIntelligence({
                             <span className="font-bold text-[#5b4cf0]">{item.score}/7</span>
                           </div>
                           <p className="mt-2 text-sm text-[#667085]">{item.rationale}</p>
+                          <EvidenceList evidence={item.evidence} onSelect={selectEvidence} />
                         </div>
                       );
                     })}
@@ -678,13 +740,35 @@ export function CallIntelligence({
               ) : null}
             </section>
 
-            <details className="rounded-xl border border-[#e4e9f0] bg-white p-6">
+            <details
+              ref={transcriptRef}
+              open={transcriptOpen}
+              onToggle={(event) => setTranscriptOpen((event.target as HTMLDetailsElement).open)}
+              className="rounded-xl border border-[#e4e9f0] bg-white p-6"
+            >
               <summary className="cursor-pointer text-lg font-bold text-[#17243a]">
                 Transcript · {detail.transcript?.character_count.toLocaleString() ?? 0} characters
               </summary>
-              <pre className="mt-4 max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-lg bg-[#f7f8fc] p-4 font-sans text-sm leading-6 text-[#344054]">
-                {detail.transcript?.transcript_text || "Transcript unavailable."}
-              </pre>
+              {selectedEvidence ? (
+                <p className="mt-3 text-xs text-[#2b79c4]">
+                  Showing evidence from {selectedEvidence.timestamp || "the transcript"}. Highlighted text is the closest matching utterance.
+                </p>
+              ) : null}
+              <div className="mt-4 max-h-[34rem] overflow-auto rounded-lg bg-[#f7f8fc] p-4 font-sans text-sm leading-6 text-[#344054]">
+                {(detail.transcript?.transcript_text || "Transcript unavailable.").split("\n").map((line, index) => {
+                  const quote = selectedEvidence?.quote.trim().toLocaleLowerCase();
+                  const matchesQuote = Boolean(quote && line.toLocaleLowerCase().includes(quote));
+                  const matchesTimestamp = Boolean(selectedEvidence?.timestamp && line.includes(selectedEvidence.timestamp));
+                  return (
+                    <p
+                      key={`${index}-${line.slice(0, 20)}`}
+                      className={matchesQuote || matchesTimestamp ? "-mx-1 rounded bg-[#fff4c2] px-1 text-[#4d3b00]" : undefined}
+                    >
+                      {line || " "}
+                    </p>
+                  );
+                })}
+              </div>
             </details>
           </>
         )}
@@ -705,7 +789,7 @@ export function CallIntelligence({
           </p>
         </div>
         <div className="flex gap-2">
-          {metrics?.needsReconciliation ? (
+          {metrics?.needsReconciliation && access?.canReconcile ? (
             <button
               type="button"
               onClick={onShowReconciliation}
@@ -833,7 +917,7 @@ export function CallIntelligence({
                   </span>
                   <div>
                     <p className="font-semibold text-[#17243a]">{call.title}</p>
-                    <p className="mt-0.5 text-sm text-[#667085]">{clientLabel(call)}</p>
+                    <p className="mt-0.5 text-sm text-[#667085]">{clientDescriptor(call)}</p>
                   </div>
                 </div>
                 <div>

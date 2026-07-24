@@ -6,6 +6,10 @@ const migrationPath =
   "supabase/migrations/20260723200000_call_intelligence_v1_foundation.sql";
 const rollbackPath =
   "supabase/rollbacks/20260723200000_call_intelligence_v1_foundation.sql";
+const promptSeedPath =
+  "supabase/migrations/20260723201000_call_intelligence_prompt_seed.sql";
+const promptSeedRollbackPath =
+  "supabase/rollbacks/20260723201000_call_intelligence_prompt_seed.sql";
 const configPath = "supabase/config.toml";
 const generatedTypesPath = "src/types/supabase.ts";
 const aiFoundationPath =
@@ -20,6 +24,8 @@ const companyReadPolicyPath =
 const [
   migration,
   rollback,
+  promptSeed,
+  promptSeedRollback,
   config,
   generatedTypes,
   aiFoundation,
@@ -29,6 +35,8 @@ const [
 ] = await Promise.all([
   readFile(migrationPath, "utf8"),
   readFile(rollbackPath, "utf8"),
+  readFile(promptSeedPath, "utf8"),
+  readFile(promptSeedRollbackPath, "utf8"),
   readFile(configPath, "utf8"),
   readFile(generatedTypesPath, "utf8"),
   readFile(aiFoundationPath, "utf8"),
@@ -77,6 +85,17 @@ const checks = [
   ["JWT-on worker function", /\[functions\.process-call-intelligence\]\s+verify_jwt = true/],
 ];
 
+assert.match(
+  promptSeed,
+  /structured_v2_quality_v4/,
+  "prompt seed uses current structured version",
+);
+assert.match(
+  promptSeedRollback,
+  /structured_v2_quality_v4/,
+  "prompt seed rollback removes current structured version",
+);
+
 function generatedTableBlock(name) {
   const marker = `      ${name}: {`;
   const start = generatedTypes.indexOf(marker);
@@ -95,6 +114,7 @@ const clientTypes = generatedTableBlock("clients");
 const companySettingTypes = generatedTableBlock("company_settings");
 
 let passed = 0;
+passed += 2;
 for (const [label, pattern] of checks) {
   const source = label.includes("rollback")
     ? rollback
@@ -220,5 +240,5 @@ execFileSync(
 passed += 1;
 
 console.log(
-  `Call Intelligence database contract: ${passed}/${checks.length + 4 + dependencyChecks.length} passed`,
+  `Call Intelligence database contract: ${passed}/${checks.length + 6 + dependencyChecks.length} passed`,
 );
