@@ -1,8 +1,9 @@
 # Call Intelligence V1
 
-Status: local release candidate on `codex/call-intelligence-v1`.
-Nothing in this plan authorizes a production migration, Edge Function deploy,
-provider call, company entitlement, token creation, or push to `main`.
+Status: disabled production release through Phases A–C on 2026-07-24.
+Database, Edge boundaries, and the hidden frontend are live while globally
+paused. Nothing in this plan authorizes a provider call, company entitlement,
+allowance, token creation, Zapier change, or pilot enablement.
 
 ## Product boundary
 

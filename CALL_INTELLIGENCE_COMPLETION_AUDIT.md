@@ -29,7 +29,7 @@ is not treated as proof of production runtime behavior.
 | Evidence grounding and attribution | Proven locally | 42/42 retained private citations plus 4/4 adversarial citations valid; two collision calls quarantined before provider spend | Pilot observation |
 | Legacy-vs-structured model evaluation | Complete locally | 59/59 provider requests; cost/latency/schema/evidence and independent semantic review; $2.878853 cumulative spend | Production pilot observation |
 | On-demand prompts | Proven locally | seven company prompt seeds, authorized queue/dispatch path, real UI action | One pilot prompt result |
-| Real Call Intelligence UI | Proven locally, release pending | actor-scoped management API; productized RetainOS UI; deterministic matched-client labels; evidence-to-transcript highlight; desktop/mobile QA | Hidden frontend release and authenticated production pilot QA |
+| Real Call Intelligence UI | Proven in hidden production | Ready Vercel deployment; production bundle contains product UI and excludes DEV fixture; deterministic matched-client labels and evidence-to-transcript highlight passed desktop/mobile QA | Authenticated production pilot QA |
 | Existing reconciliation preserved | Proven locally | `/call-ai` URL-tab implementation and frontend gate | Production navigation QA |
 | No automatic client-profile writes | Proven locally | no client update path in ingest/manage/process; source gate | Pilot observation |
 | Rollout and rollback | Proven through disabled Phase B | migrations/hashes/readback, corrected prompt rollback, function versions, denial probes | Pilot operational rollback |
@@ -75,7 +75,6 @@ is not treated as proof of production runtime behavior.
 ## External gates
 
 The local implementation and promotion evaluation objective is satisfied.
-Disabled production completion now requires the hidden frontend release and
-its live role/privacy smoke. Pilot completion remains blocked until the
-production runtime matrix and human pilot QA pass. No company may be enabled
-before that approval.
+Disabled production Phases A–C are complete. Pilot completion remains blocked
+until the production runtime matrix and human pilot QA pass. No company may be
+enabled before that approval.

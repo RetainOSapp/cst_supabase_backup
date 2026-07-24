@@ -1,8 +1,7 @@
 # Call Intelligence V1: Disabled-First Rollout
 
-Status: Phases A and B are live disabled; Phase C frontend release is ready.
-Jay approved Phases A–C on 2026-07-24. Pilot enablement remains separately
-gated.
+Status: Phases A–C are live disabled. Jay approved Phases A–C on 2026-07-24.
+Pilot enablement remains separately gated.
 
 ## Release candidate
 
@@ -10,9 +9,9 @@ gated.
   `/private/tmp/cst-call-intelligence-v1`
 - Merged with verified `origin/main` at `d9d5fae`; the dirty Pipeline workspace
   is untouched.
-- Production database and Edge boundaries are deployed while globally paused.
-  No token, entitlement, allowance, call, transcript, run, usage event, provider
-  call, frontend push, or Zapier change has occurred.
+- Production database, Edge boundaries, and hidden frontend are deployed while
+  globally paused. No token, entitlement, allowance, call, transcript, run,
+  usage event, provider call, or Zapier change has occurred.
 - V1 boundary: one RetainOS client account per call; multiple company members
   and participants from that same client are supported.
 
@@ -100,6 +99,20 @@ Then verify:
 - no entitlement, allowance, token, or provider call exists yet.
 
 ## Phase C — hidden frontend
+
+Completed 2026-07-24:
+
+- production `main` advanced to `90655e0`;
+- Vercel deployment `dpl_7XjJuKTVbVEdCBCEGVWaepHzRBXQ` reached Ready and is
+  aliased to `https://app.retainos.ai`;
+- production asset `/assets/index-d7Z3gHvp.js` contains Call Intelligence,
+  Sales / Discovery, and deterministic matched-client UI;
+- the DEV fixture is absent from the production asset and
+  `/__dev/call-intelligence` redirects to login;
+- the browser bundle contains no provider secret name or credential-shaped
+  value;
+- post-release readback remains paused with zero entitlements, allowances,
+  tokens, calls, transcripts, runs, and usage events.
 
 Merge/push only after the database and paused functions pass. Production
 continues to fail closed because role access, company entitlement, a hard
