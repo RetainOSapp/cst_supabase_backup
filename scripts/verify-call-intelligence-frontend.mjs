@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [app, page, intelligence, account, header, developmentPreview] =
+const [app, page, intelligence, account, header, developmentPreview, aiFeatures] =
   await Promise.all([
   readFile("src/App.tsx", "utf8"),
   readFile("src/pages/CallAi.tsx", "utf8"),
@@ -12,12 +12,16 @@ const [app, page, intelligence, account, header, developmentPreview] =
     "src/components/call-ai/CallIntelligenceDevelopmentPreview.tsx",
     "utf8",
   ),
+  readFile("src/components/beacon/AiFeaturesPanel.tsx", "utf8"),
 ]);
 
 const checks = [
   ["guarded Call AI route", app, /RequireCapability allowed=\{capabilities\.canAccessCallAi\}/],
   ["no public preview route", app, /path="\/login"[\s\S]+path="\/\*"/],
   ["real component used", page, /<CallIntelligence/],
+  ["company entitlement checked", page, /action: "access"[\s\S]+featureEnabled/],
+  ["disabled company tab hidden", page, /showIntelligence=\{intelligenceEnabled === true\}/],
+  ["reconciliation survives disabled intelligence", page, /Reconciliation is still available/],
   ["reconciliation remains separate", page, /"reconciliation"/],
   ["new Call Intelligence reconciliation action", page, /manage-call-intelligence/],
   ["real management API", intelligence, /manage-call-intelligence/],
@@ -39,6 +43,9 @@ const checks = [
   ["development fixture is DEV-only", app, /import\.meta\.env\.DEV/],
   ["development fixture is lazily imported", app, /import\.meta\.env\.DEV[\s\S]+lazy\(\(\) =>[\s\S]+CallIntelligenceDevelopmentPreview/],
   ["development fixture uses invalid domains", developmentPreview, /@example\.invalid/],
+  ["Call Intelligence admin control released", aiFeatures, /feature\.featureKey === "call_analysis"/],
+  ["Call Intelligence admin control named", aiFeatures, /label: "Call Intelligence"/],
+  ["Call Intelligence admin budget uses currency", aiFeatures, /\["beacon", "call_analysis"\][\s\S]+usd_cents/],
 ];
 
 let passed = 0;

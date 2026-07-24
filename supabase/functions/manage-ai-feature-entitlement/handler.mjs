@@ -20,8 +20,9 @@ const FEATURE_COPY = Object.freeze({
     description: "Read-only operational questions over approved RetainOS data.",
   }),
   call_analysis: Object.freeze({
-    label: "Call analysis",
-    description: "Analyze approved customer-call transcripts and recordings.",
+    label: "Call Intelligence",
+    description:
+      "Analyze approved customer-call transcripts with company-level cost controls.",
   }),
   sentiment_analysis: Object.freeze({
     label: "Sentiment analysis",

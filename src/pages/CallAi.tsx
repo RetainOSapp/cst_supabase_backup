@@ -89,25 +89,29 @@ function integrationClientLabel(client: IntegrationReviewClientOption) {
 function CallAiTabs({
   activeTab,
   onSelect,
+  showIntelligence,
 }: {
   activeTab: "intelligence" | "reconciliation";
   onSelect: (tab: "intelligence" | "reconciliation") => void;
+  showIntelligence: boolean;
 }) {
   return (
     <div className="border-b border-[#dfe5ec]">
       <nav className="-mb-px flex gap-6" aria-label="Call AI sections">
-        <button
-          type="button"
-          onClick={() => onSelect("intelligence")}
-          aria-current={activeTab === "intelligence" ? "page" : undefined}
-          className={`border-b-2 px-1 pb-3 text-sm font-semibold transition ${
-            activeTab === "intelligence"
-              ? "border-[#59abf0] text-[#162b3e]"
-              : "border-transparent text-[#667085] hover:border-[#cbd2dc] hover:text-[#162b3e]"
-          }`}
-        >
-          Call Intelligence
-        </button>
+        {showIntelligence ? (
+          <button
+            type="button"
+            onClick={() => onSelect("intelligence")}
+            aria-current={activeTab === "intelligence" ? "page" : undefined}
+            className={`border-b-2 px-1 pb-3 text-sm font-semibold transition ${
+              activeTab === "intelligence"
+                ? "border-[#59abf0] text-[#162b3e]"
+                : "border-transparent text-[#667085] hover:border-[#cbd2dc] hover:text-[#162b3e]"
+            }`}
+          >
+            Call Intelligence
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => onSelect("reconciliation")}
@@ -129,6 +133,12 @@ export function CallAi() {
   const { effectiveCompanyId, capabilities, role } = useAccountContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const [companyAppId, setCompanyAppId] = useState("");
+  const [intelligenceEnabled, setIntelligenceEnabled] = useState<boolean | null>(
+    null,
+  );
+  const [intelligenceGateError, setIntelligenceGateError] = useState<
+    string | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState<IntegrationIntakeEventRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -153,17 +163,60 @@ export function CallAi() {
 
   const canAccess = capabilities.canAccessCallAi;
   const canReview = canAccess && (role === "super_admin" || role === "director");
+  const requestedTab = searchParams.get("tab");
   const activeTab =
-    canReview && searchParams.get("tab") === "reconciliation"
+    canReview &&
+    (requestedTab === "reconciliation" || intelligenceEnabled === false)
       ? "reconciliation"
       : "intelligence";
 
   function setActiveTab(tab: "intelligence" | "reconciliation") {
+    if (tab === "intelligence" && intelligenceEnabled !== true) return;
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
     if (tab === "reconciliation") next.delete("call");
     setSearchParams(next);
   }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadIntelligenceAccess() {
+      if (!effectiveCompanyId || !canAccess) {
+        setIntelligenceEnabled(false);
+        setIntelligenceGateError(null);
+        return;
+      }
+
+      setIntelligenceEnabled(null);
+      setIntelligenceGateError(null);
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "manage-call-intelligence",
+        {
+          body: {
+            action: "access",
+            companyId: effectiveCompanyId,
+          },
+        },
+      );
+      if (cancelled) return;
+      if (invokeError || data?.error) {
+        setIntelligenceEnabled(false);
+        setIntelligenceGateError(
+          data?.error ||
+            invokeError?.message ||
+            "Call Intelligence access could not be checked.",
+        );
+        return;
+      }
+      setIntelligenceEnabled(data.featureEnabled === true);
+    }
+
+    void loadIntelligenceAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [canAccess, effectiveCompanyId, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -377,11 +430,51 @@ export function CallAi() {
     );
   }
 
+  if (
+    activeTab === "intelligence" &&
+    intelligenceEnabled == null &&
+    !intelligenceGateError
+  ) {
+    return (
+      <div className="flex items-center justify-center py-16" role="status">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[#59abf0]" />
+        <span className="sr-only">Checking Call Intelligence access…</span>
+      </div>
+    );
+  }
+
+  if (
+    activeTab === "intelligence" &&
+    intelligenceEnabled === false &&
+    !canReview
+  ) {
+    return (
+      <div className="rounded-lg border border-[#e4e9f0] bg-white p-6 text-center shadow-sm">
+        <h1 className="text-lg font-semibold text-[#162b3e]">
+          Call Intelligence is not enabled
+        </h1>
+        <p className="mt-2 text-sm text-[#667085]">
+          A RetainOS SuperAdmin can enable it for this company under SaaS
+          Clients → AI Features.
+        </p>
+        {intelligenceGateError ? (
+          <p className="mt-3 text-xs text-[#9f2f2a]">
+            Access could not be verified. Please try again.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   if (activeTab === "intelligence") {
     return (
       <div className="space-y-6">
         {canReview ? (
-          <CallAiTabs activeTab={activeTab} onSelect={setActiveTab} />
+          <CallAiTabs
+            activeTab={activeTab}
+            onSelect={setActiveTab}
+            showIntelligence
+          />
         ) : null}
         <CallIntelligence
           companyId={effectiveCompanyId}
@@ -413,7 +506,18 @@ export function CallAi() {
         </button>
       </div>
 
-      <CallAiTabs activeTab={activeTab} onSelect={setActiveTab} />
+      <CallAiTabs
+        activeTab={activeTab}
+        onSelect={setActiveTab}
+        showIntelligence={intelligenceEnabled === true}
+      />
+
+      {intelligenceGateError ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Call Intelligence access could not be verified, so it remains hidden.
+          Reconciliation is still available.
+        </div>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-4">
         <div className="rounded-lg border border-[#e4e9f0] bg-white p-4 shadow-sm">

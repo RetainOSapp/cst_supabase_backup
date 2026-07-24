@@ -18,8 +18,9 @@ const FEATURE_COPY: Record<string, { label: string; description: string }> = {
     description: "Read-only operational questions over approved RetainOS data.",
   },
   call_analysis: {
-    label: "Call analysis",
-    description: "Analyze approved customer-call transcripts and recordings.",
+    label: "Call Intelligence",
+    description:
+      "Analyze approved customer-call transcripts with company-level cost controls.",
   },
   sentiment_analysis: {
     label: "Sentiment analysis",
@@ -265,8 +266,9 @@ function AiFeatureCard({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const copy = featureCopy(feature);
-  const isReleased = feature.featureKey === "beacon";
-  const meterOptions = feature.featureKey === "beacon"
+  const isReleased =
+    feature.featureKey === "beacon" || feature.featureKey === "call_analysis";
+  const meterOptions = ["beacon", "call_analysis"].includes(feature.featureKey)
     ? METER_OPTIONS.filter(({ value }) => value === "usd_cents")
     : METER_OPTIONS;
   const meterTypes = allowances.map((allowance) => allowance.meterType);
@@ -360,43 +362,51 @@ function AiFeatureCard({
         </span>
       </div>
 
-      <fieldset className="mt-4 rounded-xl border border-[#d6eafb] bg-[#f6fbff] p-4">
-        <legend className="px-1 text-xs font-bold text-[#162b3e]">Who can access Beacon</legend>
-        <p className="mb-3 text-[11px] leading-5 text-[#667085]">
-          RetainOS SuperAdmins always retain access. Viewer access is unavailable.
-          These choices are enforced again by the server on every request.
-        </p>
-        <label className="flex items-start gap-3 rounded-lg border border-[#e4e9f0] bg-white px-3 py-2.5 opacity-70">
-          <input type="checkbox" checked disabled className="mt-0.5" />
-          <span><span className="block text-xs font-bold text-[#162b3e]">RetainOS SuperAdmin</span><span className="text-[10px] text-[#667085]">Always enabled for rollout and rollback control.</span></span>
-        </label>
-        <div className="mt-2 grid gap-2 sm:grid-cols-3">
-          {BEACON_ROLE_OPTIONS.map((option) => (
-            <label key={option.value} className="flex items-start gap-2 rounded-lg border border-[#e4e9f0] bg-white px-3 py-2.5">
-              <input
-                type="checkbox"
-                checked={allowedRoles.includes(option.value)}
-                disabled={savingAccess}
-                onChange={(event) => setAllowedRoles((current) =>
-                  event.target.checked
-                    ? [...current, option.value]
-                    : current.filter((role) => role !== option.value)
-                )}
-                className="mt-0.5"
-              />
-              <span><span className="block text-xs font-bold text-[#162b3e]">{option.label}</span><span className="text-[10px] leading-4 text-[#667085]">{option.detail}</span></span>
-            </label>
-          ))}
+      {feature.featureKey === "beacon" ? (
+        <fieldset className="mt-4 rounded-xl border border-[#d6eafb] bg-[#f6fbff] p-4">
+          <legend className="px-1 text-xs font-bold text-[#162b3e]">Who can access Beacon</legend>
+          <p className="mb-3 text-[11px] leading-5 text-[#667085]">
+            RetainOS SuperAdmins always retain access. Viewer access is unavailable.
+            These choices are enforced again by the server on every request.
+          </p>
+          <label className="flex items-start gap-3 rounded-lg border border-[#e4e9f0] bg-white px-3 py-2.5 opacity-70">
+            <input type="checkbox" checked disabled className="mt-0.5" />
+            <span><span className="block text-xs font-bold text-[#162b3e]">RetainOS SuperAdmin</span><span className="text-[10px] text-[#667085]">Always enabled for rollout and rollback control.</span></span>
+          </label>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            {BEACON_ROLE_OPTIONS.map((option) => (
+              <label key={option.value} className="flex items-start gap-2 rounded-lg border border-[#e4e9f0] bg-white px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={allowedRoles.includes(option.value)}
+                  disabled={savingAccess}
+                  onChange={(event) => setAllowedRoles((current) =>
+                    event.target.checked
+                      ? [...current, option.value]
+                      : current.filter((role) => role !== option.value)
+                  )}
+                  className="mt-0.5"
+                />
+                <span><span className="block text-xs font-bold text-[#162b3e]">{option.label}</span><span className="text-[10px] leading-4 text-[#667085]">{option.detail}</span></span>
+              </label>
+            ))}
+          </div>
+          <button
+            type="button"
+            disabled={savingAccess}
+            onClick={() => void saveAccess()}
+            className="retainos-button-secondary mt-3"
+          >
+            {savingAccess ? "Saving access…" : "Save role access"}
+          </button>
+        </fieldset>
+      ) : (
+        <div className="mt-4 rounded-xl border border-[#d6eafb] bg-[#f6fbff] p-4 text-xs leading-5 text-[#586273]">
+          Company access follows the existing Call AI role permissions.
+          Disabling or pausing this feature hides Call Intelligence and blocks
+          its server actions without affecting reconciliation.
         </div>
-        <button
-          type="button"
-          disabled={savingAccess}
-          onClick={() => void saveAccess()}
-          className="retainos-button-secondary mt-3"
-        >
-          {savingAccess ? "Saving access…" : "Save role access"}
-        </button>
-      </fieldset>
+      )}
 
       <div className="mt-4 space-y-3">
         {allowances.map((allowance, index) => (

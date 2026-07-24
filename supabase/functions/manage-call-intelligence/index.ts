@@ -14,6 +14,7 @@ import { STRUCTURED_V2_PROMPT_VERSION } from "../_shared/call-intelligence-versi
 import { sha256Hex } from "../ingest-call-intelligence/_shared/contracts.mjs";
 
 const ACTIONS = new Set([
+  "access",
   "list",
   "detail",
   "manual_upload",
@@ -113,6 +114,43 @@ async function actorAccess(supabase, actor, companyId: string) {
     }
   }
   return { role: membership.role, member: membership, csmEnabled };
+}
+
+async function callIntelligenceEnabled(supabase, companyId: string) {
+  const { data, error } = await supabase
+    .from("company_ai_feature_entitlements")
+    .select("status, effective_from, effective_until")
+    .eq("company_id", companyId)
+    .eq("feature_key", "call_analysis")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || !["pilot", "enabled"].includes(data.status)) return false;
+
+  const now = Date.now();
+  const effectiveFrom = data.effective_from
+    ? Date.parse(data.effective_from)
+    : null;
+  const effectiveUntil = data.effective_until
+    ? Date.parse(data.effective_until)
+    : null;
+  return (
+    (effectiveFrom == null || effectiveFrom <= now) &&
+    (effectiveUntil == null || effectiveUntil > now)
+  );
+}
+
+function publicAccess(access) {
+  const canUpload =
+    access.role === "super_admin" || access.role === "director";
+  return {
+    role: access.role,
+    canReconcile: canUpload,
+    canUpload,
+    canRun:
+      access.role === "super_admin" ||
+      access.role === "director" ||
+      access.role === "csm",
+  };
 }
 
 function memberAssignmentIds(access) {
@@ -688,23 +726,30 @@ Deno.serve(async (req) => {
       cleanText(body.companyId ?? body.companyLegacyId),
     );
     const access = await actorAccess(supabase, actor, company.id);
+    const featureEnabled = await callIntelligenceEnabled(supabase, company.id);
 
-    if (action === "list") {
-      const canUpload =
-        access.role === "super_admin" || access.role === "director";
+    if (action === "access") {
       return jsonResponse(req, {
         ok: true,
-        access: {
-          role: access.role,
-          canReconcile:
-            access.role === "super_admin" || access.role === "director",
-          canUpload,
-          canRun:
-            access.role === "super_admin" ||
-            access.role === "director" ||
-            access.role === "csm",
-        },
-        uploadOptions: canUpload
+        featureEnabled,
+        access: publicAccess(access),
+      });
+    }
+
+    if (!featureEnabled) {
+      throw new AuthError(
+        "Call Intelligence is not enabled for this company.",
+        403,
+      );
+    }
+
+    if (action === "list") {
+      const publicActorAccess = publicAccess(access);
+      return jsonResponse(req, {
+        ok: true,
+        featureEnabled: true,
+        access: publicActorAccess,
+        uploadOptions: publicActorAccess.canUpload
           ? await manualUploadOptions(supabase, company.id)
           : { clients: [], members: [] },
         ...(await listCalls(supabase, company, access, body)),
