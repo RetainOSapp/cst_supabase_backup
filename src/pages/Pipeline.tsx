@@ -13,6 +13,7 @@ import {
   createPipelineItem,
   loadPipelineWorkspace,
   movePipelineItemStage,
+  previewPipelineRenewals,
   resolvePipelineLost,
   resolvePipelineWon,
   runPipelineRenewalScan,
@@ -25,6 +26,7 @@ import {
   type PipelineLostDraft,
   type PipelineMember,
   type PipelineOffer,
+  type RenewalPreviewCandidate,
   type PipelineWonDraft,
   type PipelineWorkspace,
 } from "../lib/pipeline.ts";
@@ -976,6 +978,8 @@ export function Pipeline() {
   const [terminalResolution, setTerminalResolution] = useState<{ itemId: string; type: "won" | "lost" } | null>(null);
   const [lostSuccess, setLostSuccess] = useState<{ clientId: string; name: string } | null>(null);
   const [scanResult, setScanResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
+  const [renewalPreview, setRenewalPreview] = useState<RenewalPreviewCandidate[] | null>(null);
+  const [previewingRenewals, setPreviewingRenewals] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [movingItemId, setMovingItemId] = useState<string | null>(null);
@@ -1147,12 +1151,9 @@ export function Pipeline() {
     ? lookupClient(workspace.clients, resolutionItem.client_id) ?? null
     : null;
   const canManageRenewalScan = workspace?.canWrite && workspace.actorRole === "super_admin";
+  const canPreviewRenewals = workspace?.actorRole === "super_admin" || workspace?.actorRole === "director";
   const renewalScanPipeline = pipelines.find(
-    (pipeline) =>
-      pipeline.pipeline_type === "renewal" &&
-      pipeline.auto_create_renewals === true &&
-      pipeline.renewal_generation_enabled === true &&
-      pipeline.automation_paused !== true,
+    (pipeline) => pipeline.pipeline_type === "renewal",
   );
   const canRunRenewalScan = Boolean(canManageRenewalScan && renewalScanPipeline);
   const openItems = filteredItems.filter((item) => stageById.get(item.stage_id)?.stage_type === "open");
@@ -1340,11 +1341,18 @@ export function Pipeline() {
 
   async function handleRenewalScan() {
     if (!effectiveCompanyId || !workspace || !canRunRenewalScan) return;
+    const eligibleCount = renewalPreview?.filter((candidate) => candidate.eligibility_status === "eligible").length;
+    const confirmed = window.confirm(
+      eligibleCount === undefined
+        ? "Run a one-time renewal scan now? Eligible contracts will be added without enabling recurring automation."
+        : `Add ${eligibleCount} eligible renewal${eligibleCount === 1 ? "" : "s"} now? Recurring automation will remain unchanged.`,
+    );
+    if (!confirmed) return;
     setScanning(true);
     setActionError(null);
     setScanResult(null);
     try {
-      const result = await runPipelineRenewalScan(effectiveCompanyId);
+      const result = await runPipelineRenewalScan(effectiveCompanyId, renewalScanPipeline!.id);
       setScanResult({ createdCount: result.createdCount, skippedCount: result.skippedCount });
       if (result.items?.length) {
         setWorkspace((current) => {
@@ -1357,6 +1365,21 @@ export function Pipeline() {
       setActionError(reason instanceof Error ? reason.message : "Unable to run the renewal scan.");
     } finally {
       setScanning(false);
+    }
+  }
+
+  async function handleRenewalPreview() {
+    if (!effectiveCompanyId || !renewalScanPipeline || !canPreviewRenewals) return;
+    setPreviewingRenewals(true);
+    setActionError(null);
+    try {
+      setRenewalPreview(
+        await previewPipelineRenewals(effectiveCompanyId, renewalScanPipeline.id),
+      );
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : "Unable to preview renewals.");
+    } finally {
+      setPreviewingRenewals(false);
     }
   }
 
@@ -1399,17 +1422,29 @@ export function Pipeline() {
           <p className="mt-1 text-sm text-[#667085]">Manage renewals and expansion opportunities without leaving the workspace.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canManageRenewalScan ? (
-            <div className="flex flex-col items-start gap-1 sm:items-end">
-              <button type="button" onClick={() => void handleRenewalScan()} disabled={!canRunRenewalScan || scanning} aria-describedby={!canRunRenewalScan ? "renewal-scan-unavailable" : undefined} className="retainos-button-secondary disabled:cursor-not-allowed disabled:opacity-50">{scanning ? "Scanning..." : "Run renewal scan"}</button>
-              {!canRunRenewalScan ? <p id="renewal-scan-unavailable" className="max-w-xs text-left text-xs text-[#667085] sm:text-right">Automatic renewal entry is off for this pilot. Renewal scanning requires a separate automation approval.</p> : null}
-            </div>
-          ) : null}
+          {canPreviewRenewals && renewalScanPipeline ? <button type="button" onClick={() => void handleRenewalPreview()} disabled={previewingRenewals || scanning} className="retainos-button-secondary disabled:cursor-not-allowed disabled:opacity-50">{previewingRenewals ? "Previewing..." : "Preview renewal scan"}</button> : null}
+          {canManageRenewalScan && renewalScanPipeline ? <button type="button" onClick={() => void handleRenewalScan()} disabled={!canRunRenewalScan || scanning || previewingRenewals} className="retainos-button-secondary disabled:cursor-not-allowed disabled:opacity-50">{scanning ? "Adding renewals..." : "Run one-time scan"}</button> : null}
           {workspace.canWrite ? <button type="button" onClick={() => { setActionError(null); setNewItemOpen(true); }} className="retainos-button-primary">New pipeline item</button> : <span className="rounded-full border border-[#dce5ef] bg-white px-3 py-1.5 text-xs font-semibold text-[#667085]">Read-only</span>}
         </div>
       </div>
 
       {scanResult ? <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900"><span>Renewal scan complete: <strong>{scanResult.createdCount}</strong> created · <strong>{scanResult.skippedCount}</strong> already tracked.</span><button type="button" onClick={() => setScanResult(null)} aria-label="Dismiss scan result">×</button></div> : null}
+      {renewalPreview ? (
+        <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              Renewal preview: <strong>{renewalPreview.filter((candidate) => candidate.eligibility_status === "eligible").length}</strong> eligible ·{" "}
+              <strong>{renewalPreview.filter((candidate) => candidate.eligibility_status === "excluded").length}</strong> excluded. No records were changed.
+            </span>
+            <button type="button" onClick={() => setRenewalPreview(null)} aria-label="Dismiss renewal preview">×</button>
+          </div>
+          {renewalPreview.some((candidate) => candidate.eligibility_status === "excluded") ? (
+            <p className="mt-2 text-xs text-sky-800">
+              Exclusions include contracts outside the configured timing window, already tracked renewals, and contracts excluded by cadence or client status.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {lostSuccess ? <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"><span><strong>{lostSuccess.name}</strong> was recorded as Lost. Review the client before offboarding.</span><div className="flex items-center gap-3"><Link to={`/clients/${lostSuccess.clientId}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-[#2b79c4] hover:underline">Open client to offboard</Link><button type="button" onClick={() => setLostSuccess(null)} aria-label="Dismiss Lost result">×</button></div></div> : null}
 
       <div className="mb-5 overflow-x-auto pb-1">

@@ -150,20 +150,39 @@ async function loadCompany(
 async function loadSettings(supabase: SupabaseServiceClient, companyId: string) {
   const { data, error } = await supabase
     .from("company_settings")
-    .select("enable_pipeline, enable_pipeline_viewer_access")
+    .select("enable_pipeline, enable_pipeline_director_access, enable_pipeline_support_access, enable_pipeline_csm_access, enable_pipeline_viewer_access")
     .eq("company_id", companyId)
     .maybeSingle();
   if (error) throw error;
   return {
     enabled: data?.enable_pipeline === true,
+    directorAccess: data?.enable_pipeline_director_access !== false,
+    supportAccess: data?.enable_pipeline_support_access !== false,
+    csmAccess: data?.enable_pipeline_csm_access !== false,
     viewerAccess: data?.enable_pipeline_viewer_access === true,
   };
 }
 
-function assertReadable(actor: ActorContext, settings: { enabled: boolean; viewerAccess: boolean }) {
+type PipelineAccessSettings = {
+  enabled: boolean;
+  directorAccess: boolean;
+  supportAccess: boolean;
+  csmAccess: boolean;
+  viewerAccess: boolean;
+};
+
+function roleAccessAllowed(actor: ActorContext, settings: PipelineAccessSettings) {
+  if (actor.role === "super_admin") return true;
+  if (actor.role === "director") return settings.directorAccess;
+  if (actor.role === "support") return settings.supportAccess;
+  if (actor.role === "csm") return settings.csmAccess;
+  return settings.viewerAccess;
+}
+
+function assertReadable(actor: ActorContext, settings: PipelineAccessSettings) {
   if (!settings.enabled) throw new AuthError("Pipeline is disabled for this company.", 403);
-  if (actor.role === "viewer" && !settings.viewerAccess) {
-    throw new AuthError("Viewer Pipeline access is disabled.", 403);
+  if (!roleAccessAllowed(actor, settings)) {
+    throw new AuthError("Pipeline access is disabled for your company role.", 403);
   }
 }
 
@@ -215,7 +234,7 @@ async function loadWorkspace(
   supabase: SupabaseServiceClient,
   company: Record<string, unknown>,
   actor: ActorContext,
-  settings: { enabled: boolean; viewerAccess: boolean },
+  settings: PipelineAccessSettings,
 ) {
   assertReadable(actor, settings);
   const companyId = String(company.id);
@@ -249,6 +268,12 @@ async function loadWorkspace(
 
   return {
     enabled: true,
+    roleAccess: {
+      director: settings.directorAccess,
+      support: settings.supportAccess,
+      csm: settings.csmAccess,
+      viewer: settings.viewerAccess,
+    },
     viewerAccess: settings.viewerAccess,
     canWrite: actor.role !== "viewer",
     actorRole: actor.role,
@@ -370,13 +395,14 @@ Deno.serve(async (req) => {
     if (action === "access") {
       return respond({
         enabled: settings.enabled,
+        roleAllowed: roleAccessAllowed(actor, settings),
         viewerAccess: settings.viewerAccess,
         actorRole: actor.role,
       });
     }
 
     if (action === "workspace") {
-      if (!settings.enabled || actor.role === "viewer" && !settings.viewerAccess) {
+      if (!settings.enabled || !roleAccessAllowed(actor, settings)) {
         return respond({
           enabled: false,
           viewerAccess: settings.viewerAccess,
@@ -401,8 +427,16 @@ Deno.serve(async (req) => {
         throw new AuthError("Only a Super Admin can run renewal materialization during the local pilot.", 403);
       }
       const asOf = optionalDate(body.asOf) ?? new Date().toISOString();
+      const pipelineId = cleanText(body.pipelineId);
+      if (!pipelineId) {
+        throw new AuthError("Choose the Renewal pipeline to scan.", 400);
+      }
+      const pipeline = await loadPipeline(supabase, company.id, pipelineId);
+      if (pipeline.pipeline_type !== "renewal") {
+        throw new AuthError("Choose an enabled Renewal pipeline.", 400);
+      }
       const runKey = cleanText(body.runKey) ||
-        `manual:${company.id}:${asOf.slice(0, 10)}:${crypto.randomUUID()}`;
+        `manual-once:${pipelineId}:${asOf.slice(0, 10)}:${crypto.randomUUID()}`;
       const { data, error } = await supabase.rpc(
         "generate_due_renewal_pipeline_items",
         {

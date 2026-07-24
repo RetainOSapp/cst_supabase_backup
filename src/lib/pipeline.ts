@@ -112,6 +112,12 @@ export interface ClientPipelineItem {
 export interface PipelineWorkspace {
   enabled: boolean;
   viewerAccess: boolean;
+  roleAccess?: {
+    director: boolean;
+    support: boolean;
+    csm: boolean;
+    viewer: boolean;
+  };
   canWrite: boolean;
   actorRole: PipelineActorRole | null;
   pipelines: CompanyPipeline[];
@@ -161,6 +167,18 @@ export interface RenewalScanResult {
   createdCount: number;
   skippedCount: number;
   items?: ClientPipelineItem[];
+}
+
+export interface RenewalPreviewCandidate {
+  contract_id: string;
+  client_id: string;
+  pipeline_id: string;
+  entry_stage_id: string;
+  contract_end_at: string | null;
+  eligibility_status: "eligible" | "excluded";
+  exclusion_reason: string | null;
+  estimated_value_cents: number | null;
+  currency_code: string | null;
 }
 
 type WorkspaceAction =
@@ -288,9 +306,37 @@ export async function resolvePipelineLost(
   );
 }
 
-export async function runPipelineRenewalScan(companyLegacyId: string) {
+export async function previewPipelineRenewals(
+  companyLegacyId: string,
+  pipelineId: string,
+) {
+  const { data, error } = await supabase.functions.invoke(
+    "manage-pipeline-automation",
+    {
+      body: {
+        action: "preview_renewals",
+        companyLegacyId,
+        pipelineId,
+      },
+    },
+  );
+  if (error || data?.error) {
+    const message =
+      typeof data?.error === "string"
+        ? data.error
+        : await functionErrorMessage(error, "Renewal preview failed.");
+    throw new Error(message);
+  }
+  return (data?.candidates ?? []) as RenewalPreviewCandidate[];
+}
+
+export async function runPipelineRenewalScan(
+  companyLegacyId: string,
+  pipelineId: string,
+) {
   return invokePipelineWorkspace<RenewalScanResult>(
     "run_renewal_scan",
     companyLegacyId,
+    { pipelineId },
   );
 }

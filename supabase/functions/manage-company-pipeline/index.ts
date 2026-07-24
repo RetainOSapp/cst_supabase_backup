@@ -26,6 +26,7 @@ const ACTIONS = new Set([
   "update_stage",
   "reorder_stages",
   "archive_stage",
+  "update_role_access",
 ]);
 const PIPELINE_TYPES = new Set(["renewal", "expansion"]);
 const VALUE_SOURCES = new Set(["current_contract", "fixed", "none"]);
@@ -398,7 +399,7 @@ async function listConfiguration(
   const [settingsResult, pipelinesResult, stagesResult] = await Promise.all([
     supabase
       .from("company_settings")
-      .select("enable_pipeline, enable_pipeline_viewer_access")
+      .select("enable_pipeline, enable_pipeline_director_access, enable_pipeline_support_access, enable_pipeline_csm_access, enable_pipeline_viewer_access")
       .eq("company_id", companyId)
       .maybeSingle(),
     supabase
@@ -421,11 +422,17 @@ async function listConfiguration(
   if (stagesResult.error) throw stagesResult.error;
   const settings = settingsResult.data ?? {
       enable_pipeline: false,
+      enable_pipeline_director_access: true,
+      enable_pipeline_support_access: true,
+      enable_pipeline_csm_access: true,
       enable_pipeline_viewer_access: false,
     };
   return {
     settings,
     masterEnabled: settings.enable_pipeline === true,
+    directorAccessEnabled: settings.enable_pipeline_director_access !== false,
+    supportAccessEnabled: settings.enable_pipeline_support_access !== false,
+    csmAccessEnabled: settings.enable_pipeline_csm_access !== false,
     viewerAccessEnabled: settings.enable_pipeline_viewer_access === true,
     pipelines: (pipelinesResult.data ?? []).map((pipeline) => ({
       ...pipeline,
@@ -501,6 +508,44 @@ Deno.serve(async (req) => {
     if (action === "list_configuration") {
       return respond({
         ok: true,
+        ...(await listConfiguration(supabase, company.id)),
+      });
+    }
+
+    if (action === "update_role_access") {
+      if (actor.role !== "super_admin") {
+        throw new AuthError(
+          "Only a Super Admin can change Pipeline role access.",
+          403,
+        );
+      }
+      for (const key of [
+        "directorAccessEnabled",
+        "supportAccessEnabled",
+        "csmAccessEnabled",
+        "viewerAccessEnabled",
+      ]) {
+        if (typeof body[key] !== "boolean") {
+          throw new AuthError(`${key} must be true or false.`, 400);
+        }
+      }
+      const { data, error } = await supabase.rpc(
+        "update_company_pipeline_role_access_with_audit",
+        {
+          p_company_id: company.id,
+          p_director_access: body.directorAccessEnabled,
+          p_support_access: body.supportAccessEnabled,
+          p_csm_access: body.csmAccessEnabled,
+          p_viewer_access: body.viewerAccessEnabled,
+          p_actor_auth_user_id: authenticatedActor.id,
+          p_actor_member_id: actor.memberId,
+          p_actor_role: actor.role,
+        },
+      );
+      if (error) throw error;
+      return respond({
+        ok: true,
+        settings: Array.isArray(data) ? data[0] : data,
         ...(await listConfiguration(supabase, company.id)),
       });
     }

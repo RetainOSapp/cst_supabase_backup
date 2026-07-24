@@ -6309,6 +6309,7 @@ export function SaasClientDetail({
           canManage={
             teamSource === "app_owned" && canManageCompanyDefinitions
           }
+          canManageAccess={isSuperAdmin && teamSource === "app_owned"}
         />
       ) : (
         settingsLoading && settingsSource === "mirror" && !companySettings.id ? (

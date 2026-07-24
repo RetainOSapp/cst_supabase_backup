@@ -124,6 +124,8 @@ mixed reasons, but they are not active Jay QA asks unless copied here.
 - `[~]` `[qa]` Observe the Pipeline release with MM for one week before broad rollout or advanced automation/reporting.
   - Remaining human check: Jay signs into production and visually confirms ES/MM navigation, workspace, drawers, Admin Pipelines, and existing Dashboard/Clients/Tasks/Beacon surfaces. No business-data mutation is required.
   - Sales Kick pipeline definitions/items, Viewer access, renewal scan/scheduler automation, Daily Pulse integration, forecasts, conversion funnels, AI analysis, Slack/email reminders, and broader rollout remain separate decisions.
+  - 2026-07-24 local release candidate adds SuperAdmin-controlled Director/Support/CSM/Viewer workspace gates per company. Enforcement covers sidebar discovery, workspace reads/writes, direct routes, automation preview, and defensive table policies; defaults preserve current company behavior until explicitly changed.
+  - The same candidate separates read-only renewal preview from a confirmed, audited, contract-idempotent SuperAdmin one-time scan. It does not enable recurring automation; production migration/function/frontend release and MM Director-only configuration remain gated.
 
 ## Current Foundation
 

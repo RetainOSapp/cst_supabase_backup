@@ -26,6 +26,7 @@
     "pipeline:verify": "node scripts/verify-pipeline-phase02.mjs",
     "pipeline:verify:phase34": "node scripts/verify-pipeline-phase34.mjs",
     "pipeline:verify:early-renewal": "node scripts/verify-pipeline-early-renewal.mjs",
+    "pipeline:verify:role-access": "node scripts/verify-pipeline-role-access.mjs",
     "dashboard:verify:renewal-reporting": "node scripts/verify-dashboard-renewal-reporting.mjs",
     "dashboard:verify:churn-chart-period": "node scripts/verify-dashboard-churn-chart-period.mjs",
     "dashboard:verify:mm-lifecycle": "node scripts/verify-mm-dashboard-lifecycle.mjs",

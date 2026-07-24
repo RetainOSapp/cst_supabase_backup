@@ -10,6 +10,9 @@ import type {
 
 interface PipelineConfigurationPayload {
   masterEnabled: boolean;
+  directorAccessEnabled: boolean;
+  supportAccessEnabled: boolean;
+  csmAccessEnabled: boolean;
   viewerAccessEnabled: boolean;
   pipelines: PipelineDefinition[];
   stages: PipelineStage[];
@@ -18,6 +21,7 @@ interface PipelineConfigurationPayload {
 interface PipelineSetupProps {
   companyLegacyId: string;
   canManage: boolean;
+  canManageAccess: boolean;
   isAppOwned: boolean;
 }
 
@@ -321,12 +325,26 @@ function PipelineEditor({
   );
 }
 
-export function PipelineSetup({ companyLegacyId, canManage, isAppOwned }: PipelineSetupProps) {
+export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isAppOwned }: PipelineSetupProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [payload, setPayload] = useState<PipelineConfigurationPayload>({ masterEnabled: false, viewerAccessEnabled: false, pipelines: [], stages: [] });
+  const [payload, setPayload] = useState<PipelineConfigurationPayload>({
+    masterEnabled: false,
+    directorAccessEnabled: true,
+    supportAccessEnabled: true,
+    csmAccessEnabled: true,
+    viewerAccessEnabled: false,
+    pipelines: [],
+    stages: [],
+  });
+  const [roleAccessDraft, setRoleAccessDraft] = useState({
+    director: true,
+    support: true,
+    csm: true,
+    viewer: false,
+  });
   const [selectedPipelineId, setSelectedPipelineId] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("Expansion");
@@ -343,6 +361,9 @@ export function PipelineSetup({ companyLegacyId, canManage, isAppOwned }: Pipeli
       const data = await invokeConfiguration({ action: "list_configuration", companyLegacyId });
       setPayload({
         masterEnabled: data.masterEnabled === true,
+        directorAccessEnabled: data.directorAccessEnabled !== false,
+        supportAccessEnabled: data.supportAccessEnabled !== false,
+        csmAccessEnabled: data.csmAccessEnabled !== false,
         viewerAccessEnabled: data.viewerAccessEnabled === true,
         pipelines: (data.pipelines ?? []) as PipelineDefinition[],
         stages: (data.stages ?? []) as PipelineStage[],
@@ -355,6 +376,20 @@ export function PipelineSetup({ companyLegacyId, canManage, isAppOwned }: Pipeli
   }, [companyLegacyId, isAppOwned]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    setRoleAccessDraft({
+      director: payload.directorAccessEnabled,
+      support: payload.supportAccessEnabled,
+      csm: payload.csmAccessEnabled,
+      viewer: payload.viewerAccessEnabled,
+    });
+  }, [
+    payload.csmAccessEnabled,
+    payload.directorAccessEnabled,
+    payload.supportAccessEnabled,
+    payload.viewerAccessEnabled,
+  ]);
 
   useEffect(() => {
     if (payload.pipelines.length === 0) {
@@ -435,11 +470,62 @@ export function PipelineSetup({ companyLegacyId, canManage, isAppOwned }: Pipeli
 
       <div className={`rounded-lg border px-4 py-3 text-sm ${payload.masterEnabled ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
         <strong>{payload.masterEnabled ? "Pipeline is enabled for this company." : "Pipeline is disabled for this company."}</strong>{" "}
-        The master feature gate is controlled in Company Settings. Viewer access is {payload.viewerAccessEnabled ? "enabled" : "disabled"}.
+        The master feature gate is controlled in Company Settings.
       </div>
 
       {error ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{error}</span><button type="button" onClick={() => void load()} disabled={loading || saving} className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Retry</button></div> : null}
       {notice ? <div role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div> : null}
+
+      <section className="rounded-xl border border-[#dfe5ec] bg-white p-5 shadow-sm" aria-labelledby="pipeline-role-access">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 id="pipeline-role-access" className="text-base font-semibold text-[#162b3e]">Workspace access by role</h3>
+            <p className="mt-1 max-w-3xl text-sm text-[#667085]">Choose which company roles can see and use Pipeline. Super Admin access is always retained. CSM assignment scoping still applies when CSM access is enabled.</p>
+          </div>
+          {!canManageAccess ? <span className="w-fit rounded-full border border-[#d0d5dd] bg-[#f8fafc] px-3 py-1 text-xs font-semibold text-[#667085]">Super Admin controlled</span> : null}
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {([
+            ["director", "Directors", "Company-wide operational access"],
+            ["support", "Support", "Company-wide operational access"],
+            ["csm", "CSMs", "Assigned clients only"],
+            ["viewer", "Viewers", "Read-only company access"],
+          ] as const).map(([key, label, description]) => (
+            <label key={key} className="flex min-h-[76px] items-start gap-3 rounded-lg border border-[#d0d5dd] bg-[#f8fafc] px-4 py-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={roleAccessDraft[key]}
+                disabled={!canManageAccess || saving}
+                onChange={(event) => setRoleAccessDraft((current) => ({ ...current, [key]: event.target.checked }))}
+              />
+              <span><span className="block text-sm font-semibold text-[#344054]">{label}</span><span className="mt-1 block text-xs text-[#667085]">{description}</span></span>
+            </label>
+          ))}
+        </div>
+        {canManageAccess ? (
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void act("update_role_access", {
+                directorAccessEnabled: roleAccessDraft.director,
+                supportAccessEnabled: roleAccessDraft.support,
+                csmAccessEnabled: roleAccessDraft.csm,
+                viewerAccessEnabled: roleAccessDraft.viewer,
+              }).then((result) => {
+                if (result) {
+                  setNotice("Pipeline role access was saved.");
+                  window.dispatchEvent(new CustomEvent("retainos:pipeline-visibility-changed", { detail: { companyLegacyId } }));
+                }
+              })}
+              className="rounded-md bg-[#162b3e] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {saving ? "Saving..." : "Save role access"}
+            </button>
+          </div>
+        ) : null}
+      </section>
 
       {showCreate ? (
         <section className="rounded-lg border border-[#dfe5ec] bg-white p-4">

@@ -87,17 +87,20 @@ async function resolveManager(
   return { role: "director", memberId: membership.id as string };
 }
 
-async function isPipelineEnabled(
+async function loadPipelineAccess(
   supabase: SupabaseServiceClient,
   companyId: string,
 ) {
   const { data, error } = await supabase
     .from("company_settings")
-    .select("enable_pipeline")
+    .select("enable_pipeline, enable_pipeline_director_access")
     .eq("company_id", companyId)
     .maybeSingle();
   if (error) throw error;
-  return data?.enable_pipeline === true;
+  return {
+    enabled: data?.enable_pipeline === true,
+    directorAccess: data?.enable_pipeline_director_access !== false,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -122,13 +125,16 @@ Deno.serve(async (req) => {
     const company = await loadCompany(supabase, companyLegacyId);
     const actor = await resolveManager(supabase, authenticatedActor, company.id);
     const asOf = optionalDate(body.asOf);
-    const pipelineEnabled = await isPipelineEnabled(supabase, company.id);
+    const pipelineAccess = await loadPipelineAccess(supabase, company.id);
 
-    if (!pipelineEnabled) {
+    if (!pipelineAccess.enabled) {
       if (action === "preview_renewals") {
         return respond({ ok: true, enabled: false, asOf, candidates: [] });
       }
       throw new AuthError("Pipeline is disabled for this company.", 403);
+    }
+    if (actor.role === "director" && !pipelineAccess.directorAccess) {
+      throw new AuthError("Pipeline access is disabled for Directors.", 403);
     }
 
     if (action === "preview_renewals") {
@@ -151,7 +157,7 @@ Deno.serve(async (req) => {
       );
     }
     const runKey = cleanText(body.runKey) ||
-      `manual:${company.id}:${asOf.slice(0, 10)}:${crypto.randomUUID()}`;
+      `manual-once:${cleanText(body.pipelineId)}:${asOf.slice(0, 10)}:${crypto.randomUUID()}`;
     const { data, error } = await supabase.rpc(
       "generate_due_renewal_pipeline_items",
       {

@@ -157,7 +157,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       .then(({ data, error }) => {
         if (cancelled || error || data?.error) return;
         const viewerAllowed = role !== "viewer" || data?.viewerAccess === true;
-        setPipelineVisible(data?.enabled === true && viewerAllowed);
+        setPipelineVisible(
+          data?.enabled === true &&
+          data?.roleAllowed === true &&
+          viewerAllowed,
+        );
       })
       .catch(() => {
         if (!cancelled) setPipelineVisible(false);
