@@ -213,3 +213,13 @@ Promote the local quality-v3 candidate to the documented production-approval
 and pilot gate. No P0–P3 evaluation blocker remains. Production must still be
 released disabled-first, and human pilot QA remains mandatory before enabling
 any company.
+
+## Visual feedback workflow
+
+The local-only QA viewer builds from the Git-ignored private corpus and provider
+results. It presents five real use cases plus the synthetic injection case,
+including side-by-side transcript/evidence navigation, full analysis,
+quarantine behavior, independent ratings, and per-case feedback. Feedback stays
+in browser storage until explicitly exported as JSON. The viewer binds only to
+`127.0.0.1`, carries `noindex` metadata, and passed its 19/19 artifact checks
+plus interactive desktop and mobile browser QA.
