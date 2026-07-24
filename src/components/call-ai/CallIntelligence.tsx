@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "../../lib/supabase.ts";
 
@@ -151,13 +157,31 @@ interface DetailResponse {
 interface Access {
   role: string;
   canReconcile: boolean;
+  canUpload: boolean;
   canRun: boolean;
+}
+
+interface UploadOptions {
+  clients: Array<{
+    id: string;
+    client_name: string | null;
+    client_business: string | null;
+    client_email: string | null;
+    program_status_value: string | null;
+  }>;
+  members: Array<{
+    id: string;
+    name: string | null;
+    email: string | null;
+    role: string | null;
+  }>;
 }
 
 export interface CallIntelligenceDevelopmentFixture {
   calls: CallRow[];
   metrics: Metrics;
   access: Access;
+  uploadOptions?: UploadOptions;
   details: Record<string, DetailResponse>;
 }
 
@@ -169,6 +193,12 @@ function formatDate(value: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+function currentLocalDateTime() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
 function formatDuration(seconds: number | null) {
@@ -287,6 +317,10 @@ export function CallIntelligence({
   const [calls, setCalls] = useState<CallRow[]>([]);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [access, setAccess] = useState<Access | null>(null);
+  const [uploadOptions, setUploadOptions] = useState<UploadOptions>({
+    clients: [],
+    members: [],
+  });
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -300,6 +334,15 @@ export function CallIntelligence({
   const [sentimentFilter, setSentimentFilter] = useState("all");
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadForm, setUploadForm] = useState({
+    title: "",
+    occurredAt: currentLocalDateTime(),
+    durationMinutes: "",
+    clientId: "",
+    assignedMemberId: "",
+    transcript: "",
+  });
   const transcriptRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
@@ -311,6 +354,9 @@ export function CallIntelligence({
         setCalls(developmentFixture.calls);
         setMetrics(developmentFixture.metrics);
         setAccess(developmentFixture.access);
+        setUploadOptions(
+          developmentFixture.uploadOptions ?? { clients: [], members: [] },
+        );
         setLoading(false);
         return;
       }
@@ -328,10 +374,12 @@ export function CallIntelligence({
         setCalls([]);
         setMetrics(null);
         setAccess(null);
+        setUploadOptions({ clients: [], members: [] });
       } else {
         setCalls(data.calls ?? []);
         setMetrics(data.metrics ?? null);
         setAccess(data.access ?? null);
+        setUploadOptions(data.uploadOptions ?? { clients: [], members: [] });
       }
       setLoading(false);
     }
@@ -487,6 +535,96 @@ export function CallIntelligence({
   function selectEvidence(evidence: Evidence) {
     setSelectedEvidence(evidence);
     setTranscriptOpen(true);
+  }
+
+  async function submitManualUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (actionBusy) return;
+    setActionBusy("manual_upload");
+    setError(null);
+    setSuccess(null);
+    const durationMinutes = uploadForm.durationMinutes.trim();
+    const durationSeconds = durationMinutes
+      ? Math.round(Number(durationMinutes) * 60)
+      : null;
+    const occurredAt = new Date(uploadForm.occurredAt);
+    if (
+      !uploadForm.title.trim() ||
+      !uploadForm.clientId ||
+      !uploadForm.assignedMemberId ||
+      !uploadForm.transcript.trim()
+    ) {
+      setError("Complete the title, client, team member, and transcript.");
+      setActionBusy(null);
+      return;
+    }
+    if (Number.isNaN(occurredAt.getTime())) {
+      setError("Choose a valid call date and time.");
+      setActionBusy(null);
+      return;
+    }
+    if (
+      durationMinutes &&
+      (durationSeconds == null ||
+        !Number.isFinite(durationSeconds) ||
+        !Number.isInteger(durationSeconds) ||
+        durationSeconds < 0 ||
+        durationSeconds > 86_400)
+    ) {
+      setError("Duration must be between 0 and 1440 minutes.");
+      setActionBusy(null);
+      return;
+    }
+    if (uploadForm.transcript.trim().length > 500_000) {
+      setError("The transcript cannot exceed 500,000 characters.");
+      setActionBusy(null);
+      return;
+    }
+    if (developmentFixture) {
+      setUploadOpen(false);
+      setSuccess(
+        "Development preview: this transcript would be securely queued for analysis.",
+      );
+      setActionBusy(null);
+      return;
+    }
+    const { data, error: invokeError } = await supabase.functions.invoke(
+      "manage-call-intelligence",
+      {
+        body: {
+          action: "manual_upload",
+          companyId,
+          title: uploadForm.title.trim(),
+          occurredAt: occurredAt.toISOString(),
+          durationSeconds,
+          clientId: uploadForm.clientId,
+          assignedMemberId: uploadForm.assignedMemberId,
+          transcript: uploadForm.transcript.trim(),
+        },
+      },
+    );
+    if (invokeError || data?.error) {
+      setError(
+        data?.error ||
+          invokeError?.message ||
+          "The transcript could not be uploaded.",
+      );
+      setActionBusy(null);
+      return;
+    }
+    setUploadOpen(false);
+    setUploadForm({
+      title: "",
+      occurredAt: currentLocalDateTime(),
+      durationMinutes: "",
+      clientId: "",
+      assignedMemberId: "",
+      transcript: "",
+    });
+    setSuccess("Transcript uploaded. The first analysis is queued.");
+    setActionBusy(null);
+    setReloadKey((value) => value + 1);
+    if (data.call?.id) openCall(data.call.id);
   }
 
   useEffect(() => {
@@ -798,6 +936,15 @@ export function CallIntelligence({
               Reconcile {metrics.needsReconciliation}
             </button>
           ) : null}
+          {access?.canUpload ? (
+            <button
+              type="button"
+              onClick={() => setUploadOpen(true)}
+              className="rounded-lg bg-[#5b4cf0] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#4b3bd9]"
+            >
+              + Add transcript
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setReloadKey((value) => value + 1)}
@@ -811,6 +958,205 @@ export function CallIntelligence({
       {error ? (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      ) : null}
+      {success ? (
+        <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {success}
+        </div>
+      ) : null}
+
+      {uploadOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a]/55 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !actionBusy) {
+              setUploadOpen(false);
+            }
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="manual-transcript-title"
+            onSubmit={submitManualUpload}
+            className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between border-b border-[#e4e9f0] px-6 py-5">
+              <div>
+                <h2
+                  id="manual-transcript-title"
+                  className="text-xl font-bold text-[#17243a]"
+                >
+                  Add a meeting transcript
+                </h2>
+                <p className="mt-1 text-sm text-[#667085]">
+                  Select the known client and team member before analysis.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={Boolean(actionBusy)}
+                onClick={() => setUploadOpen(false)}
+                className="rounded-lg px-2 py-1 text-xl text-[#667085] hover:bg-[#f2f4f7] disabled:opacity-50"
+                aria-label="Close transcript upload"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-5 px-6 py-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="text-sm font-semibold text-[#344054]">
+                  Call title
+                  <input
+                    required
+                    maxLength={500}
+                    value={uploadForm.title}
+                    onChange={(event) =>
+                      setUploadForm((value) => ({
+                        ...value,
+                        title: event.target.value,
+                      }))
+                    }
+                    placeholder="Client name — check-in call"
+                    className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 font-normal"
+                  />
+                </label>
+                <label className="text-sm font-semibold text-[#344054]">
+                  Date and time
+                  <input
+                    required
+                    type="datetime-local"
+                    value={uploadForm.occurredAt}
+                    onChange={(event) =>
+                      setUploadForm((value) => ({
+                        ...value,
+                        occurredAt: event.target.value,
+                      }))
+                    }
+                    className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 font-normal"
+                  />
+                </label>
+                <label className="text-sm font-semibold text-[#344054]">
+                  Client
+                  <select
+                    required
+                    value={uploadForm.clientId}
+                    onChange={(event) =>
+                      setUploadForm((value) => ({
+                        ...value,
+                        clientId: event.target.value,
+                      }))
+                    }
+                    className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 font-normal"
+                  >
+                    <option value="">Choose a client</option>
+                    {uploadOptions.clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.client_name ||
+                          client.client_business ||
+                          client.client_email ||
+                          client.id}
+                        {client.client_business &&
+                        client.client_business !== client.client_name
+                          ? ` · ${client.client_business}`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-[#344054]">
+                  Team member on the call
+                  <select
+                    required
+                    value={uploadForm.assignedMemberId}
+                    onChange={(event) =>
+                      setUploadForm((value) => ({
+                        ...value,
+                        assignedMemberId: event.target.value,
+                      }))
+                    }
+                    className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 font-normal"
+                  >
+                    <option value="">Choose a team member</option>
+                    {uploadOptions.members.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name || member.email || member.id}
+                        {member.role ? ` · ${member.role}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="block text-sm font-semibold text-[#344054]">
+                Duration in minutes
+                <input
+                  type="number"
+                  min="0"
+                  max="1440"
+                  step="1"
+                  value={uploadForm.durationMinutes}
+                  onChange={(event) =>
+                    setUploadForm((value) => ({
+                      ...value,
+                      durationMinutes: event.target.value,
+                    }))
+                  }
+                  placeholder="Optional"
+                  className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-2.5 font-normal md:w-48"
+                />
+              </label>
+
+              <label className="block text-sm font-semibold text-[#344054]">
+                Transcript
+                <textarea
+                  required
+                  maxLength={500_000}
+                  rows={14}
+                  value={uploadForm.transcript}
+                  onChange={(event) =>
+                    setUploadForm((value) => ({
+                      ...value,
+                      transcript: event.target.value,
+                    }))
+                  }
+                  placeholder={"00:00:00 — Team member: Welcome…\n00:00:06 — Client: Thanks…"}
+                  className="mt-2 block w-full rounded-lg border border-[#d0d5dd] px-3 py-3 font-mono text-sm font-normal leading-6"
+                />
+                <span className="mt-1 block text-right text-xs font-normal text-[#98a2b3]">
+                  {uploadForm.transcript.length.toLocaleString()} / 500,000
+                </span>
+              </label>
+
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                Pilot retention: this raw transcript is kept until you approve
+                the analysis. It will not update Client Notes or Next Steps.
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-[#e4e9f0] px-6 py-4">
+              <button
+                type="button"
+                disabled={Boolean(actionBusy)}
+                onClick={() => setUploadOpen(false)}
+                className="retainos-button-secondary px-4 py-2 text-sm disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={Boolean(actionBusy)}
+                className="rounded-lg bg-[#5b4cf0] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {actionBusy === "manual_upload"
+                  ? "Uploading…"
+                  : "Upload and analyze"}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
 

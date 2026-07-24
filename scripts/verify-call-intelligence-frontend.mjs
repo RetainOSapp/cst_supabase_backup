@@ -28,6 +28,10 @@ const checks = [
   ["matched client named in summary", intelligence, /Matched client: \{detail\.call\.client\.client_name\}/],
   ["sales discovery label", intelligence, /sales_discovery: "Sales \/ Discovery"/],
   ["on-demand prompt actions", intelligence, /run_on_demand/],
+  ["manual upload is capability-gated", intelligence, /access\?\.canUpload/],
+  ["manual upload uses actor-scoped API", intelligence, /action: "manual_upload"/],
+  ["manual upload requires client and member", intelligence, /clientId: uploadForm\.clientId[\s\S]+assignedMemberId: uploadForm\.assignedMemberId/],
+  ["manual upload states pilot retention", intelligence, /Pilot retention:/],
   ["transcript bounded viewport", intelligence, /max-h-\[34rem\]/],
   ["CSM company toggle loaded", account, /enable_call_ai_for_csms/],
   ["CSM capability gated", account, /isCsm && callAiForCsms/],
@@ -53,10 +57,16 @@ assert.doesNotMatch(
 );
 passed += 1;
 assert.doesNotMatch(
+  intelligence,
+  /integration.token|x-retainos-integration-token|x-webhook-secret/i,
+  "browser manual upload must not contain an integration token",
+);
+passed += 1;
+assert.doesNotMatch(
   developmentPreview,
   /Aron Lucas|Jay Goncalves|Vanessa Valencia|@gmail\.com/i,
   "development fixtures must not contain supplied customer/person data",
 );
 passed += 1;
 
-console.log(`Call Intelligence frontend verification: ${passed}/${checks.length + 4} passed`);
+console.log(`Call Intelligence frontend verification: ${passed}/${checks.length + 5} passed`);

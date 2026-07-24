@@ -16,12 +16,14 @@ import { sha256Hex } from "../ingest-call-intelligence/_shared/contracts.mjs";
 const ACTIONS = new Set([
   "list",
   "detail",
+  "manual_upload",
   "reconcile",
   "ignore",
   "assign_member",
   "run_on_demand",
   "reprocess",
 ]);
+const MAX_TRANSCRIPT_CHARACTERS = 500_000;
 const ACTIVE_CLIENT_STATUSES = new Set([
   "front-end",
   "back-end",
@@ -45,6 +47,10 @@ function cleanText(value: unknown, maxLength = 500) {
 
 function normalizeEmail(value: unknown) {
   return cleanText(value, 320).toLowerCase();
+}
+
+function normalizeProgramStatus(value: unknown) {
+  return cleanText(value, 100).toLowerCase().replace(/[_\s]+/g, "-");
 }
 
 function isUuid(value: string) {
@@ -159,6 +165,42 @@ function assertDirector(access) {
       403,
     );
   }
+}
+
+function requiredManualText(
+  value: unknown,
+  field: string,
+  maxLength: number,
+) {
+  if (typeof value !== "string") {
+    throw new ManageError(`${field} is required.`);
+  }
+  const text = value.trim();
+  if (!text) throw new ManageError(`${field} is required.`);
+  if (text.length > maxLength) {
+    throw new ManageError(`${field} is too long.`);
+  }
+  return text;
+}
+
+function manualOccurredAt(value: unknown) {
+  const text = requiredManualText(value, "occurredAt", 100);
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    throw new ManageError("Choose a valid call date and time.");
+  }
+  return date.toISOString();
+}
+
+function manualDurationSeconds(value: unknown) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 86_400) {
+    throw new ManageError(
+      "Duration must be a whole number of seconds between 0 and 86400.",
+    );
+  }
+  return parsed;
 }
 
 async function loadCall(supabase, companyId: string, callId: string) {
@@ -385,6 +427,204 @@ async function basePrompt(supabase) {
   return data;
 }
 
+async function manualUploadOptions(supabase, companyId: string) {
+  const [clientsResult, membersResult] = await Promise.all([
+    supabase
+      .from("clients")
+      .select("id, client_name, client_business, client_email, program_status_value")
+      .eq("company_id", companyId)
+      .is("archived_at", null)
+      .order("client_name")
+      .limit(2_000),
+    supabase
+      .from("company_members")
+      .select("id, name, email, role")
+      .eq("company_id", companyId)
+      .eq("status", "active")
+      .is("archived_at", null)
+      .order("name")
+      .limit(1_000),
+  ]);
+  if (clientsResult.error) throw clientsResult.error;
+  if (membersResult.error) throw membersResult.error;
+  return {
+    clients: (clientsResult.data ?? []).filter((client) =>
+      ACTIVE_CLIENT_STATUSES.has(
+        normalizeProgramStatus(client.program_status_value),
+      )
+    ),
+    members: membersResult.data ?? [],
+  };
+}
+
+async function manualUpload(supabase, company, access, actor, body) {
+  assertDirector(access);
+  const clientId = cleanText(body.clientId);
+  const assignedMemberId = cleanText(body.assignedMemberId);
+  if (!clientId) throw new ManageError("Choose a client.");
+  if (!assignedMemberId) throw new ManageError("Choose a company team member.");
+
+  const [clientResult, memberResult] = await Promise.all([
+    supabase
+      .from("clients")
+      .select(
+        "id, client_name, client_business, client_email, program_status_value, archived_at",
+      )
+      .eq("id", clientId)
+      .eq("company_id", company.id)
+      .maybeSingle(),
+    supabase
+      .from("company_members")
+      .select("id, name, email, role, status, archived_at")
+      .eq("id", assignedMemberId)
+      .eq("company_id", company.id)
+      .maybeSingle(),
+  ]);
+  if (clientResult.error) throw clientResult.error;
+  if (memberResult.error) throw memberResult.error;
+  const client = clientResult.data;
+  const member = memberResult.data;
+  if (
+    !client ||
+    client.archived_at ||
+    !ACTIVE_CLIENT_STATUSES.has(
+      normalizeProgramStatus(client.program_status_value),
+    )
+  ) {
+    throw new ManageError("Choose an active client.");
+  }
+  if (!member || member.archived_at || member.status !== "active") {
+    throw new ManageError("Choose an active company team member.");
+  }
+
+  const title = requiredManualText(body.title, "title", 500);
+  const transcript = requiredManualText(
+    body.transcript,
+    "transcript",
+    MAX_TRANSCRIPT_CHARACTERS,
+  );
+  const occurredAt = manualOccurredAt(body.occurredAt);
+  const durationSeconds = manualDurationSeconds(body.durationSeconds);
+  const prompt = await basePrompt(supabase);
+  const transcriptHash = await sha256Hex(transcript);
+  const promptHash = await sha256Hex(String(prompt.prompt_text));
+  const now = new Date().toISOString();
+  const providerCallId = `manual:${crypto.randomUUID()}`;
+
+  const { data: call, error: callError } = await supabase
+    .from("call_intelligence_calls")
+    .insert({
+      company_id: company.id,
+      client_id: client.id,
+      assigned_member_id: member.id,
+      schema_version: "call_intelligence.v1",
+      provider: "manual",
+      provider_call_id: providerCallId,
+      title,
+      occurred_at: occurredAt,
+      duration_seconds: durationSeconds,
+      host_name: member.name ?? null,
+      host_email_normalized: normalizeEmail(member.email) || null,
+      match_status: "matched",
+      processing_status: "queued",
+      matched_by: "manual_upload",
+      match_reason: "Client selected by an authorized RetainOS reviewer.",
+      transcript_sha256: transcriptHash,
+      queued_at: now,
+    })
+    .select("id, match_status, processing_status")
+    .single();
+  if (callError) throw callError;
+
+  let run;
+  try {
+    const { error: transcriptError } = await supabase
+      .from("call_intelligence_transcripts")
+      .insert({
+        call_id: call.id,
+        transcript_text: transcript,
+        transcript_sha256: transcriptHash,
+        character_count: transcript.length,
+        source_format: "plaintext",
+      });
+    if (transcriptError) throw transcriptError;
+
+    const participantRows = [
+      {
+        call_id: call.id,
+        name: member.name ?? null,
+        email_normalized: normalizeEmail(member.email) || null,
+        participant_kind: "internal",
+        provider_role: "host",
+        matched_client_id: null,
+        matched_member_id: member.id,
+        metadata: { source: "manual_upload" },
+      },
+      {
+        call_id: call.id,
+        name: client.client_name || client.client_business || null,
+        email_normalized: normalizeEmail(client.client_email) || null,
+        participant_kind: "external",
+        provider_role: "invitee",
+        matched_client_id: client.id,
+        matched_member_id: null,
+        metadata: { source: "manual_upload" },
+      },
+    ];
+    if (
+      participantRows[0].email_normalized &&
+      participantRows[0].email_normalized ===
+        participantRows[1].email_normalized
+    ) {
+      participantRows[1].email_normalized = null;
+    }
+    const { error: participantError } = await supabase
+      .from("call_intelligence_participants")
+      .insert(participantRows);
+    if (participantError) throw participantError;
+
+    const runResult = await supabase
+      .from("call_intelligence_runs")
+      .insert({
+        company_id: company.id,
+        call_id: call.id,
+        prompt_definition_id: prompt.id,
+        prompt_version: prompt.version,
+        prompt_snapshot_sha256: promptHash,
+        run_kind: "fixed",
+        request_key: "manual_upload",
+        status: "queued",
+        created_by_auth_user_id: actor.id,
+      })
+      .select("id, status, run_kind, created_at")
+      .single();
+    if (runResult.error) throw runResult.error;
+    run = runResult.data;
+  } catch (childError) {
+    await supabase.from("call_intelligence_calls").delete().eq("id", call.id);
+    throw childError;
+  }
+
+  await audit(supabase, {
+    actor,
+    companyId: company.id,
+    callId: call.id,
+    title: "Call Intelligence transcript uploaded",
+    summary:
+      "An authorized reviewer uploaded one transcript and queued analysis.",
+    metadata: {
+      run_id: run.id,
+      provider: "manual",
+      client_id: client.id,
+      assigned_member_id: member.id,
+      transcript_character_count: transcript.length,
+      transcript_sha256: transcriptHash,
+    },
+  });
+  dispatchCallIntelligenceRun(run.id);
+  return { call, run };
+}
+
 async function enqueueRun(
   supabase,
   companyId,
@@ -450,19 +690,36 @@ Deno.serve(async (req) => {
     const access = await actorAccess(supabase, actor, company.id);
 
     if (action === "list") {
+      const canUpload =
+        access.role === "super_admin" || access.role === "director";
       return jsonResponse(req, {
         ok: true,
         access: {
           role: access.role,
           canReconcile:
             access.role === "super_admin" || access.role === "director",
+          canUpload,
           canRun:
             access.role === "super_admin" ||
             access.role === "director" ||
             access.role === "csm",
         },
+        uploadOptions: canUpload
+          ? await manualUploadOptions(supabase, company.id)
+          : { clients: [], members: [] },
         ...(await listCalls(supabase, company, access, body)),
       });
+    }
+
+    if (action === "manual_upload") {
+      const result = await manualUpload(
+        supabase,
+        company,
+        access,
+        actor,
+        body,
+      );
+      return jsonResponse(req, { ok: true, ...result }, 202);
     }
 
     const callId = cleanText(body.callId);

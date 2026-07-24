@@ -67,6 +67,12 @@ const checks = [
   ["no automatic client profile write", ingest, /never writes client Notes|Call Intelligence source ingested/],
   ["actor authentication", manage, /requireAuthenticatedActor/],
   ["Director-only reconciliation", manage, /function assertDirector/],
+  ["Director-only manual upload", manage, /async function manualUpload[\s\S]+assertDirector\(access\)/],
+  ["manual upload uses isolated provider", manage, /provider: "manual"/],
+  ["manual upload stores transcript separately", manage, /manualUpload[\s\S]+\.from\("call_intelligence_transcripts"\)/],
+  ["manual upload binds known client", manage, /client_id: client\.id[\s\S]+matched_by: "manual_upload"/],
+  ["manual upload binds known team member", manage, /assigned_member_id: member\.id/],
+  ["manual upload is bounded", manage, /MAX_TRANSCRIPT_CHARACTERS = 500_000/],
   ["Support read-only", manage, /Support access is read-only/],
   ["CSM assignment restriction", manage, /clientAuthorizedForCsm/],
   ["service-only worker", worker, /isServiceRoleRequest/],
@@ -145,5 +151,11 @@ assert.doesNotMatch(
   "ingestion must never update a client profile",
 );
 passed += 1;
+assert.doesNotMatch(
+  manage,
+  /\.from\("clients"\)\s*\.update/,
+  "management must never update a client profile",
+);
+passed += 1;
 
-console.log(`Call Intelligence Edge/source verification: ${passed}/${checks.length + 6} passed`);
+console.log(`Call Intelligence Edge/source verification: ${passed}/${checks.length + 7} passed`);

@@ -107,7 +107,34 @@ const fixture = {
   access: {
     role: "Director",
     canReconcile: true,
+    canUpload: true,
     canRun: true,
+  },
+  uploadOptions: {
+    clients: [
+      {
+        id: "00000000-0000-4000-8000-000000000101",
+        client_name: "Alex Morgan",
+        client_business: "Northstar Growth",
+        client_email: "alex@example.invalid",
+        program_status_value: "front-end",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000102",
+        client_name: "Riley Chen",
+        client_business: "Atlas Advisory",
+        client_email: "riley@example.invalid",
+        program_status_value: "back-end",
+      },
+    ],
+    members: [
+      {
+        id: "00000000-0000-4000-8000-000000000201",
+        name: "Jordan Lee",
+        email: "jordan@example.invalid",
+        role: "director",
+      },
+    ],
   },
   details: {
     "dev-call-renewal": {
