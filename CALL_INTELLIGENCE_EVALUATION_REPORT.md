@@ -223,3 +223,17 @@ quarantine behavior, independent ratings, and per-case feedback. Feedback stays
 in browser storage until explicitly exported as JSON. The viewer binds only to
 `127.0.0.1`, carries `noindex` metadata, and passed its 19/19 artifact checks
 plus interactive desktop and mobile browser QA.
+
+## Quality-v4 feedback closure
+
+Jay confirmed the Real Call 1 sentiment label but rejected its technically
+grounded quote as an unrepresentative example. `structured_v2_quality_v4`
+therefore adds representative, context-complete sentiment-evidence guidance,
+adds `sales_discovery` as a first-class type, and keeps client/company identity
+deterministic in the application rather than asking the model to guess it.
+The QA viewer now separates the $0.274668 three-real-call cost from the
+$0.011858 synthetic security request.
+
+This feedback closure used zero provider requests. Quality-v3 remains the paid
+promotion evidence; the first controlled pilot call is the human/provider
+observation gate for quality-v4 before any company enablement.

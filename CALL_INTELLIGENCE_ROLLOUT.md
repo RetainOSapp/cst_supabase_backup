@@ -1,15 +1,18 @@
 # Call Intelligence V1: Disabled-First Rollout
 
-Status: release candidate only. This checklist does not authorize production
-changes. Apply each production phase only after Jay explicitly approves it.
+Status: Phases A and B are live disabled; Phase C frontend release is ready.
+Jay approved Phases A–C on 2026-07-24. Pilot enablement remains separately
+gated.
 
 ## Release candidate
 
 - Branch/worktree: `codex/call-intelligence-v1` at
   `/private/tmp/cst-call-intelligence-v1`
-- Based on verified `origin/main`; the dirty Pipeline workspace is untouched.
-- No production migration, Edge deployment, token, entitlement, provider call,
-  frontend push, or Zapier change has occurred.
+- Merged with verified `origin/main` at `d9d5fae`; the dirty Pipeline workspace
+  is untouched.
+- Production database and Edge boundaries are deployed while globally paused.
+  No token, entitlement, allowance, call, transcript, run, usage event, provider
+  call, frontend push, or Zapier change has occurred.
 - V1 boundary: one RetainOS client account per call; multiple company members
   and participants from that same client are supported.
 
@@ -37,6 +40,18 @@ individual failures require Sol.
 
 ## Phase A — database, disabled
 
+Completed 2026-07-24:
+
+- foundation SHA-256:
+  `a6a12b62f68719ef9ee5929fc46978d54cd46be89a08ed47078e4b462f03ecc9`;
+- prompt seed SHA-256:
+  `2b9e2594b46506e347a72d1fb7040936bb47862119032b1a0058d4f1b565336c`;
+- both migrations applied to `zjauqflzxzsbpnivzsct`;
+- all six tables read back successfully; prompt seed contains
+  `structured_v2_quality_v4`;
+- `call_analysis` remains paused with zero entitlements, allowances, tokens,
+  calls, transcripts, participants, runs, and usage events.
+
 1. Record hashes for both migrations and rollbacks.
 2. Apply:
    - `20260723200000_call_intelligence_v1_foundation.sql`
@@ -53,6 +68,19 @@ Pre-traffic rollback may use the supplied drop scripts. After any traffic,
 never drop the tables; use operational rollback below.
 
 ## Phase B — Edge Functions, still disabled
+
+Completed 2026-07-24:
+
+- `ingest-call-intelligence` v1, JWT off,
+  `6d155f29fdb409e8c8cdd0f2fa9ce6ed96f359d578213a63b70e87b370c78aac`;
+- `manage-call-intelligence` v1, JWT on,
+  `b596c9379a0b414266f53c2718ef7a0229bef145a4ff7a18a61a09b9406d8a4a`;
+- `process-call-intelligence` v1, JWT on,
+  `0a0bedce509878d71ebc20513acb7424b703389470c335de73a833663bcdd85d`;
+- missing and invalid company-token probes returned 401;
+- anonymous management and processing probes returned 401;
+- post-probe readback remained globally paused with zero customer or usage
+  records and zero provider spend.
 
 Deploy:
 

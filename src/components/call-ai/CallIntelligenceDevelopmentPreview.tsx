@@ -11,7 +11,7 @@ const baseAnalysis = {
     "Alex is positive about retention gains, while flagging that onboarding documentation still needs attention. Jordan aligned on a concrete documentation review and owner.",
   clientSentiment: "positive" as const,
   teamMemberSentiment: "positive" as const,
-  callScore: 23,
+  callScore: 20,
 };
 
 const baseCall = {
@@ -89,7 +89,7 @@ const fixture = {
   ],
   metrics: {
     totalCalls: 128,
-    averageScore: 21.4,
+    averageScore: 17.7,
     clientSentiment: {
       positive: 92,
       neutral: 24,
@@ -217,24 +217,24 @@ const fixture = {
               },
             ],
             call_score: {
-              total: 23,
+              total: 20,
               agenda: {
                 score: 5,
                 rationale: "The purpose was clear but not framed as a formal agenda.",
                 evidence: [],
               },
               team_member_energy: {
-                score: 6,
+                score: 5,
                 rationale: "The team member was engaged and ownership-oriented.",
                 evidence: [],
               },
               recap: {
-                score: 6,
+                score: 5,
                 rationale: "The call ended with a concise ownership recap.",
                 evidence: [],
               },
               action_plan: {
-                score: 6,
+                score: 5,
                 rationale: "A named owner and due date were agreed.",
                 evidence: [],
               },
