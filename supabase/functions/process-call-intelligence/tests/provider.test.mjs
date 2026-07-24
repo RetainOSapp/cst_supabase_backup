@@ -336,6 +336,37 @@ test("parses native Fathom minute and hour timestamps with grounded roles", () =
   );
 });
 
+test("uses an exact parenthetical client account label as a trusted alias", () => {
+  const context = [
+    { name: "Ali Abdaal", role: "client" },
+    { name: "Jay Goncalves", role: "team_member" },
+  ];
+  const transcript =
+    "0:00 - Angus Parker (Ali Abdaal)\n" +
+    "  Things are heading in the right direction.\n" +
+    "0:27 - Jay Goncalves (Ethical Scaling)\n" +
+    "  I think we are on the same page.";
+
+  assert.deepEqual(
+    parseTranscriptUtterances(transcript, context).map(
+      ({ speaker_label, speaker_role }) => ({
+        speaker_label,
+        speaker_role,
+      }),
+    ),
+    [
+      {
+        speaker_label: "Angus Parker (Ali Abdaal)",
+        speaker_role: "client",
+      },
+      {
+        speaker_label: "Jay Goncalves (Ethical Scaling)",
+        speaker_role: "team_member",
+      },
+    ],
+  );
+});
+
 test("quarantines participant role collisions before analysis", () => {
   const exactCollision = [
     { name: "Shared Name", role: "client" },

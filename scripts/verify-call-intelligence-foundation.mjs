@@ -22,6 +22,10 @@ const esManualPilotPath =
   "supabase/migrations/20260724162000_enable_es_call_intelligence_manual_pilot.sql";
 const esManualPilotRollbackPath =
   "supabase/rollbacks/20260724162000_enable_es_call_intelligence_manual_pilot.sql";
+const onDemandStatusPath =
+  "supabase/migrations/20260724180000_call_intelligence_on_demand_status.sql";
+const onDemandStatusRollbackPath =
+  "supabase/rollbacks/20260724180000_call_intelligence_on_demand_status.sql";
 const configPath = "supabase/config.toml";
 const generatedTypesPath = "src/types/supabase.ts";
 const aiFoundationPath =
@@ -44,6 +48,8 @@ const [
   allowanceRoundingRollback,
   esManualPilot,
   esManualPilotRollback,
+  onDemandStatus,
+  onDemandStatusRollback,
   config,
   generatedTypes,
   aiFoundation,
@@ -61,6 +67,8 @@ const [
   readFile(allowanceRoundingRollbackPath, "utf8"),
   readFile(esManualPilotPath, "utf8"),
   readFile(esManualPilotRollbackPath, "utf8"),
+  readFile(onDemandStatusPath, "utf8"),
+  readFile(onDemandStatusRollbackPath, "utf8"),
   readFile(configPath, "utf8"),
   readFile(generatedTypesPath, "utf8"),
   readFile(aiFoundationPath, "utf8"),
@@ -190,6 +198,44 @@ const adminPolicyChecks = [
     "ES pilot rollback preserves evidence",
     esManualPilotRollback,
     /Preserve call,[\s\S]+transcript, run, usage, and audit evidence/,
+  ],
+];
+
+const onDemandStatusChecks = [
+  [
+    "on-demand terminal trigger",
+    onDemandStatus,
+    /after update of status on public\.call_intelligence_runs/,
+  ],
+  [
+    "on-demand status only",
+    onDemandStatus,
+    /new\.run_kind <> 'on_demand'[\s\S]+new\.status not in \('succeeded', 'failed'\)/,
+  ],
+  [
+    "successful base restores completed call",
+    onDemandStatus,
+    /v_base_status = 'succeeded' then 'completed'/,
+  ],
+  [
+    "repair never touches active runs",
+    onDemandStatus,
+    /not exists \([\s\S]+active_run\.status in \('queued', 'claimed'\)/,
+  ],
+  [
+    "trigger helper is not browser callable",
+    onDemandStatus,
+    /revoke all on function public\.restore_call_intelligence_status_after_on_demand\(\)[\s\S]+from public, anon, authenticated/,
+  ],
+  [
+    "on-demand status rollback removes trigger",
+    onDemandStatusRollback,
+    /drop trigger if exists call_intelligence_on_demand_restore_call_status/,
+  ],
+  [
+    "on-demand status rollback removes helper",
+    onDemandStatusRollback,
+    /drop function if exists public\.restore_call_intelligence_status_after_on_demand\(\)/,
   ],
 ];
 
@@ -334,6 +380,11 @@ for (const [label, source, pattern] of adminPolicyChecks) {
   passed += 1;
 }
 
+for (const [label, source, pattern] of onDemandStatusChecks) {
+  assert.match(source, pattern, label);
+  passed += 1;
+}
+
 execFileSync(
   process.execPath,
   ["scripts/sync-call-intelligence-structured-seed.mjs", "--check"],
@@ -342,5 +393,5 @@ execFileSync(
 passed += 1;
 
 console.log(
-  `Call Intelligence database contract: ${passed}/${checks.length + 6 + dependencyChecks.length + adminPolicyChecks.length} passed`,
+  `Call Intelligence database contract: ${passed}/${checks.length + 6 + dependencyChecks.length + adminPolicyChecks.length + onDemandStatusChecks.length} passed`,
 );

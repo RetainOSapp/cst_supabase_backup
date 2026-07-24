@@ -66,10 +66,16 @@ function normalizeComparableText(value) {
     .replace(/\s+/g, " ");
 }
 
+function parentheticalAliases(value) {
+  return [...String(value ?? "").matchAll(/\(([^()]*)\)/g)]
+    .map((match) => normalizeComparableText(match[1]))
+    .filter(Boolean);
+}
+
 function roleForSpeakerName(speakerName, participants) {
   const speaker = normalizeComparableText(speakerName);
   if (!speaker) return "unknown";
-  const matches = matchingParticipantsForSpeaker(speaker, participants);
+  const matches = matchingParticipantsForSpeaker(speakerName, participants);
   const roles = new Set(matches.map((participant) => participant.role));
   return roles.size === 1 ? [...roles][0] : "unknown";
 }
@@ -81,6 +87,12 @@ function matchingParticipantsForSpeaker(speakerName, participants) {
     (participant) =>
       normalizeComparableText(participant.name) === speaker,
   );
+  if (matches.length === 0) {
+    const aliases = new Set(parentheticalAliases(speakerName));
+    matches = participants.filter((participant) =>
+      aliases.has(normalizeComparableText(participant.name)),
+    );
+  }
   if (matches.length === 0) {
     const speakerWords = speaker.split(" ");
     matches = participants.filter((participant) => {
