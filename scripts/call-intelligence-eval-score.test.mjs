@@ -17,13 +17,21 @@ const result = JSON.parse(
 const transcript =
   "00:00:08 - Client: The implementation is working well and our team is confident.\n" +
   "00:00:20 - Team Member: I will send the renewal proposal by Friday.";
+const participantContext = [
+  { name: "Client", role: "client" },
+  { name: "Team Member", role: "team_member" },
+];
 
 test("collects unique evidence and verifies transcript grounding", () => {
   assert.equal(collectEvidence(result).length, 2);
   const score = scoreStructuredResult({
     output: result,
-    validation: validateStructuredV2(result),
+    validation: validateStructuredV2(result, {
+      transcript,
+      participantContext,
+    }),
     transcript,
+    participantContext,
     expectations: {
       call_type: "renewal",
       client_sentiment: "positive",
@@ -34,6 +42,9 @@ test("collects unique evidence and verifies transcript grounding", () => {
   assert.equal(score.schemaValid, true);
   assert.equal(score.evidence.total, 2);
   assert.equal(score.evidence.supported, 2);
+  assert.equal(score.evidence.quoteSupported, 2);
+  assert.equal(score.evidence.roleSupported, 2);
+  assert.ok(score.evidence.checks.every((item) => item.path));
   assert.equal(score.expectationsPassed, true);
   assert.equal(score.hardPass, true);
 });
@@ -45,6 +56,7 @@ test("fails the hard gate for an unsupported quote or missed expectation", () =>
     output: unsupported,
     validation: validateStructuredV2(unsupported),
     transcript,
+    participantContext,
     expectations: {
       client_sentiment: "negative",
     },
@@ -60,6 +72,7 @@ test("summarizes legacy and structured cost, latency, and promotion rates", () =
     output: result,
     validation: validateStructuredV2(result),
     transcript,
+    participantContext,
     expectations: { call_type: "renewal" },
   });
   const summary = summarizeEvaluation([

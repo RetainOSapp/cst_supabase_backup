@@ -1,3 +1,5 @@
+import { evidenceRoleIsGrounded } from "./participant-context.mjs";
+
 const SENTIMENTS = new Set([
   "positive",
   "neutral",
@@ -21,6 +23,10 @@ const ARCHETYPES = new Set([
   "follower",
   "insufficient_evidence",
 ]);
+const MAX_EVIDENCE_ITEMS = 1;
+const MAX_EVIDENCE_QUOTE_CHARACTERS = 120;
+const MIN_EVIDENCE_QUOTE_WORDS = 4;
+const MAX_EVIDENCE_QUOTE_WORDS = 12;
 
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value);
@@ -34,6 +40,79 @@ function boundedString(value, min, max) {
   );
 }
 
+export function normalizeEvidenceText(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[“”‘’"']/g, "")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+export function collectStructuredEvidence(value) {
+  const entries = [];
+  const seen = new Set();
+
+  function visit(current, path = []) {
+    if (Array.isArray(current)) {
+      current.forEach((item, index) => visit(item, [...path, index]));
+      return;
+    }
+    if (!object(current)) return;
+    if (
+      typeof current.timestamp === "string" &&
+      typeof current.speaker_role === "string" &&
+      typeof current.quote === "string"
+    ) {
+      const key = JSON.stringify([
+        current.timestamp,
+        current.speaker_role,
+        current.quote,
+      ]);
+      if (!seen.has(key)) {
+        seen.add(key);
+        entries.push({ item: current, path: path.join(".") });
+      }
+    }
+    for (const [key, child] of Object.entries(current)) {
+      visit(child, [...path, key]);
+    }
+  }
+
+  visit(value);
+  return entries;
+}
+
+export function evidenceIsGrounded(item, transcript) {
+  if (!item || typeof transcript !== "string" || !transcript.trim()) {
+    return false;
+  }
+  const quote = normalizeEvidenceText(item.quote);
+  if (!quote) return false;
+  if (!item.timestamp) {
+    return normalizeEvidenceText(transcript).includes(quote);
+  }
+
+  let searchFrom = 0;
+  while (searchFrom < transcript.length) {
+    const timestampIndex = transcript.indexOf(item.timestamp, searchFrom);
+    if (timestampIndex < 0) return false;
+    const afterTimestamp = timestampIndex + item.timestamp.length;
+    const nextTimestamp = transcript
+      .slice(afterTimestamp)
+      .search(/\b\d{2}:\d{2}:\d{2}\b/);
+    const contextEnd =
+      nextTimestamp < 0
+        ? transcript.length
+        : afterTimestamp + nextTimestamp;
+    const context = transcript.slice(timestampIndex, contextEnd);
+    if (normalizeEvidenceText(context).includes(quote)) return true;
+    searchFrom = afterTimestamp;
+  }
+  return false;
+}
+
 function exactKeys(value, keys) {
   if (!object(value)) return false;
   const actual = Object.keys(value).sort();
@@ -45,15 +124,20 @@ function exactKeys(value, keys) {
 }
 
 function evidence(value) {
+  const quoteWords = normalizeEvidenceText(value?.quote)
+    .split(" ")
+    .filter(Boolean).length;
   return (
     exactKeys(value, ["timestamp", "speaker_role", "quote"]) &&
     boundedString(value.timestamp, 0, 32) &&
     ["client", "team_member", "unknown"].includes(value.speaker_role) &&
-    boundedString(value.quote, 1, 240)
+    boundedString(value.quote, 1, MAX_EVIDENCE_QUOTE_CHARACTERS) &&
+    quoteWords >= MIN_EVIDENCE_QUOTE_WORDS &&
+    quoteWords <= MAX_EVIDENCE_QUOTE_WORDS
   );
 }
 
-function evidenceList(value, max = 3) {
+function evidenceList(value, max = MAX_EVIDENCE_ITEMS) {
   return Array.isArray(value) && value.length <= max && value.every(evidence);
 }
 
@@ -75,7 +159,10 @@ function score(value) {
   );
 }
 
-export function validateStructuredV2(value) {
+export function validateStructuredV2(
+  value,
+  { transcript = null, participantContext = null } = {},
+) {
   const errors = [];
   if (!object(value)) return { ok: false, errors: ["result_not_object"] };
   if (
@@ -179,6 +266,24 @@ export function validateStructuredV2(value) {
     !evidenceList(value.archetype.evidence)
   ) {
     errors.push("archetype");
+  }
+  if (
+    typeof transcript === "string" &&
+    collectStructuredEvidence(value).some(
+      ({ item }) => !evidenceIsGrounded(item, transcript),
+    )
+  ) {
+    errors.push("evidence_grounding");
+  }
+  if (
+    typeof transcript === "string" &&
+    participantContext !== null &&
+    collectStructuredEvidence(value).some(
+      ({ item }) =>
+        !evidenceRoleIsGrounded(item, transcript, participantContext),
+    )
+  ) {
+    errors.push("evidence_attribution");
   }
   return { ok: errors.length === 0, errors };
 }

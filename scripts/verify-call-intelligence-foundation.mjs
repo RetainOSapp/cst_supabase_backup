@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
 const migrationPath =
@@ -211,6 +212,13 @@ for (const [label, source, pattern] of dependencyChecks) {
   passed += 1;
 }
 
+execFileSync(
+  process.execPath,
+  ["scripts/sync-call-intelligence-structured-seed.mjs", "--check"],
+  { stdio: "pipe" },
+);
+passed += 1;
+
 console.log(
-  `Call Intelligence database contract: ${passed}/${checks.length + 3 + dependencyChecks.length} passed`,
+  `Call Intelligence database contract: ${passed}/${checks.length + 4 + dependencyChecks.length} passed`,
 );

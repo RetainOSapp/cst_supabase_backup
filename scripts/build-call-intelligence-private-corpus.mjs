@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { normalizeParticipantContext } from "../supabase/functions/process-call-intelligence/_shared/participant-context.mjs";
 
 const sourceArgument =
   process.argv[2] ?? process.env.CALL_INTELLIGENCE_ZAPIER_EXPORT;
@@ -35,6 +36,18 @@ for (const [runKey, run] of Object.entries(source)) {
   const digest = createHash("sha256")
     .update(`${runKey}:${transcript}`)
     .digest("hex");
+  const participantContext = normalizeParticipantContext([
+    {
+      name: run?.output__274138252__fathom_user__name,
+      role: "team_member",
+    },
+    ...(Array.isArray(run?.output__274138252__meeting__invitees)
+      ? run.output__274138252__meeting__invitees.map((invitee) => ({
+          name: invitee?.name,
+          role: invitee?.is_external === true ? "client" : "team_member",
+        }))
+      : []),
+  ]);
   calls.push({
     id: `private-fathom-${digest.slice(0, 12)}`,
     category: "real_fathom_single_client_account",
@@ -42,6 +55,7 @@ for (const [runKey, run] of Object.entries(source)) {
       attendee_count: attendeeCount,
       transcript_characters: transcript.length,
     },
+    participant_context: participantContext,
     transcript,
   });
 }

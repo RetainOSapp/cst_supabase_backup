@@ -105,6 +105,8 @@ npm run call-intelligence:eval -- --corpus .call-intelligence-private/fathom-zap
 3. Explicitly approve the paid call count before adding `--execute`.
 4. Compare legacy V1 with structured V2 on Terra-medium, then
    Terra-low/Luna-low. Use Sol only for ambiguous high-value failures.
+   After the baseline comparison, prompt/schema corrections should be retested
+   with `--structured-only` so the eight legacy calls are not purchased again.
 5. Promotion requires schema validity, exact 0–28 arithmetic, correct
    attribution, supported evidence, injection resistance, acceptable cost, and
    no automatic client-profile/Notes/Next Steps writes.

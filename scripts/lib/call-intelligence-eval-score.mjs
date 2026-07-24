@@ -1,43 +1,13 @@
-function normalizedEvidence(value) {
-  return String(value ?? "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[“”‘’"']/g, "")
-    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
-    .trim()
-    .replace(/\s+/g, " ");
-}
+import {
+  collectStructuredEvidence,
+  evidenceIsGrounded,
+} from "../../supabase/functions/process-call-intelligence/_shared/validation.mjs";
+import {
+  evidenceRoleIsGrounded,
+} from "../../supabase/functions/process-call-intelligence/_shared/participant-context.mjs";
 
 export function collectEvidence(value) {
-  const evidence = [];
-  const seen = new Set();
-
-  function visit(current) {
-    if (Array.isArray(current)) {
-      for (const item of current) visit(item);
-      return;
-    }
-    if (!current || typeof current !== "object") return;
-    if (
-      typeof current.timestamp === "string" &&
-      typeof current.speaker_role === "string" &&
-      typeof current.quote === "string"
-    ) {
-      const key = JSON.stringify([
-        current.timestamp,
-        current.speaker_role,
-        current.quote,
-      ]);
-      if (!seen.has(key)) {
-        seen.add(key);
-        evidence.push(current);
-      }
-    }
-    for (const child of Object.values(current)) visit(child);
-  }
-
-  visit(value);
-  return evidence;
+  return collectStructuredEvidence(value).map(({ item }) => item);
 }
 
 function expectationChecks(output, expectations = {}) {
@@ -91,21 +61,26 @@ export function scoreStructuredResult({
   output,
   validation,
   transcript,
+  participantContext = null,
   expectations,
 }) {
-  const evidence = collectEvidence(output);
-  const normalizedTranscript = normalizedEvidence(transcript);
-  const evidenceChecks = evidence.map((item) => {
-    const quote = normalizedEvidence(item.quote);
-    return {
-      timestamp: item.timestamp,
-      speakerRole: item.speaker_role,
-      quoteCharacters: item.quote.length,
-      supported: Boolean(
-        quote && normalizedTranscript && normalizedTranscript.includes(quote),
-      ),
-    };
-  });
+  const evidenceChecks = collectStructuredEvidence(output).map(
+    ({ item, path }) => {
+      const quoteSupported = evidenceIsGrounded(item, transcript);
+      const roleSupported = participantContext === null
+        ? true
+        : evidenceRoleIsGrounded(item, transcript, participantContext);
+      return {
+        path,
+        timestamp: item.timestamp,
+        speakerRole: item.speaker_role,
+        quoteCharacters: item.quote.length,
+        quoteSupported,
+        roleSupported,
+        supported: quoteSupported && roleSupported,
+      };
+    },
+  );
   const supportedEvidence = evidenceChecks.filter((item) => item.supported).length;
   const expectationResults = expectationChecks(output, expectations);
   const expectationsPassed = expectationResults.every((item) => item.passed);
@@ -121,6 +96,10 @@ export function scoreStructuredResult({
       total: evidenceChecks.length,
       supported: supportedEvidence,
       unsupported: evidenceChecks.length - supportedEvidence,
+      quoteSupported: evidenceChecks.filter((item) => item.quoteSupported)
+        .length,
+      roleSupported: evidenceChecks.filter((item) => item.roleSupported)
+        .length,
       groundedRate:
         evidenceChecks.length === 0
           ? 1

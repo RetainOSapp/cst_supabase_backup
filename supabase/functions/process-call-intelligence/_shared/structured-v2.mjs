@@ -1,3 +1,5 @@
+export const STRUCTURED_V2_PROMPT_VERSION = "structured_v2_evidence_v1";
+
 const evidenceRef = {
   type: "object",
   additionalProperties: false,
@@ -15,15 +17,16 @@ const evidenceRef = {
     quote: {
       type: "string",
       minLength: 1,
-      maxLength: 240,
-      description: "A short verbatim excerpt supporting the claim.",
+      maxLength: 120,
+      description:
+        "One short, uninterrupted, word-for-word excerpt copied from the cited transcript utterance.",
     },
   },
 };
 
 const evidenceArray = {
   type: "array",
-  maxItems: 3,
+  maxItems: 1,
   items: evidenceRef,
 };
 
@@ -211,6 +214,16 @@ Outcome:
 
 Evidence rules:
 - never invent a name, timestamp, owner, due date, emotion, or quote;
+- use the application-generated participant role map for speaker attribution;
+  when a transcript speaker cannot be mapped unambiguously, use unknown;
+- every evidence quote must be one uninterrupted span of 4–12 consecutive
+  words copied word-for-word from the single utterance at the cited timestamp;
+- never stitch separate phrases, omit interior words, fix grammar, paraphrase,
+  summarize, add ellipses, or combine speakers inside an evidence quote;
+- before returning, verify each normalized evidence quote occurs contiguously
+  inside the cited transcript utterance; remove the evidence item if it does not;
+- use at most one evidence item per claim and prefer an empty evidence array to
+  a quote that is not exact;
 - use zero findings when no finding is supported; never force a top three;
 - quoted, hypothetical, historical, or resolved concerns are not automatically
   current negative sentiment;

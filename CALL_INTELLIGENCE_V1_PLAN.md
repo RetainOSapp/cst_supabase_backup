@@ -145,26 +145,30 @@ After any real traffic, rollback means:
 
 The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only.
 
-## Local evidence — 2026-07-23
+## Local evidence — 2026-07-24
 
-- Edge/provider/dispatch tests: 16/16.
-- Evaluation scoring tests: 3/3.
-- Database/dependency/rollback contract verification: 53/53, including
+- Edge/provider/dispatch tests: 18/18.
+- Evaluation scoring/harness tests: 4/4.
+- Database/dependency/rollback contract verification: 54/54, including
   immutable price lineage, database-side cost recomputation, compatibility with
   existing token/intake/AI-policy dependencies, and the current RPC rollback
   signature.
-- Edge/source security verification: 35/35.
+- Edge/source security verification: 43/43.
 - Frontend/security/privacy verification: 19/19.
 - Production TypeScript/Vite build: pass.
 - Evaluation harness: dry-run pass; 3 synthetic calls, 8 legacy prompts plus
-  structured V2, 27 planned Terra-medium calls. No paid provider call occurred.
-- Jay's five real Fathom/Zapier examples are converted locally into a
-  git-ignored 253,045-character private corpus. Its Terra-medium dry-run plans
-  45 calls with a conservative $5.26 ceiling; no transcript was printed or
-  committed and no paid call occurred.
+  structured V2, 27 planned Terra-medium calls. That manifest made no provider
+  call; the separate private baseline below was executed.
+- Jay's five real Fathom/Zapier examples remain a git-ignored 253,045-character
+  private corpus. The 45-call Terra-medium baseline cost $1.849210: structured
+  V2 was 100% schema-valid and 75.5% cheaper than the eight-prompt legacy flow,
+  but 0/5 calls passed timestamp-scoped evidence grounding. The corrected
+  five-call structured-only retest now carries trusted participant-role context,
+  rejects incorrect timestamp-speaker attribution, has a conservative $1.13
+  ceiling, and remains pending.
 - Browser QA: desktop 1440×1000 and mobile 320×900, list/detail/filter/URL
   behavior, no horizontal overflow.
-- Real Supabase migration/runtime, private-corpus paid evaluation, company
+- Real Supabase migration/runtime, corrected private-corpus retest, company
   token, entitlement, allowance, Zapier switch, provider call, and production
   deploy remain explicit rollout gates in `CALL_INTELLIGENCE_ROLLOUT.md`.
 - Requirement-by-requirement evidence and remaining runtime gates are recorded

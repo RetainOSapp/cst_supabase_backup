@@ -14,6 +14,10 @@ import {
   ProviderError,
   usageCostMicros,
 } from "./_shared/provider.mjs";
+import {
+  buildProviderInputText,
+  participantContextFromRows,
+} from "./_shared/participant-context.mjs";
 import { validateStructuredV2 } from "./_shared/validation.mjs";
 
 const ALLOWED_MODELS = new Set([
@@ -36,7 +40,7 @@ async function preliminaryRun(supabase, runId: string) {
   if (runError) throw runError;
   if (!run) return null;
 
-  const [transcriptResult, promptResult] = await Promise.all([
+  const [transcriptResult, promptResult, participantsResult] = await Promise.all([
     supabase
       .from("call_intelligence_transcripts")
       .select("character_count")
@@ -47,16 +51,29 @@ async function preliminaryRun(supabase, runId: string) {
       .select("prompt_text")
       .eq("id", run.prompt_definition_id)
       .maybeSingle(),
+    supabase
+      .from("call_intelligence_participants")
+      .select("name, participant_kind, matched_client_id, matched_member_id")
+      .eq("call_id", run.call_id)
+      .order("id"),
   ]);
   if (transcriptResult.error) throw transcriptResult.error;
   if (promptResult.error) throw promptResult.error;
+  if (participantsResult.error) throw participantsResult.error;
   if (!transcriptResult.data || !promptResult.data) {
     throw new Error("Run source is incomplete.");
   }
+  const participantContext = participantContextFromRows(
+    participantsResult.data ?? [],
+  );
   return {
     ...run,
+    participantContext,
     inputCharacters:
-      Number(transcriptResult.data.character_count ?? 0) +
+      buildProviderInputText(
+        "x".repeat(Number(transcriptResult.data.character_count ?? 0)),
+        participantContext,
+      ).length +
       String(promptResult.data.prompt_text ?? "").length,
   };
 }
@@ -212,6 +229,7 @@ Deno.serve(async (req) => {
         reasoningEffort,
         instructions,
         transcript: claim.transcript_text,
+        participantContext: preliminary.participantContext,
         outputSchema: onDemand ? null : claim.output_schema,
         maxOutputTokens,
         safetyIdentifier: `call_intelligence_${safetyHash.slice(0, 44)}`,
@@ -288,7 +306,10 @@ Deno.serve(async (req) => {
       if (finalizeError) throw finalizeError;
       return jsonResponse(req, { ok: false, error: "result_invalid_json" }, 502);
     }
-    const validation = validateStructuredV2(result);
+    const validation = validateStructuredV2(result, {
+      transcript: claim.transcript_text,
+      participantContext: preliminary.participantContext,
+    });
     if (!validation.ok) {
       const { error: finalizeError } = await finalizeFailure(supabase, runId, {
         response,
