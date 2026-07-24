@@ -37,6 +37,7 @@ const checks = [
   ["CSM capability gated", account, /isCsm && callAiForCsms/],
   ["navigation uses capability", header, /show: capabilities\.canAccessCallAi/],
   ["development fixture is DEV-only", app, /import\.meta\.env\.DEV/],
+  ["development fixture is lazily imported", app, /import\.meta\.env\.DEV[\s\S]+lazy\(\(\) =>[\s\S]+CallIntelligenceDevelopmentPreview/],
   ["development fixture uses invalid domains", developmentPreview, /@example\.invalid/],
 ];
 
@@ -47,6 +48,12 @@ for (const [label, source, pattern] of checks) {
 }
 
 assert.doesNotMatch(app, /call-intelligence-preview/, "public mock route removed");
+passed += 1;
+assert.doesNotMatch(
+  app,
+  /^import\s+\{\s*CallIntelligenceDevelopmentPreview/m,
+  "development fixture must not be statically imported into production",
+);
 passed += 1;
 assert.doesNotMatch(intelligence, /DEMO_CALLS|Amelia Grant/, "dummy call data removed");
 passed += 1;
@@ -69,4 +76,4 @@ assert.doesNotMatch(
 );
 passed += 1;
 
-console.log(`Call Intelligence frontend verification: ${passed}/${checks.length + 5} passed`);
+console.log(`Call Intelligence frontend verification: ${passed}/${checks.length + 6} passed`);

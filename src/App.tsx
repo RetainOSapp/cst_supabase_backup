@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { AuthGuard } from "./components/AuthGuard.tsx";
 import { AppShell } from "./components/Header.tsx";
 import { AccountProvider, useAccountContext } from "./lib/accountContext.tsx";
@@ -19,7 +19,16 @@ import { Resources } from "./pages/Resources.tsx";
 import { SaasClients } from "./pages/SaasClients.tsx";
 import { SaasClientDetail } from "./pages/SaasClientDetail.tsx";
 import { ComingSoonPage } from "./components/ComingSoon.tsx";
-import { CallIntelligenceDevelopmentPreview } from "./components/call-ai/CallIntelligenceDevelopmentPreview.tsx";
+
+const CallIntelligenceDevelopmentPreview = import.meta.env.DEV
+  ? lazy(() =>
+      import(
+        "./components/call-ai/CallIntelligenceDevelopmentPreview.tsx"
+      ).then((module) => ({
+        default: module.CallIntelligenceDevelopmentPreview,
+      }))
+    )
+  : null;
 
 function NoPermission() {
   return (
@@ -240,8 +249,10 @@ export function App() {
       <Route
         path="/__dev/call-intelligence"
         element={
-          import.meta.env.DEV ? (
-            <CallIntelligenceDevelopmentPreview />
+          import.meta.env.DEV && CallIntelligenceDevelopmentPreview ? (
+            <Suspense fallback={null}>
+              <CallIntelligenceDevelopmentPreview />
+            </Suspense>
           ) : (
             <Navigate to="/login" replace />
           )
