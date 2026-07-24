@@ -2072,6 +2072,7 @@ export type Database = {
           archived_at: string | null
           churn_comments: string | null
           churn_reason_value: string | null
+          dashboard_analytics_exclusion_reason: string | null
           client_age_date_offboarded: string | null
           client_age_date_offboarded_for_filtering: string | null
           client_age_date_onboarded: string | null
@@ -2099,6 +2100,7 @@ export type Database = {
           current_contract_of_days: number | null
           current_contract_reference_link: string | null
           current_contract_start_date: string | null
+          exclude_from_dashboard_analytics: boolean
           glide_row_id: string
           id: string
           metadata: Json
@@ -2163,6 +2165,7 @@ export type Database = {
           archived_at?: string | null
           churn_comments?: string | null
           churn_reason_value?: string | null
+          dashboard_analytics_exclusion_reason?: string | null
           client_age_date_offboarded?: string | null
           client_age_date_offboarded_for_filtering?: string | null
           client_age_date_onboarded?: string | null
@@ -2190,6 +2193,7 @@ export type Database = {
           current_contract_of_days?: number | null
           current_contract_reference_link?: string | null
           current_contract_start_date?: string | null
+          exclude_from_dashboard_analytics?: boolean
           glide_row_id: string
           id?: string
           metadata?: Json
@@ -2254,6 +2258,7 @@ export type Database = {
           archived_at?: string | null
           churn_comments?: string | null
           churn_reason_value?: string | null
+          dashboard_analytics_exclusion_reason?: string | null
           client_age_date_offboarded?: string | null
           client_age_date_offboarded_for_filtering?: string | null
           client_age_date_onboarded?: string | null
@@ -2281,6 +2286,7 @@ export type Database = {
           current_contract_of_days?: number | null
           current_contract_reference_link?: string | null
           current_contract_start_date?: string | null
+          exclude_from_dashboard_analytics?: boolean
           glide_row_id?: string
           id?: string
           metadata?: Json
@@ -2706,6 +2712,7 @@ export type Database = {
           company_id: string
           created_at: string
           email: string
+          exclude_from_dashboard_analytics: boolean
           hide_from_csm_list: boolean
           id: string
           is_read_only: boolean
@@ -2724,6 +2731,7 @@ export type Database = {
           company_id: string
           created_at?: string
           email: string
+          exclude_from_dashboard_analytics?: boolean
           hide_from_csm_list?: boolean
           id?: string
           is_read_only?: boolean
@@ -2742,6 +2750,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           email?: string
+          exclude_from_dashboard_analytics?: boolean
           hide_from_csm_list?: boolean
           id?: string
           is_read_only?: boolean
@@ -2952,6 +2961,7 @@ export type Database = {
           allow_status_change_retention: boolean
           company_id: string
           created_at: string
+          dashboard_exclude_unassigned_clients: boolean
           dashboard_default_tab: string
           default_calendar_mode: string
           default_client_view: string
@@ -2972,6 +2982,7 @@ export type Database = {
           allow_status_change_retention?: boolean
           company_id: string
           created_at?: string
+          dashboard_exclude_unassigned_clients?: boolean
           dashboard_default_tab?: string
           default_calendar_mode?: string
           default_client_view?: string
@@ -2992,6 +3003,7 @@ export type Database = {
           allow_status_change_retention?: boolean
           company_id?: string
           created_at?: string
+          dashboard_exclude_unassigned_clients?: boolean
           dashboard_default_tab?: string
           default_calendar_mode?: string
           default_client_view?: string

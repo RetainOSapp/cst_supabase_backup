@@ -14,6 +14,7 @@ import { BackEndClientsKpi } from "../components/dashboard/kpis/BackEndClientsKp
 import { ChurnPercentageKpi } from "../components/dashboard/kpis/ChurnPercentageKpi.tsx";
 import { FrontEndClientsKpi } from "../components/dashboard/kpis/FrontEndClientsKpi.tsx";
 import { OffBoardedClientsKpi } from "../components/dashboard/kpis/OffBoardedClientsKpi.tsx";
+import { PausedClientsKpi } from "../components/dashboard/kpis/PausedClientsKpi.tsx";
 import { RetainedClientsKpi } from "../components/dashboard/kpis/RetainedClientsKpi.tsx";
 import { RetentionPercentageKpi } from "../components/dashboard/kpis/RetentionPercentageKpi.tsx";
 import { SuspendedClientsKpi } from "../components/dashboard/kpis/SuspendedClientsKpi.tsx";
@@ -74,6 +75,7 @@ type KpiDetailKey =
   | "active"
   | "front-end"
   | "back-end"
+  | "paused"
   | "suspended"
   | "off-boarded"
   | "retained"
@@ -1712,6 +1714,7 @@ export function Dashboard() {
   const [activeClients, setActiveClients] = useState<number | null>(null);
   const [frontEndClients, setFrontEndClients] = useState<number | null>(null);
   const [backEndClients, setBackEndClients] = useState<number | null>(null);
+  const [pausedClients, setPausedClients] = useState<number | null>(null);
   const [suspendedClients, setSuspendedClients] = useState<number | null>(null);
   const [offBoardedClients, setOffBoardedClients] = useState<number | null>(null);
   const [retainedClients, setRetainedClients] = useState<number | null>(null);
@@ -2028,6 +2031,9 @@ export function Dashboard() {
     if (activeDetailKey === "active") return "Active Clients";
     if (activeDetailKey === "front-end") return "Front-end Clients";
     if (activeDetailKey === "back-end") return "Back-end Clients";
+    if (activeDetailKey === "paused") {
+      return `${statusDistributionLabels.get("paused") ?? DEFAULT_PROGRAM_STATUS_LABELS.paused} Clients`;
+    }
     if (activeDetailKey === "suspended") {
       return `${statusDistributionLabels.get("suspended") ?? DEFAULT_PROGRAM_STATUS_LABELS.suspended} Clients`;
     }
@@ -2547,6 +2553,7 @@ export function Dashboard() {
       setActiveClients(null);
       setFrontEndClients(null);
       setBackEndClients(null);
+      setPausedClients(null);
       setSuspendedClients(null);
       setOffBoardedClients(null);
       setRetainedClients(null);
@@ -2611,6 +2618,9 @@ export function Dashboard() {
           .eq(companyColumn, appliedFilters.companyId)
           .range(from, to);
 
+        if (appliedUsesAppClients) {
+          query = query.eq("exclude_from_dashboard_analytics", false);
+        }
         if (appliedFilters.offerId) {
           query = query.eq(
             "offer_milestones_current_offer_id",
@@ -2668,6 +2678,7 @@ export function Dashboard() {
         setActiveClients(null);
         setFrontEndClients(null);
         setBackEndClients(null);
+        setPausedClients(null);
         setSuspendedClients(null);
         setOffBoardedClients(null);
         setChurnedClientsCount(null);
@@ -2698,6 +2709,9 @@ export function Dashboard() {
       const backEnd = reportClients.filter(
         (client) => client.program_status_value === "back-end",
       );
+      const paused = reportClients.filter(
+        (client) => client.program_status_value === "paused",
+      );
       const suspended = reportClients.filter(
         (client) => client.program_status_value === "suspended",
       );
@@ -2721,6 +2735,7 @@ export function Dashboard() {
       setActiveClients(active.length);
       setFrontEndClients(frontEnd.length);
       setBackEndClients(backEnd.length);
+      setPausedClients(paused.length);
       setSuspendedClients(suspended.length);
       setOffBoardedClients(offBoarded.length);
       setChurnedClientsCount(churned.length);
@@ -3063,6 +3078,7 @@ export function Dashboard() {
         setActiveClients(null);
         setFrontEndClients(null);
         setBackEndClients(null);
+        setPausedClients(null);
         setSuspendedClients(null);
         setOffBoardedClients(null);
         setChurnedClientsCount(null);
@@ -3081,6 +3097,7 @@ export function Dashboard() {
       setActiveClients(Number(row?.active_clients ?? 0));
       setFrontEndClients(Number(row?.front_end_clients ?? 0));
       setBackEndClients(Number(row?.back_end_clients ?? 0));
+      setPausedClients(Number(row?.paused_clients ?? 0));
       setSuspendedClients(Number(row?.suspended_clients ?? 0));
       setOffBoardedClients(Number(row?.off_boarded_clients ?? 0));
       setChurnedClientsCount(Number(row?.churned_clients ?? 0));
@@ -3307,6 +3324,7 @@ export function Dashboard() {
         .select(advocacySummarySelect)
         .eq("company_id", appCompany.id);
 
+      clientQuery = clientQuery.eq("exclude_from_dashboard_analytics", false);
       if (appliedFilters.offerId) {
         clientQuery = clientQuery.eq(
           "offer_milestones_current_offer_id",
@@ -3583,6 +3601,9 @@ export function Dashboard() {
         .eq(companyColumn, companyValue)
         .range(0, 4999);
 
+      if (usesAppTtv) {
+        clientQuery = clientQuery.eq("exclude_from_dashboard_analytics", false);
+      }
       if (assignedTeamMemberId) {
         clientQuery = clientQuery.or(
           `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
@@ -3817,6 +3838,9 @@ export function Dashboard() {
           .eq(companyColumn, appliedFilters.companyId)
           .range(from, to);
 
+        if (appliedUsesAppClients) {
+          query = query.eq("exclude_from_dashboard_analytics", false);
+        }
         if (appliedFilters.offerId) {
           query = query.eq(
             "offer_milestones_current_offer_id",
@@ -4403,6 +4427,9 @@ export function Dashboard() {
         if (detailKey === "front-end" || detailKey === "back-end") {
           return client.program_status_value === detailKey;
         }
+        if (detailKey === "paused") {
+          return client.program_status_value === "paused";
+        }
         if (detailKey === "suspended") {
           return client.program_status_value === "suspended";
         }
@@ -4700,6 +4727,9 @@ export function Dashboard() {
           )
           .range(from, to);
 
+        if (appliedUsesAppClients) {
+          query = query.eq("exclude_from_dashboard_analytics", false);
+        }
         if (assignedTeamMemberId) {
           query = query.or(
             `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
@@ -5271,8 +5301,12 @@ export function Dashboard() {
             <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">
               Client Health
             </h2>
+            <p className="mt-1 text-xs text-gray-500">
+              Active and status cards show the current client population. Off-boarded
+              follows the selected reporting period.
+            </p>
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <ActiveClientsKpi
               value={activeClients}
               loading={primaryKpiLoading}
@@ -5300,6 +5334,20 @@ export function Dashboard() {
               onOpenList={
                 canUseDashboardDrilldowns
                   ? () => openDetailDrawer("back-end")
+                  : undefined
+              }
+            />
+            <PausedClientsKpi
+              value={pausedClients}
+              label={
+                statusDistributionLabels.get("paused") ??
+                DEFAULT_PROGRAM_STATUS_LABELS.paused
+              }
+              loading={primaryKpiLoading}
+              onOpenInfo={openKpiInfoModal}
+              onOpenList={
+                canUseDashboardDrilldowns
+                  ? () => openDetailDrawer("paused")
                   : undefined
               }
             />

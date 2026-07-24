@@ -796,6 +796,7 @@ Use this as the top-level product taxonomy. The detailed sections below track im
 - `[x]` Active client and status/program reporting where source data is available.
 - `[~]` `[polish]` Retention and churn reporting exist; app-owned UI path was hardened for Ethical Scaling, but still needs canonical Supabase formulas before broad write-mode rollout.
   - 2026-06-21 resource audit refreshed `retention-churn-metrics` to match the current RetainOS formula/workflow: renewals through contract retention events, churn through offboarding actual end date vs contract end date, dashboard drilldowns, Clients renewal filters, and predictive renewal forecast as future/Beacon-assisted scope.
+  - 2026-07-24 MM production reconciliation moved dashboard population exclusions into a shared client-level decision consumed by canonical reporting and direct drilldowns. CST history safely corrected 324 migrated offboard months plus confirmed Christopher; 4 MIA/offboard contradictions and 65 missing MIA timers were reconciled with audit/rollback evidence, while 9 later app-owned mismatches remain review-only. Paused now has a company-labeled Client Health card. Await Jay/MM UI QA before promoting this polish checkpoint.
 - `[~]` `[polish]` CSM workload/capacity areas exist conceptually but need final formula and data validation.
 - `[ ]` `[priority: medium]` CSM performance reports.
 - `[ ]` `[priority: medium]` At-risk client identification and tracking.

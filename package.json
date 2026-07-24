@@ -28,6 +28,7 @@
     "pipeline:verify:early-renewal": "node scripts/verify-pipeline-early-renewal.mjs",
     "dashboard:verify:renewal-reporting": "node scripts/verify-dashboard-renewal-reporting.mjs",
     "dashboard:verify:churn-chart-period": "node scripts/verify-dashboard-churn-chart-period.mjs",
+    "dashboard:verify:mm-lifecycle": "node scripts/verify-mm-dashboard-lifecycle.mjs",
     "dashboard:verify:suspended-auto-offboard": "node scripts/verify-suspended-auto-offboard.mjs",
     "preview": "vite preview",
     "db:apply:sql": "node scripts/apply-sql-file.mjs",
