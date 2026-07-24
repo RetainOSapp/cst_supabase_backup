@@ -26,7 +26,7 @@ import {
   type PipelineLostDraft,
   type PipelineMember,
   type PipelineOffer,
-  type RenewalPreviewCandidate,
+  type RenewalPreviewResult,
   type PipelineWonDraft,
   type PipelineWorkspace,
 } from "../lib/pipeline.ts";
@@ -978,7 +978,7 @@ export function Pipeline() {
   const [terminalResolution, setTerminalResolution] = useState<{ itemId: string; type: "won" | "lost" } | null>(null);
   const [lostSuccess, setLostSuccess] = useState<{ clientId: string; name: string } | null>(null);
   const [scanResult, setScanResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
-  const [renewalPreview, setRenewalPreview] = useState<RenewalPreviewCandidate[] | null>(null);
+  const [renewalPreview, setRenewalPreview] = useState<RenewalPreviewResult | null>(null);
   const [previewingRenewals, setPreviewingRenewals] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1155,7 +1155,12 @@ export function Pipeline() {
   const renewalScanPipeline = pipelines.find(
     (pipeline) => pipeline.pipeline_type === "renewal",
   );
-  const canRunRenewalScan = Boolean(canManageRenewalScan && renewalScanPipeline);
+  const canRunRenewalScan = Boolean(
+    canManageRenewalScan &&
+    renewalScanPipeline &&
+    renewalPreview?.pipelineId === renewalScanPipeline.id &&
+    renewalPreview.eligibleCount > 0,
+  );
   const openItems = filteredItems.filter((item) => stageById.get(item.stage_id)?.stage_type === "open");
   const wonItems = filteredItems.filter((item) => stageById.get(item.stage_id)?.stage_type === "won");
   const overdueFollowUps = openItems.filter((item) => dateKey(item.follow_up_at) && dateKey(item.follow_up_at) < todayKey());
@@ -1341,7 +1346,7 @@ export function Pipeline() {
 
   async function handleRenewalScan() {
     if (!effectiveCompanyId || !workspace || !canRunRenewalScan) return;
-    const eligibleCount = renewalPreview?.filter((candidate) => candidate.eligibility_status === "eligible").length;
+    const eligibleCount = renewalPreview?.eligibleCount;
     const confirmed = window.confirm(
       eligibleCount === undefined
         ? "Run a one-time renewal scan now? Eligible contracts will be added without enabling recurring automation."
@@ -1354,6 +1359,7 @@ export function Pipeline() {
     try {
       const result = await runPipelineRenewalScan(effectiveCompanyId, renewalScanPipeline!.id);
       setScanResult({ createdCount: result.createdCount, skippedCount: result.skippedCount });
+      setRenewalPreview(null);
       if (result.items?.length) {
         setWorkspace((current) => {
           if (!current) return current;
@@ -1433,15 +1439,46 @@ export function Pipeline() {
         <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
-              Renewal preview: <strong>{renewalPreview.filter((candidate) => candidate.eligibility_status === "eligible").length}</strong> eligible ·{" "}
-              <strong>{renewalPreview.filter((candidate) => candidate.eligibility_status === "excluded").length}</strong> excluded. No records were changed.
+              Renewal preview: <strong>{renewalPreview.eligibleCount}</strong> eligible ·{" "}
+              <strong>{renewalPreview.excludedCount}</strong> excluded ·{" "}
+              <strong>{renewalPreview.totalEvaluated}</strong> clients checked. No records were changed.
             </span>
             <button type="button" onClick={() => setRenewalPreview(null)} aria-label="Dismiss renewal preview">×</button>
           </div>
-          {renewalPreview.some((candidate) => candidate.eligibility_status === "excluded") ? (
-            <p className="mt-2 text-xs text-sky-800">
-              Exclusions include contracts outside the configured timing window, already tracked renewals, and contracts excluded by cadence or client status.
-            </p>
+          <p className="mt-2 text-xs text-sky-800">
+            Operational window: <strong>{formatDate(renewalPreview.windowStart)}</strong> through{" "}
+            <strong>{formatDate(renewalPreview.windowEnd)}</strong> ({renewalPreview.catchUpDays} days behind + {renewalPreview.leadDays} days ahead).
+            This is the configured Pipeline window, not a calendar-month Dashboard total.
+          </p>
+          {renewalPreview.candidates.length > 0 ? (
+            <details className="mt-3 rounded-md border border-sky-200 bg-white/70 px-3 py-2">
+              <summary className="cursor-pointer font-semibold">
+                Review {renewalPreview.eligibleCount} eligible client{renewalPreview.eligibleCount === 1 ? "" : "s"}
+              </summary>
+              <ul className="mt-2 max-h-64 columns-1 overflow-y-auto text-xs sm:columns-2 lg:columns-3">
+                {renewalPreview.candidates.map((candidate) => {
+                  const client = lookupClient(workspace.clients, candidate.client_id);
+                  return (
+                    <li key={candidate.contract_id} className="mb-1 break-inside-avoid pr-3">
+                      <strong>{client?.client_name || client?.client_business || candidate.client_id}</strong>
+                      {candidate.contract_end_at ? ` · ${formatDate(candidate.contract_end_at)}` : ""}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          ) : null}
+          {renewalPreview.excludedCount > 0 ? (
+            <details className="mt-2 text-xs text-sky-800">
+              <summary className="cursor-pointer font-semibold">Why clients were excluded</summary>
+              <ul className="mt-1 grid gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
+                {Object.entries(renewalPreview.exclusionCounts)
+                  .sort((left, right) => right[1] - left[1])
+                  .map(([reason, count]) => (
+                    <li key={reason}>{reason.replaceAll("_", " ")}: <strong>{count}</strong></li>
+                  ))}
+              </ul>
+            </details>
           ) : null}
         </div>
       ) : null}

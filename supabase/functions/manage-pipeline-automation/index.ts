@@ -129,7 +129,16 @@ Deno.serve(async (req) => {
 
     if (!pipelineAccess.enabled) {
       if (action === "preview_renewals") {
-        return respond({ ok: true, enabled: false, asOf, candidates: [] });
+        return respond({
+          ok: true,
+          enabled: false,
+          asOf,
+          candidates: [],
+          totalEvaluated: 0,
+          eligibleCount: 0,
+          excludedCount: 0,
+          exclusionCounts: {},
+        });
       }
       throw new AuthError("Pipeline is disabled for this company.", 403);
     }
@@ -142,12 +151,68 @@ Deno.serve(async (req) => {
       if (!pipelineId) {
         return respond({ error: "Choose the Renewal pipeline to preview." }, 400);
       }
-      const { data, error } = await supabase.rpc(
-        "preview_due_renewal_pipeline_items",
-        { p_company_id: company.id, p_pipeline_id: pipelineId, p_as_of: asOf },
+      const { data: pipeline, error: pipelineError } = await supabase
+        .from("company_pipelines")
+        .select("renewal_lead_days, automation_settings")
+        .eq("company_id", company.id)
+        .eq("id", pipelineId)
+        .eq("pipeline_type", "renewal")
+        .maybeSingle();
+      if (pipelineError) throw pipelineError;
+      if (!pipeline) throw new AuthError("Choose an enabled Renewal pipeline.", 400);
+
+      const rows: Record<string, unknown>[] = [];
+      const pageSize = 1000;
+      for (let from = 0;; from += pageSize) {
+        const { data, error } = await supabase
+          .rpc(
+            "preview_due_renewal_pipeline_items",
+            { p_company_id: company.id, p_pipeline_id: pipelineId, p_as_of: asOf },
+          )
+          .order("client_id")
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const page = (data ?? []) as Record<string, unknown>[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
+
+      const candidates = rows.filter((row) => row.eligibility_status === "eligible");
+      const exclusionCounts = rows.reduce<Record<string, number>>((counts, row) => {
+        if (row.eligibility_status !== "excluded") return counts;
+        const reason = cleanText(row.exclusion_reason) || "other";
+        counts[reason] = (counts[reason] ?? 0) + 1;
+        return counts;
+      }, {});
+      const leadDays = Math.max(0, Number(pipeline.renewal_lead_days) || 0);
+      const settings = pipeline.automation_settings &&
+          typeof pipeline.automation_settings === "object" &&
+          !Array.isArray(pipeline.automation_settings)
+        ? pipeline.automation_settings as Record<string, unknown>
+        : {};
+      const catchUpDays = Math.min(
+        365,
+        Math.max(0, Number(settings.catch_up_days) || 30),
       );
-      if (error) throw error;
-      return respond({ ok: true, pipelineId, asOf, candidates: data ?? [] });
+      const windowStart = new Date(asOf);
+      windowStart.setUTCDate(windowStart.getUTCDate() - catchUpDays);
+      const windowEnd = new Date(asOf);
+      windowEnd.setUTCDate(windowEnd.getUTCDate() + leadDays);
+      return respond({
+        ok: true,
+        enabled: true,
+        pipelineId,
+        asOf,
+        windowStart: windowStart.toISOString(),
+        windowEnd: windowEnd.toISOString(),
+        leadDays,
+        catchUpDays,
+        totalEvaluated: rows.length,
+        eligibleCount: candidates.length,
+        excludedCount: rows.length - candidates.length,
+        exclusionCounts,
+        candidates,
+      });
     }
 
     if (actor.role !== "super_admin") {

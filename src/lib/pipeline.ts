@@ -181,6 +181,21 @@ export interface RenewalPreviewCandidate {
   currency_code: string | null;
 }
 
+export interface RenewalPreviewResult {
+  enabled: boolean;
+  pipelineId: string;
+  asOf: string;
+  windowStart: string;
+  windowEnd: string;
+  leadDays: number;
+  catchUpDays: number;
+  totalEvaluated: number;
+  eligibleCount: number;
+  excludedCount: number;
+  exclusionCounts: Record<string, number>;
+  candidates: RenewalPreviewCandidate[];
+}
+
 type WorkspaceAction =
   | "workspace"
   | "create_item"
@@ -327,7 +342,7 @@ export async function previewPipelineRenewals(
         : await functionErrorMessage(error, "Renewal preview failed.");
     throw new Error(message);
   }
-  return (data?.candidates ?? []) as RenewalPreviewCandidate[];
+  return data as RenewalPreviewResult;
 }
 
 export async function runPipelineRenewalScan(
