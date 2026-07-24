@@ -25,9 +25,9 @@ is not treated as proof of production runtime behavior.
 | Hard allowance and global pause | Proven as migration contract | locked claim, active hard USD allowance, reservation accounting, pause-on-overrun | Runtime allowance exhaustion/global-pause denial |
 | Immutable price lineage and DB cost recomputation | Proven as migration contract | run/usage price fields, finalize recomputation, 54/54 DB contract | Runtime exact-cost finalization |
 | Exact Glide prompt preservation | Proven locally | generated immutable `legacy_v1` prompt JSON/seed | Seed readback after migration |
-| Structured V2 schema | Proven locally; quality-v3 uncalled | strict Responses schema, exact evidence/next-step rules, conservative archetype gate, synchronized seed | Three-call quality-v3 provider retest |
-| Evidence grounding and attribution | Proven locally | evidence-v2 raw run plus quality-v3 replay: two collisions quarantined; 44/44 retained citations valid across 3/3 eligible hard passes | Focused provider retest and pilot observation |
-| Legacy-vs-structured model evaluation | Baseline complete; final correction pending | 55/55 private Terra-medium requests across 15 transcript analyses; aggregate cost/latency/schema/evidence/quality review | Three eligible quality-v3 calls plus one synthetic adversarial call after approval |
+| Structured V2 schema | Proven locally | quality-v3 provider retest: 3/3 eligible private calls plus 1/1 adversarial call schema/hard pass; conservative archetype and exact next-step evidence gates | Pilot observation |
+| Evidence grounding and attribution | Proven locally | 42/42 retained private citations plus 4/4 adversarial citations valid; two collision calls quarantined before provider spend | Pilot observation |
+| Legacy-vs-structured model evaluation | Complete locally | 59/59 provider requests; cost/latency/schema/evidence and independent semantic review; $2.878853 cumulative spend | Production pilot observation |
 | On-demand prompts | Proven locally | seven company prompt seeds, authorized queue/dispatch path, real UI action | One pilot prompt result |
 | Real Call Intelligence UI | Proven locally | actor-scoped management API; desktop 1440×1000 and mobile 320×900 browser QA; no horizontal overflow | Authenticated production pilot QA |
 | Existing reconciliation preserved | Proven locally | `/call-ai` URL-tab implementation and frontend gate | Production navigation QA |
@@ -58,18 +58,22 @@ is not treated as proof of production runtime behavior.
   structure/grounding/role checks, and suppresses weak archetypes. Semantic
   next-step review remains required. Its zero-provider-call replay passed 3/3 eligible calls with
   44/44 retained citations supported; two calls were quarantined.
-- Total provider evaluation spend across all three runs: $2.592327.
+- Provider evaluation spend before quality-v3: $2.592327.
+- `structured_v2_quality_v3` promotion retest: exactly three eligible private
+  requests plus one synthetic adversarial request completed for $0.286526.
+  Private results passed 3/3 with 42/42 citations supported; the two collision
+  calls were quarantined at zero cost. The adversarial result passed 1/1 with
+  4/4 citations supported and all injection-resistance expectations satisfied.
+  Independent review found no P0-P3 blocker.
+- Total provider evaluation spend across all four stages: $2.878853.
 - Browser QA: list, detail, URL navigation, filtering, desktop, and mobile pass.
 
 ## External gates
 
-The local implementation objective is satisfied, but promotion remains blocked
-until:
+The local implementation and promotion evaluation objective is satisfied.
+Production completion remains blocked until:
 
-1. Jay approves the three-call quality-v3 and one-call synthetic adversarial
-   provider retest, with a combined 936,559-micro ($0.94 rounded) ceiling;
-2. the new private outputs pass subjective sentiment, archetype, score,
-   pain-point, and next-step review;
-3. Jay explicitly approves the disabled-first production migration, paused
+1. Jay explicitly approves the disabled-first production migration, paused
    function deployment, hidden frontend release, and Ethical Scaling pilot;
-4. the production runtime matrix in the table above passes.
+2. the production runtime matrix in the table above passes;
+3. human pilot QA passes before any company is enabled.

@@ -176,9 +176,16 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
   collided calls before provider dispatch, requires evidence for each next
   step, and suppresses weak archetypes. Its zero-cost replay passed 3/3 eligible
   calls with 44/44 retained citations; two calls were quarantined. Total
-  provider evaluation spend remains $2.592327. A three-call quality-v3 plus
-  one-call synthetic adversarial provider retest requires fresh approval; its
-  combined dry-run ceiling is 936,559 micros ($0.94 rounded).
+  provider evaluation spend was $2.592327. The three-call quality-v3 plus
+  one-call synthetic adversarial provider retest then required fresh approval;
+  its combined dry-run ceiling was 936,559 micros ($0.94 rounded).
+- The approved quality-v3 retest then completed for $0.286526: three eligible
+  private calls passed 3/3 with 42/42 retained citations supported, two
+  conflicting-identity calls were quarantined with no provider request or
+  cost, and the synthetic adversarial call passed 1/1 with 4/4 citations and
+  every injection-resistance expectation satisfied. Independent semantic
+  review scored all eligible dimensions 4–5/5 and found no P0-P3 blocker.
+  Cumulative provider evaluation spend is $2.878853.
 - Browser QA: desktop 1440×1000 and mobile 320×900, list/detail/filter/URL
   behavior, no horizontal overflow.
 - Real Supabase migration/runtime, company token, entitlement, allowance,

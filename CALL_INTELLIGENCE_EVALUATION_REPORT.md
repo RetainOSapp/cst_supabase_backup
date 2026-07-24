@@ -1,7 +1,7 @@
 # Call Intelligence V1 Evaluation Report
 
 Date: 2026-07-24  
-Status: quality-v3 remediation complete locally; focused paid retest pending approval
+Status: local promotion gates passed; production approval and pilot pending
 Production impact: none
 
 ## Corpus and execution
@@ -12,9 +12,9 @@ Production impact: none
 - Model: `gpt-5.6-terra`.
 - Reasoning: `medium`.
 - Price lineage: `openai-standard-2026-07-23`.
-- 55/55 provider requests completed across the baseline and two focused
-  corrections, with no retries in either correction run.
-- Total actual evaluation spend: 2,592,327 micros ($2.592327).
+- 59/59 provider requests completed across the baseline and three focused
+  corrections, with no retries in any correction run.
+- Total actual evaluation spend: 2,878,853 micros ($2.878853).
 - All raw transcripts, provider outputs, and the deterministic replay remain
   private and Git-ignored.
 
@@ -174,20 +174,42 @@ No prompt-injection attempt appeared in the five real calls, so the existing
 synthetic adversarial case is coverage, not yet a provider-level resistance
 result.
 
+## Quality-v3 provider retest
+
+The approved four-request retest completed for 286,526 micros ($0.286526),
+well below its 936,559-micro ($0.94 rounded) ceiling.
+
+| Metric | Three eligible private calls | Synthetic adversarial call |
+| --- | ---: | ---: |
+| Provider requests | 3 | 1 |
+| Actual cost | $0.274668 | $0.011858 |
+| Input tokens | 66,013 | 2,451 |
+| Output tokens | 7,309 | 382 |
+| Reasoning tokens | 3,667 | 0 |
+| Cumulative latency | 68.648s | 3.458s |
+| Schema / hard pass | 3/3 | 1/1 |
+| Grounded and role-correct retained citations | 42/42 | 4/4 |
+
+Both conflicting-identity calls were materialized as quarantines with
+`output=null`, no provider request, and zero cost. The production sanitizer
+removed three invalid evidence items and two citation-invalid claims from the
+eligible outputs. The adversarial result ignored the transcript's injection
+request, stayed on the authorized analysis task, disclosed no instruction- or
+credential-like content, and passed all six explicit expectations.
+
+Independent transcript-level review rated every eligible output dimension
+between 4/5 and 5/5. Classifications, sentiments, score rationales, pain points,
+and next steps tracked the conversations; due dates were conservatively empty
+where no concrete date was agreed. Archetypes were suitably conservative. One
+call contains two supported but overlapping follow-ups, which is non-blocking
+UI polish.
+
+Total provider evaluation history is now 59/59 completed requests and
+2,878,853 micros ($2.878853).
+
 ## Decision
 
-Do not promote yet. The known quality blockers are remediated locally and the
-zero-cost replay proves that the deterministic gates behave as intended, but
-the new quality-v3 prompt and schema have not received fresh provider output.
-Before promotion:
-
-1. approve and run a three-call quality-v3 structured-only retest; the two
-   collided calls must be quarantined with zero provider cost;
-2. run the synthetic adversarial prompt-injection case through the provider;
-3. review those private outputs for summary, sentiment, next steps, score, and
-   conservative archetype quality;
-4. separately approve the disabled-first production pilot.
-
-The combined dry-run ceiling for steps 1–2 is 936,559 micros ($0.94 rounded):
-753,051 micros for the three eligible private calls and 183,508 micros for the
-single synthetic adversarial call.
+Promote the local quality-v3 candidate to the documented production-approval
+and pilot gate. No P0–P3 evaluation blocker remains. Production must still be
+released disabled-first, and human pilot QA remains mandatory before enabling
+any company.
