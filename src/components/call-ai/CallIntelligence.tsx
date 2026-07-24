@@ -327,7 +327,12 @@ export function CallIntelligence({
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
+  const [listReloadKey, setListReloadKey] = useState(0);
+  const [detailReloadKey, setDetailReloadKey] = useState(0);
+  const [pendingRun, setPendingRun] = useState<{
+    id: string;
+    kind: "reprocess" | "run_on_demand";
+  } | null>(null);
   const [clientFilter, setClientFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("all");
@@ -387,7 +392,7 @@ export function CallIntelligence({
     return () => {
       cancelled = true;
     };
-  }, [companyId, developmentFixture, reloadKey]);
+  }, [companyId, developmentFixture, listReloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -432,29 +437,62 @@ export function CallIntelligence({
     return () => {
       cancelled = true;
     };
-  }, [companyId, developmentFixture, selectedCallId, reloadKey]);
+  }, [companyId, developmentFixture, selectedCallId, detailReloadKey]);
 
   useEffect(() => {
     setSelectedEvidence(null);
     setTranscriptOpen(false);
+    setPendingRun(null);
+    setSuccess(null);
   }, [selectedCallId]);
+
+  const activeRun = detail?.runs.find((run) =>
+    ["queued", "claimed"].includes(run.status),
+  );
 
   useEffect(() => {
     if (
       developmentFixture ||
       !selectedCallId ||
-      !detail?.runs.some((run) =>
-        ["queued", "claimed"].includes(run.status),
-      )
+      !activeRun
     ) {
       return;
     }
     const timer = window.setTimeout(
-      () => setReloadKey((value) => value + 1),
+      () => setDetailReloadKey((value) => value + 1),
       2_500,
     );
     return () => window.clearTimeout(timer);
-  }, [detail?.runs, developmentFixture, selectedCallId]);
+  }, [activeRun, developmentFixture, selectedCallId]);
+
+  useEffect(() => {
+    if (!pendingRun || !detail) return;
+    const run = detail.runs.find((item) => item.id === pendingRun.id);
+    if (!run || ["queued", "claimed"].includes(run.status)) return;
+
+    setPendingRun(null);
+    setListReloadKey((value) => value + 1);
+    if (run.status === "succeeded") {
+      setSuccess(
+        pendingRun.kind === "reprocess"
+          ? "The fresh analysis is ready."
+          : "The on-demand analysis is ready.",
+      );
+      return;
+    }
+    setSuccess(null);
+    setError(
+      run.error_category
+        ? `Analysis stopped: ${run.error_category.replaceAll("_", " ")}.`
+        : "The analysis did not complete.",
+    );
+  }, [detail, pendingRun]);
+
+  useEffect(() => {
+    if (!success) return;
+    const timer = window.setTimeout(() => setSuccess(null), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [success]);
 
   const months = useMemo(
     () =>
@@ -539,12 +577,10 @@ export function CallIntelligence({
     if (invokeError || data?.error) {
       setError(data?.error || invokeError?.message || "Action failed.");
     } else {
-      setSuccess(
-        action === "reprocess"
-          ? "A fresh analysis was queued."
-          : "The on-demand analysis was queued.",
-      );
-      setReloadKey((value) => value + 1);
+      if (data.run?.id) {
+        setPendingRun({ id: data.run.id, kind: action });
+      }
+      setDetailReloadKey((value) => value + 1);
     }
     setActionBusy(null);
   }
@@ -640,7 +676,7 @@ export function CallIntelligence({
     });
     setSuccess("Transcript uploaded. The first analysis is queued.");
     setActionBusy(null);
-    setReloadKey((value) => value + 1);
+    setListReloadKey((value) => value + 1);
     if (data.call?.id) openCall(data.call.id);
   }
 
@@ -679,7 +715,7 @@ export function CallIntelligence({
             {success}
           </div>
         ) : null}
-        {detailLoading || !detail ? (
+        {!detail ? (
           <div className="flex justify-center py-20">
             <div className="h-9 w-9 animate-spin rounded-full border-b-2 border-[#5b4cf0]" />
           </div>
@@ -715,27 +751,52 @@ export function CallIntelligence({
                   {access?.canReconcile ? (
                     <button
                       type="button"
-                      disabled={Boolean(actionBusy)}
+                      disabled={Boolean(actionBusy) || Boolean(activeRun)}
                       onClick={() => void runAction("reprocess")}
                       className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-[#17243a] disabled:opacity-50"
                     >
-                      {actionBusy === "reprocess" ? "Queuing…" : "Reprocess"}
+                      {actionBusy === "reprocess"
+                        ? "Queuing…"
+                        : activeRun
+                          ? "Processing…"
+                          : "Reprocess"}
                     </button>
                   ) : null}
                 </div>
               </div>
             </header>
 
+            {activeRun ? (
+              <div
+                role="status"
+                className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700"
+              >
+                Analysis in progress. This page will update automatically.
+              </div>
+            ) : detailLoading ? (
+              <p className="text-right text-xs text-[#667085]">
+                Updating…
+              </p>
+            ) : null}
+
             <section className="grid gap-4 md:grid-cols-3">
               <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Client sentiment</p>
                 <div className="mt-3"><SentimentBadge value={analysis?.client_sentiment.label} /></div>
-                <EvidenceList evidence={analysis?.client_sentiment.evidence ?? []} onSelect={selectEvidence} />
+                <p className="mt-3 text-xs leading-5 text-[#667085]">
+                  {analysis
+                    ? `${analysis.client_sentiment.confidence} confidence · aggregate tone across the full call`
+                    : "Pending aggregate assessment"}
+                </p>
               </div>
               <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Team sentiment</p>
                 <div className="mt-3"><SentimentBadge value={analysis?.team_member_sentiment.label} /></div>
-                <EvidenceList evidence={analysis?.team_member_sentiment.evidence ?? []} onSelect={selectEvidence} />
+                <p className="mt-3 text-xs leading-5 text-[#667085]">
+                  {analysis
+                    ? `${analysis.team_member_sentiment.confidence} confidence · aggregate tone across the full call`
+                    : "Pending aggregate assessment"}
+                </p>
               </div>
               <div className="rounded-xl border border-[#e4e9f0] bg-white p-5">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">Call score</p>
@@ -864,7 +925,7 @@ export function CallIntelligence({
                       <button
                         key={prompt.id}
                         type="button"
-                        disabled={Boolean(actionBusy)}
+                        disabled={Boolean(actionBusy) || Boolean(activeRun)}
                         onClick={() => void runAction("run_on_demand", prompt.id)}
                         className="rounded-lg border border-[#d0d5dd] bg-white px-3 py-2 text-sm font-semibold text-[#344054] hover:border-[#5b4cf0] disabled:opacity-50"
                       >
@@ -964,7 +1025,7 @@ export function CallIntelligence({
           ) : null}
           <button
             type="button"
-            onClick={() => setReloadKey((value) => value + 1)}
+            onClick={() => setListReloadKey((value) => value + 1)}
             className="retainos-button-secondary px-4 py-2 text-sm"
           >
             Refresh

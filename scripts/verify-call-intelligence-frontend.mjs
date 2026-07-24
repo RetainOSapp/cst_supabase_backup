@@ -33,6 +33,14 @@ const checks = [
   ["sales discovery label", intelligence, /sales_discovery: "Sales \/ Discovery"/],
   ["on-demand prompt actions", intelligence, /run_on_demand/],
   ["on-demand runs auto-refresh", intelligence, /\["queued", "claimed"\][\s\S]+2_500/],
+  ["active run polls detail only", intelligence, /setDetailReloadKey\(\(value\) => value \+ 1\)[\s\S]+2_500/],
+  ["list and detail refresh are isolated", intelligence, /listReloadKey[\s\S]+detailReloadKey/],
+  ["existing detail stays mounted during refresh", intelligence, /\{!detail \? \(/],
+  ["pending run tracked by returned id", intelligence, /setPendingRun\(\{ id: data\.run\.id, kind: action \}\)/],
+  ["pending run settles on terminal status", intelligence, /item\.id === pendingRun\.id[\s\S]+setPendingRun\(null\)/],
+  ["success notices auto-dismiss", intelligence, /setTimeout\(\(\) => setSuccess\(null\), 5_000\)/],
+  ["sentiment cards describe aggregate tone", intelligence, /aggregate tone across the full call/],
+  ["run controls lock during active processing", intelligence, /disabled=\{Boolean\(actionBusy\) \|\| Boolean\(activeRun\)\}/],
   ["succeeded run status", intelligence, /value === "completed" \|\| value === "succeeded"/],
   ["manual upload is capability-gated", intelligence, /access\?\.canUpload/],
   ["manual upload uses actor-scoped API", intelligence, /action: "manual_upload"/],
@@ -79,10 +87,16 @@ assert.doesNotMatch(
 );
 passed += 1;
 assert.doesNotMatch(
+  intelligence,
+  /analysis\?\.client_sentiment\.evidence|analysis\?\.team_member_sentiment\.evidence/,
+  "headline sentiment cards must not present a single quote as aggregate proof",
+);
+passed += 1;
+assert.doesNotMatch(
   developmentPreview,
   /Aron Lucas|Jay Goncalves|Vanessa Valencia|@gmail\.com/i,
   "development fixtures must not contain supplied customer/person data",
 );
 passed += 1;
 
-console.log(`Call Intelligence frontend verification: ${passed}/${checks.length + 6} passed`);
+console.log(`Call Intelligence frontend verification: ${passed}/${checks.length + 7} passed`);
