@@ -1,7 +1,7 @@
 # Call Intelligence V1 Evaluation Report
 
 Date: 2026-07-24  
-Status: baseline complete; corrected structured-only retest pending approval  
+Status: baseline and evidence-v1 retest complete; evidence-v2 retest pending approval
 Production impact: none
 
 ## Corpus and execution
@@ -51,9 +51,33 @@ The private corpus currently has no human-authored expected labels, so it proves
 schema, evidence, usage, latency, and cost behavior but does not independently
 prove subjective sentiment/archetype quality. Jay's pilot QA remains required.
 
-## Local correction
+## Evidence-v1 retest
 
-`structured_v2_evidence_v1` now:
+The approved five-call structured-only retest completed with exactly five
+provider requests, no retries, and $0.372006 actual cost against the $1.13
+rounded ceiling.
+
+| Metric | Result |
+| --- | ---: |
+| Input tokens | 73,646 |
+| Output tokens | 12,526 |
+| Reasoning tokens | 6,984 |
+| Cumulative provider latency | 142.242s |
+| Timestamp-grounded unique evidence | 55/67 (82.1%) |
+| Correctly attributed unique evidence | 42/67 (62.7%) |
+| Fully accepted calls | 0/5 |
+
+All five results were rejected by the runtime quote and attribution gates. One
+also failed a result-field check because two evidence occurrences contained 14
+words despite the prompt's 12-word maximum. Aggregate corpus analysis found 14
+unique transcript speaker labels: 11 exactly matched calendar participants, one
+was a safe unique first-name match, and two were genuinely absent and therefore
+must remain `unknown`. Terra inferred client/team roles for some unknown labels
+instead of preserving `unknown`.
+
+## Evidence-v2 correction
+
+`structured_v2_evidence_v2` now:
 
 - allows at most one evidence item per claim;
 - asks for one uninterrupted 4–12-word excerpt from one utterance;
@@ -63,21 +87,29 @@ prove subjective sentiment/archetype quality. Jay's pilot QA remains required.
 - limits quote size to 120 characters and validates 4–12 normalized words;
 - verifies every quote occurs inside the exact cited timestamp context before a
   run can succeed;
-- supplies only sanitized participant names and deterministic
-  `client`/`team_member`/`unknown` roles from matched call records, never emails
-  or internal IDs;
+- derives an explicit transcript-speaker-to-role map from sanitized matched
+  participant records, never emails or internal IDs;
+- permits a unique first-name match while forcing genuinely unmapped or
+  ambiguous speakers to `unknown`;
+- uses a supported strict-schema regex to require 4–12 whitespace-separated
+  words, rather than relying on prompt compliance alone;
 - rejects evidence whose claimed role does not match the mapped speaker at the
   cited timestamp;
 - keeps the migration seed synchronized mechanically with the runtime prompt
   and schema.
 
-The corrected structured-only dry run plans five provider requests with a
-conservative maximum of 1,122,829 micros ($1.13 rounded). It has not been
+The schema constraint follows OpenAI's documented Structured Outputs support
+for the string `pattern` property:
+https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas
+
+The evidence-v2 structured-only dry run plans five provider requests with a
+conservative maximum of 1,123,498 micros ($1.13 rounded). It has not been
 executed.
 
 ## Decision
 
-Do not promote the baseline. Run the five-call corrected structured-only retest.
+Do not promote either completed run. Run the five-call evidence-v2
+structured-only retest.
 Promotion requires:
 
 1. 5/5 schema-valid results;

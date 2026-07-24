@@ -28,7 +28,7 @@ test("plans a full baseline and a bounded structured-only retest", () => {
   const retest = dryRun(["--structured-only"]);
   assert.deepEqual(retest.runKinds, ["structured_v2"]);
   assert.equal(retest.plannedProviderCalls, 3);
-  assert.equal(retest.structuredPromptVersion, "structured_v2_evidence_v1");
+  assert.equal(retest.structuredPromptVersion, "structured_v2_evidence_v2");
   assert.ok(
     retest.conservativeMaximumCostMicros <
       baseline.conservativeMaximumCostMicros,

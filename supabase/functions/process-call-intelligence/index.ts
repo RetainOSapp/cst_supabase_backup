@@ -15,7 +15,7 @@ import {
   usageCostMicros,
 } from "./_shared/provider.mjs";
 import {
-  buildProviderInputText,
+  conservativeProviderInputCharacters,
   participantContextFromRows,
 } from "./_shared/participant-context.mjs";
 import { validateStructuredV2 } from "./_shared/validation.mjs";
@@ -70,10 +70,9 @@ async function preliminaryRun(supabase, runId: string) {
     ...run,
     participantContext,
     inputCharacters:
-      buildProviderInputText(
-        "x".repeat(Number(transcriptResult.data.character_count ?? 0)),
-        participantContext,
-      ).length +
+      conservativeProviderInputCharacters(
+        transcriptResult.data.character_count,
+      ) +
       String(promptResult.data.prompt_text ?? "").length,
   };
 }

@@ -256,7 +256,7 @@ Deno.serve(async (req) => {
         .select("id, prompt_text, version")
         .eq("scope", "fixed")
         .eq("prompt_key", "structured_v2_base")
-        .eq("version", "structured_v2_evidence_v1")
+        .eq("version", "structured_v2_evidence_v2")
         .eq("status", "active")
         .maybeSingle();
       if (error) throw error;

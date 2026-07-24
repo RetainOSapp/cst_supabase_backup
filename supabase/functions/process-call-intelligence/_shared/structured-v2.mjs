@@ -1,4 +1,4 @@
-export const STRUCTURED_V2_PROMPT_VERSION = "structured_v2_evidence_v1";
+export const STRUCTURED_V2_PROMPT_VERSION = "structured_v2_evidence_v2";
 
 const evidenceRef = {
   type: "object",
@@ -18,8 +18,9 @@ const evidenceRef = {
       type: "string",
       minLength: 1,
       maxLength: 120,
+      pattern: "^\\S+(?:\\s+\\S+){3,11}$",
       description:
-        "One short, uninterrupted, word-for-word excerpt copied from the cited transcript utterance.",
+        "Exactly 4–12 whitespace-separated words copied as one uninterrupted, word-for-word excerpt from the cited transcript utterance.",
     },
   },
 };
@@ -214,10 +215,12 @@ Outcome:
 
 Evidence rules:
 - never invent a name, timestamp, owner, due date, emotion, or quote;
-- use the application-generated participant role map for speaker attribution;
-  when a transcript speaker cannot be mapped unambiguously, use unknown;
+- use the application-generated speaker role map for attribution;
+  copy each supplied role exactly and never infer a replacement for unknown;
 - every evidence quote must be one uninterrupted span of 4–12 consecutive
   words copied word-for-word from the single utterance at the cited timestamp;
+- count the whitespace-separated words before returning; the schema requires
+  at least 4 and at most 12;
 - never stitch separate phrases, omit interior words, fix grammar, paraphrase,
   summarize, add ellipses, or combine speakers inside an evidence quote;
 - before returning, verify each normalized evidence quote occurs contiguously

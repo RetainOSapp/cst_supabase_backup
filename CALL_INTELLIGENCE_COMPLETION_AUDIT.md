@@ -26,8 +26,8 @@ is not treated as proof of production runtime behavior.
 | Immutable price lineage and DB cost recomputation | Proven as migration contract | run/usage price fields, finalize recomputation, 54/54 DB contract | Runtime exact-cost finalization |
 | Exact Glide prompt preservation | Proven locally | generated immutable `legacy_v1` prompt JSON/seed | Seed readback after migration |
 | Structured V2 schema | Proven locally | strict Responses schema, post-provider exact-key/length/date validation, score arithmetic tests | Corrected private retest and Jay quality review |
-| Evidence grounding and attribution | Proven locally; baseline failed safely | timestamp-scoped quote and trusted participant-role validation; baseline aggregate report | Execute corrected five-call structured-only retest |
-| Legacy-vs-structured model evaluation | Baseline complete; correction pending retest | 45/45 private Terra-medium calls; aggregate cost/latency/schema/evidence report | Execute five corrected Terra-medium calls, then selected challengers only if needed |
+| Evidence grounding and attribution | Proven locally; two model runs failed safely | timestamp-scoped quote and explicit speaker-role validation; aggregate report | Execute evidence-v2 five-call structured-only retest |
+| Legacy-vs-structured model evaluation | Baseline and first correction complete | 50/50 private Terra-medium requests across ten transcript analyses; aggregate cost/latency/schema/evidence report | Execute five evidence-v2 Terra-medium calls, then selected challengers only if needed |
 | On-demand prompts | Proven locally | seven company prompt seeds, authorized queue/dispatch path, real UI action | One pilot prompt result |
 | Real Call Intelligence UI | Proven locally | actor-scoped management API; desktop 1440×1000 and mobile 320×900 browser QA; no horizontal overflow | Authenticated production pilot QA |
 | Existing reconciliation preserved | Proven locally | `/call-ai` URL-tab implementation and frontend gate | Production navigation QA |
@@ -40,15 +40,18 @@ is not treated as proof of production runtime behavior.
 - Edge/provider/dispatch tests: 18/18.
 - Evaluation scorer/harness tests: 4/4.
 - Database/dependency/rollback contract: 54/54.
-- Edge/source security: 43/43.
+- Edge/source security: 46/46.
 - Frontend/security/privacy: 19/19.
 - TypeScript/Vite production build: pass.
 - Synthetic evaluation manifest: 27 planned calls, dry-run only.
 - Five-call private Fathom baseline: 45/45 paid calls completed for $1.849210,
   safely below the $5.26 ceiling. Structured V2 was 100% schema-valid and 75.5%
   cheaper than legacy, but 0/5 calls passed the strict evidence gate.
-- Corrected `structured_v2_evidence_v1` retest: five structured-only calls,
-  conservative 1,122,829-micro ($1.13 rounded) ceiling, not yet executed.
+- `structured_v2_evidence_v1` retest: 5/5 calls completed for $0.372006, but
+  runtime acceptance was 0/5; timestamp-grounded evidence was 55/67 and
+  correctly attributed evidence was 42/67.
+- `structured_v2_evidence_v2` retest: five structured-only calls,
+  conservative 1,123,498-micro ($1.13 rounded) ceiling, not yet executed.
 - Browser QA: list, detail, URL navigation, filtering, desktop, and mobile pass.
 
 ## External gates
@@ -56,7 +59,7 @@ is not treated as proof of production runtime behavior.
 The local implementation objective is satisfied. Full end-to-end completion
 remains unproven until:
 
-1. the five-call corrected structured-only retest meets 100% timestamp-scoped
+1. the five-call evidence-v2 structured-only retest meets 100% timestamp-scoped
    evidence grounding and hard-promotion gates;
 2. Jay reviews the private outputs for subjective sentiment, archetype, score,
    pain-point, and next-step quality;
