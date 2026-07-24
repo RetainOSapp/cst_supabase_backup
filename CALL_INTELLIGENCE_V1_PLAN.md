@@ -147,13 +147,13 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
 
 ## Local evidence — 2026-07-24
 
-- Edge/provider/dispatch tests: 18/18.
-- Evaluation scoring/harness tests: 4/4.
+- Edge/provider/dispatch tests: 20/20.
+- Evaluation scoring/harness tests: 5/5.
 - Database/dependency/rollback contract verification: 54/54, including
   immutable price lineage, database-side cost recomputation, compatibility with
   existing token/intake/AI-policy dependencies, and the current RPC rollback
   signature.
-- Edge/source security verification: 47/47.
+- Edge/source security verification: 56/56.
 - Frontend/security/privacy verification: 19/19.
 - Production TypeScript/Vite build: pass.
 - Evaluation harness: dry-run pass; 3 synthetic calls, 8 legacy prompts plus
@@ -165,14 +165,24 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
   but 0/5 calls passed timestamp-scoped evidence grounding. The corrected
   evidence-v1 five-call retest completed for $0.372006 but also failed safely:
   55/67 unique evidence items were timestamp-grounded, 42/67 were correctly
-  attributed, and 0/5 calls passed. Evidence-v2 now sends an explicit
+  attributed, and 0/5 calls passed. Evidence-v2 sends an explicit
   speaker-role map, presents explicit timestamped utterance records, preserves
   unknown speakers, and constrains quote word count in the strict schema. Its
-  five-call retest has a conservative $1.18 ceiling and remains pending.
+  five-call retest completed for $0.371111: raw output passed 3/5 calls at
+  65/67 supported citations. A zero-provider-call replay through the production
+  sanitizer/validator initially passed 5/5 technically, but transcript-level
+  quality review found participant-role collisions in two calls, one unsupported
+  next step, and two overconfident archetypes. Quality-v3 now quarantines the
+  collided calls before provider dispatch, requires evidence for each next
+  step, and suppresses weak archetypes. Its zero-cost replay passed 3/3 eligible
+  calls with 44/44 retained citations; two calls were quarantined. Total
+  provider evaluation spend remains $2.592327. A three-call quality-v3 plus
+  one-call synthetic adversarial provider retest requires fresh approval; its
+  combined dry-run ceiling is 936,559 micros ($0.94 rounded).
 - Browser QA: desktop 1440×1000 and mobile 320×900, list/detail/filter/URL
   behavior, no horizontal overflow.
-- Real Supabase migration/runtime, evidence-v2 private-corpus retest, company
-  token, entitlement, allowance, Zapier switch, provider call, and production
-  deploy remain explicit rollout gates in `CALL_INTELLIGENCE_ROLLOUT.md`.
+- Real Supabase migration/runtime, company token, entitlement, allowance,
+  Zapier switch, production provider call, and production deploy remain
+  explicit rollout gates in `CALL_INTELLIGENCE_ROLLOUT.md`.
 - Requirement-by-requirement evidence and remaining runtime gates are recorded
   in `CALL_INTELLIGENCE_COMPLETION_AUDIT.md`.

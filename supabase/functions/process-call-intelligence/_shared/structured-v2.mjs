@@ -1,4 +1,6 @@
-export const STRUCTURED_V2_PROMPT_VERSION = "structured_v2_evidence_v2";
+export {
+  STRUCTURED_V2_PROMPT_VERSION,
+} from "../../_shared/call-intelligence-version.mjs";
 
 const evidenceRef = {
   type: "object",
@@ -28,6 +30,17 @@ const evidenceRef = {
 const evidenceArray = {
   type: "array",
   maxItems: 1,
+  items: evidenceRef,
+};
+
+const requiredEvidenceArray = {
+  ...evidenceArray,
+  minItems: 1,
+};
+
+const archetypeEvidenceArray = {
+  type: "array",
+  maxItems: 2,
   items: evidenceRef,
 };
 
@@ -131,7 +144,7 @@ export const STRUCTURED_V2_SCHEMA = {
         required: ["summary", "evidence"],
         properties: {
           summary: { type: "string", minLength: 1, maxLength: 500 },
-          evidence: evidenceArray,
+          evidence: requiredEvidenceArray,
         },
       },
     },
@@ -150,7 +163,7 @@ export const STRUCTURED_V2_SCHEMA = {
             description:
               "ISO date only when explicitly agreed, otherwise an empty string.",
           },
-          evidence: evidenceArray,
+          evidence: requiredEvidenceArray,
         },
       },
     },
@@ -191,7 +204,7 @@ export const STRUCTURED_V2_SCHEMA = {
           type: "string",
           enum: ["low", "medium", "high"],
         },
-        evidence: evidenceArray,
+        evidence: archetypeEvidenceArray,
       },
     },
   },
@@ -211,7 +224,8 @@ Outcome:
 - identify only supported positive/negative signals, pain points, and next steps;
 - ground material claims in short transcript evidence with timestamp and role;
 - score the four moments using the anchored rubric below;
-- keep archetype review-only and return insufficient_evidence when support is weak.
+- keep archetype review-only; return insufficient_evidence unless two distinct
+  behavioral moments support a high-confidence label.
 
 Evidence rules:
 - never invent a name, timestamp, owner, due date, emotion, or quote;
@@ -227,8 +241,13 @@ Evidence rules:
   summarize, add ellipses, or combine speakers inside an evidence quote;
 - before returning, verify each normalized evidence quote occurs contiguously
   inside the cited transcript utterance; remove the evidence item if it does not;
-- use at most one evidence item per claim and prefer an empty evidence array to
-  a quote that is not exact;
+- except for the two-moment archetype rule below, use at most one evidence item
+  per claim and prefer an empty evidence array to a quote that is not exact;
+- every returned pain point and next step must carry one valid evidence item;
+  omit the entire finding when its evidence is absent or uncertain;
+- use a named archetype only with high confidence and two evidence items from
+  distinct behavioral moments; otherwise return insufficient_evidence with low
+  confidence and no archetype evidence;
 - use zero findings when no finding is supported; never force a top three;
 - quoted, hypothetical, historical, or resolved concerns are not automatically
   current negative sentiment;

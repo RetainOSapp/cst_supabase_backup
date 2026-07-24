@@ -25,9 +25,9 @@ is not treated as proof of production runtime behavior.
 | Hard allowance and global pause | Proven as migration contract | locked claim, active hard USD allowance, reservation accounting, pause-on-overrun | Runtime allowance exhaustion/global-pause denial |
 | Immutable price lineage and DB cost recomputation | Proven as migration contract | run/usage price fields, finalize recomputation, 54/54 DB contract | Runtime exact-cost finalization |
 | Exact Glide prompt preservation | Proven locally | generated immutable `legacy_v1` prompt JSON/seed | Seed readback after migration |
-| Structured V2 schema | Proven locally | strict Responses schema, post-provider exact-key/length/date validation, score arithmetic tests | Corrected private retest and Jay quality review |
-| Evidence grounding and attribution | Proven locally; two model runs failed safely | timestamp-scoped quote and explicit speaker-role validation; aggregate report | Execute evidence-v2 five-call structured-only retest |
-| Legacy-vs-structured model evaluation | Baseline and first correction complete | 50/50 private Terra-medium requests across ten transcript analyses; aggregate cost/latency/schema/evidence report | Execute five evidence-v2 Terra-medium calls, then selected challengers only if needed |
+| Structured V2 schema | Proven locally; quality-v3 uncalled | strict Responses schema, exact evidence/next-step rules, conservative archetype gate, synchronized seed | Three-call quality-v3 provider retest |
+| Evidence grounding and attribution | Proven locally | evidence-v2 raw run plus quality-v3 replay: two collisions quarantined; 44/44 retained citations valid across 3/3 eligible hard passes | Focused provider retest and pilot observation |
+| Legacy-vs-structured model evaluation | Baseline complete; final correction pending | 55/55 private Terra-medium requests across 15 transcript analyses; aggregate cost/latency/schema/evidence/quality review | Three eligible quality-v3 calls plus one synthetic adversarial call after approval |
 | On-demand prompts | Proven locally | seven company prompt seeds, authorized queue/dispatch path, real UI action | One pilot prompt result |
 | Real Call Intelligence UI | Proven locally | actor-scoped management API; desktop 1440×1000 and mobile 320×900 browser QA; no horizontal overflow | Authenticated production pilot QA |
 | Existing reconciliation preserved | Proven locally | `/call-ai` URL-tab implementation and frontend gate | Production navigation QA |
@@ -37,10 +37,10 @@ is not treated as proof of production runtime behavior.
 
 ## Current verification matrix
 
-- Edge/provider/dispatch tests: 18/18.
-- Evaluation scorer/harness tests: 4/4.
+- Edge/provider/dispatch tests: 20/20.
+- Evaluation scorer/harness tests: 5/5.
 - Database/dependency/rollback contract: 54/54.
-- Edge/source security: 47/47.
+- Edge/source security: 56/56.
 - Frontend/security/privacy: 19/19.
 - TypeScript/Vite production build: pass.
 - Synthetic evaluation manifest: 27 planned calls, dry-run only.
@@ -50,19 +50,26 @@ is not treated as proof of production runtime behavior.
 - `structured_v2_evidence_v1` retest: 5/5 calls completed for $0.372006, but
   runtime acceptance was 0/5; timestamp-grounded evidence was 55/67 and
   correctly attributed evidence was 42/67.
-- `structured_v2_evidence_v2` retest: five structured-only calls,
-  conservative 1,176,566-micro ($1.18 rounded) ceiling, not yet executed.
+- `structured_v2_evidence_v2` retest: 5/5 calls completed without retries for
+  $0.371111. Raw output passed 3/5 calls with 65/67 evidence items supported.
+  The quality review found three useful calls and two unusable calls with
+  participant-role collisions. Quality-v3 now quarantines those two before any
+  provider request, omits next steps whose citations fail deterministic
+  structure/grounding/role checks, and suppresses weak archetypes. Semantic
+  next-step review remains required. Its zero-provider-call replay passed 3/3 eligible calls with
+  44/44 retained citations supported; two calls were quarantined.
+- Total provider evaluation spend across all three runs: $2.592327.
 - Browser QA: list, detail, URL navigation, filtering, desktop, and mobile pass.
 
 ## External gates
 
-The local implementation objective is satisfied. Full end-to-end completion
-remains unproven until:
+The local implementation objective is satisfied, but promotion remains blocked
+until:
 
-1. the five-call evidence-v2 structured-only retest meets 100% timestamp-scoped
-   evidence grounding and hard-promotion gates;
-2. Jay reviews the private outputs for subjective sentiment, archetype, score,
-   pain-point, and next-step quality;
+1. Jay approves the three-call quality-v3 and one-call synthetic adversarial
+   provider retest, with a combined 936,559-micro ($0.94 rounded) ceiling;
+2. the new private outputs pass subjective sentiment, archetype, score,
+   pain-point, and next-step review;
 3. Jay explicitly approves the disabled-first production migration, paused
    function deployment, hidden frontend release, and Ethical Scaling pilot;
 4. the production runtime matrix in the table above passes.

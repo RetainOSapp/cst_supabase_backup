@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import {
   collectEvidence,
+  quarantinedEvaluationResult,
   scoreStructuredResult,
   summarizeEvaluation,
 } from "./lib/call-intelligence-eval-score.mjs";
@@ -98,4 +99,35 @@ test("summarizes legacy and structured cost, latency, and promotion rates", () =
   assert.equal(summary["terra-medium"].structuredV2.costMicros, 50);
   assert.equal(summary["terra-medium"].structuredV2.schemaPassRate, 1);
   assert.equal(summary["terra-medium"].structuredV2.hardPassRate, 1);
+  assert.equal(summary["terra-medium"].structuredV2.eligibleCalls, 1);
+  assert.equal(summary["terra-medium"].structuredV2.quarantinedCalls, 0);
+});
+
+test("excludes quarantined attribution collisions from promotion rates", () => {
+  const summary = summarizeEvaluation([
+    quarantinedEvaluationResult({
+      callId: "collision",
+      profile: "terra-medium",
+    }),
+    {
+      profile: "terra-medium",
+      legacy: [],
+      structuredV2: {
+        score: {
+          hardPass: true,
+          schemaValid: true,
+          evidence: { supported: 1, total: 1 },
+        },
+        usage: { inputTokens: 10, outputTokens: 2 },
+        costMicros: 1,
+      },
+    },
+  ]);
+  const structured = summary["terra-medium"].structuredV2;
+  assert.equal(structured.eligibleCalls, 1);
+  assert.equal(structured.quarantinedCalls, 1);
+  assert.equal(structured.schemaPassRate, 1);
+  assert.equal(structured.hardPassRate, 1);
+  assert.equal(structured.requests, 1);
+  assert.equal(structured.costMicros, 1);
 });

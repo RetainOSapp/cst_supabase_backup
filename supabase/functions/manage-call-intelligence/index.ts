@@ -10,6 +10,7 @@ import {
 } from "../_shared/auth.ts";
 import { jsonResponse, optionsResponse } from "../_shared/http.ts";
 import { dispatchCallIntelligenceRun } from "../_shared/call-intelligence-dispatch.mjs";
+import { STRUCTURED_V2_PROMPT_VERSION } from "../_shared/call-intelligence-version.mjs";
 import { sha256Hex } from "../ingest-call-intelligence/_shared/contracts.mjs";
 
 const ACTIONS = new Set([
@@ -376,7 +377,7 @@ async function basePrompt(supabase) {
     .select("id, prompt_text, version")
     .eq("scope", "fixed")
     .eq("prompt_key", "structured_v2_base")
-    .eq("version", "structured_v2_evidence_v2")
+    .eq("version", STRUCTURED_V2_PROMPT_VERSION)
     .eq("status", "active")
     .maybeSingle();
   if (error) throw error;

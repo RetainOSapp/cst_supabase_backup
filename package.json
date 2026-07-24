@@ -18,6 +18,7 @@
     "call-intelligence:eval:prepare-private": "node scripts/build-call-intelligence-private-corpus.mjs",
     "call-intelligence:sync:structured-seed": "node scripts/sync-call-intelligence-structured-seed.mjs",
     "call-intelligence:eval": "node scripts/evaluate-call-intelligence.mjs",
+    "call-intelligence:eval:replay": "node scripts/replay-call-intelligence-evaluation.mjs",
     "test:milestone-ordering": "node --test scripts/milestone-ordering.test.mjs",
     "pipeline:verify": "node scripts/verify-pipeline-phase02.mjs",
     "pipeline:verify:phase34": "node scripts/verify-pipeline-phase34.mjs",

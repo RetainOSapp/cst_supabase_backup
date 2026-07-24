@@ -112,10 +112,39 @@ export function scoreStructuredResult({
   };
 }
 
+export function quarantinedEvaluationResult({
+  callId,
+  category = null,
+  profile,
+  quarantineCategory = "participant_role_conflict",
+}) {
+  return {
+    callId,
+    category,
+    profile,
+    legacy: [],
+    structuredV2: {
+      output: null,
+      quarantine: { category: quarantineCategory },
+      validation: { ok: false, errors: [quarantineCategory] },
+      score: null,
+      providerRequestMade: false,
+      usage: {
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+      },
+      costMicros: 0,
+      latencyMs: 0,
+    },
+  };
+}
+
 function usageTotals(items) {
   return items.reduce(
     (total, item) => {
-      total.requests += 1;
+      total.requests += item.providerRequestMade === false ? 0 : 1;
       total.inputTokens += item.usage?.inputTokens ?? 0;
       total.cachedInputTokens += item.usage?.cachedInputTokens ?? 0;
       total.outputTokens += item.usage?.outputTokens ?? 0;
@@ -146,16 +175,33 @@ export function summarizeEvaluation(results) {
       schemaPasses: 0,
       groundedEvidence: 0,
       totalEvidence: 0,
+      removedEvidence: 0,
+      removedClaims: 0,
+      suppressedArchetypes: 0,
+      quarantinedCalls: 0,
+      eligibleCalls: 0,
     };
     profile.calls += 1;
     profile.legacy.push(...result.legacy);
     if (result.structuredV2) {
       profile.structured.push(result.structuredV2);
-      if (result.structuredV2.score?.hardPass) profile.hardPasses += 1;
-      if (result.structuredV2.score?.schemaValid) profile.schemaPasses += 1;
-      profile.groundedEvidence +=
-        result.structuredV2.score?.evidence?.supported ?? 0;
-      profile.totalEvidence += result.structuredV2.score?.evidence?.total ?? 0;
+      if (result.structuredV2.quarantine) {
+        profile.quarantinedCalls += 1;
+      } else {
+        profile.eligibleCalls += 1;
+        if (result.structuredV2.score?.hardPass) profile.hardPasses += 1;
+        if (result.structuredV2.score?.schemaValid) profile.schemaPasses += 1;
+        profile.groundedEvidence +=
+          result.structuredV2.score?.evidence?.supported ?? 0;
+        profile.totalEvidence +=
+          result.structuredV2.score?.evidence?.total ?? 0;
+      }
+      profile.removedEvidence +=
+        result.structuredV2.sanitization?.removedEvidenceCount ?? 0;
+      profile.removedClaims +=
+        result.structuredV2.sanitization?.removedClaimCount ?? 0;
+      profile.suppressedArchetypes +=
+        result.structuredV2.sanitization?.suppressedArchetypeCount ?? 0;
     }
     profiles[result.profile] = profile;
   }
@@ -168,14 +214,23 @@ export function summarizeEvaluation(results) {
         legacy: usageTotals(profile.legacy),
         structuredV2: {
           ...usageTotals(profile.structured),
+          eligibleCalls: profile.eligibleCalls,
+          quarantinedCalls: profile.quarantinedCalls,
           schemaPassRate:
-            profile.calls === 0 ? 0 : profile.schemaPasses / profile.calls,
+            profile.eligibleCalls === 0
+              ? 0
+              : profile.schemaPasses / profile.eligibleCalls,
           hardPassRate:
-            profile.calls === 0 ? 0 : profile.hardPasses / profile.calls,
+            profile.eligibleCalls === 0
+              ? 0
+              : profile.hardPasses / profile.eligibleCalls,
           evidenceGroundedRate:
             profile.totalEvidence === 0
               ? 1
               : profile.groundedEvidence / profile.totalEvidence,
+          removedEvidenceCount: profile.removedEvidence,
+          removedClaimCount: profile.removedClaims,
+          suppressedArchetypeCount: profile.suppressedArchetypes,
         },
       },
     ]),

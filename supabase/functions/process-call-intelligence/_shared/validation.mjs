@@ -124,8 +124,9 @@ function exactKeys(value, keys) {
 }
 
 function evidence(value) {
-  const quoteWords = normalizeEvidenceText(value?.quote)
-    .split(" ")
+  const quoteWords = String(value?.quote ?? "")
+    .trim()
+    .split(/\s+/)
     .filter(Boolean).length;
   return (
     exactKeys(value, ["timestamp", "speaker_role", "quote"]) &&
@@ -135,6 +136,81 @@ function evidence(value) {
     quoteWords >= MIN_EVIDENCE_QUOTE_WORDS &&
     quoteWords <= MAX_EVIDENCE_QUOTE_WORDS
   );
+}
+
+export function sanitizeStructuredEvidence(
+  value,
+  { transcript = null, participantContext = null } = {},
+) {
+  const sanitized = structuredClone(value);
+  let removedEvidenceCount = 0;
+  let removedClaimCount = 0;
+  let suppressedArchetypeCount = 0;
+
+  function visit(current) {
+    if (Array.isArray(current)) {
+      current.forEach(visit);
+      return;
+    }
+    if (!object(current)) return;
+    if (Array.isArray(current.evidence)) {
+      current.evidence = current.evidence.filter((item) => {
+        if (!evidence(item)) {
+          removedEvidenceCount += 1;
+          return false;
+        }
+        const quoteGrounded =
+          typeof transcript !== "string" ||
+          evidenceIsGrounded(item, transcript);
+        const roleGrounded =
+          participantContext === null ||
+          evidenceRoleIsGrounded(item, transcript, participantContext);
+        if (quoteGrounded && roleGrounded) return true;
+        removedEvidenceCount += 1;
+        return false;
+      });
+    }
+    for (const [key, child] of Object.entries(current)) {
+      if (key !== "evidence") visit(child);
+    }
+  }
+
+  visit(sanitized);
+  for (const key of ["client_pain_points", "next_steps"]) {
+    if (!Array.isArray(sanitized?.[key])) continue;
+    sanitized[key] = sanitized[key].filter((item) => {
+      if (Array.isArray(item?.evidence) && item.evidence.length === 1) {
+        return true;
+      }
+      removedClaimCount += 1;
+      return false;
+    });
+  }
+  if (
+    object(sanitized?.archetype) &&
+    sanitized.archetype.label !== "insufficient_evidence" &&
+    (
+      sanitized.archetype.confidence !== "high" ||
+      !Array.isArray(sanitized.archetype.evidence) ||
+      sanitized.archetype.evidence.length < 2 ||
+      new Set(
+        sanitized.archetype.evidence.map((item) => item.timestamp),
+      ).size < 2
+    )
+  ) {
+    sanitized.archetype = {
+      label: "insufficient_evidence",
+      confidence: "low",
+      evidence: [],
+    };
+    suppressedArchetypeCount = 1;
+  }
+  return {
+    value: sanitized,
+    removedEvidenceCount,
+    removedClaimCount,
+    suppressedArchetypeCount,
+  };
 }
 
 function evidenceList(value, max = MAX_EVIDENCE_ITEMS) {
@@ -218,7 +294,8 @@ export function validateStructuredV2(
       (item) =>
         exactKeys(item, ["summary", "evidence"]) &&
         boundedString(item.summary, 1, 500) &&
-        evidenceList(item.evidence),
+        evidenceList(item.evidence) &&
+        item.evidence.length === 1,
     )
   ) {
     errors.push("client_pain_points");
@@ -233,7 +310,8 @@ export function validateStructuredV2(
         boundedString(item.action, 1, 500) &&
         typeof item.due_date === "string" &&
         (item.due_date === "" || /^\d{4}-\d{2}-\d{2}$/.test(item.due_date)) &&
-        evidenceList(item.evidence),
+        evidenceList(item.evidence) &&
+        item.evidence.length === 1,
     )
   ) {
     errors.push("next_steps");
@@ -263,7 +341,17 @@ export function validateStructuredV2(
     !exactKeys(value.archetype, ["label", "confidence", "evidence"]) ||
     !ARCHETYPES.has(value.archetype.label) ||
     !CONFIDENCE.has(value.archetype.confidence) ||
-    !evidenceList(value.archetype.evidence)
+    !evidenceList(value.archetype.evidence, 2) ||
+    (
+      value.archetype.label === "insufficient_evidence"
+        ? value.archetype.confidence !== "low" ||
+          value.archetype.evidence.length !== 0
+        : value.archetype.confidence !== "high" ||
+          value.archetype.evidence.length !== 2 ||
+          new Set(
+            value.archetype.evidence.map((item) => item.timestamp),
+          ).size !== 2
+    )
   ) {
     errors.push("archetype");
   }

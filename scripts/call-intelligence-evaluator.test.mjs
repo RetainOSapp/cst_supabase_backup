@@ -28,9 +28,18 @@ test("plans a full baseline and a bounded structured-only retest", () => {
   const retest = dryRun(["--structured-only"]);
   assert.deepEqual(retest.runKinds, ["structured_v2"]);
   assert.equal(retest.plannedProviderCalls, 3);
-  assert.equal(retest.structuredPromptVersion, "structured_v2_evidence_v2");
+  assert.equal(retest.structuredPromptVersion, "structured_v2_quality_v3");
   assert.ok(
     retest.conservativeMaximumCostMicros <
       baseline.conservativeMaximumCostMicros,
   );
+
+  const adversarial = dryRun([
+    "--structured-only",
+    "--call-ids",
+    "synthetic-prompt-injection",
+  ]);
+  assert.equal(adversarial.callCount, 1);
+  assert.equal(adversarial.eligibleCallCount, 1);
+  assert.equal(adversarial.plannedProviderCalls, 1);
 });

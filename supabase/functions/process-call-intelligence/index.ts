@@ -17,8 +17,12 @@ import {
 import {
   conservativeProviderInputCharacters,
   participantContextFromRows,
+  participantRoleConflictCount,
 } from "./_shared/participant-context.mjs";
-import { validateStructuredV2 } from "./_shared/validation.mjs";
+import {
+  sanitizeStructuredEvidence,
+  validateStructuredV2,
+} from "./_shared/validation.mjs";
 
 const ALLOWED_MODELS = new Set([
   "gpt-5.6-luna",
@@ -43,7 +47,7 @@ async function preliminaryRun(supabase, runId: string) {
   const [transcriptResult, promptResult, participantsResult] = await Promise.all([
     supabase
       .from("call_intelligence_transcripts")
-      .select("character_count")
+      .select("character_count, transcript_text")
       .eq("call_id", run.call_id)
       .maybeSingle(),
     supabase
@@ -69,6 +73,10 @@ async function preliminaryRun(supabase, runId: string) {
   return {
     ...run,
     participantContext,
+    participantRoleConflictCount: participantRoleConflictCount(
+      transcriptResult.data.transcript_text,
+      participantContext,
+    ),
     inputCharacters:
       conservativeProviderInputCharacters(
         transcriptResult.data.character_count,
@@ -159,6 +167,40 @@ Deno.serve(async (req) => {
     const preliminary = await preliminaryRun(supabase, runId);
     if (!preliminary) {
       return jsonResponse(req, { error: "Run not found." }, 404);
+    }
+    if (preliminary.participantRoleConflictCount > 0) {
+      const completedAt = new Date().toISOString();
+      const [callUpdate, runUpdate] = await Promise.all([
+        supabase
+          .from("call_intelligence_calls")
+          .update({
+            processing_status: "needs_reconciliation",
+            reconciliation_note:
+              "Conflicting participant roles require reconciliation before analysis.",
+            last_error_category: "participant_role_conflict",
+          })
+          .eq("id", preliminary.call_id),
+        supabase
+          .from("call_intelligence_runs")
+          .update({
+            status: "cancelled",
+            error_category: "participant_role_conflict",
+            completed_at: completedAt,
+          })
+          .eq("id", runId)
+          .eq("status", "queued"),
+      ]);
+      if (callUpdate.error) throw callUpdate.error;
+      if (runUpdate.error) throw runUpdate.error;
+      return jsonResponse(
+        req,
+        {
+          ok: false,
+          needsReview: true,
+          error: "participant_role_conflict",
+        },
+        409,
+      );
     }
     reservationMicros = conservativeReservationMicros({
       inputCharacters: preliminary.inputCharacters,
@@ -305,6 +347,10 @@ Deno.serve(async (req) => {
       if (finalizeError) throw finalizeError;
       return jsonResponse(req, { ok: false, error: "result_invalid_json" }, 502);
     }
+    result = sanitizeStructuredEvidence(result, {
+      transcript: claim.transcript_text,
+      participantContext: preliminary.participantContext,
+    }).value;
     const validation = validateStructuredV2(result, {
       transcript: claim.transcript_text,
       participantContext: preliminary.participantContext,
@@ -337,7 +383,7 @@ Deno.serve(async (req) => {
         p_succeeded: true,
         p_result_schema_version: result.schema_version,
         p_result_json: result,
-        p_result_text: response.text,
+        p_result_text: JSON.stringify(result),
         p_provider_request_id: response.providerRequestId,
         p_input_tokens: response.usage.inputTokens,
         p_cached_input_tokens: response.usage.cachedInputTokens,

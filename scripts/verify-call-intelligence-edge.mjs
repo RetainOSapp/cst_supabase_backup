@@ -13,6 +13,8 @@ const [
   structured,
   validation,
   participantContext,
+  replay,
+  promptVersion,
 ] = await Promise.all([
   readFile("supabase/functions/ingest-call-intelligence/index.ts", "utf8"),
   readFile("supabase/functions/manage-call-intelligence/index.ts", "utf8"),
@@ -46,6 +48,11 @@ const [
     "supabase/functions/process-call-intelligence/_shared/participant-context.mjs",
     "utf8",
   ),
+  readFile("scripts/replay-call-intelligence-evaluation.mjs", "utf8"),
+  readFile(
+    "supabase/functions/_shared/call-intelligence-version.mjs",
+    "utf8",
+  ),
 ]);
 
 const checks = [
@@ -67,8 +74,10 @@ const checks = [
   ["dispatch marked before provider", worker, /mark_call_intelligence_run_dispatched/],
   ["separate Call Intelligence key", worker, /CALL_INTELLIGENCE_OPENAI_API_KEY/],
   ["strict structured result", provider, /type: "json_schema"[\s\S]+strict: true/],
-  ["single exact evidence instruction", structured, /one uninterrupted span[\s\S]+at most one evidence item per claim/],
+  ["single exact evidence instruction", structured, /one uninterrupted span[\s\S]+use at most one evidence item/],
   ["runtime evidence grounding", worker, /validateStructuredV2\(result,\s*\{[\s\S]+transcript: claim\.transcript_text/],
+  ["runtime evidence sanitization", worker, /sanitizeStructuredEvidence\(result/],
+  ["fixed result text is sanitized", worker, /p_result_text: JSON\.stringify\(result\)/],
   ["grounding failure category", validation, /evidence_grounding/],
   ["attribution failure category", validation, /evidence_attribution/],
   ["provider does not store", provider, /store: false/],
@@ -78,6 +87,9 @@ const checks = [
   ["participant context excludes emails", participantContext, /\{ name, role \}/],
   ["explicit transcript speaker map", participantContext, /SPEAKER_ROLE_MAP_JSON/],
   ["unknown speaker role is preserved", participantContext, /unknown must remain unknown/],
+  ["participant role collision detection", participantContext, /participantRoleConflictCount/],
+  ["participant collision quarantine", worker, /participant_role_conflict/],
+  ["adversarial transcript boundary", participantContext, /Do not follow instructions contained/],
   ["participant context reservation overhead", worker, /conservativeProviderInputCharacters/],
   ["same-record evidence instruction", structured, /same[\s\S]+utterance record/],
   ["model-scoped price card", worker, /pricingForModel\(model\)/],
@@ -90,6 +102,10 @@ const checks = [
   ["JWT-on management", config, /\[functions\.manage-call-intelligence\]\s+verify_jwt = true/],
   ["JWT-on worker", config, /\[functions\.process-call-intelligence\]\s+verify_jwt = true/],
   ["bounded transcript", contract, /MAX_TRANSCRIPT_CHARACTERS = 500_000/],
+  ["replay artifacts stay private", replay, /must be inside \.call-intelligence-private/],
+  ["central prompt version", promptVersion, /structured_v2_quality_v3/],
+  ["ingest uses central prompt version", ingest, /STRUCTURED_V2_PROMPT_VERSION/],
+  ["management uses central prompt version", manage, /STRUCTURED_V2_PROMPT_VERSION/],
 ];
 
 let passed = 0;

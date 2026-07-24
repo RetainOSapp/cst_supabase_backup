@@ -59,6 +59,14 @@ function normalizeComparableText(value) {
 function roleForSpeakerName(speakerName, participants) {
   const speaker = normalizeComparableText(speakerName);
   if (!speaker) return "unknown";
+  const matches = matchingParticipantsForSpeaker(speaker, participants);
+  const roles = new Set(matches.map((participant) => participant.role));
+  return roles.size === 1 ? [...roles][0] : "unknown";
+}
+
+function matchingParticipantsForSpeaker(speakerName, participants) {
+  const speaker = normalizeComparableText(speakerName);
+  if (!speaker) return [];
   let matches = participants.filter(
     (participant) =>
       normalizeComparableText(participant.name) === speaker,
@@ -75,8 +83,36 @@ function roleForSpeakerName(speakerName, participants) {
       );
     });
   }
-  const roles = new Set(matches.map((participant) => participant.role));
-  return roles.size === 1 ? [...roles][0] : "unknown";
+  return matches;
+}
+
+export function participantRoleConflictCount(
+  transcript,
+  participantContext = [],
+) {
+  const participants = normalizeParticipantContext(participantContext);
+  const conflictingNames = new Set();
+  const rolesByName = new Map();
+  for (const participant of participants) {
+    const name = normalizeComparableText(participant.name);
+    if (!name) continue;
+    const roles = rolesByName.get(name) ?? new Set();
+    roles.add(participant.role);
+    rolesByName.set(name, roles);
+    if (roles.size > 1) conflictingNames.add(name);
+  }
+  for (const utterance of parseTranscriptUtterances(transcript, participants)) {
+    const roles = new Set(
+      matchingParticipantsForSpeaker(
+        utterance.speaker_label,
+        participants,
+      ).map((participant) => participant.role),
+    );
+    if (roles.size > 1) {
+      conflictingNames.add(normalizeComparableText(utterance.speaker_label));
+    }
+  }
+  return conflictingNames.size;
 }
 
 export function speakerRoleMapFromTranscript(
