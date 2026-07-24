@@ -153,7 +153,7 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
   immutable price lineage, database-side cost recomputation, compatibility with
   existing token/intake/AI-policy dependencies, and the current RPC rollback
   signature.
-- Edge/source security verification: 46/46.
+- Edge/source security verification: 47/47.
 - Frontend/security/privacy verification: 19/19.
 - Production TypeScript/Vite build: pass.
 - Evaluation harness: dry-run pass; 3 synthetic calls, 8 legacy prompts plus
@@ -166,9 +166,9 @@ The SQL rollback that drops V1 tables is pre-traffic/disposable-environment only
   evidence-v1 five-call retest completed for $0.372006 but also failed safely:
   55/67 unique evidence items were timestamp-grounded, 42/67 were correctly
   attributed, and 0/5 calls passed. Evidence-v2 now sends an explicit
-  speaker-role map, preserves unknown speakers, and constrains quote word count
-  in the strict schema. Its five-call retest has a conservative $1.13 ceiling
-  and remains pending.
+  speaker-role map, presents explicit timestamped utterance records, preserves
+  unknown speakers, and constrains quote word count in the strict schema. Its
+  five-call retest has a conservative $1.18 ceiling and remains pending.
 - Browser QA: desktop 1440×1000 and mobile 320×900, list/detail/filter/URL
   behavior, no horizontal overflow.
 - Real Supabase migration/runtime, evidence-v2 private-corpus retest, company

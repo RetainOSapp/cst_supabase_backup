@@ -12,6 +12,7 @@ import {
   buildProviderInputText,
   conservativeProviderInputCharacters,
   evidenceRoleIsGrounded,
+  parseTranscriptUtterances,
   participantContextFromRows,
   speakerRoleMapFromTranscript,
 } from "../_shared/participant-context.mjs";
@@ -152,7 +153,7 @@ test("sends a non-stored strict structured Responses request", async () => {
   assert.equal(outbound.body.text.format.strict, true);
   assert.match(
     outbound.body.input[0].content[0].text,
-    /untrusted call transcript/i,
+    /UNTRUSTED_UTTERANCE_RECORDS_JSON/,
   );
   assert.match(
     outbound.body.input[0].content[0].text,
@@ -218,8 +219,24 @@ test("builds a minimal trusted role map from matched participant rows", () => {
   ]);
   const promptInput = buildProviderInputText(transcript, context);
   assert.match(promptInput, /SPEAKER_ROLE_MAP_JSON/);
+  assert.match(promptInput, /UNTRUSTED_UTTERANCE_RECORDS_JSON/);
+  assert.deepEqual(parseTranscriptUtterances(transcript, context), [
+    {
+      utterance_id: "u00001",
+      timestamp: "00:00:20",
+      speaker_label: "Taylor (Ethical Scaling)",
+      speaker_role: "team_member",
+      text: "I will send the renewal proposal tomorrow.",
+    },
+    {
+      utterance_id: "u00002",
+      timestamp: "00:00:30",
+      speaker_label: "Unlisted Speaker",
+      speaker_role: "unknown",
+      text: "The unknown speaker says something.",
+    },
+  ]);
   assert.doesNotMatch(promptInput, /private@example\.test|client-id|member-id/);
-  assert.match(promptInput, /BEGIN UNTRUSTED CALL TRANSCRIPT/);
   assert.ok(conservativeProviderInputCharacters(500_000) > 500_000);
   assert.equal(
     evidenceRoleIsGrounded(

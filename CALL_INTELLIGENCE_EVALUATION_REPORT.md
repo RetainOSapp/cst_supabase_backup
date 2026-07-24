@@ -89,6 +89,8 @@ instead of preserving `unknown`.
   run can succeed;
 - derives an explicit transcript-speaker-to-role map from sanitized matched
   participant records, never emails or internal IDs;
+- presents the transcript as explicit timestamped utterance records and requires
+  each evidence timestamp, role, and quote to come from the same record;
 - permits a unique first-name match while forcing genuinely unmapped or
   ambiguous speakers to `unknown`;
 - uses a supported strict-schema regex to require 4–12 whitespace-separated
@@ -103,7 +105,7 @@ for the string `pattern` property:
 https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas
 
 The evidence-v2 structured-only dry run plans five provider requests with a
-conservative maximum of 1,123,498 micros ($1.13 rounded). It has not been
+conservative maximum of 1,176,566 micros ($1.18 rounded). It has not been
 executed.
 
 ## Decision

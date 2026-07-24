@@ -40,7 +40,7 @@ is not treated as proof of production runtime behavior.
 - Edge/provider/dispatch tests: 18/18.
 - Evaluation scorer/harness tests: 4/4.
 - Database/dependency/rollback contract: 54/54.
-- Edge/source security: 46/46.
+- Edge/source security: 47/47.
 - Frontend/security/privacy: 19/19.
 - TypeScript/Vite production build: pass.
 - Synthetic evaluation manifest: 27 planned calls, dry-run only.
@@ -51,7 +51,7 @@ is not treated as proof of production runtime behavior.
   runtime acceptance was 0/5; timestamp-grounded evidence was 55/67 and
   correctly attributed evidence was 42/67.
 - `structured_v2_evidence_v2` retest: five structured-only calls,
-  conservative 1,123,498-micro ($1.13 rounded) ceiling, not yet executed.
+  conservative 1,176,566-micro ($1.18 rounded) ceiling, not yet executed.
 - Browser QA: list, detail, URL navigation, filtering, desktop, and mobile pass.
 
 ## External gates

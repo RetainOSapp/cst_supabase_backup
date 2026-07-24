@@ -187,6 +187,8 @@ Evidence rules:
 - never invent a name, timestamp, owner, due date, emotion, or quote;
 - use the application-generated speaker role map for attribution;
   copy each supplied role exactly and never infer a replacement for unknown;
+- copy an evidence item''s timestamp, speaker role, and quote from the same
+  supplied utterance record; never pair a quote with another record''s timestamp;
 - every evidence quote must be one uninterrupted span of 4–12 consecutive
   words copied word-for-word from the single utterance at the cited timestamp;
 - count the whitespace-separated words before returning; the schema requires
