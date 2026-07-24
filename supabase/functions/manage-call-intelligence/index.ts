@@ -75,7 +75,7 @@ async function actorAccess(supabase, actor, companyId: string) {
   if (await isRegisteredSuperAdmin(supabase, actor)) {
     return { role: "super_admin", member: null, csmEnabled: true };
   }
-  const select = "id, glide_row_id, role, status, email";
+  const select = "id, legacy_glide_row_id, role, status, email";
   let { data: membership, error } = await supabase
     .from("company_members")
     .select(select)
@@ -154,7 +154,7 @@ function publicAccess(access) {
 }
 
 function memberAssignmentIds(access) {
-  return [access.member?.id, access.member?.glide_row_id]
+  return [access.member?.id, access.member?.legacy_glide_row_id]
     .map((value) => cleanText(value))
     .filter(Boolean);
 }
@@ -268,7 +268,7 @@ async function loadMembers(supabase, companyId: string, ids: string[]) {
   if (ids.length === 0) return new Map();
   const { data, error } = await supabase
     .from("company_members")
-    .select("id, glide_row_id, name, email, role, status")
+    .select("id, legacy_glide_row_id, name, email, role, status")
     .eq("company_id", companyId)
     .in("id", [...new Set(ids)]);
   if (error) throw error;

@@ -78,6 +78,7 @@ const checks = [
   ["manual upload binds known team member", manage, /assigned_member_id: member\.id/],
   ["manual upload is bounded", manage, /MAX_TRANSCRIPT_CHARACTERS = 500_000/],
   ["Support read-only", manage, /Support access is read-only/],
+  ["canonical company member legacy id", manage, /company_members"\)[\s\S]+legacy_glide_row_id/],
   ["CSM assignment restriction", manage, /clientAuthorizedForCsm/],
   ["service-only worker", worker, /isServiceRoleRequest/],
   ["global/company/budget claim", worker, /claim_call_intelligence_run/],
@@ -161,5 +162,11 @@ assert.doesNotMatch(
   "management must never update a client profile",
 );
 passed += 1;
+assert.doesNotMatch(
+  manage,
+  /company_members"\)[\s\S]{0,180}\.select\("[^"]*\bglide_row_id\b/,
+  "company member reads must use legacy_glide_row_id",
+);
+passed += 1;
 
-console.log(`Call Intelligence Edge/source verification: ${passed}/${checks.length + 7} passed`);
+console.log(`Call Intelligence Edge/source verification: ${passed}/${checks.length + 8} passed`);
