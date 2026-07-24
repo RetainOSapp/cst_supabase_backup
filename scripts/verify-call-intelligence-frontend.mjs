@@ -32,6 +32,8 @@ const checks = [
   ["matched client named in summary", intelligence, /Matched client: \{detail\.call\.client\.client_name\}/],
   ["sales discovery label", intelligence, /sales_discovery: "Sales \/ Discovery"/],
   ["on-demand prompt actions", intelligence, /run_on_demand/],
+  ["on-demand runs auto-refresh", intelligence, /\["queued", "claimed"\][\s\S]+2_500/],
+  ["succeeded run status", intelligence, /value === "completed" \|\| value === "succeeded"/],
   ["manual upload is capability-gated", intelligence, /access\?\.canUpload/],
   ["manual upload uses actor-scoped API", intelligence, /action: "manual_upload"/],
   ["manual upload requires client and member", intelligence, /clientId: uploadForm\.clientId[\s\S]+assignedMemberId: uploadForm\.assignedMemberId/],

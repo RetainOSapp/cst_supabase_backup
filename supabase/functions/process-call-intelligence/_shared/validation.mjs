@@ -1,4 +1,7 @@
-import { evidenceRoleIsGrounded } from "./participant-context.mjs";
+import {
+  evidenceRoleIsGrounded,
+  parseTranscriptUtterances,
+} from "./participant-context.mjs";
 
 const SENTIMENTS = new Set([
   "positive",
@@ -95,6 +98,15 @@ export function evidenceIsGrounded(item, transcript) {
     return normalizeEvidenceText(transcript).includes(quote);
   }
 
+  const parsedUtterances = parseTranscriptUtterances(transcript);
+  if (parsedUtterances.length > 0) {
+    return parsedUtterances.some(
+      (utterance) =>
+        utterance.timestamp === item.timestamp &&
+        normalizeEvidenceText(utterance.text).includes(quote),
+    );
+  }
+
   let searchFrom = 0;
   while (searchFrom < transcript.length) {
     const timestampIndex = transcript.indexOf(item.timestamp, searchFrom);
@@ -102,7 +114,9 @@ export function evidenceIsGrounded(item, transcript) {
     const afterTimestamp = timestampIndex + item.timestamp.length;
     const nextTimestamp = transcript
       .slice(afterTimestamp)
-      .search(/\b\d{2}:\d{2}:\d{2}\b/);
+      .search(
+        /(?:^|\r?\n)\s*\d{1,3}:\d{2}(?::\d{2})?\s*[-–—:]/m,
+      );
     const contextEnd =
       nextTimestamp < 0
         ? transcript.length

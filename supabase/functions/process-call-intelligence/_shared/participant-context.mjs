@@ -3,6 +3,16 @@ const MAX_PARTICIPANTS = 100;
 const MAX_NAME_LENGTH = 160;
 const MAX_UTTERANCES = 10_000;
 const PROVIDER_INPUT_RESERVATION_OVERHEAD = 25_000;
+const TRANSCRIPT_TIMESTAMP_SOURCE = String.raw`\d{1,3}:\d{2}(?::\d{2})?`;
+
+function nextTranscriptTimestampOffset(value) {
+  return String(value ?? "").search(
+    new RegExp(
+      String.raw`(?:^|\r?\n)\s*${TRANSCRIPT_TIMESTAMP_SOURCE}\s*[-–—:]`,
+      "m",
+    ),
+  );
+}
 
 function cleanName(value) {
   if (typeof value !== "string") return "";
@@ -144,8 +154,10 @@ export function parseTranscriptUtterances(
 ) {
   const source = String(transcript ?? "");
   const participants = normalizeParticipantContext(participantContext);
-  const pattern =
-    /\b(\d{2}:\d{2}:\d{2})\s*[-–—:]\s*([^\r\n:]+)(?=:|\r?\n)/g;
+  const pattern = new RegExp(
+    String.raw`(?:^|\r?\n)\s*(${TRANSCRIPT_TIMESTAMP_SOURCE})\s*[-–—:]\s*([^\r\n:]+?)(?=\s*:\s*|\r?\n)`,
+    "gm",
+  );
   const matches = [...source.matchAll(pattern)].slice(0, MAX_UTTERANCES);
   return matches.map((match, index) => {
     const speakerLabel = cleanName(match[2]);
@@ -212,9 +224,9 @@ function utterancesAtTimestamp(transcript, timestamp) {
     const timestampIndex = transcript.indexOf(timestamp, searchFrom);
     if (timestampIndex < 0) break;
     const afterTimestamp = timestampIndex + timestamp.length;
-    const relativeNextTimestamp = transcript
-      .slice(afterTimestamp)
-      .search(/\b\d{2}:\d{2}:\d{2}\b/);
+    const relativeNextTimestamp = nextTranscriptTimestampOffset(
+      transcript.slice(afterTimestamp),
+    );
     const utteranceEnd = relativeNextTimestamp < 0
       ? transcript.length
       : afterTimestamp + relativeNextTimestamp;
@@ -245,6 +257,18 @@ export function evidenceRoleIsGrounded(
   const participants = normalizeParticipantContext(participantContext);
   if (!item.timestamp) return item.speaker_role === "unknown";
   const normalizedQuote = normalizeComparableText(item.quote);
+  const parsedUtterances = parseTranscriptUtterances(transcript, participants);
+  if (parsedUtterances.length > 0) {
+    return parsedUtterances.some(
+      (utterance) =>
+        utterance.timestamp === item.timestamp &&
+        item.speaker_role === utterance.speaker_role &&
+        (
+          !normalizedQuote ||
+          normalizeComparableText(utterance.text).includes(normalizedQuote)
+        ),
+    );
+  }
   for (const utterance of utterancesAtTimestamp(transcript, item.timestamp)) {
     if (
       normalizedQuote &&

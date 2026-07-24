@@ -261,9 +261,9 @@ function SentimentBadge({ value }: { value: Sentiment | null | undefined }) {
 
 function StatusBadge({ value }: { value: string }) {
   const style =
-    value === "completed"
+    value === "completed" || value === "succeeded"
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : value === "failed"
+      : value === "failed" || value === "cancelled"
         ? "border-red-200 bg-red-50 text-red-700"
         : value === "needs_reconciliation"
           ? "border-amber-200 bg-amber-50 text-amber-800"
@@ -438,6 +438,23 @@ export function CallIntelligence({
     setSelectedEvidence(null);
     setTranscriptOpen(false);
   }, [selectedCallId]);
+
+  useEffect(() => {
+    if (
+      developmentFixture ||
+      !selectedCallId ||
+      !detail?.runs.some((run) =>
+        ["queued", "claimed"].includes(run.status),
+      )
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setReloadKey((value) => value + 1),
+      2_500,
+    );
+    return () => window.clearTimeout(timer);
+  }, [detail?.runs, developmentFixture, selectedCallId]);
 
   const months = useMemo(
     () =>

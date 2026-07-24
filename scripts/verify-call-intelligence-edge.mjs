@@ -97,6 +97,7 @@ const checks = [
   ["runtime matched participant roles", worker, /participantContextFromRows/],
   ["participant context excludes emails", participantContext, /\{ name, role \}/],
   ["explicit transcript speaker map", participantContext, /SPEAKER_ROLE_MAP_JSON/],
+  ["native Fathom minute timestamps", participantContext, /\\d\{1,3\}:\\d\{2\}\(\?::\\d\{2\}\)\?/],
   ["unknown speaker role is preserved", participantContext, /unknown must remain unknown/],
   ["participant role collision detection", participantContext, /participantRoleConflictCount/],
   ["participant collision quarantine", worker, /participant_role_conflict/],

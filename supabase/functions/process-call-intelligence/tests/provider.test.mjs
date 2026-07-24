@@ -19,6 +19,7 @@ import {
 } from "../_shared/participant-context.mjs";
 import { STRUCTURED_V2_SCHEMA } from "../_shared/structured-v2.mjs";
 import {
+  evidenceIsGrounded,
   sanitizeStructuredEvidence,
   validateStructuredV2,
 } from "../_shared/validation.mjs";
@@ -265,6 +266,73 @@ test("builds a minimal trusted role map from matched participant rows", () => {
       context,
     ),
     true,
+  );
+});
+
+test("parses native Fathom minute and hour timestamps with grounded roles", () => {
+  const context = [
+    { name: "Matt Shiver", role: "client" },
+    { name: "Jay Goncalves", role: "team_member" },
+  ];
+  const transcript =
+    "Call title\nVIEW RECORDING\n---\n" +
+    "0:00 - Matt Shiver\n" +
+    "  I will complete the Slack channel audit today.\n" +
+    "0:14 - Jay Goncalves (Ethical Scaling)\n" +
+    "  I will send the updated action plan tomorrow.\n" +
+    "1:07:01 - Additional Speaker\n" +
+    "  I can review the final dashboard next week.";
+  const utterances = parseTranscriptUtterances(transcript, context);
+  assert.deepEqual(
+    utterances.map(({ timestamp, speaker_label, speaker_role }) => ({
+      timestamp,
+      speaker_label,
+      speaker_role,
+    })),
+    [
+      {
+        timestamp: "0:00",
+        speaker_label: "Matt Shiver",
+        speaker_role: "client",
+      },
+      {
+        timestamp: "0:14",
+        speaker_label: "Jay Goncalves (Ethical Scaling)",
+        speaker_role: "team_member",
+      },
+      {
+        timestamp: "1:07:01",
+        speaker_label: "Additional Speaker",
+        speaker_role: "unknown",
+      },
+    ],
+  );
+  assert.equal(
+    evidenceIsGrounded(
+      {
+        timestamp: "0:00",
+        speaker_role: "client",
+        quote: "complete the Slack channel audit today",
+      },
+      transcript,
+    ),
+    true,
+  );
+  assert.equal(
+    evidenceRoleIsGrounded(
+      {
+        timestamp: "0:14",
+        speaker_role: "team_member",
+        quote: "send the updated action plan tomorrow",
+      },
+      transcript,
+      context,
+    ),
+    true,
+  );
+  assert.match(
+    buildProviderInputText(transcript, context),
+    /UNTRUSTED_UTTERANCE_RECORDS_JSON/,
   );
 });
 
