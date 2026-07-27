@@ -77,6 +77,7 @@ const TASK_TEMPLATE_TRIGGERS = new Set([
   "client_created",
   "milestone_completed",
   "pipeline_stage_entered",
+  "suspended_auto_offboard",
 ]);
 const TASK_TEMPLATE_ASSIGNEES = new Set([
   "assigned_csm",
@@ -896,7 +897,19 @@ Deno.serve(async (req) => {
         if (!TASK_STATUSES.has(normalizedStatus)) {
           return jsonResponse({ error: "Choose a valid task template status." }, 400);
         }
-        const recurringIsRecurring = Boolean(body.recurringIsRecurring);
+        if (
+          triggerType === "suspended_auto_offboard" &&
+          !["todo", "in-progress", "waiting"].includes(normalizedStatus)
+        ) {
+          return jsonResponse(
+            { error: "Automatic offboarding follow-ups must start as an open task." },
+            400,
+          );
+        }
+        const recurringIsRecurring =
+          triggerType === "suspended_auto_offboard"
+            ? false
+            : Boolean(body.recurringIsRecurring);
         const recurringIntervalDays = recurringIsRecurring
           ? requiredBoundedInteger(body.recurringIntervalDays, 56, 1, 365)
           : null;

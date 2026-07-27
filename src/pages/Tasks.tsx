@@ -62,7 +62,12 @@ interface TaskTemplateRow {
   id: string;
   name: string;
   description: string | null;
-  trigger_type: "manual" | "client_created" | "milestone_completed";
+  trigger_type:
+    | "manual"
+    | "client_created"
+    | "milestone_completed"
+    | "pipeline_stage_entered"
+    | "suspended_auto_offboard";
   applies_to_offer_id: string | null;
   assign_to_type: "assigned_csm" | "director" | "support" | "specific_member" | "unassigned";
   assigned_member_legacy_id: string | null;

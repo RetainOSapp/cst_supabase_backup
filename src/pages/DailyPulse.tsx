@@ -65,10 +65,13 @@ interface PulseTask {
   glide_row_id: string;
   client_id: string | null;
   task_name: string | null;
+  task_description: string | null;
   task_due_date: string | null;
   assigned_to_id: string | null;
   status_value: string | null;
   is_manually_archived: boolean | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string | null;
   archived_at: string | null;
 }
 
@@ -93,6 +96,9 @@ interface PulseItem {
     type: "strategic_review";
     dueAt: string;
     completion?: TimedCheckpointCompletion;
+  };
+  followUpTask?: {
+    taskId: string;
   };
 }
 
@@ -490,6 +496,41 @@ function buildPulseSections(
 
   const sections: PulseSection[] = [];
 
+  const automatedOffboardFollowUps = tasks.filter((task) => {
+    const status = String(task.status_value ?? "");
+    if (["done", "completed", "closed", "dismissed", "archived"].includes(status)) {
+      return false;
+    }
+    if (task.is_manually_archived === true || task.archived_at) return false;
+    return task.metadata?.follow_up_kind === "mia_auto_offboard";
+  });
+
+  if (automatedOffboardFollowUps.length > 0) {
+    sections.push({
+      id: "automated-offboard-follow-up",
+      title: "Automated Offboards Requiring Follow-up",
+      description:
+        "Outstanding coach actions after RetainOS automatically offboarded a client.",
+      items: automatedOffboardFollowUps.map((task) => {
+        const client = task.client_id ? clientById.get(task.client_id) : undefined;
+        return {
+          ...makeItem(
+            "automated-offboard-follow-up",
+            client,
+            "Team update required",
+            task.task_description ??
+              task.task_name ??
+              "Update the client Slack thread and confirm backend access can be removed.",
+            "red",
+            task.created_at ?? task.task_due_date,
+            client ? clientUrl(client) : taskUrl(),
+          ),
+          followUpTask: { taskId: task.glide_row_id },
+        };
+      }),
+    });
+  }
+
   if (enabledTypes.has("task_due")) {
     sections.push({
       id: `tasks-${window}`,
@@ -507,6 +548,7 @@ function buildPulseSections(
             return false;
           }
           if (task.is_manually_archived === true || task.archived_at) return false;
+          if (task.metadata?.follow_up_kind === "mia_auto_offboard") return false;
           return isWithin(task.task_due_date, range.start, range.end);
         })
         .map((task) => {
@@ -820,12 +862,16 @@ function WindowButton({
 function PulseSectionCard({
   section,
   completingCheckpointKey,
+  completingFollowUpTaskId,
   onCompleteCheckpoint,
+  onCompleteFollowUpTask,
   programChoices,
 }: {
   section: PulseSection;
   completingCheckpointKey: string | null;
+  completingFollowUpTaskId: string | null;
   onCompleteCheckpoint: (item: PulseItem) => void;
+  onCompleteFollowUpTask: (item: PulseItem) => void;
   programChoices: ProgramChoice[];
 }) {
   const [open, setOpen] = useState(section.items.length > 0);
@@ -927,6 +973,26 @@ function PulseSectionCard({
                       </button>
                     </div>
                   ) : null}
+                  {item.followUpTask ? (
+                    <div className="mt-4 border-t border-[#e8edf3] pt-3">
+                      <button
+                        type="button"
+                        disabled={
+                          completingFollowUpTaskId === item.followUpTask.taskId
+                        }
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onCompleteFollowUpTask(item);
+                        }}
+                        className="retainos-focus rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {completingFollowUpTaskId === item.followUpTask.taskId
+                          ? "Saving..."
+                          : "Mark team notified"}
+                      </button>
+                    </div>
+                  ) : null}
                 </Link>
               ))}
             </div>
@@ -966,6 +1032,9 @@ export function DailyPulse() {
   const [completingCheckpointKey, setCompletingCheckpointKey] = useState<string | null>(
     null,
   );
+  const [completingFollowUpTaskId, setCompletingFollowUpTaskId] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const canFilterByCsm = !capabilities.canViewOnlyAssignedClients;
   const activeCsmScopeId =
@@ -1150,11 +1219,12 @@ export function DailyPulse() {
           let tasksQuery = supabase
             .from("client_tasks")
             .select(
-              "glide_row_id, client_id, task_name, task_due_date, assigned_to_id, status_value, is_manually_archived, archived_at",
+              "glide_row_id, client_id, task_name, task_description, task_due_date, assigned_to_id, status_value, is_manually_archived, metadata, created_at, archived_at",
             )
             .eq("company_glide_row_id", effectiveCompanyId)
             .not("task_due_date", "is", null)
-            .limit(1000);
+            .order("created_at", { ascending: false })
+            .limit(5000);
 
           if (scopedCsmId) {
             tasksQuery = tasksQuery.eq("assigned_to_id", scopedCsmId);
@@ -1339,6 +1409,45 @@ export function DailyPulse() {
     }
   }
 
+  async function handleCompleteFollowUpTask(item: PulseItem) {
+    if (!effectiveCompanyId || !item.followUpTask) return;
+    const taskId = item.followUpTask.taskId;
+    setCompletingFollowUpTaskId(taskId);
+    setError(null);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke(
+        "manage-client-task",
+        {
+          body: {
+            action: "update",
+            companyGlideId: effectiveCompanyId,
+            taskId,
+            statusValue: "done",
+          },
+        },
+      );
+
+      if (invokeError) throw invokeError;
+      if (data?.error) throw new Error(data.error);
+
+      setTasks((current) =>
+        current.map((task) =>
+          task.glide_row_id === taskId
+            ? { ...task, status_value: "done" }
+            : task,
+        ),
+      );
+    } catch (completeError) {
+      setError(
+        completeError instanceof Error
+          ? completeError.message
+          : "Could not complete the offboarding follow-up.",
+      );
+    } finally {
+      setCompletingFollowUpTaskId(null);
+    }
+  }
+
   if (!effectiveCompanyId) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center text-amber-900">
@@ -1462,7 +1571,9 @@ export function DailyPulse() {
               key={section.id}
               section={section}
               completingCheckpointKey={completingCheckpointKey}
+              completingFollowUpTaskId={completingFollowUpTaskId}
               onCompleteCheckpoint={handleCompleteCheckpoint}
+              onCompleteFollowUpTask={handleCompleteFollowUpTask}
               programChoices={programChoices}
             />
           ))}

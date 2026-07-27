@@ -7235,6 +7235,13 @@ function getHistorySourceLabel(event: ClientHistoryEventRow) {
     return "Imported from CST";
   }
 
+  if (
+    source === "suspended_auto_offboard" ||
+    source === "suspended_auto_offboard_task"
+  ) {
+    return "Automated";
+  }
+
   if (eventType === "call_summary_webhook") {
     return "Updated via webhook";
   }
@@ -7257,6 +7264,14 @@ function historyActorName(
   const importedBy = event.metadata?.modified_by;
   if (typeof importedBy === "string" && importedBy.trim()) {
     return importedBy.trim();
+  }
+
+  if (
+    event.payload?.actor_role === "system" ||
+    event.source === "suspended_auto_offboard" ||
+    event.source === "suspended_auto_offboard_task"
+  ) {
+    return "RetainOS";
   }
 
   const actorMemberId = event.actor_member_id;

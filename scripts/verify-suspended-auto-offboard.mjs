@@ -10,12 +10,18 @@ const enablement = readFileSync(
   "supabase/migrations/20260723133000_enable_mm_suspended_auto_offboard.sql",
   "utf8",
 );
+const followUpMigration = readFileSync(
+  "supabase/migrations/20260727140000_mia_auto_offboard_followup_tasks.sql",
+  "utf8",
+);
 const settingsPage = readFileSync("src/pages/SaasClientDetail.tsx", "utf8");
 const settingsFunction = readFileSync(
   "supabase/functions/manage-company-customization/index.ts",
   "utf8",
 );
 const dashboard = readFileSync("src/pages/Dashboard.tsx", "utf8");
+const dailyPulse = readFileSync("src/pages/DailyPulse.tsx", "utf8");
+const clientDetail = readFileSync("src/pages/ClientDetail.tsx", "utf8");
 
 const checks = [];
 function check(label, passed) {
@@ -120,6 +126,73 @@ check(
     /legacy_glide_row_id = 'wd7vy0vaQK2hgB3IRqy17w'/i.test(enablement) &&
     /enable_suspended_auto_offboard = true[\s\S]{0,80}suspended_auto_offboard_days = 28/i.test(
       enablement,
+    ),
+);
+check(
+  "task templates support an explicit automatic MIA offboard trigger",
+  /suspended_auto_offboard/.test(settingsPage) &&
+    /suspended_auto_offboard/.test(settingsFunction) &&
+    /Automatic offboarding follow-ups must start as an open task/i.test(
+      settingsFunction,
+    ) &&
+    /trigger_type in \([\s\S]{0,220}'suspended_auto_offboard'/i.test(
+      followUpMigration,
+    ),
+);
+check(
+  "follow-up creation is driven by exact automated history evidence",
+  /after insert on public\.client_history_events[\s\S]{0,220}new\.source = 'suspended_auto_offboard'/i.test(
+    followUpMigration,
+  ) &&
+    /history\.source = 'suspended_auto_offboard'[\s\S]{0,100}history\.event_type = 'client_status_changed'/i.test(
+      followUpMigration,
+    ),
+);
+check(
+  "follow-up tasks are retry-safe per history event and template",
+  /client_tasks_auto_offboard_event_template_unique[\s\S]{0,180}source_history_event_id, task_template_id/i.test(
+    followUpMigration,
+  ) &&
+    /on conflict do nothing/i.test(followUpMigration),
+);
+check(
+  "missing coach assignment falls back to an active Director or Support member",
+    /member\.role in \('director', 'support'\)[\s\S]{0,260}v_assignment_fallback := true/i.test(
+    followUpMigration,
+  ),
+);
+check(
+  "task delivery failure cannot invalidate automatic offboarding",
+  /exception when others[\s\S]{0,900}'mia_auto_offboard_followup_task_failed'/i.test(
+    followUpMigration,
+  ) &&
+    /Task delivery cannot invalidate a correctly due lifecycle transition/i.test(
+      followUpMigration,
+    ),
+);
+check(
+  "Moves receives one editable assigned-CSM high-priority follow-up template",
+  /21586391-9a84-4072-9ae6-20436b27bea9/i.test(followUpMigration) &&
+    /'suspended_auto_offboard',[\s\S]{0,120}'assigned_csm',[\s\S]{0,120}'high',[\s\S]{0,80}'todo'/i.test(
+      followUpMigration,
+    ) &&
+    /not exists \([\s\S]{0,200}existing\.trigger_type = 'suspended_auto_offboard'/i.test(
+      followUpMigration,
+    ),
+);
+check(
+  "Daily Pulse keeps automatic offboard follow-ups visible until completion",
+  /Automated Offboards Requiring Follow-up/i.test(dailyPulse) &&
+    /follow_up_kind === "mia_auto_offboard"/i.test(dailyPulse) &&
+    /Mark team notified/i.test(dailyPulse) &&
+    /statusValue: "done"/i.test(dailyPulse),
+);
+check(
+  "automatic history identifies RetainOS as the actor",
+  /source === "suspended_auto_offboard"/i.test(clientDetail) &&
+    /return "Automated"/i.test(clientDetail) &&
+    /event\.payload\?\.actor_role === "system"[\s\S]{0,200}return "RetainOS"/i.test(
+      clientDetail,
     ),
 );
 

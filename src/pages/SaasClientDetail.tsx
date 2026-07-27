@@ -159,7 +159,8 @@ interface CompanyTaskTemplateRow {
     | "manual"
     | "client_created"
     | "milestone_completed"
-    | "pipeline_stage_entered";
+    | "pipeline_stage_entered"
+    | "suspended_auto_offboard";
   applies_to_offer_id?: string | null;
   applies_to_milestone_id?: string | null;
   applies_to_pipeline_id?: string | null;
@@ -3161,6 +3162,9 @@ function TaskTemplatesModal({
     if (template.trigger_type === "pipeline_stage_entered") {
       return "Auto-create when a Pipeline stage is entered";
     }
+    if (template.trigger_type === "suspended_auto_offboard") {
+      return "Auto-create when MIA/Suspended is automatically offboarded";
+    }
     return "Preset available in New Task";
   }
 
@@ -3309,7 +3313,7 @@ function TaskTemplatesModal({
               Task Templates
             </h2>
             <p className="mt-1 text-sm text-[#667085]">
-              Configure reusable New Task presets and new-client auto-create rules.
+              Configure reusable presets and automated task triggers.
             </p>
           </div>
           <button
@@ -3475,6 +3479,10 @@ function TaskTemplatesModal({
                     value: "pipeline_stage_entered",
                     label: "When Pipeline stage is entered",
                   },
+                  {
+                    value: "suspended_auto_offboard",
+                    label: "When MIA/Suspended is automatically offboarded",
+                  },
                   { value: "manual", label: "Preset in New Task modal" },
                 ]}
                 onChange={(value) =>
@@ -3497,6 +3505,10 @@ function TaskTemplatesModal({
                       value === "pipeline_stage_entered"
                         ? current.applies_to_pipeline_stage_id
                         : "",
+                    recurring_is_recurring:
+                      value === "suspended_auto_offboard"
+                        ? false
+                        : current.recurring_is_recurring,
                   }))
                 }
               />
@@ -3707,7 +3719,11 @@ function TaskTemplatesModal({
                   <input
                     type="checkbox"
                     checked={draft.recurring_is_recurring === true}
-                    disabled={disabled || saving}
+                    disabled={
+                      disabled ||
+                      saving ||
+                      draft.trigger_type === "suspended_auto_offboard"
+                    }
                     onChange={(event) =>
                       setDraft((current) => ({
                         ...current,
@@ -3719,10 +3735,13 @@ function TaskTemplatesModal({
                     className="mt-1 h-4 w-4 rounded border-[#d0d5dd] text-[#2f73b8]"
                   />
                   <span>
-                    Recurring task
+                    {draft.trigger_type === "suspended_auto_offboard"
+                      ? "One follow-up per automated offboard"
+                      : "Recurring task"}
                     <span className="mt-1 block text-xs font-normal text-[#667085]">
-                      When a recurring client task is completed, RetainOS creates the
-                      next one while the client is Front End or Back End.
+                      {draft.trigger_type === "suspended_auto_offboard"
+                        ? "RetainOS creates one task from each automatic lifecycle event and prevents duplicates."
+                        : "When a recurring client task is completed, RetainOS creates the next one while the client is Front End or Back End."}
                     </span>
                   </span>
                 </label>
@@ -4779,7 +4798,7 @@ function CompanySettingsSetup({
             Manage task templates
           </button>
         </div>
-        <div className="grid gap-3 p-4 md:grid-cols-5">
+        <div className="grid gap-3 p-4 md:grid-cols-3 xl:grid-cols-6">
           <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
               Templates
@@ -4804,7 +4823,7 @@ function CompanySettingsSetup({
           </div>
           <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
-              Auto-create
+              New client
             </div>
             <div className="mt-1 text-lg font-semibold text-[#101828]">
               {
@@ -4812,6 +4831,20 @@ function CompanySettingsSetup({
                   (template) =>
                     template.is_enabled &&
                     template.trigger_type === "client_created",
+                ).length
+              }
+            </div>
+          </div>
+          <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+              MIA follow-up
+            </div>
+            <div className="mt-1 text-lg font-semibold text-[#101828]">
+              {
+                taskTemplates.filter(
+                  (template) =>
+                    template.is_enabled &&
+                    template.trigger_type === "suspended_auto_offboard",
                 ).length
               }
             </div>
