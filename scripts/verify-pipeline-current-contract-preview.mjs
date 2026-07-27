@@ -69,6 +69,9 @@ check("Director remains preview-only while SuperAdmin owns the run",
 check("confirmation names the exact bounded cohort and leaves recurrence unchanged",
   /Add exactly \$\{selectedCount\} selected renewal/i.test(page)
   && /Recurring automation and schedules remain unchanged/i.test(page));
+check("successful bounded run reloads canonical workspace cards",
+  /secure bounded endpoint returns counts, not privileged item rows/i.test(page)
+  && /setReloadKey\(\(key\) => key \+ 1\)/i.test(page));
 check("Admin status is read-only and degrades to explicit unknown",
   /Automation status/i.test(admin)
   && /This panel never enables, pauses, or schedules automation/i.test(admin)

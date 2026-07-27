@@ -1407,6 +1407,9 @@ export function Pipeline() {
           return { ...current, items: [...(result.items ?? []), ...current.items.filter((item) => !ids.has(item.id))] };
         });
       }
+      // The secure bounded endpoint returns counts, not privileged item rows.
+      // Always reload canonical workspace data so newly created cards appear.
+      setReloadKey((key) => key + 1);
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : "Unable to run the renewal scan.");
     } finally {
