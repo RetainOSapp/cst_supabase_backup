@@ -77,6 +77,28 @@ function parseAdvocacyEvents(value: unknown) {
     });
 }
 
+function parseAdvocacyNotes(value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) =>
+      row && typeof row === "object"
+        ? (row as Record<string, unknown>)
+        : null
+    )
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+    .map((row) => {
+      const advocacyType = cleanText(row.advocacyType ?? row.type);
+      const notes = cleanText(row.notes);
+      if (!ADVOCACY_TYPES.has(advocacyType)) {
+        throw new Error("Choose a valid advocacy type.");
+      }
+      if (!notes) {
+        throw new Error("Advocacy notes cannot be blank.");
+      }
+      return { advocacyType, notes };
+    });
+}
+
 function normalizeEmail(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
@@ -482,6 +504,7 @@ Deno.serve(async (req) => {
     const buyInStatus = nullableText(body.buyInStatus);
     const notes = nullableText(body.notes);
     const advocacyEvents = parseAdvocacyEvents(body.advocacyEvents);
+    const advocacyNotes = parseAdvocacyNotes(body.advocacyNotes);
     const outcomeUpdateTypes = new Set(
       Array.isArray(body.outcomeUpdateTypes)
         ? body.outcomeUpdateTypes.map((item) => cleanText(item)).filter(Boolean)
@@ -507,6 +530,12 @@ Deno.serve(async (req) => {
       outcomes_buy_in_value: buyInStatus,
       outcomes_buy_in_for_filtering: buyInStatus,
     };
+    const advocacyNoteUpdates: Record<string, unknown> = {};
+    for (const advocacyNote of advocacyNotes) {
+      const prefix = ADVOCACY_PREFIXES[advocacyNote.advocacyType];
+      advocacyNoteUpdates[`${prefix}_last_note`] = advocacyNote.notes;
+    }
+    Object.assign(nextOutcomes, advocacyNoteUpdates);
 
     if (
       (client.outcomes_success_value ?? null) !== successStatus ||
@@ -532,6 +561,7 @@ Deno.serve(async (req) => {
       changes.length === 0 &&
       customFieldUpdates.changes.length === 0 &&
       advocacyEvents.length === 0 &&
+      advocacyNotes.length === 0 &&
       !notes
     ) {
       return jsonResponse({ error: "No outcome changes to save." }, 400);
@@ -592,7 +622,10 @@ Deno.serve(async (req) => {
       );
       const { data: refreshedClient, error: refreshedError } = await supabase
         .from("clients")
-        .update(refreshedAdvocacySummary)
+        .update({
+          ...refreshedAdvocacySummary,
+          ...advocacyNoteUpdates,
+        })
         .eq("id", client.id)
         .select("*")
         .single();
@@ -639,6 +672,7 @@ Deno.serve(async (req) => {
           custom_fields: customFieldUpdates.changes,
           outcome_update_types: [...outcomeUpdateTypes],
           advocacy_events: insertedAdvocacyEvents,
+          advocacy_notes: advocacyNotes,
         },
       })
       .select("*")
@@ -664,6 +698,7 @@ Deno.serve(async (req) => {
         custom_fields: customFieldUpdates.changes,
         outcome_update_types: [...outcomeUpdateTypes],
         advocacy_events: insertedAdvocacyEvents,
+        advocacy_notes: advocacyNotes,
         history_event_id: event.id,
       },
     });
@@ -674,6 +709,7 @@ Deno.serve(async (req) => {
       event,
       customFields: customFieldUpdates.changes,
       advocacyEvents: insertedAdvocacyEvents,
+      advocacyNotes,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

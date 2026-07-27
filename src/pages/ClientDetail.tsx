@@ -19,7 +19,9 @@ import { uploadClientImage } from "../lib/clientImageUpload.ts";
 import { loadPipelineWorkspace } from "../lib/pipeline.ts";
 import { ClientAdvocacyPanel } from "../components/ClientAdvocacyPanel.tsx";
 import {
+  advocacyDefinitions,
   buildAdvocacyEventDrafts,
+  buildStandaloneAdvocacyNoteDrafts,
   emptyAdvocacyDrafts,
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
@@ -2512,6 +2514,7 @@ function ClientOutcomesEditModal({
             value: customFieldDrafts[field.id] ?? "",
           })),
           advocacyEvents: buildAdvocacyEventDrafts(advocacyDrafts),
+          advocacyNotes: buildStandaloneAdvocacyNoteDrafts(advocacyDrafts),
         },
       },
     );
@@ -2741,6 +2744,7 @@ function ClientOutcomesInlineEditor({
   const hasOutcomeChanges =
     successStatus !== "" || progressStatus !== "" || buyInStatus !== "";
   const advocacyEvents = buildAdvocacyEventDrafts(advocacyDrafts);
+  const advocacyNotes = buildStandaloneAdvocacyNoteDrafts(advocacyDrafts);
 
   useEffect(() => {
     setSuccessStatus("");
@@ -2761,6 +2765,7 @@ function ClientOutcomesInlineEditor({
   const hasChanges =
     hasOutcomeChanges ||
     advocacyEvents.length > 0 ||
+    advocacyNotes.length > 0 ||
     customFields.some(
       (field) =>
         (customFieldDrafts[field.id] ?? "") !==
@@ -2792,6 +2797,7 @@ function ClientOutcomesInlineEditor({
             value: customFieldDrafts[field.id] ?? "",
           })),
           advocacyEvents,
+          advocacyNotes,
         },
       },
     );
@@ -7491,6 +7497,55 @@ function stringFromUnknown(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+type HistoryAdvocacyEntry = {
+  key: string;
+  label: string;
+  actionLabel: string;
+  notes: string | null;
+};
+
+function historyAdvocacyEntries(
+  event: ClientHistoryEventRow,
+): HistoryAdvocacyEntry[] {
+  const payload = recordFromUnknown(event.payload);
+  const eventRows = Array.isArray(payload.advocacy_events)
+    ? payload.advocacy_events
+    : [];
+  const noteRows = Array.isArray(payload.advocacy_notes)
+    ? payload.advocacy_notes
+    : [];
+
+  return [...eventRows, ...noteRows].flatMap((value, index) => {
+    const row = recordFromUnknown(value);
+    const type =
+      stringFromUnknown(row.advocacyType) ??
+      stringFromUnknown(row.advocacy_type) ??
+      stringFromUnknown(row.type);
+    const definition = advocacyDefinitions.find(
+      (candidate) => candidate.type === type,
+    );
+    if (!definition) return [];
+
+    const action = stringFromUnknown(row.action);
+    const actionLabel =
+      action === "asked"
+        ? "Marked asked"
+        : action === "received"
+          ? "Marked received"
+          : "Note";
+    const notes = stringFromUnknown(row.notes);
+
+    return [
+      {
+        key: `${event.id}:${type}:${action ?? "note"}:${index}`,
+        label: definition.label,
+        actionLabel,
+        notes,
+      },
+    ];
+  });
+}
+
 function historyRecordingUrl(event: ClientHistoryEventRow) {
   const metadata = recordFromUnknown(event.metadata);
   const payload = recordFromUnknown(event.payload);
@@ -7568,6 +7623,14 @@ function historyEventMatchesFilter(event: ClientHistoryEventRow, filter: History
 function historyEventMatchesSearch(event: ClientHistoryEventRow, query: string) {
   const text = query.trim().toLowerCase();
   if (!text) return true;
+  const advocacyText = historyAdvocacyEntries(event)
+    .flatMap((entry) => [
+      entry.label,
+      entry.actionLabel,
+      entry.notes,
+    ])
+    .filter(Boolean)
+    .join(" ");
   return [
     event.title,
     event.summary,
@@ -7578,6 +7641,7 @@ function historyEventMatchesSearch(event: ClientHistoryEventRow, query: string) 
     event.buy_in_status,
     event.source,
     event.event_type,
+    advocacyText,
   ]
     .filter(Boolean)
     .join(" ")
@@ -7723,6 +7787,7 @@ function HistorySection({
         const isLegacyHistory = event.source === "cst_mirror";
         const recordingUrl = historyRecordingUrl(event);
         const modifiedBy = historyActorName(event, teamMemberNameById);
+        const advocacyEntries = historyAdvocacyEntries(event);
 
         return (
           <article
@@ -7818,6 +7883,33 @@ function HistorySection({
                 </div>
                 <div className="mt-1">
                   <RichPreviewValue label="Next Steps history" value={event.next_steps} />
+                </div>
+              </div>
+            ) : null}
+            {advocacyEntries.length > 0 ? (
+              <div className="mt-4 rounded-lg border border-[#dbe3ee] bg-[#f8fafc] px-4 py-3">
+                <div className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Advocacy &amp; Growth
+                </div>
+                <div className="mt-2 space-y-2">
+                  {advocacyEntries.map((entry) => (
+                    <div
+                      key={entry.key}
+                      className="rounded-md border border-[#e4e9f0] bg-white px-3 py-2"
+                    >
+                      <div className="text-xs font-semibold text-[#364152]">
+                        {entry.label} · {entry.actionLabel}
+                      </div>
+                      {entry.notes ? (
+                        <div className="mt-1">
+                          <RichPreviewValue
+                            label={`${entry.label} advocacy note`}
+                            value={entry.notes}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
               </div>
             ) : null}

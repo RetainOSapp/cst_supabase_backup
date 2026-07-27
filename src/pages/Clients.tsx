@@ -28,6 +28,7 @@ import { ClientAdvocacyPanel } from "../components/ClientAdvocacyPanel.tsx";
 import {
   advocacyDefinitions,
   buildAdvocacyEventDrafts,
+  buildStandaloneAdvocacyNoteDrafts,
   emptyAdvocacyDrafts,
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
@@ -2031,6 +2032,7 @@ function QuickUpdateModal({
             value: customFieldDrafts[field.id] ?? "",
           })),
           advocacyEvents: buildAdvocacyEventDrafts(advocacyDrafts),
+          advocacyNotes: buildStandaloneAdvocacyNoteDrafts(advocacyDrafts),
           ...(callAttendance ? { callAttendance } : {}),
           notes,
         },

@@ -203,6 +203,11 @@ export function ClientAdvocacyPanel({
                   className="block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] placeholder:text-[#7b8494] disabled:bg-[#f1f4f8]"
                 />
               </label>
+              {draft.notes.trim() && pendingTotal === 0 ? (
+                <div className="mt-2 text-xs font-medium text-[#586273]">
+                  Saves as a note without changing asked or received counts.
+                </div>
+              ) : null}
             </div>
           );
         })}

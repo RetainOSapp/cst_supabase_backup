@@ -28,6 +28,11 @@ export interface AdvocacyEventDraft {
   notes?: string;
 }
 
+export interface AdvocacyNoteDraft {
+  advocacyType: AdvocacyType;
+  notes: string;
+}
+
 export const advocacyDefinitions: AdvocacyDefinition[] = [
   { type: "review", label: "Review", shortLabel: "Review" },
   { type: "testimonial", label: "Testimonial", shortLabel: "Testimonial" },
@@ -102,4 +107,15 @@ export function buildAdvocacyEventDrafts(
   }
 
   return events;
+}
+
+export function buildStandaloneAdvocacyNoteDrafts(
+  drafts: Record<AdvocacyType, AdvocacyDraft>,
+): AdvocacyNoteDraft[] {
+  return advocacyDefinitions.flatMap((definition) => {
+    const draft = drafts[definition.type];
+    const notes = draft.notes.trim();
+    if (!notes || draft.asked > 0 || draft.received > 0) return [];
+    return [{ advocacyType: definition.type, notes }];
+  });
 }

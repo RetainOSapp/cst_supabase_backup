@@ -108,6 +108,28 @@ function parseAdvocacyEvents(value: unknown) {
     });
 }
 
+function parseAdvocacyNotes(value: unknown) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) =>
+      row && typeof row === "object"
+        ? (row as Record<string, unknown>)
+        : null
+    )
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+    .map((row) => {
+      const advocacyType = cleanText(row.advocacyType ?? row.type);
+      const notes = cleanText(row.notes);
+      if (!ADVOCACY_TYPES.has(advocacyType)) {
+        throw new Error("Choose a valid advocacy type.");
+      }
+      if (!notes) {
+        throw new Error("Advocacy notes cannot be blank.");
+      }
+      return { advocacyType, notes };
+    });
+}
+
 function parseCallAttendance(value: unknown) {
   const status = cleanText(value);
   if (!status) return null;
@@ -472,6 +494,7 @@ Deno.serve(async (req) => {
     const progressStatus = hasProgressStatus ? cleanText(body.progressStatus) : "";
     const buyInStatus = hasBuyInStatus ? cleanText(body.buyInStatus) : "";
     const advocacyEvents = parseAdvocacyEvents(body.advocacyEvents);
+    const advocacyNotes = parseAdvocacyNotes(body.advocacyNotes);
     const customFieldUpdates = await prepareCustomFieldUpdates(
       supabase,
       company.id,
@@ -508,6 +531,7 @@ Deno.serve(async (req) => {
       !hasBuyInStatus &&
       !callAttendanceStatus &&
       advocacyEvents.length === 0 &&
+      advocacyNotes.length === 0 &&
       customFieldUpdates.changes.length === 0
     ) {
       return jsonResponse(
@@ -538,6 +562,7 @@ Deno.serve(async (req) => {
         contact_touch: isContactTouch,
         custom_fields: customFieldUpdates.changes,
         advocacy_events: advocacyEvents,
+        advocacy_notes: advocacyNotes,
         call_attendance: callAttendanceStatus,
       },
     };
@@ -620,6 +645,10 @@ Deno.serve(async (req) => {
     const clientUpdates: Record<string, unknown> = {
       ...advocacySummaryUpdates,
     };
+    for (const advocacyNote of advocacyNotes) {
+      const prefix = ADVOCACY_PREFIXES[advocacyNote.advocacyType];
+      clientUpdates[`${prefix}_last_note`] = advocacyNote.notes;
+    }
     if (hasNextSteps) clientUpdates.next_steps_value = nextSteps || null;
     if (hasLastContactAt) clientUpdates.csm_date_of_last_contact = lastContactAt;
     if (hasNextContactAt || nextContactAt) {
@@ -700,6 +729,7 @@ Deno.serve(async (req) => {
       client: updatedClient,
       customFields: customFieldUpdates.changes,
       advocacyEvents: insertedAdvocacyEvents,
+      advocacyNotes,
       callAttendanceEvent: insertedCallAttendanceEvent,
     });
   } catch (error) {
