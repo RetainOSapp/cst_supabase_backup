@@ -29,6 +29,7 @@ import {
   type RenewalPreviewResult,
   type PipelineWonDraft,
   type PipelineWorkspace,
+  type RenewalCohort,
 } from "../lib/pipeline.ts";
 
 type ViewMode = "board" | "list";
@@ -98,6 +99,32 @@ function formatDate(value: string | null | undefined) {
         day: "numeric",
         year: "numeric",
       });
+}
+
+function cohortIsValid(cohort: RenewalCohort) {
+  return Boolean(
+    cohort.renewalDateFrom &&
+      cohort.renewalDateTo &&
+      cohort.renewalDateFrom <= cohort.renewalDateTo &&
+      Number.isInteger(cohort.maxItems) &&
+      cohort.maxItems >= 1 &&
+      cohort.maxItems <= 100,
+  );
+}
+
+function previewMatchesCohort(
+  preview: RenewalPreviewResult | null,
+  pipelineId: string | undefined,
+  cohort: RenewalCohort,
+) {
+  const bound = preview?.binding;
+  return Boolean(
+    bound?.previewToken &&
+      preview?.pipelineId === pipelineId &&
+      bound.cohort.renewalDateFrom === cohort.renewalDateFrom &&
+      bound.cohort.renewalDateTo === cohort.renewalDateTo &&
+      bound.cohort.maxItems === cohort.maxItems,
+  );
 }
 
 function formatMoney(cents: number | null | undefined, currency = "USD") {
@@ -979,6 +1006,14 @@ export function Pipeline() {
   const [lostSuccess, setLostSuccess] = useState<{ clientId: string; name: string } | null>(null);
   const [scanResult, setScanResult] = useState<{ createdCount: number; skippedCount: number } | null>(null);
   const [renewalPreview, setRenewalPreview] = useState<RenewalPreviewResult | null>(null);
+  const [renewalCohort, setRenewalCohort] = useState<RenewalCohort>(() => {
+    const today = todayKey();
+    return {
+      renewalDateFrom: today,
+      renewalDateTo: addDays(today, 7),
+      maxItems: 10,
+    };
+  });
   const [previewingRenewals, setPreviewingRenewals] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1155,11 +1190,16 @@ export function Pipeline() {
   const renewalScanPipeline = pipelines.find(
     (pipeline) => pipeline.pipeline_type === "renewal",
   );
+  const selectedRenewalCount = renewalPreview
+    ? renewalPreview.selectedCount ?? renewalPreview.candidates.length
+    : 0;
   const canRunRenewalScan = Boolean(
     canManageRenewalScan &&
     renewalScanPipeline &&
-    renewalPreview?.pipelineId === renewalScanPipeline.id &&
-    renewalPreview.eligibleCount > 0,
+    cohortIsValid(renewalCohort) &&
+    previewMatchesCohort(renewalPreview, renewalScanPipeline.id, renewalCohort) &&
+    selectedRenewalCount > 0 &&
+    selectedRenewalCount <= renewalCohort.maxItems,
   );
   const openItems = filteredItems.filter((item) => stageById.get(item.stage_id)?.stage_type === "open");
   const wonItems = filteredItems.filter((item) => stageById.get(item.stage_id)?.stage_type === "won");
@@ -1346,18 +1386,18 @@ export function Pipeline() {
 
   async function handleRenewalScan() {
     if (!effectiveCompanyId || !workspace || !canRunRenewalScan) return;
-    const eligibleCount = renewalPreview?.eligibleCount;
+    const selectedCount = selectedRenewalCount;
+    const previewToken = renewalPreview?.binding?.previewToken;
+    if (!previewToken) return;
     const confirmed = window.confirm(
-      eligibleCount === undefined
-        ? "Run a one-time renewal scan now? Eligible contracts will be added without enabling recurring automation."
-        : `Add ${eligibleCount} eligible renewal${eligibleCount === 1 ? "" : "s"} now? Recurring automation will remain unchanged.`,
+      `Add exactly ${selectedCount} selected renewal${selectedCount === 1 ? "" : "s"} (cap ${renewalCohort.maxItems}) with renewal dates from ${formatDate(renewalCohort.renewalDateFrom)} through ${formatDate(renewalCohort.renewalDateTo)}? This matching preview may have additional eligible renewals outside this selected run. Recurring automation and schedules remain unchanged.`,
     );
     if (!confirmed) return;
     setScanning(true);
     setActionError(null);
     setScanResult(null);
     try {
-      const result = await runPipelineRenewalScan(effectiveCompanyId, renewalScanPipeline!.id);
+      const result = await runPipelineRenewalScan(effectiveCompanyId, renewalScanPipeline!.id, renewalCohort, previewToken);
       setScanResult({ createdCount: result.createdCount, skippedCount: result.skippedCount });
       setRenewalPreview(null);
       if (result.items?.length) {
@@ -1375,12 +1415,12 @@ export function Pipeline() {
   }
 
   async function handleRenewalPreview() {
-    if (!effectiveCompanyId || !renewalScanPipeline || !canPreviewRenewals) return;
+    if (!effectiveCompanyId || !renewalScanPipeline || !canPreviewRenewals || !cohortIsValid(renewalCohort)) return;
     setPreviewingRenewals(true);
     setActionError(null);
     try {
       setRenewalPreview(
-        await previewPipelineRenewals(effectiveCompanyId, renewalScanPipeline.id),
+        await previewPipelineRenewals(effectiveCompanyId, renewalScanPipeline.id, renewalCohort),
       );
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : "Unable to preview renewals.");
@@ -1428,35 +1468,52 @@ export function Pipeline() {
           <p className="mt-1 text-sm text-[#667085]">Manage renewals and expansion opportunities without leaving the workspace.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canPreviewRenewals && renewalScanPipeline ? <button type="button" onClick={() => void handleRenewalPreview()} disabled={previewingRenewals || scanning} className="retainos-button-secondary disabled:cursor-not-allowed disabled:opacity-50">{previewingRenewals ? "Previewing..." : "Preview renewal scan"}</button> : null}
+          {canPreviewRenewals && renewalScanPipeline ? <button type="button" onClick={() => void handleRenewalPreview()} disabled={!cohortIsValid(renewalCohort) || previewingRenewals || scanning} className="retainos-button-secondary disabled:cursor-not-allowed disabled:opacity-50">{previewingRenewals ? "Previewing..." : "Preview renewal cohort"}</button> : null}
           {canManageRenewalScan && renewalScanPipeline ? <button type="button" onClick={() => void handleRenewalScan()} disabled={!canRunRenewalScan || scanning || previewingRenewals} className="retainos-button-secondary disabled:cursor-not-allowed disabled:opacity-50">{scanning ? "Adding renewals..." : "Run one-time scan"}</button> : null}
           {workspace.canWrite ? <button type="button" onClick={() => { setActionError(null); setNewItemOpen(true); }} className="retainos-button-primary">New pipeline item</button> : <span className="rounded-full border border-[#dce5ef] bg-white px-3 py-1.5 text-xs font-semibold text-[#667085]">Read-only</span>}
         </div>
       </div>
+
+      {canPreviewRenewals && renewalScanPipeline ? (
+        <section className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-3" aria-labelledby="renewal-cohort-title">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 id="renewal-cohort-title" className="text-sm font-semibold text-sky-950">Bounded initial renewal cohort</h2>
+              <p className="mt-1 text-xs text-sky-800">Choose explicit inclusive renewal dates and a hard cap of 100. Directors can preview this cohort only; only a Super Admin can run a matching server-bound preview.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <label className="text-xs font-semibold text-[#344054]">Renewal from<input type="date" value={renewalCohort.renewalDateFrom} onChange={(event) => { setRenewalPreview(null); setRenewalCohort((current) => ({ ...current, renewalDateFrom: event.target.value })); }} className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-semibold text-[#344054]">Renewal through<input type="date" value={renewalCohort.renewalDateTo} onChange={(event) => { setRenewalPreview(null); setRenewalCohort((current) => ({ ...current, renewalDateTo: event.target.value })); }} className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-semibold text-[#344054]">Maximum items<input type="number" min="1" max="100" value={renewalCohort.maxItems} onChange={(event) => { const raw = Number(event.target.value); const maxItems = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.trunc(raw))) : 1; setRenewalPreview(null); setRenewalCohort((current) => ({ ...current, maxItems })); }} className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm" /></label>
+            </div>
+          </div>
+          {!cohortIsValid(renewalCohort) ? <p className="mt-2 text-xs font-semibold text-amber-800">Enter a valid date range and a cap from 1 to 100 before previewing.</p> : null}
+        </section>
+      ) : null}
 
       {scanResult ? <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900"><span>Renewal scan complete: <strong>{scanResult.createdCount}</strong> created · <strong>{scanResult.skippedCount}</strong> already tracked.</span><button type="button" onClick={() => setScanResult(null)} aria-label="Dismiss scan result">×</button></div> : null}
       {renewalPreview ? (
         <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span>
-              Renewal preview: <strong>{renewalPreview.eligibleCount}</strong> eligible ·{" "}
+              Renewal preview: <strong>{renewalPreview.eligibleCount}</strong> eligible · <strong>{selectedRenewalCount}</strong> selected for this run ·{" "}
               <strong>{renewalPreview.excludedCount}</strong> excluded ·{" "}
               <strong>{renewalPreview.totalEvaluated}</strong> clients checked. No records were changed.
             </span>
             <button type="button" onClick={() => setRenewalPreview(null)} aria-label="Dismiss renewal preview">×</button>
           </div>
           <p className="mt-2 text-xs text-sky-800">
-            Operational window: <strong>{formatDate(renewalPreview.windowStart)}</strong> through{" "}
-            <strong>{formatDate(renewalPreview.windowEnd)}</strong> ({renewalPreview.catchUpDays} days behind + {renewalPreview.leadDays} days ahead).
-            This is the configured Pipeline window, not a calendar-month Dashboard total.
+            Requested cohort: <strong>{formatDate(renewalCohort.renewalDateFrom)}</strong> through <strong>{formatDate(renewalCohort.renewalDateTo)}</strong>, capped at <strong>{renewalCohort.maxItems}</strong>.
+            Eligibility still respects the Renewal pipeline’s configured lead time, catch-up period, contract cadence, and client status.
           </p>
+          {!previewMatchesCohort(renewalPreview, renewalScanPipeline?.id, renewalCohort) ? <p className="mt-2 text-xs font-semibold text-amber-900">This API response is not bound to the requested cohort, so materialization remains disabled. It is safe to review only.</p> : null}
           {renewalPreview.candidates.length > 0 ? (
             <details className="mt-3 rounded-md border border-sky-200 bg-white/70 px-3 py-2">
               <summary className="cursor-pointer font-semibold">
-                Review {renewalPreview.eligibleCount} eligible client{renewalPreview.eligibleCount === 1 ? "" : "s"}
+                Review {selectedRenewalCount} selected client{selectedRenewalCount === 1 ? "" : "s"} for this run
               </summary>
               <ul className="mt-2 max-h-64 columns-1 overflow-y-auto text-xs sm:columns-2 lg:columns-3">
-                {renewalPreview.candidates.map((candidate) => {
+                {renewalPreview.candidates.filter((candidate) => candidate.eligibility_status === "eligible").map((candidate) => {
                   const client = lookupClient(workspace.clients, candidate.client_id);
                   return (
                     <li key={candidate.contract_id} className="mb-1 break-inside-avoid pr-3">

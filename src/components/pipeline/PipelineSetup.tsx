@@ -7,6 +7,7 @@ import type {
   PipelineType,
   PipelineValueSource,
 } from "../../lib/pipeline.ts";
+import { loadPipelineAutomationStatus, type PipelineAutomationStatus } from "../../lib/pipeline.ts";
 
 interface PipelineConfigurationPayload {
   masterEnabled: boolean;
@@ -33,6 +34,27 @@ const STAGE_COLORS = [
   { value: "#10B981", label: "Green" },
   { value: "#F43F5E", label: "Red" },
 ];
+
+function StatusFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-[#e4e9f0] bg-[#f8fafc] px-3 py-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">{label}</p>
+      <p className="mt-1 break-words text-sm font-medium text-[#344054]">{value}</p>
+    </div>
+  );
+}
+
+function pauseStatus(value: boolean | null | undefined) {
+  if (value === true) return "Paused";
+  if (value === false) return "Not paused";
+  return "Unknown";
+}
+
+function schedulerStatus(value: boolean | null | undefined) {
+  if (value === true) return "Registered";
+  if (value === false) return "Not registered";
+  return "Unknown";
+}
 
 function moneyFromCents(value: number | null | undefined) {
   if (value === null || value === undefined) return "";
@@ -349,6 +371,8 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("Expansion");
   const [newType, setNewType] = useState<PipelineType>("expansion");
+  const [automationStatus, setAutomationStatus] = useState<PipelineAutomationStatus | null>(null);
+  const [automationStatusUnavailable, setAutomationStatusUnavailable] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyLegacyId || !isAppOwned) {
@@ -374,6 +398,22 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
       setLoading(false);
     }
   }, [companyLegacyId, isAppOwned]);
+
+  const loadAutomationStatus = useCallback(async () => {
+    if (!companyLegacyId || !isAppOwned || !canManage) return;
+    setAutomationStatusUnavailable(false);
+    try {
+      setAutomationStatus(await loadPipelineAutomationStatus(companyLegacyId));
+    } catch {
+      // The endpoint is intentionally optional during rollout. Unknown is not off.
+      setAutomationStatus(null);
+      setAutomationStatusUnavailable(true);
+    }
+  }, [canManage, companyLegacyId, isAppOwned]);
+
+  useEffect(() => {
+    void loadAutomationStatus();
+  }, [loadAutomationStatus]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -472,6 +512,30 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
         <strong>{payload.masterEnabled ? "Pipeline is enabled for this company." : "Pipeline is disabled for this company."}</strong>{" "}
         The master feature gate is controlled in Company Settings.
       </div>
+
+      {canManage ? (
+        <section className="rounded-xl border border-[#dfe5ec] bg-white p-5 shadow-sm" aria-labelledby="pipeline-automation-status">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 id="pipeline-automation-status" className="text-base font-semibold text-[#162b3e]">Automation status</h3>
+              <p className="mt-1 max-w-3xl text-sm text-[#667085]">Read-only rollout evidence. This panel never enables, pauses, or schedules automation.</p>
+            </div>
+            <button type="button" onClick={() => void loadAutomationStatus()} className="rounded-md border border-[#d0d5dd] bg-white px-3 py-1.5 text-xs font-semibold text-[#475467]">Refresh status</button>
+          </div>
+          {automationStatus ? (
+            <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+              <StatusFact label="Global" value={pauseStatus(automationStatus.globalPaused)} />
+              <StatusFact label="Company" value={pauseStatus(automationStatus.companyPaused)} />
+              <StatusFact label="Scheduler" value={schedulerStatus(automationStatus.schedulerRegistered)} />
+              <StatusFact label="Pipeline" value={pauseStatus(automationStatus.pipelinePaused)} />
+              <StatusFact label="Last run" value={automationStatus.lastRunAt ? `${automationStatus.lastRunStatus || "Recorded"} · ${new Date(automationStatus.lastRunAt).toLocaleString()}` : "No run reported"} />
+              <StatusFact label="Last failure" value={automationStatus.lastFailureAt ? `${automationStatus.lastFailure || "Failure recorded"} · ${new Date(automationStatus.lastFailureAt).toLocaleString()}` : "No failure reported"} />
+            </div>
+          ) : (
+            <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{automationStatusUnavailable ? "Live automation status is unavailable from this API. Treat pause, schedule, last-run, and failure state as unknown; no schedule is implied." : "Loading live automation status..."}</p>
+          )}
+        </section>
+      ) : null}
 
       {error ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{error}</span><button type="button" onClick={() => void load()} disabled={loading || saving} className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Retry</button></div> : null}
       {notice ? <div role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div> : null}

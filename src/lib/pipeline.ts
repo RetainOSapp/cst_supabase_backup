@@ -179,6 +179,21 @@ export interface RenewalPreviewCandidate {
   exclusion_reason: string | null;
   estimated_value_cents: number | null;
   currency_code: string | null;
+  client_name?: string | null;
+  client_business?: string | null;
+}
+
+/** A deliberately small, explicit first-run cohort. Dates are inclusive ISO days. */
+export interface RenewalCohort {
+  renewalDateFrom: string;
+  renewalDateTo: string;
+  maxItems: number;
+}
+
+export interface RenewalPreviewBinding {
+  cohort: RenewalCohort;
+  /** Opaque, short-lived server token binding a materialization to this preview. */
+  previewToken: string;
 }
 
 export interface RenewalPreviewResult {
@@ -191,9 +206,25 @@ export interface RenewalPreviewResult {
   catchUpDays: number;
   totalEvaluated: number;
   eligibleCount: number;
+  /** Bounded candidates selected for this one-time run; derive from candidates for older bounded APIs. */
+  selectedCount?: number;
   excludedCount: number;
   exclusionCounts: Record<string, number>;
   candidates: RenewalPreviewCandidate[];
+  /** Present only when the automation API supports bounded cohort execution. */
+  binding?: RenewalPreviewBinding | null;
+}
+
+export interface PipelineAutomationStatus {
+  available: boolean;
+  globalPaused: boolean | null;
+  companyPaused: boolean | null;
+  pipelinePaused: boolean | null;
+  schedulerRegistered: boolean | null;
+  lastRunAt: string | null;
+  lastRunStatus: string | null;
+  lastFailureAt: string | null;
+  lastFailure: string | null;
 }
 
 type WorkspaceAction =
@@ -324,6 +355,7 @@ export async function resolvePipelineLost(
 export async function previewPipelineRenewals(
   companyLegacyId: string,
   pipelineId: string,
+  cohort: RenewalCohort,
 ) {
   const { data, error } = await supabase.functions.invoke(
     "manage-pipeline-automation",
@@ -332,6 +364,9 @@ export async function previewPipelineRenewals(
         action: "preview_renewals",
         companyLegacyId,
         pipelineId,
+        renewalDateFrom: cohort.renewalDateFrom,
+        renewalDateTo: cohort.renewalDateTo,
+        maxItems: cohort.maxItems,
       },
     },
   );
@@ -348,10 +383,45 @@ export async function previewPipelineRenewals(
 export async function runPipelineRenewalScan(
   companyLegacyId: string,
   pipelineId: string,
+  cohort: RenewalCohort,
+  previewToken: string,
 ) {
-  return invokePipelineWorkspace<RenewalScanResult>(
-    "run_renewal_scan",
-    companyLegacyId,
-    { pipelineId },
+  const { data, error } = await supabase.functions.invoke(
+    "manage-pipeline-automation",
+    {
+      body: {
+        action: "run_renewals",
+        companyLegacyId,
+        pipelineId,
+        renewalDateFrom: cohort.renewalDateFrom,
+        renewalDateTo: cohort.renewalDateTo,
+        maxItems: cohort.maxItems,
+        previewToken,
+      },
+    },
   );
+  if (error || data?.error) {
+    const message = typeof data?.error === "string"
+      ? data.error
+      : await functionErrorMessage(error, "Renewal run failed.");
+    throw new Error(message);
+  }
+  const result = data?.result ?? data;
+  return {
+    createdCount: Number(result?.createdCount ?? result?.created_count ?? 0),
+    skippedCount: Number(result?.skippedCount ?? result?.skipped_count ?? 0),
+    items: Array.isArray(result?.items) ? result.items as ClientPipelineItem[] : undefined,
+  } satisfies RenewalScanResult;
+}
+
+/** Optional read-only endpoint. Callers must treat unavailable as unknown, never as off. */
+export async function loadPipelineAutomationStatus(companyLegacyId: string) {
+  const { data, error } = await supabase.functions.invoke(
+    "manage-pipeline-automation",
+    { body: { action: "status", companyLegacyId } },
+  );
+  if (error || data?.error) {
+    throw new Error(typeof data?.error === "string" ? data.error : "Automation status is unavailable.");
+  }
+  return data as PipelineAutomationStatus;
 }

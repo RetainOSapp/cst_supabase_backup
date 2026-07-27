@@ -11,7 +11,8 @@ import {
 } from "../_shared/auth.ts";
 import { jsonResponse, optionsResponse } from "../_shared/http.ts";
 
-const ACTIONS = new Set(["preview_renewals", "run_renewals"]);
+const ACTIONS = new Set(["preview_renewals", "run_renewals", "status"]);
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -21,14 +22,43 @@ function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
 
-function optionalDate(value: unknown) {
-  const text = cleanText(value);
-  if (!text) return new Date().toISOString();
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new AuthError("Choose a valid automation date.", 400);
+function requiredIsoDate(value: unknown, label: string) {
+  const date = cleanText(value);
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (
+    !ISO_DATE_PATTERN.test(date) ||
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== date
+  ) {
+    throw new AuthError(`${label} must be an ISO date.`, 400);
   }
-  return parsed.toISOString();
+  return date;
+}
+
+function boundedMaxItems(value: unknown) {
+  const text = typeof value === "number" ? String(value) : cleanText(value);
+  if (!/^\d+$/.test(text)) {
+    throw new AuthError("Maximum items must be a whole number from 1 to 100.", 400);
+  }
+  const maxItems = Number(text);
+  if (!Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 100) {
+    throw new AuthError("Maximum items must be a whole number from 1 to 100.", 400);
+  }
+  return maxItems;
+}
+
+function renewalCohort(body: Record<string, unknown>) {
+  const renewalDateFrom = requiredIsoDate(body.renewalDateFrom, "Renewal from");
+  const renewalDateTo = requiredIsoDate(body.renewalDateTo, "Renewal through");
+  if (renewalDateFrom > renewalDateTo) {
+    throw new AuthError("Renewal from must not be after renewal through.", 400);
+  }
+  const fromMs = Date.parse(`${renewalDateFrom}T00:00:00.000Z`);
+  const toMs = Date.parse(`${renewalDateTo}T00:00:00.000Z`);
+  if ((toMs - fromMs) / 86_400_000 > 366) {
+    throw new AuthError("Renewal cohort dates cannot span more than 366 days.", 400);
+  }
+  return { renewalDateFrom, renewalDateTo, maxItems: boundedMaxItems(body.maxItems) };
 }
 
 async function loadCompany(
@@ -118,21 +148,30 @@ Deno.serve(async (req) => {
     const action = cleanText(body.action);
     const companyLegacyId = cleanText(body.companyLegacyId);
     if (!ACTIONS.has(action)) {
-      return respond({ error: "Choose preview_renewals or run_renewals." }, 400);
+      return respond({ error: "Choose preview_renewals, run_renewals, or status." }, 400);
     }
     if (!companyLegacyId) return respond({ error: "Missing company." }, 400);
 
     const company = await loadCompany(supabase, companyLegacyId);
     const actor = await resolveManager(supabase, authenticatedActor, company.id);
-    const asOf = optionalDate(body.asOf);
     const pipelineAccess = await loadPipelineAccess(supabase, company.id);
+
+    if (action === "status") {
+      const { data, error } = await supabase.rpc("get_pipeline_automation_status", {
+        p_company_id: company.id,
+      });
+      if (error) throw error;
+      const result = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+      if (!result) throw new Error("Pipeline automation status returned no result.");
+      return respond(result);
+    }
 
     if (!pipelineAccess.enabled) {
       if (action === "preview_renewals") {
         return respond({
           ok: true,
           enabled: false,
-          asOf,
+          asOf: new Date().toISOString(),
           candidates: [],
           totalEvaluated: 0,
           eligibleCount: 0,
@@ -151,67 +190,35 @@ Deno.serve(async (req) => {
       if (!pipelineId) {
         return respond({ error: "Choose the Renewal pipeline to preview." }, 400);
       }
-      const { data: pipeline, error: pipelineError } = await supabase
-        .from("company_pipelines")
-        .select("renewal_lead_days, automation_settings")
-        .eq("company_id", company.id)
-        .eq("id", pipelineId)
-        .eq("pipeline_type", "renewal")
-        .maybeSingle();
-      if (pipelineError) throw pipelineError;
-      if (!pipeline) throw new AuthError("Choose an enabled Renewal pipeline.", 400);
-
-      const rows: Record<string, unknown>[] = [];
-      const pageSize = 1000;
-      for (let from = 0;; from += pageSize) {
-        const { data, error } = await supabase
-          .rpc(
-            "preview_due_renewal_pipeline_items",
-            { p_company_id: company.id, p_pipeline_id: pipelineId, p_as_of: asOf },
-          )
-          .order("client_id")
-          .range(from, from + pageSize - 1);
-        if (error) throw error;
-        const page = (data ?? []) as Record<string, unknown>[];
-        rows.push(...page);
-        if (page.length < pageSize) break;
-      }
-
-      const candidates = rows.filter((row) => row.eligibility_status === "eligible");
-      const exclusionCounts = rows.reduce<Record<string, number>>((counts, row) => {
-        if (row.eligibility_status !== "excluded") return counts;
-        const reason = cleanText(row.exclusion_reason) || "other";
-        counts[reason] = (counts[reason] ?? 0) + 1;
-        return counts;
-      }, {});
-      const leadDays = Math.max(0, Number(pipeline.renewal_lead_days) || 0);
-      const settings = pipeline.automation_settings &&
-          typeof pipeline.automation_settings === "object" &&
-          !Array.isArray(pipeline.automation_settings)
-        ? pipeline.automation_settings as Record<string, unknown>
-        : {};
-      const catchUpDays = Math.min(
-        365,
-        Math.max(0, Number(settings.catch_up_days) || 30),
-      );
-      const windowStart = new Date(asOf);
-      windowStart.setUTCDate(windowStart.getUTCDate() - catchUpDays);
-      const windowEnd = new Date(asOf);
-      windowEnd.setUTCDate(windowEnd.getUTCDate() + leadDays);
+      const cohort = renewalCohort(body);
+      const { data, error } = await supabase.rpc("preview_renewal_pipeline_cohort", {
+        p_company_id: company.id,
+        p_pipeline_id: pipelineId,
+        p_renewal_date_from: cohort.renewalDateFrom,
+        p_renewal_date_to: cohort.renewalDateTo,
+        p_max_items: cohort.maxItems,
+        p_actor_auth_user_id: authenticatedActor.id,
+        p_actor_member_id: actor.memberId,
+      });
+      if (error) throw error;
+      const result = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+      if (!result) throw new Error("Cohort preview returned no result.");
       return respond({
         ok: true,
         enabled: true,
         pipelineId,
-        asOf,
-        windowStart: windowStart.toISOString(),
-        windowEnd: windowEnd.toISOString(),
-        leadDays,
-        catchUpDays,
-        totalEvaluated: rows.length,
-        eligibleCount: candidates.length,
-        excludedCount: rows.length - candidates.length,
-        exclusionCounts,
-        candidates,
+        asOf: result.previewed_at ?? new Date().toISOString(),
+        windowStart: `${cohort.renewalDateFrom}T00:00:00.000Z`,
+        windowEnd: `${cohort.renewalDateTo}T23:59:59.999Z`,
+        leadDays: 0,
+        catchUpDays: 0,
+        totalEvaluated: Number(result.total_evaluated ?? 0),
+        eligibleCount: Number(result.eligible_count ?? 0),
+        selectedCount: Number(result.selected_count ?? 0),
+        excludedCount: Number(result.excluded_count ?? 0),
+        exclusionCounts: result.exclusion_counts ?? {},
+        candidates: result.candidates ?? [],
+        binding: result.binding ?? null,
       });
     }
 
@@ -221,26 +228,34 @@ Deno.serve(async (req) => {
         403,
       );
     }
-    const runKey = cleanText(body.runKey) ||
-      `manual-once:${cleanText(body.pipelineId)}:${asOf.slice(0, 10)}:${crypto.randomUUID()}`;
-    const { data, error } = await supabase.rpc(
-      "generate_due_renewal_pipeline_items",
-      {
-        p_company_id: company.id,
-        p_as_of: asOf,
-        p_run_key: runKey,
-        p_requested_by_auth_user_id: authenticatedActor.id,
-        p_requested_by_member_id: actor.memberId,
-      },
-    );
-    if (error) throw error;
-    const result = (Array.isArray(data) ? data[0] : data) as
-      | Record<string, unknown>
-      | null;
-    if (typeof result?.error === "string" && result.error) {
-      throw new AuthError(result.error, 500);
+    const pipelineId = cleanText(body.pipelineId);
+    if (!pipelineId) return respond({ error: "Choose the Renewal pipeline to materialize." }, 400);
+    const cohort = renewalCohort(body);
+    const previewToken = cleanText(body.previewToken);
+    if (!previewToken || previewToken.length > 256) {
+      return respond({ error: "A valid renewal preview token is required." }, 400);
     }
-    return respond({ ok: true, asOf, runKey, result });
+    const { data, error } = await supabase.rpc("consume_renewal_pipeline_cohort", {
+      p_company_id: company.id,
+      p_pipeline_id: pipelineId,
+      p_renewal_date_from: cohort.renewalDateFrom,
+      p_renewal_date_to: cohort.renewalDateTo,
+      p_max_items: cohort.maxItems,
+      p_preview_token: previewToken,
+      p_actor_auth_user_id: authenticatedActor.id,
+      p_actor_member_id: actor.memberId,
+    });
+    if (error) throw error;
+    const result = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+    if (!result) throw new Error("Cohort materialization returned no result.");
+    return respond({
+      ok: true,
+      pipelineId,
+      createdCount: Number(result.created_count ?? 0),
+      skippedCount: Number(result.skipped_count ?? 0),
+      runId: result.run_id ?? null,
+      idempotent: result.idempotent === true,
+    });
   } catch (error) {
     console.error(error);
     const status = error instanceof AuthError ? error.status : 500;

@@ -53,13 +53,13 @@ check("Admin Hub exposes separate role controls with SuperAdmin ownership",
   && /Viewers/i.test(setup)
   && /Super Admin controlled/i.test(setup));
 check("preview is read-only and available independently from recurring execution",
-  /preview_due_renewal_pipeline_items/i.test(automation)
-  && /Preview renewal scan/i.test(pipeline)
+  /preview_renewal_pipeline_cohort/i.test(automation)
+  && /Preview renewal cohort/i.test(pipeline)
   && /No records were changed/i.test(pipeline));
 check("one-time scan stays SuperAdmin-only and requires confirmation",
-  /Only a Super Admin can run renewal materialization/i.test(workspace)
+  /Only a Super Admin can run the local\/manual renewal materialization step/i.test(automation)
   && /window\.confirm/i.test(pipeline)
-  && /Recurring automation will remain unchanged/i.test(pipeline));
+  && /Recurring automation and schedules remain unchanged/i.test(pipeline));
 check("manual scan is pipeline-bound and recurring mode keeps every kill switch",
   /p\.id::text = split_part\(p_run_key, ':', 2\)/i.test(migration)
   && /p\.auto_create_renewal_items[\s\S]*automation_paused[\s\S]*renewal_generation_enabled/i.test(migration));
