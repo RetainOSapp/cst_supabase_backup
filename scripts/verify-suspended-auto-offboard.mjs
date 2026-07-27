@@ -193,6 +193,13 @@ check(
     /statusValue: "done"/i.test(dailyPulse),
 );
 check(
+  "Daily Pulse loads task-linked clients beyond the API first-page cap",
+  /Supabase caps a single client query at 1,000 rows/.test(dailyPulse) &&
+    /missingTaskClientIds/.test(dailyPulse) &&
+    /\.in\("glide_row_id", clientIdChunk\)/.test(dailyPulse) &&
+    /taskRows = taskRows\.filter/.test(dailyPulse),
+);
+check(
   "company task template configures the Daily Pulse wording",
   /Daily Pulse follow-up block/.test(settingsPage) &&
     /dailyPulseSectionTitle/.test(settingsPage) &&

@@ -1314,16 +1314,13 @@ export function DailyPulse() {
         const mappedClients = (((data ?? []) as unknown) as Record<string, unknown>[])
           .map(mapClient)
           .filter((client) => client.glide_row_id);
-        const visibleClients = scopedCsmId
+        let visibleClients = scopedCsmId
           ? filterClientsByCsmRelationship(
               mappedClients,
               scopedCsmId,
               csmRelationshipFilter,
             )
           : mappedClients;
-        const visibleClientIds = new Set(
-          visibleClients.map((client) => client.glide_row_id),
-        );
 
         const historyByClient = new Map<string, string>();
         const completionsByClientDue = new Map<string, TimedCheckpointCompletion>();
@@ -1348,7 +1345,61 @@ export function DailyPulse() {
           if (tasksError) {
             console.warn("Daily Pulse task data unavailable:", tasksError);
           } else {
-            taskRows = ((tasksData ?? []) as PulseTask[]).filter(
+            taskRows = (tasksData ?? []) as PulseTask[];
+
+            // Supabase caps a single client query at 1,000 rows. Large
+            // companies can therefore have valid tasks whose clients were not
+            // present in the first client page. Load those exact referenced
+            // clients before applying the task visibility intersection.
+            const loadedClientIds = new Set(
+              visibleClients.map((client) => client.glide_row_id),
+            );
+            const missingTaskClientIds = [
+              ...new Set(
+                taskRows
+                  .map((task) => task.client_id)
+                  .filter((clientId): clientId is string => Boolean(clientId)),
+              ),
+            ].filter((clientId) => !loadedClientIds.has(clientId));
+
+            if (missingTaskClientIds.length > 0) {
+              const referencedClientRows: PulseClient[] = [];
+              for (let offset = 0; offset < missingTaskClientIds.length; offset += 100) {
+                const clientIdChunk = missingTaskClientIds.slice(offset, offset + 100);
+                const { data: referencedData, error: referencedError } =
+                  await supabase
+                    .from("clients")
+                    .select(APP_PULSE_CLIENT_SELECT)
+                    .eq("company_glide_row_id", effectiveCompanyId)
+                    .in("glide_row_id", clientIdChunk);
+                if (referencedError) throw referencedError;
+                const mappedReferencedClients = (
+                  ((referencedData ?? []) as unknown) as Record<string, unknown>[]
+                )
+                  .map(mapClient)
+                  .filter((client) => client.glide_row_id);
+                referencedClientRows.push(...mappedReferencedClients);
+              }
+
+              const visibleReferencedClients = scopedCsmId
+                ? filterClientsByCsmRelationship(
+                    referencedClientRows,
+                    scopedCsmId,
+                    csmRelationshipFilter,
+                  )
+                : referencedClientRows;
+              visibleClients = [
+                ...visibleClients,
+                ...visibleReferencedClients.filter(
+                  (client) => !loadedClientIds.has(client.glide_row_id),
+                ),
+              ];
+            }
+
+            const visibleClientIds = new Set(
+              visibleClients.map((client) => client.glide_row_id),
+            );
+            taskRows = taskRows.filter(
               (task) => !task.client_id || visibleClientIds.has(task.client_id),
             );
           }
