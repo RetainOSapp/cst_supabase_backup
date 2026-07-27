@@ -11,6 +11,51 @@ interface SidebarCompany {
   source?: "app_owned" | "mirror";
 }
 
+const PIPELINE_VISIBILITY_CACHE_PREFIX = "retainos:pipeline-visible:";
+const PIPELINE_VISIBILITY_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
+function pipelineVisibilityCacheKey(companyLegacyId: string, role: string | null) {
+  return `${PIPELINE_VISIBILITY_CACHE_PREFIX}${companyLegacyId}:${role ?? "unknown"}`;
+}
+
+function readPipelineVisibilityCache(key: string) {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { visible?: unknown; verifiedAt?: unknown };
+    if (
+      typeof parsed.visible !== "boolean" ||
+      typeof parsed.verifiedAt !== "number" ||
+      Date.now() - parsed.verifiedAt > PIPELINE_VISIBILITY_CACHE_TTL_MS
+    ) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+    return parsed.visible;
+  } catch {
+    return null;
+  }
+}
+
+function writePipelineVisibilityCache(key: string, visible: boolean) {
+  try {
+    window.sessionStorage.setItem(
+      key,
+      JSON.stringify({ visible, verifiedAt: Date.now() }),
+    );
+  } catch {
+    // Session storage is a UX optimization; server authorization is canonical.
+  }
+}
+
+function clearPipelineVisibilityCache(key: string) {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // A failed cache clear cannot broaden server-authorized access.
+  }
+}
+
 type IconName =
   | "dashboard"
   | "pulse"
@@ -133,6 +178,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     const refreshPipelineVisibility = (event: Event) => {
       const detail = (event as CustomEvent<{ companyLegacyId?: string }>).detail;
       if (!detail?.companyLegacyId || detail.companyLegacyId === effectiveCompanyId) {
+        if (effectiveCompanyId) {
+          clearPipelineVisibilityCache(
+            pipelineVisibilityCacheKey(effectiveCompanyId, role),
+          );
+        }
         setPipelineVisibilityVersion((current) => current + 1);
       }
     };
@@ -140,11 +190,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener("retainos:pipeline-visibility-changed", refreshPipelineVisibility);
     };
-  }, [effectiveCompanyId]);
+  }, [effectiveCompanyId, role]);
 
   useEffect(() => {
     let cancelled = false;
-    setPipelineVisible(false);
+    const cacheKey = effectiveCompanyId
+      ? pipelineVisibilityCacheKey(effectiveCompanyId, role)
+      : null;
+    const cachedVisibility = cacheKey
+      ? readPipelineVisibilityCache(cacheKey)
+      : null;
+    setPipelineVisible(cachedVisibility ?? false);
     if (!effectiveCompanyId || !capabilities.canAccessPipeline) return;
 
     supabase.functions
@@ -157,14 +213,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       .then(({ data, error }) => {
         if (cancelled || error || data?.error) return;
         const viewerAllowed = role !== "viewer" || data?.viewerAccess === true;
-        setPipelineVisible(
+        const visible =
           data?.enabled === true &&
           data?.roleAllowed === true &&
-          viewerAllowed,
-        );
+          viewerAllowed;
+        setPipelineVisible(visible);
+        if (cacheKey) writePipelineVisibilityCache(cacheKey, visible);
       })
       .catch(() => {
-        if (!cancelled) setPipelineVisible(false);
+        if (!cancelled && cachedVisibility === null) setPipelineVisible(false);
       });
 
     return () => {
