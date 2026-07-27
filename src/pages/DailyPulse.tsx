@@ -99,6 +99,7 @@ interface PulseItem {
   };
   followUpTask?: {
     taskId: string;
+    actionLabel: string;
   };
 }
 
@@ -114,7 +115,19 @@ interface CsmOption {
   name: string;
 }
 
+interface AutoOffboardFollowUpConfig {
+  title: string;
+  description: string;
+  actionLabel: string;
+}
+
 const ACTIVE_STATUSES = new Set(["front-end", "back-end"]);
+const DEFAULT_AUTO_OFFBOARD_FOLLOW_UP_CONFIG: AutoOffboardFollowUpConfig = {
+  title: "Automated Offboards Requiring Follow-up",
+  description:
+    "Outstanding coach actions after RetainOS automatically offboarded a client.",
+  actionLabel: "Mark team notified",
+};
 const APP_PULSE_CLIENT_SELECT = [
   "id",
   "glide_row_id",
@@ -351,6 +364,15 @@ function taskUrl() {
   return "/tasks";
 }
 
+function metadataText(
+  metadata: Record<string, unknown> | null | undefined,
+  key: string,
+  fallback: string,
+) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
 function mostRecentDate(values: Array<string | null | undefined>) {
   return values
     .map(parseDate)
@@ -451,6 +473,7 @@ function buildPulseSections(
   window: PulseWindow,
   enabledTypes = enabledNotificationTypes([]),
   notificationPreferences: NotificationPreference[] = [],
+  autoOffboardFollowUpConfig: AutoOffboardFollowUpConfig | null = null,
 ) {
   const today = startOfDay();
   const ranges = {
@@ -505,12 +528,11 @@ function buildPulseSections(
     return task.metadata?.follow_up_kind === "mia_auto_offboard";
   });
 
-  if (automatedOffboardFollowUps.length > 0) {
+  if (autoOffboardFollowUpConfig && automatedOffboardFollowUps.length > 0) {
     sections.push({
       id: "automated-offboard-follow-up",
-      title: "Automated Offboards Requiring Follow-up",
-      description:
-        "Outstanding coach actions after RetainOS automatically offboarded a client.",
+      title: autoOffboardFollowUpConfig.title,
+      description: autoOffboardFollowUpConfig.description,
       items: automatedOffboardFollowUps.map((task) => {
         const client = task.client_id ? clientById.get(task.client_id) : undefined;
         return {
@@ -525,7 +547,10 @@ function buildPulseSections(
             task.created_at ?? task.task_due_date,
             client ? clientUrl(client) : taskUrl(),
           ),
-          followUpTask: { taskId: task.glide_row_id },
+          followUpTask: {
+            taskId: task.glide_row_id,
+            actionLabel: autoOffboardFollowUpConfig.actionLabel,
+          },
         };
       }),
     });
@@ -548,7 +573,12 @@ function buildPulseSections(
             return false;
           }
           if (task.is_manually_archived === true || task.archived_at) return false;
-          if (task.metadata?.follow_up_kind === "mia_auto_offboard") return false;
+          if (
+            autoOffboardFollowUpConfig &&
+            task.metadata?.follow_up_kind === "mia_auto_offboard"
+          ) {
+            return false;
+          }
           return isWithin(task.task_due_date, range.start, range.end);
         })
         .map((task) => {
@@ -989,7 +1019,7 @@ function PulseSectionCard({
                       >
                         {completingFollowUpTaskId === item.followUpTask.taskId
                           ? "Saving..."
-                          : "Mark team notified"}
+                          : item.followUpTask.actionLabel}
                       </button>
                     </div>
                   ) : null}
@@ -1026,6 +1056,8 @@ export function DailyPulse() {
   const [notificationPreferences, setNotificationPreferences] = useState<
     NotificationPreference[]
   >(mergeNotificationPreferences([]));
+  const [autoOffboardFollowUpConfig, setAutoOffboardFollowUpConfig] =
+    useState<AutoOffboardFollowUpConfig | null>(null);
   const [programStatusLabels, setProgramStatusLabels] =
     useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
   const [loading, setLoading] = useState(false);
@@ -1063,6 +1095,88 @@ export function DailyPulse() {
       .catch(() => {
         if (!cancelled) setCompanyName("");
       });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveCompanyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAutoOffboardFollowUpConfig() {
+      if (!effectiveCompanyId) {
+        setAutoOffboardFollowUpConfig(null);
+        return;
+      }
+
+      try {
+        const company = await loadUnifiedCompanyByLegacyId(effectiveCompanyId);
+        if (!company?.app_company_id || company.source !== "app_owned") {
+          if (!cancelled) setAutoOffboardFollowUpConfig(null);
+          return;
+        }
+
+        const [settingsResult, templatesResult] = await Promise.all([
+          supabase
+            .from("company_settings")
+            .select("enable_suspended_auto_offboard")
+            .eq("company_id", company.app_company_id)
+            .maybeSingle(),
+          supabase
+            .from("company_task_templates")
+            .select("metadata")
+            .eq("company_id", company.app_company_id)
+            .eq("trigger_type", "suspended_auto_offboard")
+            .eq("is_enabled", true)
+            .is("archived_at", null)
+            .order("position", { ascending: true })
+            .limit(1),
+        ]);
+
+        if (settingsResult.error) throw settingsResult.error;
+        if (templatesResult.error) throw templatesResult.error;
+
+        const enabledTemplate = templatesResult.data?.[0] as
+          | { metadata: Record<string, unknown> | null }
+          | undefined;
+        if (
+          settingsResult.data?.enable_suspended_auto_offboard !== true ||
+          !enabledTemplate
+        ) {
+          if (!cancelled) setAutoOffboardFollowUpConfig(null);
+          return;
+        }
+
+        const metadata = enabledTemplate.metadata;
+        if (!cancelled) {
+          setAutoOffboardFollowUpConfig({
+            title: metadataText(
+              metadata,
+              "daily_pulse_section_title",
+              DEFAULT_AUTO_OFFBOARD_FOLLOW_UP_CONFIG.title,
+            ),
+            description: metadataText(
+              metadata,
+              "daily_pulse_section_description",
+              DEFAULT_AUTO_OFFBOARD_FOLLOW_UP_CONFIG.description,
+            ),
+            actionLabel: metadataText(
+              metadata,
+              "daily_pulse_action_label",
+              DEFAULT_AUTO_OFFBOARD_FOLLOW_UP_CONFIG.actionLabel,
+            ),
+          });
+        }
+      } catch (configError) {
+        console.warn(
+          "Daily Pulse automatic offboard follow-up configuration unavailable:",
+          configError,
+        );
+        if (!cancelled) setAutoOffboardFollowUpConfig(null);
+      }
+    }
+
+    void loadAutoOffboardFollowUpConfig();
     return () => {
       cancelled = true;
     };
@@ -1342,8 +1456,10 @@ export function DailyPulse() {
         windowMode,
         enabledTypes,
         notificationPreferences,
+        autoOffboardFollowUpConfig,
       ),
     [
+      autoOffboardFollowUpConfig,
       checkpointCompletions,
       clients,
       enabledTypes,

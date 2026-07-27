@@ -181,11 +181,26 @@ check(
     ),
 );
 check(
-  "Daily Pulse keeps automatic offboard follow-ups visible until completion",
+  "Daily Pulse only persists automatic offboard follow-ups for fully enabled companies",
   /Automated Offboards Requiring Follow-up/i.test(dailyPulse) &&
     /follow_up_kind === "mia_auto_offboard"/i.test(dailyPulse) &&
     /Mark team notified/i.test(dailyPulse) &&
+    /enable_suspended_auto_offboard/.test(dailyPulse) &&
+    /trigger_type", "suspended_auto_offboard"/.test(dailyPulse) &&
+    /autoOffboardFollowUpConfig && automatedOffboardFollowUps\.length > 0/.test(
+      dailyPulse,
+    ) &&
     /statusValue: "done"/i.test(dailyPulse),
+);
+check(
+  "company task template configures the Daily Pulse wording",
+  /Daily Pulse follow-up block/.test(settingsPage) &&
+    /dailyPulseSectionTitle/.test(settingsPage) &&
+    /dailyPulseSectionDescription/.test(settingsPage) &&
+    /dailyPulseActionLabel/.test(settingsPage) &&
+    /daily_pulse_section_title/.test(settingsFunction) &&
+    /daily_pulse_section_description/.test(settingsFunction) &&
+    /daily_pulse_action_label/.test(settingsFunction),
 );
 check(
   "automatic history identifies RetainOS as the actor",

@@ -178,6 +178,21 @@ interface CompanyTaskTemplateRow {
   archived_at?: string | null;
 }
 
+const DEFAULT_AUTO_OFFBOARD_DAILY_PULSE_TITLE =
+  "Automated Offboards Requiring Follow-up";
+const DEFAULT_AUTO_OFFBOARD_DAILY_PULSE_DESCRIPTION =
+  "Outstanding coach actions after RetainOS automatically offboarded a client.";
+const DEFAULT_AUTO_OFFBOARD_DAILY_PULSE_ACTION = "Mark team notified";
+
+function taskTemplateMetadataText(
+  metadata: Record<string, unknown> | null | undefined,
+  key: string,
+  fallback: string,
+) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : fallback;
+}
+
 interface CompanyTaskPipelineOption {
   id: string;
   name: string;
@@ -3055,6 +3070,21 @@ function TaskTemplatesModal({
   const missingPipelineTriggerFields =
     draft.trigger_type === "pipeline_stage_entered" &&
     (!draft.applies_to_pipeline_id || !draft.applies_to_pipeline_stage_id);
+  const autoOffboardDailyPulseTitle = taskTemplateMetadataText(
+    draft.metadata,
+    "daily_pulse_section_title",
+    DEFAULT_AUTO_OFFBOARD_DAILY_PULSE_TITLE,
+  );
+  const autoOffboardDailyPulseDescription = taskTemplateMetadataText(
+    draft.metadata,
+    "daily_pulse_section_description",
+    DEFAULT_AUTO_OFFBOARD_DAILY_PULSE_DESCRIPTION,
+  );
+  const autoOffboardDailyPulseAction = taskTemplateMetadataText(
+    draft.metadata,
+    "daily_pulse_action_label",
+    DEFAULT_AUTO_OFFBOARD_DAILY_PULSE_ACTION,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -3263,6 +3293,18 @@ function TaskTemplatesModal({
           statusValue: draft.status_value,
           isEnabled: draft.is_enabled,
           position: draft.position ?? 0,
+          dailyPulseSectionTitle:
+            draft.trigger_type === "suspended_auto_offboard"
+              ? autoOffboardDailyPulseTitle
+              : null,
+          dailyPulseSectionDescription:
+            draft.trigger_type === "suspended_auto_offboard"
+              ? autoOffboardDailyPulseDescription
+              : null,
+          dailyPulseActionLabel:
+            draft.trigger_type === "suspended_auto_offboard"
+              ? autoOffboardDailyPulseAction
+              : null,
         },
       },
     );
@@ -3464,6 +3506,74 @@ function TaskTemplatesModal({
                 className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
               />
             </label>
+            {draft.trigger_type === "suspended_auto_offboard" ? (
+              <div className="rounded-lg border border-[#cfe3f7] bg-[#f5faff] p-4">
+                <h4 className="text-sm font-semibold text-[#162b3e]">
+                  Daily Pulse follow-up block
+                </h4>
+                <p className="mt-1 text-xs text-[#667085]">
+                  This persistent block appears only while automatic MIA offboarding
+                  and this template are both enabled for the company.
+                </p>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label className="block text-sm font-medium text-[#344054]">
+                    Section title
+                    <input
+                      value={autoOffboardDailyPulseTitle}
+                      maxLength={100}
+                      disabled={disabled || saving}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          metadata: {
+                            ...(current.metadata ?? {}),
+                            daily_pulse_section_title: event.target.value,
+                          },
+                        }))
+                      }
+                      className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-[#344054]">
+                    Completion button
+                    <input
+                      value={autoOffboardDailyPulseAction}
+                      maxLength={60}
+                      disabled={disabled || saving}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          metadata: {
+                            ...(current.metadata ?? {}),
+                            daily_pulse_action_label: event.target.value,
+                          },
+                        }))
+                      }
+                      className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-[#344054] sm:col-span-2">
+                    Section instructions
+                    <textarea
+                      value={autoOffboardDailyPulseDescription}
+                      maxLength={240}
+                      rows={2}
+                      disabled={disabled || saving}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          metadata: {
+                            ...(current.metadata ?? {}),
+                            daily_pulse_section_description: event.target.value,
+                          },
+                        }))
+                      }
+                      className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm shadow-sm"
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
               <SettingsSelect
                 label="Trigger"

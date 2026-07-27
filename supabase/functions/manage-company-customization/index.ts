@@ -178,6 +178,11 @@ function nullableText(value: unknown) {
   return text || null;
 }
 
+function boundedText(value: unknown, fallback: string, maxLength: number) {
+  const text = cleanText(value);
+  return (text || fallback).slice(0, maxLength);
+}
+
 function exactEmailQuery<T>(query: T, email: string) {
   const builder = query as T & {
     eq: (column: string, value: string) => T;
@@ -879,6 +884,18 @@ Deno.serve(async (req) => {
         const name = cleanText(body.name);
         if (!name) return jsonResponse({ error: "Template name is required." }, 400);
 
+        if (entityId) {
+          const { data: existing, error: existingError } = await supabase
+            .from(table)
+            .select("*")
+            .eq("id", entityId)
+            .eq("company_id", company.id)
+            .maybeSingle();
+          if (existingError) throw existingError;
+          if (!existing) return jsonResponse({ error: "Task template not found." }, 404);
+          beforeData = existing;
+        }
+
         const triggerType = cleanText(body.triggerType) || "manual";
         if (!TASK_TEMPLATE_TRIGGERS.has(triggerType)) {
           return jsonResponse({ error: "Choose a valid task template trigger." }, 400);
@@ -1026,6 +1043,42 @@ Deno.serve(async (req) => {
           }
         }
 
+        const existingMetadata =
+          beforeData?.metadata &&
+          typeof beforeData.metadata === "object" &&
+          !Array.isArray(beforeData.metadata)
+            ? (beforeData.metadata as Record<string, unknown>)
+            : {};
+        const templateMetadata: Record<string, unknown> = {
+          ...existingMetadata,
+          [entityId ? "updated_from" : "created_from"]:
+            "manage-company-customization",
+        };
+        if (triggerType === "suspended_auto_offboard") {
+          templateMetadata.daily_pulse_section =
+            "automated_offboard_follow_up";
+          templateMetadata.daily_pulse_section_title = boundedText(
+            body.dailyPulseSectionTitle,
+            "Automated Offboards Requiring Follow-up",
+            100,
+          );
+          templateMetadata.daily_pulse_section_description = boundedText(
+            body.dailyPulseSectionDescription,
+            "Outstanding coach actions after RetainOS automatically offboarded a client.",
+            240,
+          );
+          templateMetadata.daily_pulse_action_label = boundedText(
+            body.dailyPulseActionLabel,
+            "Mark team notified",
+            60,
+          );
+        } else {
+          delete templateMetadata.daily_pulse_section;
+          delete templateMetadata.daily_pulse_section_title;
+          delete templateMetadata.daily_pulse_section_description;
+          delete templateMetadata.daily_pulse_action_label;
+        }
+
         const payload = {
           company_id: company.id,
           name,
@@ -1045,19 +1098,10 @@ Deno.serve(async (req) => {
           is_enabled: body.isEnabled === false ? false : true,
           position: optionalInteger(body.position) ?? 0,
           archived_at: null,
-          metadata: { updated_from: "manage-company-customization" },
+          metadata: templateMetadata,
         };
 
         if (entityId) {
-          const { data: existing, error: existingError } = await supabase
-            .from(table)
-            .select("*")
-            .eq("id", entityId)
-            .eq("company_id", company.id)
-            .maybeSingle();
-          if (existingError) throw existingError;
-          if (!existing) return jsonResponse({ error: "Task template not found." }, 404);
-          beforeData = existing;
           const { data, error } = await supabase
             .from(table)
             .update(payload)
@@ -1070,10 +1114,7 @@ Deno.serve(async (req) => {
         } else {
           const { data, error } = await supabase
             .from(table)
-            .insert({
-              ...payload,
-              metadata: { created_from: "manage-company-customization" },
-            })
+            .insert(payload)
             .select("*")
             .single();
           if (error) throw error;
