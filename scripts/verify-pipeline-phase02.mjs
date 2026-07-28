@@ -340,6 +340,8 @@ check(
     /search/i.test(pipelineBrowserSource) &&
     /pathway/i.test(pipelineBrowserSource) &&
     /owner/i.test(pipelineBrowserSource) &&
+    /Secondary assignee/i.test(pipelineBrowserSource) &&
+    /csm_secondary_assignee_id/i.test(pipelineBrowserSource) &&
     /follow.?up|renewal/i.test(pipelineBrowserSource) &&
     /drawer|detail/i.test(pipelineBrowserSource),
 );

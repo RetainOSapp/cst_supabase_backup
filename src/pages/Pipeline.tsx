@@ -1018,6 +1018,7 @@ export function Pipeline() {
   const [selectedPipelineIds, setSelectedPipelineIds] = useState<Set<string>>(new Set());
   const [pathwayFilter, setPathwayFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
+  const [secondaryAssigneeFilter, setSecondaryAssigneeFilter] = useState("");
   const [search, setSearch] = useState("");
   const [dateKind, setDateKind] = useState<DateKind>("follow_up");
   const [dateWindow, setDateWindow] = useState<DateWindow>("all");
@@ -1170,6 +1171,28 @@ export function Pipeline() {
     return [...values.entries()].sort((left, right) => left[1].localeCompare(right[1]));
   }, [workspace]);
 
+  const secondaryAssignees = useMemo(() => {
+    if (!workspace) return [];
+    const assignedIds = new Set(
+      workspace.clients
+        .map((client) => client.csm_secondary_assignee_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    return workspace.members
+      .filter(
+        (member) =>
+          member.status !== "archived" &&
+          Boolean(
+            assignedIds.has(member.id) ||
+            (member.legacy_glide_row_id &&
+              assignedIds.has(member.legacy_glide_row_id)),
+          ),
+      )
+      .sort((left, right) =>
+        (left.name || "").localeCompare(right.name || ""),
+      );
+  }, [workspace]);
+
   const filteredItems = useMemo(() => {
     if (!workspace) return [];
     const query = search.trim().toLowerCase();
@@ -1183,6 +1206,22 @@ export function Pipeline() {
       if (pathwayFilter && itemPathwayId !== pathwayFilter) return false;
       const ownerIds = [item.owner_member_id, lookupMember(workspace.members, item.owner_member_id)?.legacy_glide_row_id].filter(Boolean);
       if (ownerFilter && !ownerIds.includes(ownerFilter)) return false;
+      if (secondaryAssigneeFilter) {
+        const selectedMember = lookupMember(
+          workspace.members,
+          secondaryAssigneeFilter,
+        );
+        const selectedIds = [
+          secondaryAssigneeFilter,
+          selectedMember?.legacy_glide_row_id,
+        ].filter(Boolean);
+        if (
+          !client?.csm_secondary_assignee_id ||
+          !selectedIds.includes(client.csm_secondary_assignee_id)
+        ) {
+          return false;
+        }
+      }
       if (query) {
         const haystack = [
           clientName(item, workspace.clients),
@@ -1210,7 +1249,7 @@ export function Pipeline() {
       if (dateWindow === "month" && (!value || value.slice(0, 7) !== selectedMonth)) return false;
       return true;
     });
-  }, [dateKind, dateWindow, ownerFilter, pathwayFilter, search, selectedMonth, visiblePipelineIds, workspace]);
+  }, [dateKind, dateWindow, ownerFilter, pathwayFilter, search, secondaryAssigneeFilter, selectedMonth, visiblePipelineIds, workspace]);
 
   const stageById = useMemo(
     () => new Map((workspace?.stages ?? []).map((stage) => [stage.id, stage])),
@@ -1604,8 +1643,9 @@ export function Pipeline() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
           <label className="xl:col-span-2"><span className="retainos-field-label">Pathway</span><select value={pathwayFilter} onChange={(event) => setPathwayFilter(event.target.value)} className="retainos-input"><option value="">All pathways</option>{pathways.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
           <label className="xl:col-span-2"><span className="retainos-field-label">Assigned to</span><select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} className="retainos-input"><option value="">All users</option>{workspace.members.filter((member) => member.status !== "archived").map((member) => <option key={member.id} value={member.id}>{member.name || "Unnamed member"}</option>)}</select></label>
-          <label className="xl:col-span-3"><span className="retainos-field-label">Search clients</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Client or business name" className="retainos-input" /></label>
-          <div className="xl:col-span-3"><span className="retainos-field-label">Timing type</span><div className="flex min-h-10 flex-wrap items-center gap-1 rounded-md border border-[#d0d5dd] bg-white p-1" aria-label="Timing type">{([{ value: "follow_up", label: "Follow-up", visible: true }, { value: "renewal", label: "Renewal", visible: visiblePipelineTypes.has("renewal") }, { value: "expected_close", label: "Expansion close", visible: visiblePipelineTypes.has("expansion") }] as { value: DateKind; label: string; visible: boolean }[]).filter((option) => option.visible).map((option) => <button key={option.value} type="button" aria-pressed={dateKind === option.value} onClick={() => setDateKind(option.value)} className={`rounded px-2.5 py-1.5 text-xs font-semibold ${dateKind === option.value ? "bg-[#162b3e] text-white" : "text-[#586273] hover:bg-[#f2f4f7]"}`}>{option.label}</button>)}</div></div>
+          <label className="xl:col-span-2"><span className="retainos-field-label">Secondary assignee</span><select value={secondaryAssigneeFilter} onChange={(event) => setSecondaryAssigneeFilter(event.target.value)} className="retainos-input"><option value="">All secondary assignees</option>{secondaryAssignees.map((member) => <option key={member.id} value={member.id}>{member.name || "Unnamed member"}</option>)}</select></label>
+          <label className="xl:col-span-2"><span className="retainos-field-label">Search clients</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Client or business name" className="retainos-input" /></label>
+          <div className="xl:col-span-2"><span className="retainos-field-label">Timing type</span><div className="flex min-h-10 flex-wrap items-center gap-1 rounded-md border border-[#d0d5dd] bg-white p-1" aria-label="Timing type">{([{ value: "follow_up", label: "Follow-up", visible: true }, { value: "renewal", label: "Renewal", visible: visiblePipelineTypes.has("renewal") }, { value: "expected_close", label: "Expansion close", visible: visiblePipelineTypes.has("expansion") }] as { value: DateKind; label: string; visible: boolean }[]).filter((option) => option.visible).map((option) => <button key={option.value} type="button" aria-pressed={dateKind === option.value} onClick={() => setDateKind(option.value)} className={`rounded px-2.5 py-1.5 text-xs font-semibold ${dateKind === option.value ? "bg-[#162b3e] text-white" : "text-[#586273] hover:bg-[#f2f4f7]"}`}>{option.label}</button>)}</div></div>
           <label className="xl:col-span-2"><span className="retainos-field-label">Time window</span><select value={dateWindow} onChange={(event) => setDateWindow(event.target.value as DateWindow)} className="retainos-input"><option value="all">Any date</option><option value="overdue">Overdue</option><option value="next_30">Next 30 days</option><option value="this_month">This month</option><option value="next_month">Next month</option><option value="month">Choose month…</option><option value="no_date">No date</option></select>{dateWindow === "month" ? <input aria-label={`Selected ${dateKind === "follow_up" ? "follow-up" : dateKind === "renewal" ? "renewal" : "expansion close"} month`} type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} className="retainos-input mt-2" /> : null}</label>
         </div>
         <div className="mt-4 flex justify-end"><div className="inline-flex rounded-lg border border-[#dce5ef] bg-white p-1"><button type="button" onClick={() => setViewMode("board")} className={`rounded-md px-4 py-1.5 text-sm font-semibold ${viewMode === "board" ? "bg-[#162b3e] text-white" : "text-[#586273]"}`}>Board</button><button type="button" onClick={() => setViewMode("list")} className={`rounded-md px-4 py-1.5 text-sm font-semibold ${viewMode === "list" ? "bg-[#162b3e] text-white" : "text-[#586273]"}`}>List</button></div></div>
