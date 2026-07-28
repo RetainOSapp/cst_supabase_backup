@@ -10,6 +10,12 @@ import {
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
 import { ComingSoonPanel } from "../components/ComingSoon.tsx";
+import {
+  emptyClientIdentityPreferences,
+  resolveClientIdentity,
+  type ClientIdentityMode,
+  type ClientIdentityPreferences,
+} from "../lib/clientIdentity.ts";
 
 type ViewMode = "board" | "list";
 type StatusMode = "open" | "all" | "closed" | "overdue" | "due-soon";
@@ -51,11 +57,16 @@ interface ClientRow {
   id?: string | null;
   glide_row_id: string;
   client_name: string | null;
+  client_business?: string | null;
   client_image: string | null;
   program_status_value: string | null;
+  offer_milestones_current_offer_id?: string | null;
   csm_team_member_id?: string | null;
   csm_secondary_assignee_id?: string | null;
   isMirrorFallback?: boolean;
+  identity_primary?: string;
+  identity_secondary?: string | null;
+  identity_mode?: ClientIdentityMode;
 }
 
 interface TaskTemplateRow {
@@ -537,10 +548,21 @@ function TaskCard({
             />
           ) : (
             <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
-              {getInitials(client?.client_name ?? fallbackClientName)}
+              {getInitials(client?.identity_primary ?? fallbackClientName)}
             </span>
           )}
-          <span className="truncate">{client?.client_name ?? fallbackClientName}</span>
+          <span className="min-w-0">
+            <span className="block truncate">
+              {client?.identity_primary ?? fallbackClientName}
+            </span>
+            {client?.identity_secondary ? (
+              <span className="block truncate text-xs font-normal text-gray-500">
+                {client.identity_mode === "business_first"
+                  ? `POC: ${client.identity_secondary}`
+                  : client.identity_secondary}
+              </span>
+            ) : null}
+          </span>
         </Link>
         {client?.program_status_value && (
           <ProgramStatusPill
@@ -622,15 +644,24 @@ function TaskListTable({
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
                   {canOpenClient && client ? (
-                    <Link
-                      to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
-                      className="font-medium text-indigo-600 hover:text-indigo-800"
-                    >
-                      {client.client_name ?? "Unnamed client"}
-                    </Link>
+                    <>
+                      <Link
+                        to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
+                        className="font-medium text-indigo-600 hover:text-indigo-800"
+                      >
+                        {client.identity_primary ?? "Unnamed client"}
+                      </Link>
+                      {client.identity_secondary ? (
+                        <div className="mt-0.5 text-xs text-gray-500">
+                          {client.identity_mode === "business_first"
+                            ? `POC: ${client.identity_secondary}`
+                            : client.identity_secondary}
+                        </div>
+                      ) : null}
+                    </>
                   ) : client ? (
                     <span className="font-medium text-gray-800">
-                      {client.client_name ?? fallbackClientName}
+                      {client.identity_primary ?? fallbackClientName}
                     </span>
                   ) : (
                     fallbackClientName
@@ -900,7 +931,9 @@ function NewTaskModal({
                 ) : null}
                 {clients.map((client) => (
                   <option key={client.glide_row_id} value={client.glide_row_id}>
-                    {client.client_name ?? "Unnamed client"}
+                    {client.identity_primary ??
+                      client.client_name ??
+                      "Unnamed client"}
                   </option>
                 ))}
               </select>
@@ -1080,6 +1113,8 @@ export function Tasks() {
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplateRow[]>([]);
   const [programStatusLabels, setProgramStatusLabels] =
     useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
+  const [clientIdentityPreferences, setClientIdentityPreferences] =
+    useState<ClientIdentityPreferences>(emptyClientIdentityPreferences);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -1101,10 +1136,39 @@ export function Tasks() {
     () => programStatusChoicesWithLabels(programStatusLabels),
     [programStatusLabels],
   );
-  const companyClientById = useMemo(
-    () => buildClientLookup(companyClients),
-    [companyClients],
+  const displayCompanyClients = useMemo(
+    () =>
+      companyClients.map((client) => {
+        const identity = resolveClientIdentity(client, clientIdentityPreferences);
+        return {
+          ...client,
+          identity_primary: identity.primary,
+          identity_secondary: identity.secondary,
+          identity_mode: identity.mode,
+        };
+      }),
+    [clientIdentityPreferences, companyClients],
   );
+  const companyClientById = useMemo(
+    () => buildClientLookup(displayCompanyClients),
+    [displayCompanyClients],
+  );
+  const displayClientById = useMemo(() => {
+    const lookup = new Map<string, ClientRow>();
+    const seen = new Set<ClientRow>();
+    clientById.forEach((client) => {
+      if (seen.has(client)) return;
+      seen.add(client);
+      const identity = resolveClientIdentity(client, clientIdentityPreferences);
+      addClientToLookup(lookup, {
+        ...client,
+        identity_primary: identity.primary,
+        identity_secondary: identity.secondary,
+        identity_mode: identity.mode,
+      });
+    });
+    return lookup;
+  }, [clientById, clientIdentityPreferences]);
 
   const availableTeamMembers = useMemo(
     () =>
@@ -1218,6 +1282,7 @@ export function Tasks() {
   useEffect(() => {
     if (!companyId) {
       setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      setClientIdentityPreferences(emptyClientIdentityPreferences());
       return;
     }
 
@@ -1225,7 +1290,13 @@ export function Tasks() {
 
     async function loadWorkspaceDefaults() {
       const defaults = await loadCompanyWorkspaceDefaults(companyId);
-      if (!cancelled) setProgramStatusLabels(defaults.programStatusLabels);
+      if (!cancelled) {
+        setProgramStatusLabels(defaults.programStatusLabels);
+        setClientIdentityPreferences({
+          companyMode: defaults.clientIdentityMode,
+          pathwayModes: defaults.pathwayIdentityModes,
+        });
+      }
     }
 
     void loadWorkspaceDefaults();
@@ -1323,8 +1394,8 @@ export function Tasks() {
           .from(sourceTable)
           .select(
             usesAppClients
-              ? "id, glide_row_id, client_name, client_image, program_status_value, csm_team_member_id, csm_secondary_assignee_id"
-              : "glide_row_id, client_name, client_image, program_status_value, csm_team_member_id",
+              ? "id, glide_row_id, client_name, client_business, client_image, program_status_value, offer_milestones_current_offer_id, csm_team_member_id, csm_secondary_assignee_id"
+              : "glide_row_id, client_name, client_business, client_image, program_status_value, offer_milestones_current_offer_id, csm_team_member_id",
           )
           .eq(
             sourceTable === "clients" ? "company_glide_row_id" : "company_id",
@@ -1519,8 +1590,8 @@ export function Tasks() {
         for (let index = 0; index < clientIds.length; index += chunkSize) {
           const chunk = clientIds.slice(index, index + chunkSize);
           const clientSelect = usesAppTasks
-            ? "id, glide_row_id, client_name, client_image, program_status_value, csm_team_member_id"
-            : "glide_row_id, client_name, client_image, program_status_value, csm_team_member_id";
+            ? "id, glide_row_id, client_name, client_business, client_image, program_status_value, offer_milestones_current_offer_id, csm_team_member_id"
+            : "glide_row_id, client_name, client_business, client_image, program_status_value, offer_milestones_current_offer_id, csm_team_member_id";
           const clientsResult = await supabase
             .from(usesAppTasks ? "clients" : "backup_company_clients")
             .select(clientSelect)
@@ -1552,7 +1623,7 @@ export function Tasks() {
             const mirrorClientsResult = await supabase
               .from("backup_company_clients")
               .select(
-                "glide_row_id, client_name, client_image, program_status_value, csm_team_member_id",
+                "glide_row_id, client_name, client_business, client_image, program_status_value, offer_milestones_current_offer_id, csm_team_member_id",
               )
               .eq("company_id", companyId)
               .in("glide_row_id", chunk);
@@ -1798,9 +1869,14 @@ export function Tasks() {
               className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
             >
               <option value="">All clients</option>
-              {companyClients.map((client) => (
+              {displayCompanyClients.map((client) => (
                 <option key={client.glide_row_id} value={client.glide_row_id}>
-                  {client.client_name ?? "Unnamed client"}
+                  {client.identity_primary ?? "Unnamed client"}
+                  {client.identity_secondary
+                    ? ` — ${
+                        client.identity_mode === "business_first" ? "POC: " : ""
+                      }${client.identity_secondary}`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -1936,7 +2012,7 @@ export function Tasks() {
               ) : (
                 <TaskListTable
                   tasks={column.tasks}
-                  clientById={clientById}
+                  clientById={displayClientById}
                   companyClientById={companyClientById}
                   teamMemberNameById={teamMemberNameById}
                   canManage={canManageTasks}
@@ -1987,7 +2063,11 @@ export function Tasks() {
                   <TaskCard
                     key={task.glide_row_id}
                     task={task}
-                    client={resolveTaskClient(task, clientById, companyClientById)}
+                    client={resolveTaskClient(
+                      task,
+                      displayClientById,
+                      companyClientById,
+                    )}
                     fallbackClientName={taskClientNameFallback(task)}
                     teamMemberNameById={teamMemberNameById}
                     canManage={canManageTasks}
@@ -2017,7 +2097,7 @@ export function Tasks() {
       {newTaskOpen ? (
         <NewTaskModal
           companyId={companyId}
-          clients={companyClients}
+          clients={displayCompanyClients}
           teamMembers={teamMembers}
           taskTemplates={taskTemplates}
           assignedTeamMemberId={assignedTeamMemberId}
@@ -2043,7 +2123,7 @@ export function Tasks() {
         <NewTaskModal
           companyId={companyId}
           task={selectedTask}
-          clients={companyClients}
+          clients={displayCompanyClients}
           teamMembers={teamMembers}
           taskTemplates={taskTemplates}
           assignedTeamMemberId={assignedTeamMemberId}

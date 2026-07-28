@@ -1,5 +1,11 @@
 import { supabase } from "./supabase.ts";
 import type { ProgramChoice } from "./clientDisplay.tsx";
+import {
+  DEFAULT_CLIENT_IDENTITY_MODE,
+  clientIdentityModeFromMetadata,
+  clientIdentityOverrideFromMetadata,
+  type ClientIdentityMode,
+} from "./clientIdentity.ts";
 
 export type DefaultClientView = "list" | "card" | "calendar";
 export type DefaultCalendarMode = "month" | "week" | "day";
@@ -31,6 +37,8 @@ export interface CompanyWorkspaceDefaults {
   defaultCalendarMode: DefaultCalendarMode;
   clientListColumns: ClientListColumnKey[];
   programStatusLabels: ProgramStatusLabelMap;
+  clientIdentityMode: ClientIdentityMode;
+  pathwayIdentityModes: Record<string, ClientIdentityMode>;
   source: "app_owned" | "fallback";
 }
 
@@ -107,6 +115,8 @@ const FALLBACK_WORKSPACE_DEFAULTS: CompanyWorkspaceDefaults = {
     "actions",
   ],
   programStatusLabels: DEFAULT_PROGRAM_STATUS_LABELS,
+  clientIdentityMode: DEFAULT_CLIENT_IDENTITY_MODE,
+  pathwayIdentityModes: {},
   source: "fallback",
 };
 
@@ -359,13 +369,21 @@ export async function loadCompanyWorkspaceDefaults(
 
   if (!appCompany?.id) return FALLBACK_WORKSPACE_DEFAULTS;
 
-  const { data, error } = await supabase
-    .from("company_settings")
-    .select(
-      "profile_upkeep_freshness_days, default_client_view, default_calendar_mode, metadata",
-    )
-    .eq("company_id", appCompany.id)
-    .maybeSingle();
+  const [settingsResult, offersResult] = await Promise.all([
+    supabase
+      .from("company_settings")
+      .select(
+        "profile_upkeep_freshness_days, default_client_view, default_calendar_mode, metadata",
+      )
+      .eq("company_id", appCompany.id)
+      .maybeSingle(),
+    supabase
+      .from("company_offers")
+      .select("glide_row_id, metadata")
+      .eq("company_id", appCompany.id)
+      .eq("status", "active"),
+  ]);
+  const { data, error } = settingsResult;
 
   if (error) {
     console.error("Failed to load company workspace defaults:", error);
@@ -373,6 +391,21 @@ export async function loadCompanyWorkspaceDefaults(
   }
 
   if (!data) return { ...FALLBACK_WORKSPACE_DEFAULTS, source: "app_owned" };
+
+  if (offersResult.error) {
+    console.error(
+      "Failed to load pathway client identity overrides:",
+      offersResult.error,
+    );
+  }
+  const clientIdentityMode = clientIdentityModeFromMetadata(data.metadata);
+  const pathwayIdentityModes = (offersResult.data ?? []).reduce<
+    Record<string, ClientIdentityMode>
+  >((modes, offer) => {
+    const override = clientIdentityOverrideFromMetadata(offer.metadata);
+    if (override !== "inherit") modes[offer.glide_row_id] = override;
+    return modes;
+  }, {});
 
   return {
     profileUpkeepFreshnessDays: normalizeFreshnessDays(
@@ -394,6 +427,8 @@ export async function loadCompanyWorkspaceDefaults(
         ? (data.metadata as Record<string, unknown>).program_status_labels
         : null,
     ),
+    clientIdentityMode,
+    pathwayIdentityModes,
     source: "app_owned",
   };
 }

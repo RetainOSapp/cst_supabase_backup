@@ -186,6 +186,15 @@ Deno.serve(async (req) => {
     const table = isOfferAction ? "company_offers" : "company_offer_milestones";
     const entityId = cleanText(body.entityId);
     const name = cleanText(body.name);
+    const hasClientIdentityMode = Object.prototype.hasOwnProperty.call(
+      body,
+      "clientIdentityMode",
+    );
+    const clientIdentityMode =
+      body.clientIdentityMode === "person_first" ||
+      body.clientIdentityMode === "business_first"
+        ? body.clientIdentityMode
+        : "inherit";
 
     let beforeData: Record<string, unknown> | null = null;
     let saved: Record<string, unknown> | null = null;
@@ -320,7 +329,12 @@ Deno.serve(async (req) => {
             company_glide_row_id: companyLegacyId,
             glide_row_id: stableId,
             name,
-            metadata: { created_from: "manage-company-pathway" },
+            metadata: {
+              created_from: "manage-company-pathway",
+              ...(!hasClientIdentityMode || clientIdentityMode === "inherit"
+                ? {}
+                : { client_identity_mode: clientIdentityMode }),
+            },
           }
         : {
             company_id: company.id,
@@ -426,7 +440,24 @@ Deno.serve(async (req) => {
         }
       } else {
         payload = isOfferAction
-          ? { name }
+          ? {
+              name,
+              metadata: {
+                ...(existing.metadata &&
+                typeof existing.metadata === "object" &&
+                !Array.isArray(existing.metadata)
+                  ? existing.metadata
+                  : {}),
+                ...(hasClientIdentityMode
+                  ? {
+                      client_identity_mode:
+                        clientIdentityMode === "inherit"
+                          ? null
+                          : clientIdentityMode,
+                    }
+                  : {}),
+              },
+            }
           : {
               name,
               position: optionalInteger(body.position) ?? existing.position ?? 0,

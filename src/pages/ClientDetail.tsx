@@ -26,6 +26,14 @@ import {
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
 import { compareOfferMilestones } from "../lib/milestoneOrdering.ts";
+import {
+  clientIdentityModeFromMetadata,
+  clientIdentityOverrideFromMetadata,
+  emptyClientIdentityPreferences,
+  resolveClientIdentity,
+  type ClientIdentityMode,
+  type ClientIdentityPreferences,
+} from "../lib/clientIdentity.ts";
 
 const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
 const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as const;
@@ -33,12 +41,14 @@ const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as 
 type ClientRow = Record<string, unknown> & {
   glide_row_id: string;
   client_name?: string | null;
+  client_business?: string | null;
   client_image?: string | null;
   company_id?: string | null;
   company_glide_row_id?: string | null;
   csm_team_member_id?: string | null;
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
+  offer_milestones_current_offer_id?: string | null;
   secondary_offer_milestones_current_offer_id?: string | null;
   secondary_offer_milestones_current_milestone_id?: string | null;
 };
@@ -6585,7 +6595,8 @@ function PathwaysSection({
         ]}
         client={{
           ...client,
-          offer_milestones_current_offer_id: offerValue,
+          offer_milestones_current_offer_id:
+            typeof offerValue === "string" ? offerValue : null,
           offer_milestones_current_milestone_id: milestoneValue,
         }}
         programChoices={[]}
@@ -8081,6 +8092,8 @@ export function ClientDetail() {
   >([]);
   const [churnReasons, setChurnReasons] = useState<CompanyChurnReasonRow[]>([]);
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
+  const [clientIdentityPreferences, setClientIdentityPreferences] =
+    useState<ClientIdentityPreferences>(emptyClientIdentityPreferences);
   const [outcomeChoices, setOutcomeChoices] = useState<OutcomeChoiceSets>({
     success: [],
     progress: [],
@@ -8125,6 +8138,7 @@ export function ClientDetail() {
       setError(null);
       setSecondaryAssigneeEnabled(false);
       setSecondaryPathwaysEnabled(false);
+      setClientIdentityPreferences(emptyClientIdentityPreferences());
       const { data: appClient, error: appClientError } = await supabase
         .from("clients")
         .select("*")
@@ -8431,6 +8445,21 @@ export function ClientDetail() {
             nextProgramStatusLabels,
           ),
         );
+        const settingsMetadata =
+          companySettingsResult.data?.metadata &&
+          typeof companySettingsResult.data.metadata === "object" &&
+          !Array.isArray(companySettingsResult.data.metadata)
+            ? (companySettingsResult.data.metadata as Record<string, unknown>)
+            : {};
+        const companyMode = clientIdentityModeFromMetadata(settingsMetadata);
+        const pathwayModes = (companyOfferRows ?? []).reduce<
+          Record<string, ClientIdentityMode>
+        >((modes, offer) => {
+          const override = clientIdentityOverrideFromMetadata(offer.metadata);
+          if (override !== "inherit") modes[offer.glide_row_id] = override;
+          return modes;
+        }, {});
+        setClientIdentityPreferences({ companyMode, pathwayModes });
         setChurnReasons(
           churnReasonsResult.error
             ? []
@@ -8872,6 +8901,7 @@ export function ClientDetail() {
       ),
     ]);
   };
+  const identity = resolveClientIdentity(client, clientIdentityPreferences);
   return (
     <div>
       <div className="mb-4">
@@ -8893,13 +8923,20 @@ export function ClientDetail() {
               />
             ) : (
               <div className="flex h-16 w-16 items-center justify-center rounded-md border border-[#d6eafb] bg-[#eaf4fe] text-lg font-semibold text-[#2b79c4]">
-                {getInitials(client.client_name)}
+                {getInitials(identity.primary)}
               </div>
             )}
             <div className="min-w-0">
               <h1 className="truncate text-2xl font-semibold text-[#162b3e]">
-                {client.client_name ?? "Unnamed client"}
+                {identity.primary}
               </h1>
+              {identity.secondary ? (
+                <p className="mt-0.5 truncate text-sm text-[#667085]">
+                  {identity.mode === "business_first"
+                    ? `POC: ${identity.secondary}`
+                    : identity.secondary}
+                </p>
+              ) : null}
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[#586273]">
                 <span>{csmName}</span>
                 <span aria-hidden="true">-</span>

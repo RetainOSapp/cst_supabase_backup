@@ -2170,6 +2170,11 @@ Use this section as the “what good looks like” checklist before migrating re
 - `[ ]` Add a user avatar/account menu. Keep it hidden until it has useful account actions.
 - `[ ]` Preserve the current working Dashboard information structure while applying the HiFi visual system.
 - `[x]` Use amber for Paused and Suspended statuses and red for Offboarded.
+- `[~]` `[qa]` Configurable person-first/business-first client identity presentation.
+  - Company Settings controls the default; each pathway can inherit or override it.
+  - Canonical person/business fields remain separate for exports and integrations.
+  - Clients, Client Detail, Dashboard drilldowns, Daily Pulse, Tasks, CSM Reports, and Pipeline use one fallback-safe display rule.
+  - Clients roster search matches both the person and business name. Sales Kick production UI QA remains.
 
 ## QA Checklist For Every Release
 

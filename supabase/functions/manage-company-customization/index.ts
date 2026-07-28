@@ -39,6 +39,7 @@ const CUSTOM_FIELD_TYPES = new Set([
 const CUSTOM_FIELD_ENTITY_TYPES = new Set(["client", "company_member", "contract"]);
 const CLIENT_VIEWS = new Set(["list", "card", "calendar"]);
 const CALENDAR_MODES = new Set(["month", "week", "day"]);
+const CLIENT_IDENTITY_MODES = new Set(["person_first", "business_first"]);
 const CLIENT_LIST_COLUMN_ORDER = [
   "status",
   "pathway",
@@ -254,6 +255,11 @@ function normalizeProgramStatusLabels(value: unknown) {
   }, {});
 }
 
+function normalizeClientIdentityMode(value: unknown) {
+  const mode = cleanText(value);
+  return CLIENT_IDENTITY_MODES.has(mode) ? mode : "person_first";
+}
+
 function normalizeEmail(value: unknown) {
   return cleanText(value).toLowerCase();
 }
@@ -457,6 +463,12 @@ Deno.serve(async (req) => {
       const programStatusLabels = normalizeProgramStatusLabels(
         body.programStatusLabels,
       );
+      const clientIdentityMode = Object.prototype.hasOwnProperty.call(
+        body,
+        "clientIdentityMode",
+      )
+        ? normalizeClientIdentityMode(body.clientIdentityMode)
+        : normalizeClientIdentityMode(existingMetadata.client_identity_mode);
 
       const payload = {
         company_id: company.id,
@@ -500,6 +512,7 @@ Deno.serve(async (req) => {
             : {}),
           ...(clientListColumns ? { client_list_columns: clientListColumns } : {}),
           program_status_labels: programStatusLabels,
+          client_identity_mode: clientIdentityMode,
         },
       };
 

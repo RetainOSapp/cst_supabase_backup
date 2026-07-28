@@ -26,6 +26,12 @@ import { supabase } from "../lib/supabase.ts";
 import { uploadClientImage } from "../lib/clientImageUpload.ts";
 import { ClientAdvocacyPanel } from "../components/ClientAdvocacyPanel.tsx";
 import {
+  emptyClientIdentityPreferences,
+  resolveClientIdentity,
+  type ClientIdentityPreferences,
+  type ResolvedClientIdentity,
+} from "../lib/clientIdentity.ts";
+import {
   advocacyDefinitions,
   buildAdvocacyEventDrafts,
   buildStandaloneAdvocacyNoteDrafts,
@@ -54,12 +60,14 @@ type SortDirection = "asc" | "desc";
 type ClientRow = Record<string, unknown> & {
   glide_row_id: string;
   client_name?: string | null;
+  client_business?: string | null;
   client_image?: string | null;
   company_id?: string | null;
   company_glide_row_id?: string | null;
   csm_team_member_id?: string | null;
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
+  offer_milestones_current_offer_id?: string | null;
 };
 type CompanyCustomFieldRow = {
   id: string;
@@ -1586,10 +1594,12 @@ function OutcomeSelect({
 }
 function QuickUpdateModal({
   client,
+  identity,
   onClose,
   onClientUpdated,
 }: {
   client: ClientRow;
+  identity: ResolvedClientIdentity;
   onClose: () => void;
   onClientUpdated: (client: ClientRow) => void;
 }) {
@@ -2199,8 +2209,15 @@ function QuickUpdateModal({
               Client interaction
             </div>
             <h2 className="mt-1 text-xl font-semibold text-[#162b3e]">
-              Quick Update · {client.client_name ?? "Unnamed client"}
+              Quick Update · {identity.primary}
             </h2>
+            {identity.secondary ? (
+              <p className="mt-0.5 text-xs text-[#667085]">
+                {identity.mode === "business_first"
+                  ? `POC: ${identity.secondary}`
+                  : identity.secondary}
+              </p>
+            ) : null}
             <p className="mt-1 text-sm text-[#586273]">
               {isPilotCompany
                 ? "Record the latest client context, outcomes, and pathway progress."
@@ -3384,6 +3401,8 @@ export function Clients() {
   const [programChoicesLoading, setProgramChoicesLoading] = useState(false);
   const [programStatusLabels, setProgramStatusLabels] =
     useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
+  const [clientIdentityPreferences, setClientIdentityPreferences] =
+    useState<ClientIdentityPreferences>(emptyClientIdentityPreferences);
   const [appClientCompanyIdsLoaded, setAppClientCompanyIdsLoaded] = useState(false);
   const [appClientCompanyIds, setAppClientCompanyIds] = useState<Set<string>>(
     () => new Set(),
@@ -3584,6 +3603,7 @@ export function Clients() {
     const companyId = filters.companyId || appliedFilters.companyId;
     if (!companyId) {
       setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      setClientIdentityPreferences(emptyClientIdentityPreferences());
       return;
     }
     if (defaultAppliedCompanyRef.current === companyId) return;
@@ -3603,6 +3623,10 @@ export function Clients() {
       }
       setClientListColumns(defaults.clientListColumns);
       setProgramStatusLabels(defaults.programStatusLabels);
+      setClientIdentityPreferences({
+        companyMode: defaults.clientIdentityMode,
+        pathwayModes: defaults.pathwayIdentityModes,
+      });
       defaultAppliedCompanyRef.current = companyId;
     }
 
@@ -3984,11 +4008,12 @@ export function Clients() {
     if (useAppClients) {
       query = query.is("archived_at", null);
     }
-    if (appliedFilters.clientName.trim())
-      query = query.ilike(
-        "client_name",
-        `%${appliedFilters.clientName.trim()}%`,
+    if (appliedFilters.clientName.trim()) {
+      const pattern = `%${appliedFilters.clientName.trim()}%`;
+      query = query.or(
+        `client_name.ilike.${pattern},client_business.ilike.${pattern}`,
       );
+    }
     if (assignedTeamMemberId) {
       query = query.or(
         `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
@@ -4290,9 +4315,9 @@ export function Clients() {
     }
 
     if (appliedFilters.clientName.trim()) {
-      query = query.ilike(
-        "client_name",
-        `%${appliedFilters.clientName.trim()}%`,
+      const pattern = `%${appliedFilters.clientName.trim()}%`;
+      query = query.or(
+        `client_name.ilike.${pattern},client_business.ilike.${pattern}`,
       );
     }
     if (assignedTeamMemberId) {
@@ -4608,15 +4633,22 @@ export function Clients() {
         }
         setClientListColumns(defaults.clientListColumns);
         setProgramStatusLabels(defaults.programStatusLabels);
+        setClientIdentityPreferences({
+          companyMode: defaults.clientIdentityMode,
+          pathwayModes: defaults.pathwayIdentityModes,
+        });
         defaultAppliedCompanyRef.current = defaultCompanyId;
       });
     } else {
       setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      setClientIdentityPreferences(emptyClientIdentityPreferences());
     }
     setSearchParams(defaultCompanyId ? { companyId: defaultCompanyId } : {}, {
       replace: true,
     });
   }
+  const clientIdentity = (client: ClientRow) =>
+    resolveClientIdentity(client, clientIdentityPreferences);
   const renderClientAvatar = (client: ClientRow, size = "h-9 w-9") =>
     client.client_image ? (
       <img
@@ -4628,10 +4660,11 @@ export function Clients() {
       <div
         className={`${size} flex items-center justify-center rounded-full border border-[#d6eafb] bg-[#eaf4fe] text-xs font-semibold text-[#2b79c4]`}
       >
-        {getInitials(client.client_name)}
+        {getInitials(clientIdentity(client).primary)}
       </div>
     );
   const clientMeta = (client: ClientRow) => ({
+    identity: clientIdentity(client),
     last: valueFrom(client, lastContactColumns),
     next: valueFrom(client, nextContactColumns),
     buyIn: valueFrom(client, buyInColumns),
@@ -4686,9 +4719,9 @@ export function Clients() {
             <>
               <FilterInput
                 id="clients-name-filter"
-                label="Client Name"
+                label="Client or business"
                 value={filters.clientName}
-                placeholder="Search clients"
+                placeholder="Search person or business"
                 onChange={(clientName) =>
                   setFilters((prev) => ({ ...prev, clientName }))
                 }
@@ -5237,7 +5270,7 @@ export function Clients() {
                   }}
                   className="rounded-md border border-[#cbd2dc] bg-white px-3 py-2 text-sm text-[#162b3e] focus:border-[#59abf0] focus:outline-none focus:ring-2 focus:ring-[#d6eafb]"
                 >
-                  <option value="client_name">Client name</option>
+                  <option value="client_name">Displayed name</option>
                   <option value="onboarded">Onboarded date</option>
                   <option value="weeks_in_program">Weeks in</option>
                   <option value="renewal">Renewal date</option>
@@ -5465,6 +5498,7 @@ export function Clients() {
       {quickUpdateClient && (
         <QuickUpdateModal
           client={quickUpdateClient}
+          identity={clientIdentity(quickUpdateClient)}
           onClose={() => setQuickUpdateClient(null)}
           onClientUpdated={(updatedClient) => {
             setQuickUpdateClient(updatedClient);
@@ -5514,6 +5548,7 @@ function ClientTable({
   teamMemberNameById: Map<string, string>;
   renderClientAvatar: (client: ClientRow) => React.ReactNode;
   clientMeta: (client: ClientRow) => {
+    identity: ResolvedClientIdentity;
     last: unknown;
     next: unknown;
     onboarded: unknown;
@@ -5552,6 +5587,7 @@ function ClientTable({
         <tbody className="divide-y divide-[#e4e9f0]">
           {clients.map((client) => {
             const meta = clientMeta(client);
+            const identity = meta.identity;
             const isMarkingContacted =
               markingContactedClientIds?.has(client.glide_row_id) === true;
             const isContactTouchConfirmed =
@@ -5570,8 +5606,15 @@ function ClientTable({
                         state={{ clientsReturnTo }}
                         className="truncate text-left text-sm font-semibold text-[#162b3e] hover:text-[#2b79c4] cursor-pointer"
                       >
-                        {client.client_name ?? "Unnamed client"}
+                        {identity.primary}
                       </Link>
+                      {identity.secondary ? (
+                        <div className="truncate text-xs text-[#667085]">
+                          {identity.mode === "business_first"
+                            ? `POC: ${identity.secondary}`
+                            : identity.secondary}
+                        </div>
+                      ) : null}
                     </div>
                     {onMarkContacted ? (
                       <button
@@ -5583,8 +5626,8 @@ function ClientTable({
                         }
                         aria-label={
                           isContactTouchConfirmed
-                            ? `${client.client_name ?? "Client"} marked as contacted today`
-                            : `Mark ${client.client_name ?? "client"} as contacted today`
+                            ? `${identity.primary} marked as contacted today`
+                            : `Mark ${identity.primary} as contacted today`
                         }
                         disabled={isMarkingContacted}
                         onClick={(event) => {
@@ -5683,6 +5726,7 @@ function ClientCards({
   teamMemberNameById: Map<string, string>;
   renderClientAvatar: (client: ClientRow, size?: string) => React.ReactNode;
   clientMeta: (client: ClientRow) => {
+    identity: ResolvedClientIdentity;
     last: unknown;
     pathway: unknown;
     onboarded: unknown;
@@ -5702,6 +5746,7 @@ function ClientCards({
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {clients.map((client) => {
         const meta = clientMeta(client);
+        const identity = meta.identity;
         const isMarkingContacted =
           markingContactedClientIds?.has(client.glide_row_id) === true;
         const isContactTouchConfirmed =
@@ -5715,7 +5760,7 @@ function ClientCards({
               to={`/clients/${encodeURIComponent(client.glide_row_id)}`}
               state={{ clientsReturnTo }}
               className="retainos-focus absolute inset-0 rounded-md"
-              aria-label={`Open ${client.client_name ?? "client"}`}
+              aria-label={`Open ${identity.primary}`}
             >
               <span className="sr-only">Open client</span>
             </Link>
@@ -5724,8 +5769,15 @@ function ClientCards({
                 {renderClientAvatar(client, "h-10 w-10")}
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-[#162b3e]">
-                    {client.client_name ?? "Unnamed client"}
+                    {identity.primary}
                   </div>
+                  {identity.secondary ? (
+                    <div className="truncate text-xs text-[#667085]">
+                      {identity.mode === "business_first"
+                        ? `POC: ${identity.secondary}`
+                        : identity.secondary}
+                    </div>
+                  ) : null}
                   <div className="truncate text-xs text-[#586273]">
                     {teamMemberNameById.get(client.csm_team_member_id ?? "") ??
                       "Unassigned"}
@@ -5763,8 +5815,8 @@ function ClientCards({
                       }
                       aria-label={
                         isContactTouchConfirmed
-                          ? `${client.client_name ?? "Client"} marked as contacted today`
-                          : `Mark ${client.client_name ?? "client"} as contacted today`
+                          ? `${identity.primary} marked as contacted today`
+                          : `Mark ${identity.primary} as contacted today`
                       }
                     disabled={isMarkingContacted}
                     onClick={(event) => {
@@ -6046,6 +6098,7 @@ function ContactCalendar({
   programChoices: ProgramChoice[];
   teamMemberNameById: Map<string, string>;
   clientMeta: (client: ClientRow) => {
+    identity: ResolvedClientIdentity;
     last: unknown;
     next: unknown;
     onboarded: unknown;
@@ -6227,9 +6280,9 @@ function ContactCalendar({
                         to={`/clients/${encodeURIComponent(event.client.glide_row_id)}`}
                         state={{ clientsReturnTo }}
                         className="block w-full truncate text-left text-xs font-semibold text-[#162b3e] hover:text-[#2b79c4]"
-                        title={event.client.client_name ?? "Unnamed client"}
+                        title={clientMeta(event.client).identity.primary}
                       >
-                        {event.client.client_name ?? "Unnamed client"}
+                        {clientMeta(event.client).identity.primary}
                       </Link>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span

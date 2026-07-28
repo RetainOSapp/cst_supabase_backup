@@ -18,6 +18,13 @@ import {
   type ProgramStatusLabelMap,
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
+import {
+  DEFAULT_CLIENT_IDENTITY_MODE,
+  clientIdentityModeFromMetadata,
+  clientIdentityOverrideFromMetadata,
+  type ClientIdentityMode,
+  type ClientIdentityOverride,
+} from "../lib/clientIdentity.ts";
 
 type DetailTab = "team" | "customization" | "pathways" | "pipelines" | "settings";
 type TeamSource = "mirror" | "app_owned";
@@ -80,6 +87,7 @@ interface CompanyOfferRow {
   name: string | null;
   company_id?: string | null;
   status?: "active" | "archived" | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 interface CompanyOfferMilestoneRow {
@@ -243,6 +251,7 @@ interface CompanySettingsRow {
   enable_pipeline_viewer_access: boolean;
   client_list_columns?: ClientListColumnKey[];
   program_status_labels?: ProgramStatusLabelMap;
+  client_identity_mode?: ClientIdentityMode;
   metadata?: Record<string, unknown> | null;
   updated_at?: string | null;
 }
@@ -923,6 +932,10 @@ function PathwaySetupModal({
   const [isFinalMilestone, setIsFinalMilestone] = useState(
     milestone?.is_final_milestone ?? milestone?.final_milestone ?? false,
   );
+  const [clientIdentityMode, setClientIdentityMode] =
+    useState<ClientIdentityOverride>(
+      clientIdentityOverrideFromMetadata(offer?.metadata),
+    );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -949,6 +962,7 @@ function PathwaySetupModal({
           targetDays,
           isTtvMilestone,
           isFinalMilestone,
+          clientIdentityMode,
         },
       },
     );
@@ -1018,7 +1032,28 @@ function PathwaySetupModal({
                   Final milestone in this pathway
                 </label>
               </>
-            ) : null}
+            ) : (
+              <label className="block text-sm font-semibold text-[#364152]">
+                Client identity display
+                <select
+                  value={clientIdentityMode}
+                  onChange={(event) =>
+                    setClientIdentityMode(
+                      event.target.value as ClientIdentityOverride,
+                    )
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#cbd2dc] bg-white px-3 py-2.5 text-sm"
+                >
+                  <option value="inherit">Use company default</option>
+                  <option value="person_first">Person first</option>
+                  <option value="business_first">Business first</option>
+                </select>
+                <span className="mt-2 block text-xs font-normal leading-5 text-[#667085]">
+                  Override how clients in this pathway appear in RetainOS. Search
+                  still matches both the person and business names.
+                </span>
+              </label>
+            )}
             {error ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
@@ -2619,6 +2654,7 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_pipeline_viewer_access: false,
     client_list_columns: normalizeClientListColumns(null),
     program_status_labels: DEFAULT_PROGRAM_STATUS_LABELS,
+    client_identity_mode: DEFAULT_CLIENT_IDENTITY_MODE,
     metadata: {
       contact_touch_sets_next_contact: false,
       contact_touch_next_contact_days: DEFAULT_CONTACT_TOUCH_NEXT_CONTACT_DAYS,
@@ -2652,6 +2688,13 @@ function programStatusLabels(settings: CompanySettingsRow) {
   return normalizeProgramStatusLabels(
     settings.program_status_labels ??
       settingsMetadata(settings).program_status_labels,
+  );
+}
+
+function clientIdentityMode(settings: CompanySettingsRow) {
+  return (
+    settings.client_identity_mode ??
+    clientIdentityModeFromMetadata(settingsMetadata(settings))
   );
 }
 
@@ -3111,7 +3154,7 @@ function TaskTemplatesModal({
         await Promise.all([
         supabase
           .from("company_offers")
-          .select("glide_row_id, name, status")
+          .select("glide_row_id, name, status, metadata")
           .eq("company_id", appCompany.id)
           .eq("status", "active")
           .order("name", { ascending: true }),
@@ -4366,6 +4409,7 @@ function CompanySettingsSetup({
           enablePipelineViewerAccess: draft.enable_pipeline_viewer_access,
           clientListColumns: clientListColumns(draft),
           programStatusLabels: programStatusLabels(draft),
+          clientIdentityMode: clientIdentityMode(draft),
           contactTouchSetsNextContact: contactTouchSetsNextContact(draft),
           contactTouchNextContactDays: contactTouchNextContactDays(draft),
         },
@@ -4573,6 +4617,41 @@ function CompanySettingsSetup({
               setDraft((current) => ({ ...current, default_calendar_mode: value }))
             }
           />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Client identity display
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Choose whether RetainOS leads with the person or business name.
+            Pathways can override this default without changing stored client
+            data, exports, or integrations.
+          </p>
+        </div>
+        <div className="p-4">
+          <SettingsSelect
+            label="Company default"
+            value={clientIdentityMode(draft)}
+            disabled={disabled}
+            options={[
+              { value: "person_first", label: "Person first" },
+              { value: "business_first", label: "Business first" },
+            ]}
+            onChange={(value) =>
+              setDraft((current) => ({
+                ...current,
+                client_identity_mode: value,
+              }))
+            }
+          />
+          <p className="mt-2 text-xs leading-5 text-[#667085]">
+            Person first shows the business underneath. Business first shows
+            the person as the POC. If one value is blank, RetainOS automatically
+            uses the other.
+          </p>
         </div>
       </section>
 
@@ -5590,7 +5669,7 @@ export function SaasClientDetail({
         const [offersResult, milestonesResult, usageResult] = await Promise.all([
           supabase
             .from("company_offers")
-            .select("glide_row_id, name, status")
+            .select("glide_row_id, name, status, metadata")
             .eq("company_id", appCompany.id)
             .order("name", { ascending: true }),
           supabase
@@ -5936,7 +6015,7 @@ export function SaasClientDetail({
             .order("name", { ascending: true }),
           supabase
             .from("company_offers")
-            .select("glide_row_id, name, status")
+            .select("glide_row_id, name, status, metadata")
             .eq("company_id", appCompany.id)
             .eq("status", "active")
             .order("name", { ascending: true }),
@@ -6022,6 +6101,7 @@ export function SaasClientDetail({
             ...loadedSettings,
             client_list_columns: clientListColumns(loadedSettings),
             program_status_labels: programStatusLabels(loadedSettings),
+            client_identity_mode: clientIdentityMode(loadedSettings),
           });
           setSettingsSource("app_owned");
           setSettingsLoading(false);

@@ -9,6 +9,11 @@ import {
   type ProgramStatusLabelMap,
 } from "../lib/companySettings.ts";
 import { supabase } from "../lib/supabase.ts";
+import {
+  emptyClientIdentityPreferences,
+  resolveClientIdentity,
+  type ClientIdentityPreferences,
+} from "../lib/clientIdentity.ts";
 
 type DatePreset = "today" | "7" | "14" | "30" | "custom";
 type SortField = "client" | "csm" | "status" | "updated";
@@ -42,12 +47,14 @@ interface TeamMember {
 interface ClientRow {
   glide_row_id: string;
   client_name: string | null;
+  client_business?: string | null;
   client_image?: string | null;
   company_id?: string | null;
   company_glide_row_id?: string | null;
   csm_team_member_id: string | null;
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
+  offer_milestones_current_offer_id?: string | null;
   outcomes_success_for_filtering?: string | null;
   outcomes_progress_for_filtering?: string | null;
   outcomes_buy_in_for_filtering?: string | null;
@@ -362,6 +369,8 @@ export function CsmReports() {
   const [programChoices, setProgramChoices] = useState<ProgramChoice[]>([]);
   const [programStatusLabels, setProgramStatusLabels] =
     useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
+  const [clientIdentityPreferences, setClientIdentityPreferences] =
+    useState<ClientIdentityPreferences>(emptyClientIdentityPreferences);
   const [csmId, setCsmId] = useState("");
   const [preset, setPreset] = useState<DatePreset>("30");
   const [startDate, setStartDate] = useState(presetStartDate("30"));
@@ -482,8 +491,12 @@ export function CsmReports() {
       let bValue: string | number;
 
       if (sortField === "client") {
-        aValue = sortText(a.client.client_name);
-        bValue = sortText(b.client.client_name);
+        aValue = sortText(
+          resolveClientIdentity(a.client, clientIdentityPreferences).primary,
+        );
+        bValue = sortText(
+          resolveClientIdentity(b.client, clientIdentityPreferences).primary,
+        );
       } else if (sortField === "csm") {
         aValue = sortText(a.csmName);
         bValue = sortText(b.csmName);
@@ -502,7 +515,7 @@ export function CsmReports() {
       return sortDirection === "asc" ? result : -result;
     });
     return nextRows;
-  }, [rows, sortDirection, sortField]);
+  }, [clientIdentityPreferences, rows, sortDirection, sortField]);
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -526,8 +539,12 @@ export function CsmReports() {
           Number(Boolean(a.latestEvent)) - Number(Boolean(b.latestEvent));
         return (
           updatedSort ||
-          sortText(a.client.client_name).localeCompare(
-            sortText(b.client.client_name),
+          sortText(
+            resolveClientIdentity(a.client, clientIdentityPreferences).primary,
+          ).localeCompare(
+            sortText(
+              resolveClientIdentity(b.client, clientIdentityPreferences).primary,
+            ),
           )
         );
       });
@@ -658,6 +675,7 @@ export function CsmReports() {
     if (!companyId) {
       setProfileUpkeepFreshnessDays(14);
       setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      setClientIdentityPreferences(emptyClientIdentityPreferences());
       return;
     }
     let cancelled = false;
@@ -666,6 +684,10 @@ export function CsmReports() {
       if (cancelled) return;
       setProfileUpkeepFreshnessDays(defaults.profileUpkeepFreshnessDays);
       setProgramStatusLabels(defaults.programStatusLabels);
+      setClientIdentityPreferences({
+        companyMode: defaults.clientIdentityMode,
+        pathwayModes: defaults.pathwayIdentityModes,
+      });
     }
     void loadWorkspaceDefaults();
     return () => {
@@ -711,12 +733,14 @@ export function CsmReports() {
       ? [
           "glide_row_id",
           "client_name",
+          "client_business",
           "client_image",
           "company_id",
           "company_glide_row_id",
           "csm_team_member_id",
           "csm_secondary_assignee_id",
           "program_status_value",
+          "offer_milestones_current_offer_id",
           "outcomes_success_value_for_filtering",
           "outcomes_progress_for_filtering",
           "outcomes_buy_in_for_filtering",
@@ -731,11 +755,13 @@ export function CsmReports() {
       : [
           "glide_row_id",
           "client_name",
+          "client_business",
           "client_image",
           "company_id",
           "csm_team_member_id",
           "csm_secondary_assignee_id",
           "program_status_value",
+          "offer_milestones_current_offer_id",
           "outcomes_progress_for_filtering",
           "outcomes_buy_in_for_filtering",
           "next_steps_value",
@@ -1332,6 +1358,10 @@ export function CsmReports() {
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {sortedRows.map((row) => {
                     const updated = latestByClientId.has(row.client.glide_row_id);
+                    const identity = resolveClientIdentity(
+                      row.client,
+                      clientIdentityPreferences,
+                    );
                     return (
                       <tr key={row.client.glide_row_id}>
                         <td className="px-3 py-2">
@@ -1340,9 +1370,20 @@ export function CsmReports() {
                             className="flex items-center gap-2 font-medium text-gray-900 hover:text-indigo-700"
                           >
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-indigo-50 text-xs font-semibold text-indigo-700">
-                              {getInitials(row.client.client_name)}
+                              {getInitials(identity.primary)}
                             </span>
-                            <span>{row.client.client_name ?? "(unnamed)"}</span>
+                            <span className="min-w-0">
+                              <span className="block truncate">
+                                {identity.primary}
+                              </span>
+                              {identity.secondary ? (
+                                <span className="block truncate text-xs font-normal text-gray-500">
+                                  {identity.mode === "business_first"
+                                    ? `POC: ${identity.secondary}`
+                                    : identity.secondary}
+                                </span>
+                              ) : null}
+                            </span>
                           </Link>
                         </td>
                         <td className="px-3 py-2 text-gray-700">{row.csmName}</td>
@@ -1442,7 +1483,12 @@ export function CsmReports() {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
               <div className="divide-y divide-gray-100 rounded-lg border border-gray-100">
-                {csmSummaryDetail.rows.map((row) => (
+                {csmSummaryDetail.rows.map((row) => {
+                  const identity = resolveClientIdentity(
+                    row.client,
+                    clientIdentityPreferences,
+                  );
+                  return (
                   <Link
                     key={row.client.glide_row_id}
                     to={`/clients/${row.client.glide_row_id}`}
@@ -1457,13 +1503,20 @@ export function CsmReports() {
                         />
                       ) : (
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
-                          {getInitials(row.client.client_name)}
+                          {getInitials(identity.primary)}
                         </div>
                       )}
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-gray-900">
-                          {row.client.client_name ?? "Unnamed client"}
+                          {identity.primary}
                         </div>
+                        {identity.secondary ? (
+                          <div className="truncate text-xs text-gray-500">
+                            {identity.mode === "business_first"
+                              ? `POC: ${identity.secondary}`
+                              : identity.secondary}
+                          </div>
+                        ) : null}
                         <div className="mt-1">
                           <ProgramStatusPill
                             value={row.client.program_status_value}
@@ -1489,7 +1542,8 @@ export function CsmReports() {
                       </div>
                     </div>
                   </Link>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1567,7 +1621,12 @@ export function CsmReports() {
                     </div>
                   ) : (
                     <div className="divide-y divide-gray-100 rounded-lg border border-gray-100">
-                      {section.rows.map(({ client, csmName, score }) => (
+                      {section.rows.map(({ client, csmName, score }) => {
+                        const identity = resolveClientIdentity(
+                          client,
+                          clientIdentityPreferences,
+                        );
+                        return (
                         <Link
                           key={client.glide_row_id}
                           to={`/clients/${client.glide_row_id}`}
@@ -1582,13 +1641,20 @@ export function CsmReports() {
                               />
                             ) : (
                               <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
-                                {getInitials(client.client_name)}
+                                {getInitials(identity.primary)}
                               </div>
                             )}
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-gray-900">
-                                {client.client_name ?? "Unnamed client"}
+                                {identity.primary}
                               </div>
+                              {identity.secondary ? (
+                                <div className="truncate text-xs text-gray-500">
+                                  {identity.mode === "business_first"
+                                    ? `POC: ${identity.secondary}`
+                                    : identity.secondary}
+                                </div>
+                              ) : null}
                               <div className="truncate text-xs text-gray-500">
                                 {csmName}
                               </div>
@@ -1603,7 +1669,8 @@ export function CsmReports() {
                             </span>
                           </div>
                         </Link>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </section>

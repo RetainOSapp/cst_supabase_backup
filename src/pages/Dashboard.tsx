@@ -33,6 +33,12 @@ import {
   type AdvocacyAction,
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
+import {
+  clientIdentitySearchText,
+  emptyClientIdentityPreferences,
+  resolveClientIdentity,
+  type ClientIdentityPreferences,
+} from "../lib/clientIdentity.ts";
 
 const MONTH_OPTIONS_COUNT = 25;
 const FUTURE_MONTH_OPTIONS_COUNT = 12;
@@ -242,8 +248,10 @@ interface ProgramChoice {
 interface ClientRow {
   glide_row_id: string;
   client_name: string | null;
+  client_business?: string | null;
   client_image: string | null;
   csm_team_member_id: string | null;
+  offer_milestones_current_offer_id?: string | null;
   renewal_date?: string | null;
 }
 
@@ -332,6 +340,7 @@ interface TtvMetric {
 type ChartClientRow = Record<string, unknown> & {
   glide_row_id: string;
   client_name: string | null;
+  client_business?: string | null;
   client_image?: string | null;
   program_status_value: string | null;
   outcomes_buy_in_for_filtering: string | null;
@@ -397,6 +406,7 @@ type ChartTaskRow = {
 type OfferKpiClientRow = Record<string, unknown> & {
   glide_row_id: string;
   client_name: string | null;
+  client_business?: string | null;
   client_image: string | null;
   csm_team_member_id: string | null;
   csm_secondary_assignee_id: string | null;
@@ -482,7 +492,11 @@ type TtvProgressRow = {
   time_to_hit_days?: number | null;
 };
 
-const DASHBOARD_CLIENT_IDENTITY_FIELDS = ["client_name", "client_image"];
+const DASHBOARD_CLIENT_IDENTITY_FIELDS = [
+  "client_name",
+  "client_business",
+  "client_image",
+];
 const DASHBOARD_CLIENT_PROFILE_FIELDS = [
   "next_steps_value",
   "csm_date_of_last_contact",
@@ -1710,6 +1724,8 @@ export function Dashboard() {
   const [programChoicesLoaded, setProgramChoicesLoaded] = useState(false);
   const [programStatusLabels, setProgramStatusLabels] =
     useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
+  const [clientIdentityPreferences, setClientIdentityPreferences] =
+    useState<ClientIdentityPreferences>(emptyClientIdentityPreferences);
 
   const [activeClients, setActiveClients] = useState<number | null>(null);
   const [frontEndClients, setFrontEndClients] = useState<number | null>(null);
@@ -2377,6 +2393,7 @@ export function Dashboard() {
   useEffect(() => {
     if (!pendingFilters.companyId) {
       setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+      setClientIdentityPreferences(emptyClientIdentityPreferences());
       return;
     }
 
@@ -2384,7 +2401,13 @@ export function Dashboard() {
 
     async function loadWorkspaceDefaults() {
       const defaults = await loadCompanyWorkspaceDefaults(pendingFilters.companyId);
-      if (!cancelled) setProgramStatusLabels(defaults.programStatusLabels);
+      if (!cancelled) {
+        setProgramStatusLabels(defaults.programStatusLabels);
+        setClientIdentityPreferences({
+          companyMode: defaults.clientIdentityMode,
+          pathwayModes: defaults.pathwayIdentityModes,
+        });
+      }
     }
 
     void loadWorkspaceDefaults();
@@ -3179,6 +3202,7 @@ export function Dashboard() {
     appliedUsesAppClients,
     appliedProgramValues,
     canUseDashboardDrilldowns,
+    clientIdentityPreferences,
     reportVersion,
     rpcFilterParams,
     assignedTeamMemberId,
@@ -3987,12 +4011,14 @@ export function Dashboard() {
         const search = detailSearch.trim().toLowerCase();
         if (search) {
           rows = rows.filter((client) =>
-            String(client.client_name ?? "").toLowerCase().includes(search),
+            clientIdentitySearchText(client).includes(search),
           );
         }
 
         rows = rows.sort((a, b) =>
-          String(a.client_name ?? "").localeCompare(String(b.client_name ?? "")),
+          resolveClientIdentity(a, clientIdentityPreferences).primary.localeCompare(
+            resolveClientIdentity(b, clientIdentityPreferences).primary,
+          ),
         );
 
         const totalCount = rows.length;
@@ -4002,8 +4028,11 @@ export function Dashboard() {
           pageRows.map((row) => ({
             glide_row_id: row.glide_row_id,
             client_name: row.client_name,
+            client_business: row.client_business,
             client_image: row.client_image,
             csm_team_member_id: row.csm_team_member_id,
+            offer_milestones_current_offer_id:
+              row.offer_milestones_current_offer_id,
             renewal_date: null,
           })),
         );
@@ -4396,7 +4425,7 @@ export function Dashboard() {
         const search = detailSearch.trim().toLowerCase();
         if (search) {
           rows = rows.filter(({ client }) =>
-            String(client.client_name ?? "").toLowerCase().includes(search),
+            clientIdentitySearchText(client).includes(search),
           );
         }
         rows = rows.sort((a, b) => {
@@ -4407,8 +4436,11 @@ export function Dashboard() {
           }
           if (aDate && !bDate) return -1;
           if (!aDate && bDate) return 1;
-          return String(a.client.client_name ?? "").localeCompare(
-            String(b.client.client_name ?? ""),
+          return resolveClientIdentity(
+            a.client,
+            clientIdentityPreferences,
+          ).primary.localeCompare(
+            resolveClientIdentity(b.client, clientIdentityPreferences).primary,
           );
         });
         const totalCount = rows.length;
@@ -4418,8 +4450,11 @@ export function Dashboard() {
           pageRows.map(({ client, retainedAt }) => ({
             glide_row_id: client.glide_row_id,
             client_name: client.client_name,
+            client_business: client.client_business,
             client_image: client.client_image,
             csm_team_member_id: client.csm_team_member_id,
+            offer_milestones_current_offer_id:
+              client.offer_milestones_current_offer_id,
             renewal_date: retainedAt,
           })),
         );
@@ -4465,7 +4500,7 @@ export function Dashboard() {
       const search = detailSearch.trim().toLowerCase();
       if (search) {
         rows = rows.filter((client) =>
-          String(client.client_name ?? "").toLowerCase().includes(search),
+          clientIdentitySearchText(client).includes(search),
         );
       }
 
@@ -4481,8 +4516,11 @@ export function Dashboard() {
           if (aDate && !bDate) return detailRenewalSortDirection === "asc" ? -1 : 1;
           if (!aDate && bDate) return detailRenewalSortDirection === "asc" ? 1 : -1;
         }
-        return String(a.client_name ?? "").localeCompare(
-          String(b.client_name ?? ""),
+        return resolveClientIdentity(
+          a,
+          clientIdentityPreferences,
+        ).primary.localeCompare(
+          resolveClientIdentity(b, clientIdentityPreferences).primary,
         );
       });
       const totalCount = rows.length;
@@ -4492,8 +4530,11 @@ export function Dashboard() {
         pageRows.map((row) => ({
           glide_row_id: row.glide_row_id,
           client_name: row.client_name,
+          client_business: row.client_business,
           client_image: row.client_image,
           csm_team_member_id: row.csm_team_member_id,
+          offer_milestones_current_offer_id:
+            row.offer_milestones_current_offer_id,
           renewal_date: renewalDateByClientId.get(row.glide_row_id) ?? null,
         })),
       );
@@ -5879,7 +5920,7 @@ export function Dashboard() {
                     setDetailSearch(e.target.value);
                     setDetailPage(1);
                   }}
-                  placeholder="Search clients"
+                  placeholder="Search person or business"
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
               </div>
@@ -5929,7 +5970,12 @@ export function Dashboard() {
                 </div>
               ) : (
                 <div>
-                  {detailRows.map((client) => (
+                  {detailRows.map((client) => {
+                    const identity = resolveClientIdentity(
+                      client,
+                      clientIdentityPreferences,
+                    );
+                    return (
                     <div
                       key={client.glide_row_id}
                       className={`${detailGridClass} border-b border-gray-100 py-3`}
@@ -5947,11 +5993,20 @@ export function Dashboard() {
                           />
                         ) : (
                           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-xs font-semibold text-indigo-700 border border-indigo-100">
-                            {getInitials(client.client_name)}
+                            {getInitials(identity.primary)}
                           </div>
                         )}
-                        <span className="truncate text-sm font-medium text-gray-900">
-                          {client.client_name ?? "Unnamed client"}
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-gray-900">
+                            {identity.primary}
+                          </span>
+                          {identity.secondary ? (
+                            <span className="block truncate text-xs text-gray-500">
+                              {identity.mode === "business_first"
+                                ? `POC: ${identity.secondary}`
+                                : identity.secondary}
+                            </span>
+                          ) : null}
                         </span>
                       </Link>
 
@@ -5972,7 +6027,8 @@ export function Dashboard() {
                         </div>
                       ) : null}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -6058,7 +6114,12 @@ export function Dashboard() {
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {chartDetail.rows.map((client) => (
+                  {chartDetail.rows.map((client) => {
+                    const identity = resolveClientIdentity(
+                      client,
+                      clientIdentityPreferences,
+                    );
+                    return (
                     <Link
                       key={client.glide_row_id}
                       to={`/clients/${client.glide_row_id}`}
@@ -6073,13 +6134,20 @@ export function Dashboard() {
                           />
                         ) : (
                           <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-100 bg-indigo-50 text-xs font-semibold text-indigo-700">
-                            {getInitials(client.client_name)}
+                            {getInitials(identity.primary)}
                           </div>
                         )}
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium text-gray-900">
-                            {client.client_name ?? "Unnamed client"}
+                            {identity.primary}
                           </div>
+                          {identity.secondary ? (
+                            <div className="truncate text-xs text-gray-500">
+                              {identity.mode === "business_first"
+                                ? `POC: ${identity.secondary}`
+                                : identity.secondary}
+                            </div>
+                          ) : null}
                           <div className="truncate text-xs text-gray-500">
                             {teamMemberNameById.get(client.csm_team_member_id ?? "") ??
                               "Unassigned"}
@@ -6090,7 +6158,8 @@ export function Dashboard() {
                         View
                       </span>
                     </Link>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -31,6 +31,8 @@ import {
   type PipelineWorkspace,
   type RenewalCohort,
 } from "../lib/pipeline.ts";
+import { loadCompanyWorkspaceDefaults } from "../lib/companySettings.ts";
+import { resolveClientIdentity } from "../lib/clientIdentity.ts";
 
 type ViewMode = "board" | "list";
 type DateKind = "follow_up" | "renewal" | "expected_close";
@@ -225,10 +227,16 @@ function lookupClient(clients: PipelineClient[], clientId: string) {
 }
 
 function clientOptionLabel(client: PipelineClient) {
-  const name = client.client_name?.trim() || client.client_business?.trim() || "Unnamed client";
+  const name =
+    client.identity_primary ||
+    client.client_name?.trim() ||
+    client.client_business?.trim() ||
+    "Unnamed client";
   const details = [
-    client.client_business?.trim() && client.client_business.trim() !== name
-      ? client.client_business.trim()
+    client.identity_secondary
+      ? `${
+          client.identity_mode === "business_first" ? "POC: " : ""
+        }${client.identity_secondary}`
       : null,
     client.pathway_name?.trim() || null,
     client.offer_name?.trim() && client.offer_name.trim() !== client.pathway_name?.trim()
@@ -266,7 +274,12 @@ function lookupMember(members: PipelineMember[], memberId?: string | null) {
 
 function clientName(item: ClientPipelineItem, clients: PipelineClient[]) {
   const client = lookupClient(clients, item.client_id);
-  return client?.client_name || item.client_name_snapshot || "Unnamed client";
+  return (
+    client?.identity_primary ||
+    client?.client_name ||
+    item.client_name_snapshot ||
+    "Unnamed client"
+  );
 }
 
 function pathwayName(item: ClientPipelineItem, clients: PipelineClient[]) {
@@ -677,7 +690,12 @@ function ManualItemModal({
                             : "text-[#344054] hover:bg-[#f9fafb]"
                       }`}
                     >
-                      <span className="block font-semibold">{client.client_name?.trim() || client.client_business?.trim() || "Unnamed client"}</span>
+                      <span className="block font-semibold">
+                        {client.identity_primary ||
+                          client.client_name?.trim() ||
+                          client.client_business?.trim() ||
+                          "Unnamed client"}
+                      </span>
                       {clientOptionLabel(client).includes(" — ") ? (
                         <span className="mt-0.5 block text-xs font-normal text-[#667085]">
                           {clientOptionLabel(client).split(" — ").slice(1).join(" — ")}
@@ -916,7 +934,13 @@ function ItemDrawer({
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wider text-[#667085]">{pipeline?.name || "Pipeline item"}</p>
             <h2 id="pipeline-detail-title" className="mt-1 truncate text-2xl font-semibold text-[#162b3e]">{clientName(item, clients)}</h2>
-            <p className="mt-1 text-sm text-[#667085]">{client?.client_business || pathwayName(item, clients)}</p>
+            <p className="mt-1 text-sm text-[#667085]">
+              {client?.identity_secondary
+                ? `${
+                    client.identity_mode === "business_first" ? "POC: " : ""
+                  }${client.identity_secondary}`
+                : pathwayName(item, clients)}
+            </p>
           </div>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Close" className="rounded-md p-2 text-[#667085] hover:bg-[#f2f4f7]">×</button>
         </div>
@@ -1044,10 +1068,27 @@ export function Pipeline() {
     setLoading(true);
     setError(null);
     setWorkspace(null);
-    loadPipelineWorkspace(effectiveCompanyId)
-      .then((result) => {
+    Promise.all([
+      loadPipelineWorkspace(effectiveCompanyId),
+      loadCompanyWorkspaceDefaults(effectiveCompanyId),
+    ])
+      .then(([result, defaults]) => {
         if (cancelled) return;
-        setWorkspace(result);
+        setWorkspace({
+          ...result,
+          clients: result.clients.map((client) => {
+            const identity = resolveClientIdentity(client, {
+              companyMode: defaults.clientIdentityMode,
+              pathwayModes: defaults.pathwayIdentityModes,
+            });
+            return {
+              ...client,
+              identity_primary: identity.primary,
+              identity_secondary: identity.secondary,
+              identity_mode: identity.mode,
+            };
+          }),
+        });
         setSelectedPipelineIds(new Set());
       })
       .catch((reason) => {
@@ -1520,7 +1561,12 @@ export function Pipeline() {
                   const client = lookupClient(workspace.clients, candidate.client_id);
                   return (
                     <li key={candidate.contract_id} className="mb-1 break-inside-avoid pr-3">
-                      <strong>{client?.client_name || client?.client_business || candidate.client_id}</strong>
+                      <strong>
+                        {client?.identity_primary ||
+                          client?.client_name ||
+                          client?.client_business ||
+                          candidate.client_id}
+                      </strong>
                       {candidate.contract_end_at ? ` · ${formatDate(candidate.contract_end_at)}` : ""}
                     </li>
                   );

@@ -58,6 +58,9 @@ export interface PipelineClient {
   glide_row_id?: string | null;
   client_name: string | null;
   client_business?: string | null;
+  identity_primary?: string;
+  identity_secondary?: string | null;
+  identity_mode?: "person_first" | "business_first";
   client_image?: string | null;
   pathway_id?: string | null;
   pathway_name?: string | null;

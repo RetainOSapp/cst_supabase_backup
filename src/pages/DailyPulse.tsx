@@ -21,6 +21,11 @@ import {
 } from "../lib/companySettings.ts";
 import { useAccountContext } from "../lib/accountContext.tsx";
 import { supabase } from "../lib/supabase.ts";
+import {
+  emptyClientIdentityPreferences,
+  resolveClientIdentity,
+  type ClientIdentityPreferences,
+} from "../lib/clientIdentity.ts";
 
 type PulseWindow = "today" | "week" | "month";
 type CsmRelationshipFilter = "both" | "primary" | "secondary";
@@ -40,11 +45,13 @@ const CSM_RELATIONSHIP_LABELS: Record<CsmRelationshipFilter, string> = {
 interface PulseClient {
   glide_row_id: string;
   client_name: string | null;
+  client_business: string | null;
   company_id: string | null;
   company_glide_row_id: string | null;
   csm_team_member_id: string | null;
   csm_secondary_assignee_id: string | null;
   program_status_value: string | null;
+  offer_milestones_current_offer_id: string | null;
   csm_date_of_last_contact: string | null;
   csm_date_of_next_contact: string | null;
   program_paused_return_date: string | null;
@@ -132,11 +139,13 @@ const APP_PULSE_CLIENT_SELECT = [
   "id",
   "glide_row_id",
   "client_name",
+  "client_business",
   "company_id",
   "company_glide_row_id",
   "csm_team_member_id",
   "csm_secondary_assignee_id",
   "program_status_value",
+  "offer_milestones_current_offer_id",
   "csm_date_of_last_contact",
   "csm_date_of_next_contact",
   "program_paused_return_date",
@@ -153,10 +162,12 @@ const APP_PULSE_CLIENT_SELECT = [
 const MIRROR_PULSE_CLIENT_SELECT = [
   "glide_row_id",
   "client_name",
+  "client_business",
   "company_id",
   "csm_team_member_id",
   "csm_secondary_assignee_id",
   "program_status_value",
+  "offer_milestones_current_offer_id",
   "csm_date_of_last_contact",
   "csm_date_of_next_contact",
   "current_contract_end_date_for_filtering",
@@ -174,6 +185,8 @@ function mapClient(row: Record<string, unknown>): PulseClient {
   return {
     glide_row_id: String(row.glide_row_id ?? row.id ?? ""),
     client_name: (row.client_name as string | null | undefined) ?? null,
+    client_business:
+      (row.client_business as string | null | undefined) ?? null,
     company_id:
       (row.company_glide_row_id as string | null | undefined) ??
       (row.company_id as string | null | undefined) ??
@@ -188,6 +201,11 @@ function mapClient(row: Record<string, unknown>): PulseClient {
       (row.csm_secondary_assignee_id as string | null | undefined) ?? null,
     program_status_value:
       (row.program_status_value as string | null | undefined) ?? null,
+    offer_milestones_current_offer_id:
+      (row.offer_milestones_current_offer_id as
+        | string
+        | null
+        | undefined) ?? null,
     csm_date_of_last_contact:
       ((row.csm_date_of_last_contact ??
         row.last_contact_at ??
@@ -896,6 +914,7 @@ function PulseSectionCard({
   onCompleteCheckpoint,
   onCompleteFollowUpTask,
   programChoices,
+  clientIdentityPreferences,
 }: {
   section: PulseSection;
   completingCheckpointKey: string | null;
@@ -903,6 +922,7 @@ function PulseSectionCard({
   onCompleteCheckpoint: (item: PulseItem) => void;
   onCompleteFollowUpTask: (item: PulseItem) => void;
   programChoices: ProgramChoice[];
+  clientIdentityPreferences: ClientIdentityPreferences;
 }) {
   const [open, setOpen] = useState(section.items.length > 0);
 
@@ -937,7 +957,11 @@ function PulseSectionCard({
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {section.items.map((item) => (
+              {section.items.map((item) => {
+                const identity = item.client
+                  ? resolveClientIdentity(item.client, clientIdentityPreferences)
+                  : null;
+                return (
                 <Link
                   key={item.id}
                   to={item.href ?? (item.client ? clientUrl(item.client) : taskUrl())}
@@ -946,8 +970,15 @@ function PulseSectionCard({
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="font-semibold text-[#162b3e]">
-                        {item.client?.client_name ?? "Company task"}
+                        {identity?.primary ?? "Company task"}
                       </h3>
+                      {identity?.secondary ? (
+                        <p className="mt-0.5 truncate text-xs text-[#667085]">
+                          {identity.mode === "business_first"
+                            ? `POC: ${identity.secondary}`
+                            : identity.secondary}
+                        </p>
+                      ) : null}
                       <p className="mt-1 text-sm text-[#697586]">{item.detail}</p>
                     </div>
                     <span
@@ -1024,7 +1055,8 @@ function PulseSectionCard({
                     </div>
                   ) : null}
                 </Link>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1060,6 +1092,8 @@ export function DailyPulse() {
     useState<AutoOffboardFollowUpConfig | null>(null);
   const [programStatusLabels, setProgramStatusLabels] =
     useState<ProgramStatusLabelMap>(DEFAULT_PROGRAM_STATUS_LABELS);
+  const [clientIdentityPreferences, setClientIdentityPreferences] =
+    useState<ClientIdentityPreferences>(emptyClientIdentityPreferences);
   const [loading, setLoading] = useState(false);
   const [completingCheckpointKey, setCompletingCheckpointKey] = useState<string | null>(
     null,
@@ -1187,10 +1221,17 @@ export function DailyPulse() {
     async function loadWorkspaceDefaults() {
       if (!effectiveCompanyId) {
         setProgramStatusLabels(DEFAULT_PROGRAM_STATUS_LABELS);
+        setClientIdentityPreferences(emptyClientIdentityPreferences());
         return;
       }
       const defaults = await loadCompanyWorkspaceDefaults(effectiveCompanyId);
-      if (!cancelled) setProgramStatusLabels(defaults.programStatusLabels);
+      if (!cancelled) {
+        setProgramStatusLabels(defaults.programStatusLabels);
+        setClientIdentityPreferences({
+          companyMode: defaults.clientIdentityMode,
+          pathwayModes: defaults.pathwayIdentityModes,
+        });
+      }
     }
 
     void loadWorkspaceDefaults();
@@ -1742,6 +1783,7 @@ export function DailyPulse() {
               onCompleteCheckpoint={handleCompleteCheckpoint}
               onCompleteFollowUpTask={handleCompleteFollowUpTask}
               programChoices={programChoices}
+              clientIdentityPreferences={clientIdentityPreferences}
             />
           ))}
         </div>
