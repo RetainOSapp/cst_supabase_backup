@@ -8131,6 +8131,18 @@ export function ClientDetail() {
         .eq("glide_row_id", clientId)
         .maybeSingle();
 
+      if (appClient?.archived_at) {
+        if (!cancelled) {
+          setError("This client has been deleted from RetainOS.");
+          setClient(null);
+          setIsAppOwnedClient(false);
+          setCustomFields([]);
+          setCustomFieldValues([]);
+          setLoading(false);
+        }
+        return;
+      }
+
       let data: Record<string, unknown> | null = appClient
         ? mapAppClientRow(appClient as Record<string, unknown>)
         : null;

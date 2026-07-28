@@ -2619,7 +2619,9 @@ export function Dashboard() {
           .range(from, to);
 
         if (appliedUsesAppClients) {
-          query = query.eq("exclude_from_dashboard_analytics", false);
+          query = query
+            .eq("exclude_from_dashboard_analytics", false)
+            .is("archived_at", null);
         }
         if (appliedFilters.offerId) {
           query = query.eq(
@@ -3324,7 +3326,9 @@ export function Dashboard() {
         .select(advocacySummarySelect)
         .eq("company_id", appCompany.id);
 
-      clientQuery = clientQuery.eq("exclude_from_dashboard_analytics", false);
+      clientQuery = clientQuery
+        .eq("exclude_from_dashboard_analytics", false)
+        .is("archived_at", null);
       if (appliedFilters.offerId) {
         clientQuery = clientQuery.eq(
           "offer_milestones_current_offer_id",
@@ -3602,7 +3606,9 @@ export function Dashboard() {
         .range(0, 4999);
 
       if (usesAppTtv) {
-        clientQuery = clientQuery.eq("exclude_from_dashboard_analytics", false);
+        clientQuery = clientQuery
+          .eq("exclude_from_dashboard_analytics", false)
+          .is("archived_at", null);
       }
       if (assignedTeamMemberId) {
         clientQuery = clientQuery.or(
@@ -3839,7 +3845,9 @@ export function Dashboard() {
           .range(from, to);
 
         if (appliedUsesAppClients) {
-          query = query.eq("exclude_from_dashboard_analytics", false);
+          query = query
+            .eq("exclude_from_dashboard_analytics", false)
+            .is("archived_at", null);
         }
         if (appliedFilters.offerId) {
           query = query.eq(
@@ -4728,7 +4736,9 @@ export function Dashboard() {
           .range(from, to);
 
         if (appliedUsesAppClients) {
-          query = query.eq("exclude_from_dashboard_analytics", false);
+          query = query
+            .eq("exclude_from_dashboard_analytics", false)
+            .is("archived_at", null);
         }
         if (assignedTeamMemberId) {
           query = query.or(

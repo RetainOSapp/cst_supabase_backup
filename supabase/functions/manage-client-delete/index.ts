@@ -172,18 +172,22 @@ Deno.serve(async (req) => {
       "";
     const deletedAt = new Date().toISOString();
 
-    const { error: archiveClientError } = await supabase
+    const { data: archivedClient, error: archiveClientError } = await supabase
       .from("clients")
       .update({
         archived_at: deletedAt,
+        exclude_from_dashboard_analytics: true,
         metadata: {
           ...(client.metadata ?? {}),
           deleted_by_retainos: true,
           deleted_at: deletedAt,
           deletion_reason: reason,
+          deletion_strategy: "archived_tombstone",
         },
       })
-      .eq("id", client.id);
+      .eq("id", client.id)
+      .select("*")
+      .single();
     if (archiveClientError) throw archiveClientError;
 
     const [
@@ -240,12 +244,6 @@ Deno.serve(async (req) => {
       ]),
     ]);
 
-    const { error: deleteClientError } = await supabase
-      .from("clients")
-      .delete()
-      .eq("id", client.id);
-    if (deleteClientError) throw deleteClientError;
-
     const deletedCounts = {
       tasks,
       contracts,
@@ -270,10 +268,11 @@ Deno.serve(async (req) => {
       title: "Client deleted",
       summary: `Deleted ${client.client_name ?? clientLegacyId}. Reason: ${reason}`,
       before_data: client,
-      after_data: null,
+      after_data: archivedClient,
       metadata: {
         actor_role: actor.role,
         reason,
+        deletion_strategy: "archived_tombstone",
         deleted_counts: deletedCounts,
       },
     });
@@ -282,6 +281,7 @@ Deno.serve(async (req) => {
       ok: true,
       deletedClientId: client.id,
       deletedClientLegacyId: clientLegacyId,
+      deletionMode: "archived_tombstone",
       deletedCounts,
     });
   } catch (error) {
