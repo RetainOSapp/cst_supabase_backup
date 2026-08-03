@@ -33,6 +33,9 @@
     "pipeline:verify:safe-rollout": "node scripts/verify-pipeline-safe-production-rollout.mjs",
     "pipeline:verify:owner-navigation": "node scripts/verify-pipeline-owner-navigation.mjs",
     "dashboard:verify:renewal-reporting": "node scripts/verify-dashboard-renewal-reporting.mjs",
+    "dashboard:verify:renewal-consistency": "node scripts/verify-renewal-canonical-consistency.mjs",
+    "dashboard:test:calendar-dates": "node --experimental-strip-types scripts/test-calendar-date.mjs",
+    "dashboard:verify:mm-adam-renewals": "node scripts/verify-mm-adam-renewal-ticket.mjs",
     "dashboard:verify:churn-chart-period": "node scripts/verify-dashboard-churn-chart-period.mjs",
     "dashboard:verify:mm-lifecycle": "node scripts/verify-mm-dashboard-lifecycle.mjs",
     "advocacy:verify:note-history": "node scripts/verify-advocacy-note-history.mjs",
@@ -52,7 +55,8 @@
     "pilot:backfill:company-activity": "node scripts/backfill-company-activity.mjs",
     "pilot:backfill:company-contracts": "node scripts/backfill-company-contracts.mjs",
     "pilot:backfill:mm-template-contracts": "node scripts/backfill-mm-template-contracts.mjs",
-    "pilot:repair:mm-legacy-contract-placeholders": "node scripts/repair-mm-legacy-contract-placeholders.mjs"
+    "pilot:repair:mm-legacy-contract-placeholders": "node scripts/repair-mm-legacy-contract-placeholders.mjs",
+    "pilot:reconcile:mm-contract-summaries": "node scripts/reconcile-mm-contract-summaries.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",

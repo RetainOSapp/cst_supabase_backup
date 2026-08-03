@@ -34,6 +34,7 @@ import {
   type ClientIdentityMode,
   type ClientIdentityPreferences,
 } from "../lib/clientIdentity.ts";
+import { formatCalendarDate } from "../lib/calendarDate.ts";
 
 const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
 const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as const;
@@ -3295,7 +3296,7 @@ function ClientStatusModal({
                     </span>
                     <span className="mt-1 block font-medium text-gray-900">
                       {contractEndDateInput
-                        ? formatDate(contractEndDateInput)
+                        ? formatCalendarDate(contractEndDateInput, "en-US")
                         : "No contract end date"}
                     </span>
                   </div>
@@ -5020,7 +5021,9 @@ function FieldGrid({
             ) : label === "Date Onboarded" ||
               label === "Last Contact" ||
               label === "Next Contact" ? (
-              formatDate(valueFrom(client, candidates))
+              label === "Date Onboarded"
+                ? formatCalendarDate(valueFrom(client, candidates), "en-US")
+                : formatDate(valueFrom(client, candidates))
             ) : label === "Client Age" ? (
               formatClientAge(
                 valueFrom(client, candidates),
@@ -5493,11 +5496,15 @@ function ContractCard({
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <ContractField
           label="Start Date"
-          value={formatDate(
+          value={formatCalendarDate(
             valueFrom(contract, ["start_date", "current_contract_start_date"]),
+            "en-US",
           )}
         />
-        <ContractField label="End Date" value={formatDate(resolvedContractEndDate(contract))} />
+        <ContractField
+          label="End Date"
+          value={formatCalendarDate(resolvedContractEndDate(contract), "en-US")}
+        />
         <ContractField
           label="Renewal Source"
           value={`${renewalDate.sourceLabel} (${renewalDate.confidenceLabel})`}
@@ -6295,7 +6302,8 @@ function PathwaysSection({
                   Contract / Program Timing
                 </div>
                 <div className="mt-1 text-sm font-semibold text-[#162b3e]">
-                  {formatDate(contractStart)} to {formatDate(contractEnd)}
+                  {formatCalendarDate(contractStart, "en-US")} to{" "}
+                  {formatCalendarDate(contractEnd, "en-US")}
                 </div>
               </div>
               <span className="text-2xl font-semibold text-[#162b3e]">

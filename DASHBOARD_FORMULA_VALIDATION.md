@@ -192,8 +192,13 @@ current or historical contract end date inside the selected reporting period.
 
 Sources:
 
-- Current client summary calculated end date from `clients` or `backup_company_clients`.
-- App-owned `client_contracts.end_date`.
+- For app-owned/migrated companies and an explicit period,
+  `dashboard_renewal_cohort_counts_fast` is authoritative for the KPI,
+  denominator, and both renewal drilldowns.
+- App-owned `client_contracts.end_date`, including migrated
+  `current_summary` contract rows.
+- Current client summary calculated end date is a fallback outside the
+  explicit-period canonical path.
 - Mirror fallback `backup_company_clients_contracts.end_date`.
 
 Exclusions:
@@ -209,7 +214,8 @@ Known weak spots:
 
 Validation notes:
 
-- Compare Up For Renewal drawer with Clients sorted/filterable by renewal date.
+- Compare the KPI count and drawer IDs with
+  `renewal_cohort_client_ids`; they must be the same cohort.
 - Spot-check clients with multiple contracts and clients with only current summary fields.
 
 ### Active Clients Up For Renewal
@@ -219,12 +225,16 @@ Formula: clients in Up For Renewal whose current status is active
 
 Sources:
 
-- Same renewal source set as Clients Up For Renewal.
+- Same canonical renewal cohort IDs as Clients Up For Renewal.
 - Retained client set from retention events.
 
 Validation notes:
 
 - This is the "still needs renewal action" list. It should shrink when retention is recorded in the same date range.
+- The card numerator and clickable list must both equal canonical cohort IDs
+  minus retained IDs, then limited to current Front End/Back End status.
+- Calendar-only contract dates render by their stored date in UTC and must not
+  move backward or forward with the browser timezone.
 
 ### Retention Percentage
 

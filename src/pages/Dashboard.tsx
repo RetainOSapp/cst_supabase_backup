@@ -39,6 +39,7 @@ import {
   resolveClientIdentity,
   type ClientIdentityPreferences,
 } from "../lib/clientIdentity.ts";
+import { formatCalendarDate } from "../lib/calendarDate.ts";
 
 const MONTH_OPTIONS_COUNT = 25;
 const FUTURE_MONTH_OPTIONS_COUNT = 12;
@@ -1215,16 +1216,6 @@ function dateInputValueFromDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function formatDisplayDate(value: unknown) {
-  const date = dateFromValue(value);
-  if (!date) return "--";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
 }
 
 function renewalKpiDateRange(dateRange: MonthDateFilterState) {
@@ -3029,6 +3020,30 @@ export function Dashboard() {
       const reportedRenewalCohortClients = hasRenewalCohortResult
         ? Number(renewalCohortRow?.renewal_cohort_clients ?? 0)
         : renewingIds.size;
+      const canonicalRenewalClientIds = new Set(
+        renewalCohortRow?.renewal_cohort_client_ids ?? [],
+      );
+      const canonicalRetainedClientIds = new Set(
+        renewalCohortRow?.retained_client_ids ?? [],
+      );
+      const activeRenewalSourceIds = hasRenewalCohortResult
+        ? canonicalRenewalClientIds
+        : currentSummaryRenewingIds;
+      const resolvedRetentionIds = hasRenewalCohortResult
+        ? canonicalRetainedClientIds
+        : retainedIds;
+      const reportedActiveRenewingClients = [...activeRenewalSourceIds].filter(
+        (id) => {
+          const client = clientById.get(id);
+          return (
+            client &&
+            ["front-end", "back-end"].includes(
+              client.program_status_value ?? "",
+            ) &&
+            !resolvedRetentionIds.has(id)
+          );
+        },
+      ).length;
 
       setRetainedClients(reportedRetainedClients);
       setRenewingClientsCount(reportedRenewalCohortClients);
@@ -3042,15 +3057,7 @@ export function Dashboard() {
               (reportedRetainedClients / reportedRenewalCohortClients) * 100,
             ),
       );
-      setActiveRenewingClients(
-        [...currentSummaryRenewingIds].filter((id) => {
-          const client = clientById.get(id);
-          return (
-            client &&
-            ["front-end", "back-end"].includes(client.program_status_value ?? "")
-          );
-        }).length,
-      );
+      setActiveRenewingClients(reportedActiveRenewingClients);
       setRetentionKpiLoading(false);
     }
 
@@ -3129,6 +3136,7 @@ export function Dashboard() {
       setChurnPercentage(
         row?.churn_percentage == null ? 0 : Number(row.churn_percentage),
       );
+      let activeRenewingSetFromCohort = false;
       if (hasExplicitRenewalPeriod && !renewalCohortResult.error) {
         const renewalCohortRow = (
           (renewalCohortResult.data ?? []) as DashboardRenewalCohortFastRow[]
@@ -3145,6 +3153,50 @@ export function Dashboard() {
             ? 0
             : Math.round((cohortRetained / cohortClients) * 100),
         );
+        const retainedIds = new Set(
+          renewalCohortRow?.retained_client_ids ?? [],
+        );
+        const unresolvedRenewalIds = (
+          renewalCohortRow?.renewal_cohort_client_ids ?? []
+        ).filter((clientId) => !retainedIds.has(clientId));
+        if (unresolvedRenewalIds.length === 0) {
+          setActiveRenewingClients(0);
+          activeRenewingSetFromCohort = true;
+        } else {
+          const activeRenewalResult =
+            await fetchDashboardRowsInChunksPaged<{
+              glide_row_id: string;
+              program_status_value: string | null;
+            }>(unresolvedRenewalIds, (chunk, from, to) =>
+              supabase
+                .from("clients")
+                .select("glide_row_id, program_status_value")
+                .eq("company_glide_row_id", appliedFilters.companyId)
+                .in("glide_row_id", chunk)
+                .range(from, to),
+            );
+          if (cancelled) return true;
+          if (activeRenewalResult.error) {
+            console.error(
+              "Failed to resolve active clients from renewal cohort:",
+              activeRenewalResult.error,
+            );
+          } else {
+            setActiveRenewingClients(
+              (
+                (activeRenewalResult.data ?? []) as Array<{
+                  glide_row_id: string;
+                  program_status_value: string | null;
+                }>
+              ).filter((client) =>
+                ["front-end", "back-end"].includes(
+                  client.program_status_value ?? "",
+                ),
+              ).length,
+            );
+            activeRenewingSetFromCohort = true;
+          }
+        }
       } else {
         if (renewalCohortResult.error) {
           console.error(
@@ -3159,7 +3211,9 @@ export function Dashboard() {
           row?.retention_percentage == null ? 0 : Number(row.retention_percentage),
         );
       }
-      setActiveRenewingClients(Number(row?.active_renewing_clients ?? 0));
+      if (!activeRenewingSetFromCohort) {
+        setActiveRenewingClients(Number(row?.active_renewing_clients ?? 0));
+      }
       setPrimaryKpiLoading(false);
       setRetentionKpiLoading(false);
       return true;
@@ -4376,6 +4430,16 @@ export function Dashboard() {
           const cohortRow = (
             (renewalCohortResult.data ?? []) as DashboardRenewalCohortFastRow[]
           )[0];
+          const cohortEvents = cohortRow?.renewal_cohort_events ?? [];
+          const cohortClientIds =
+            cohortEvents.length > 0
+              ? cohortEvents.flatMap((event) =>
+                  event.client_id ? [event.client_id] : [],
+                )
+              : cohortRow?.renewal_cohort_client_ids ?? [];
+          const retainedCohortClientIds = new Set(
+            cohortRow?.retained_client_ids ?? [],
+          );
           if (detailKey === "retained") {
             retainedIds = new Set<string>();
             retainedEventRows = [];
@@ -4400,16 +4464,26 @@ export function Dashboard() {
           }
           if (detailKey === "renewing") {
             renewingIds = new Set<string>();
-            const cohortEvents = cohortRow?.renewal_cohort_events ?? [];
-            const cohortClientIds =
-              cohortEvents.length > 0
-                ? cohortEvents.flatMap((event) =>
-                    event.client_id ? [event.client_id] : [],
-                  )
-                : cohortRow?.renewal_cohort_client_ids ?? [];
             cohortClientIds.forEach((clientId) => {
               if (!clientById.has(clientId)) return;
               renewingIds.add(clientId);
+              recordRenewalDate(
+                clientId,
+                cohortEvents.find((event) => event.client_id === clientId)
+                  ?.contract_end_date,
+              );
+            });
+          }
+          if (detailKey === "active-renewing") {
+            currentSummaryRenewingIds = new Set<string>();
+            cohortClientIds.forEach((clientId) => {
+              if (
+                !clientById.has(clientId) ||
+                retainedCohortClientIds.has(clientId)
+              ) {
+                return;
+              }
+              currentSummaryRenewingIds.add(clientId);
               recordRenewalDate(
                 clientId,
                 cohortEvents.find((event) => event.client_id === clientId)
@@ -6023,7 +6097,7 @@ export function Dashboard() {
                       </div>
                       {detailShowsRenewalDate ? (
                         <div className="flex items-center text-sm font-medium text-gray-800">
-                          {formatDisplayDate(client.renewal_date)}
+                          {formatCalendarDate(client.renewal_date)}
                         </div>
                       ) : null}
                     </div>

@@ -1565,6 +1565,8 @@ These formulas matter when RetainOS moves away from read-only Glide mirror field
 
 - `[~]` `[polish]` Current contract end / renewal date.
   - Current state: mostly read from mirrored fields, with UI fallback calculations in Client Detail and Dashboard.
+  - 2026-08-03 compatibility correction: migrated `current_summary` contract rows are valid live-current evidence for summary refresh. Editing one can no longer clear the client summary. A guarded MM reconciliation restored 103 fully blank summaries with one effective app-edited contract and recorded atomic before/after audits; 406 partial mismatches, 3 ambiguous multi-contract cases, and 1 unsupported blank remain report-only. Lisa Fuller is explicitly held pending Adam's date confirmation. [qa]
+  - Calendar-only onboarding and contract dates now render in UTC across Client Detail, Clients, and Dashboard so midnight values do not shift by browser timezone. [qa]
   - Future need: app-owned computed contract end date from start date + contract days, plus renewal date indexing/filtering.
   - Future idea: offer-level default contract duration templates, e.g. Ethical Scaling Optimized Journey defaults to 91 days.
 - `[~]` `[polish]` Churn Percentage.
@@ -1577,6 +1579,7 @@ These formulas matter when RetainOS moves away from read-only Glide mirror field
   - 2026-07-21: selected reporting periods now use an all-status contract-end cohort and match retention to that cohort (rather than counting unrelated event-month activity). The Dashboard keeps the active renewal work-queue number and shows it as `active / all contracts ending`; legacy status transitions require successor-contract evidence before counting as retained.
   - 2026-07-22 correction: the selected-period denominator is renewal-eligible contract endings. Paused clients and clients offboarded before their scheduled end are excluded; dated early offboards remain churn in the month they left. Suspended/MIA clients remain eligible because their contracts continue.
   - 2026-07-23 correction: MM confirmed suspended/MIA must also be excluded. Renewal reporting now uses the later of the prior contract end or successor-contract start, so early renewals remain in the scheduled expiry month and late renewals move to the actual re-sign month. Paused, suspended/MIA, and pre-end churn are excluded. Migrated status source snapshots provide prior contract-end evidence without mutating client data. John July production verification is 16 eligible / 4 retained with Brent Larson and Vipal Panchal retained in July and Nikki Cook excluded. [qa]
+  - 2026-08-03 consistency correction: explicit-period KPI counts and both renewal drawers now use the exact `dashboard_renewal_cohort_counts_fast` client IDs. The active work queue subtracts retained IDs and then applies current Front End/Back End status, eliminating summary-vs-contract card/list divergence. Production assertions for Adam show July 13 eligible including Daniel Michaud and Richardson Jules, August 6 excluding Lisa Fuller, and September 7 eligible/7 active including Lisa. [qa]
   - Renewal/retention transitions: Front End -> Front End, Front End -> Back End, and Back End -> Back End.
   - Front End -> Back End should be broken out as renewal/upsell.
   - Pilot v1: New Contract can write `client_retention_recorded` for same-program renewals and FE -> BE upsells.

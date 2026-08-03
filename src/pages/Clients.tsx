@@ -38,6 +38,7 @@ import {
   emptyAdvocacyDrafts,
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
+import { formatCalendarDate } from "../lib/calendarDate.ts";
 
 const DEFAULT_PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [12, 25, 50, 100] as const;
@@ -5667,9 +5668,9 @@ function ClientTable({
                               />
                             )
                             : column === "onboarded"
-                              ? formatDate(meta.onboarded)
+                              ? formatCalendarDate(meta.onboarded)
                               : column === "renewal"
-                                ? formatDate(meta.renewal)
+                                ? formatCalendarDate(meta.renewal)
                                 : column === "last_contact"
                                   ? formatDate(meta.last)
                                   : column === "next_contact"
@@ -5799,8 +5800,14 @@ function ClientCards({
                 <MiniMeta label="Archetype" value={displayValue(meta.archetype)} />
               ) : null}
               <MiniMeta label="Last Contact" value={formatDate(meta.last)} />
-              <MiniMeta label="Onboarded" value={formatDate(meta.onboarded)} />
-              <MiniMeta label="Renewal" value={formatDate(meta.renewal)} />
+              <MiniMeta
+                label="Onboarded"
+                value={formatCalendarDate(meta.onboarded)}
+              />
+              <MiniMeta
+                label="Renewal"
+                value={formatCalendarDate(meta.renewal)}
+              />
               <MiniMeta label="Pathway" value={displayValue(meta.pathway)} />
             </div>
             {(onQuickUpdate || onMarkContacted) && (
