@@ -31,6 +31,11 @@ const ACTIVE_CLIENT_STATUSES = new Set([
   "paused",
   "suspended",
 ]);
+const RECONCILABLE_CLIENT_STATUSES = new Set([
+  ...ACTIVE_CLIENT_STATUSES,
+  "off-boarded",
+  "offboarded",
+]);
 
 class ManageError extends Error {
   status: number;
@@ -796,11 +801,11 @@ Deno.serve(async (req) => {
       if (
         !client ||
         client.archived_at ||
-        !ACTIVE_CLIENT_STATUSES.has(
+        !RECONCILABLE_CLIENT_STATUSES.has(
           String(client.program_status_value ?? "").trim().toLowerCase(),
         )
       ) {
-        throw new ManageError("Choose an active client.");
+        throw new ManageError("Choose an available client.");
       }
       const prompt = await basePrompt(supabase);
       const now = new Date().toISOString();

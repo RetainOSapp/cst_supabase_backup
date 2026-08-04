@@ -24,6 +24,8 @@ interface IntegrationReviewClientOption {
   client_name: string | null;
   client_business: string | null;
   client_email: string | null;
+  client_email_secondary: string | null;
+  client_email_tertiary: string | null;
   program_status_value: string | null;
 }
 
@@ -59,18 +61,6 @@ function integrationSearchTerm(value: string) {
   return value.trim().replace(/[,%]/g, " ");
 }
 
-function normalizeClientStatus(value: string | null | undefined) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, "-");
-}
-
-function isMatchableClient(client: IntegrationReviewClientOption) {
-  const status = normalizeClientStatus(client.program_status_value);
-  return status !== "off-boarded" && status !== "offboarded";
-}
-
 function integrationClientLabel(client: IntegrationReviewClientOption) {
   const label =
     client.client_name ||
@@ -78,7 +68,9 @@ function integrationClientLabel(client: IntegrationReviewClientOption) {
     client.client_email ||
     client.id;
   const detail = [
-    client.client_email,
+    client.client_email ||
+      client.client_email_secondary ||
+      client.client_email_tertiary,
     client.program_status_value ? client.program_status_value : null,
   ]
     .filter(Boolean)
@@ -313,12 +305,12 @@ export function CallAi() {
     const { data, error: searchError } = await supabase
       .from("clients")
       .select(
-        "id, glide_row_id, client_name, client_business, client_email, program_status_value",
+        "id, glide_row_id, client_name, client_business, client_email, client_email_secondary, client_email_tertiary, program_status_value",
       )
       .eq("company_glide_row_id", effectiveCompanyId)
       .is("archived_at", null)
       .or(
-        `client_name.ilike.${pattern},client_email.ilike.${pattern},client_business.ilike.${pattern}`,
+        `client_name.ilike.${pattern},client_email.ilike.${pattern},client_email_secondary.ilike.${pattern},client_email_tertiary.ilike.${pattern},client_business.ilike.${pattern}`,
       )
       .order("client_name", { ascending: true })
       .limit(20);
@@ -334,9 +326,7 @@ export function CallAi() {
       return;
     }
 
-    const options = ((data ?? []) as IntegrationReviewClientOption[]).filter(
-      isMatchableClient,
-    );
+    const options = (data ?? []) as IntegrationReviewClientOption[];
     setEventClientOptions((current) => ({ ...current, [eventId]: options }));
     setEventClientSearchMessages((current) => ({
       ...current,

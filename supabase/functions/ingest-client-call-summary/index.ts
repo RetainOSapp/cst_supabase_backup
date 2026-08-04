@@ -8,6 +8,7 @@ import {
 } from "../_shared/http.ts";
 
 const ACTIVE_PROGRAM_STATUSES = new Set(["front-end", "back-end", "paused", "suspended"]);
+const OFFBOARDED_PROGRAM_STATUSES = new Set(["off-boarded", "offboarded"]);
 // Hosted Supabase Edge workers stop after at most 400 seconds. This buffer
 // ensures the original invocation is gone before an event moves to review.
 const INTAKE_STALE_AFTER_MS = 30 * 60 * 1000;
@@ -652,13 +653,25 @@ Deno.serve(async (req) => {
           String(client.program_status_value ?? "").trim().toLowerCase(),
         ) && clientMatchesAnyEmail(client, clientEmails),
     );
+    const offboardedClients = clientRows.filter(
+      (client) =>
+        OFFBOARDED_PROGRAM_STATUSES.has(
+          String(client.program_status_value ?? "").trim().toLowerCase(),
+        ) && clientMatchesAnyEmail(client, clientEmails),
+    );
+    const matchedClients = activeClients.length > 0
+      ? activeClients
+      : offboardedClients;
+    const usesOffboardedFallback = activeClients.length === 0;
 
-    if (activeClients.length !== 1) {
-      const matchStatus = activeClients.length > 1 ? "ambiguous" : "unmatched";
+    if (matchedClients.length !== 1) {
+      const matchStatus = matchedClients.length > 1 ? "ambiguous" : "unmatched";
       const errorMessage =
         matchStatus === "ambiguous"
-          ? "Multiple matching active clients were found for this email."
-          : "No active client matched this email.";
+          ? `Multiple matching ${
+              usesOffboardedFallback ? "offboarded " : ""
+            }clients were found for this email.`
+          : "No active or uniquely identifiable offboarded client matched this email.";
 
       const { data: failedEvent, error: updateError } = await supabase
         .from("integration_intake_events")
@@ -670,6 +683,7 @@ Deno.serve(async (req) => {
             ...metadataRecord(intakeEvent.metadata),
             total_matches: clientRows.length,
             active_matches: activeClients.length,
+            offboarded_matches: offboardedClients.length,
             submitted_client_emails: clientEmails,
           },
         })
@@ -689,7 +703,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const client = activeClients[0];
+    const client = matchedClients[0];
     const matchedEmail = matchedClientEmail(client, clientEmails) || clientEmail;
     const previousNextSteps = client.next_steps_value ?? null;
     const previousLastContact = client.csm_date_of_last_contact ?? null;
@@ -843,7 +857,9 @@ Deno.serve(async (req) => {
         match_status: "matched",
         matched_client_id: client.id,
         matched_legacy_client_glide_row_id: client.glide_row_id,
-        matched_by: "client_email",
+        matched_by: usesOffboardedFallback
+          ? "client_email_offboarded"
+          : "client_email",
         error_message: null,
         processed_at: new Date().toISOString(),
         metadata: {

@@ -21,6 +21,7 @@ const ACTIVE_PROGRAM_STATUSES = new Set([
   "paused",
   "suspended",
 ]);
+const OFFBOARDED_PROGRAM_STATUSES = new Set(["off-boarded", "offboarded"]);
 const CLIENT_UPDATE_FIELDS = [
   "next_steps_value",
   "csm_date_of_last_contact",
@@ -524,7 +525,7 @@ async function findClientForEvent(
     const { data, error } = await query
       .maybeSingle();
     if (error) throw error;
-    if (!data) throw new ReviewValidationError("Selected client is not active.");
+    if (!data) throw new ReviewValidationError("Selected client is unavailable.");
     return {
       client: data as JsonRecord,
       matchedBy: isUuid(manualClientId)
@@ -565,17 +566,26 @@ async function findClientForEvent(
     clientSelect,
     clientEmails,
   );
-  const rows = emailMatches.filter((client) =>
+  const activeRows = emailMatches.filter((client) =>
     ACTIVE_PROGRAM_STATUSES.has(
       String(client.program_status_value ?? "").trim().toLowerCase(),
     ),
   );
+  const offboardedRows = emailMatches.filter((client) =>
+    OFFBOARDED_PROGRAM_STATUSES.has(
+      String(client.program_status_value ?? "").trim().toLowerCase(),
+    ),
+  );
+  const rows = activeRows.length > 0 ? activeRows : offboardedRows;
+  const usesOffboardedFallback = activeRows.length === 0;
   if (rows.length !== 1) {
     const matchStatus = rows.length > 1 ? "ambiguous" : "unmatched";
     const errorMessage =
       matchStatus === "ambiguous"
-        ? "Multiple matching active clients were found for this email."
-        : "No active client matched this email.";
+        ? `Multiple matching ${
+            usesOffboardedFallback ? "offboarded " : ""
+          }clients were found for this email.`
+        : "No active or uniquely identifiable offboarded client matched this email.";
     const { data: reviewEvent, error: reviewError } = await supabase
       .from("integration_intake_events")
       .update({
@@ -586,7 +596,8 @@ async function findClientForEvent(
           ...metadata,
           retry_checked_at: new Date().toISOString(),
           submitted_client_emails: clientEmails,
-          active_matches: rows.length,
+          active_matches: activeRows.length,
+          offboarded_matches: offboardedRows.length,
           total_matches: emailMatches.length,
         },
       })
@@ -602,7 +613,12 @@ async function findClientForEvent(
     throw new ReviewValidationError(errorMessage);
   }
 
-  return { client: rows[0] as JsonRecord, matchedBy: "client_email" };
+  return {
+    client: rows[0] as JsonRecord,
+    matchedBy: usesOffboardedFallback
+      ? "client_email_offboarded"
+      : "client_email",
+  };
 }
 
 async function resolveAssignableMember(

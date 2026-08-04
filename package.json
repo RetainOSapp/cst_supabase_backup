@@ -15,6 +15,7 @@
     "call-intelligence:verify:db": "node scripts/verify-call-intelligence-foundation.mjs",
     "call-intelligence:verify:edge": "node scripts/verify-call-intelligence-edge.mjs",
     "call-intelligence:verify:frontend": "node scripts/verify-call-intelligence-frontend.mjs",
+    "call-ai:verify:offboarded-matching": "node scripts/verify-call-ai-offboarded-matching.mjs",
     "call-intelligence:eval:prepare-private": "node scripts/build-call-intelligence-private-corpus.mjs",
     "call-intelligence:sync:structured-seed": "node scripts/sync-call-intelligence-structured-seed.mjs",
     "call-intelligence:eval": "node scripts/evaluate-call-intelligence.mjs",
