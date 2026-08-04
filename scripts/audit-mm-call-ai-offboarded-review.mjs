@@ -181,6 +181,11 @@ const rows = (eventsResult.data ?? []).map((event) => {
   const offboarded = matches.filter((client) =>
     offboardedStatuses.has(normalizedStatus(client)),
   );
+  const otherStatus = matches.filter(
+    (client) =>
+      !activeStatuses.has(normalizedStatus(client)) &&
+      !offboardedStatuses.has(normalizedStatus(client)),
+  );
   const inferredClientName = eventClientName(event);
   const nameMatches = clientsByName.get(normalizeName(inferredClientName)) ?? [];
   return {
@@ -198,6 +203,13 @@ const rows = (eventsResult.data ?? []).map((event) => {
       data_source: client.data_source,
     })),
     offboarded_matches: offboarded.map((client) => ({
+      id: client.id,
+      glide_row_id: client.glide_row_id,
+      name: client.client_name,
+      status: client.program_status_value,
+      data_source: client.data_source,
+    })),
+    other_status_matches: otherStatus.map((client) => ({
       id: client.id,
       glide_row_id: client.glide_row_id,
       name: client.client_name,
@@ -227,6 +239,9 @@ console.log(
         unique_active_match: rows.filter(
           (row) => row.active_matches.length === 1,
         ).length,
+        ambiguous_active: rows.filter(
+          (row) => row.active_matches.length > 1,
+        ).length,
         unique_offboarded_fallback: rows.filter(
           (row) => row.safe_offboarded_fallback,
         ).length,
@@ -239,6 +254,9 @@ console.log(
           (row) =>
             row.active_matches.length === 0 &&
             row.offboarded_matches.length === 0,
+        ).length,
+        other_status_email_match: rows.filter(
+          (row) => row.other_status_matches.length > 0,
         ).length,
         unique_exact_name_match: rows.filter(
           (row) => row.exact_name_matches.length === 1,

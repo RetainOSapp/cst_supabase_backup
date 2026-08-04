@@ -829,7 +829,7 @@ Use this as the top-level product taxonomy. The detailed sections below track im
   - 2026-07-23 local release candidate implements this boundary; private eval, disabled production rollout, and Jay pilot QA remain.
 - `[x]` Upload and process meeting transcripts manually.
 - `[~]` `[mixed]` `[priority: high]` Automatically ingest meeting transcripts through Zapier plus Fathom or equivalent integration.
-  - 2026-08-04 MM offboarded-profile reconciliation is live through `191338b`: reconciliation search includes nonarchived offboarded profiles plus primary/secondary/tertiary emails; automatic call-summary and transcript matching prefers a unique active client, then a unique offboarded fallback. Archived profiles and ambiguous email reuse remain fail-closed. Production audit finds 16 of 23 open MM events safe for exact offboarded retry and 6 requiring manual review. Await Jay/Jhoyce authenticated UI QA. [qa]
+  - 2026-08-04 MM offboarded-profile reconciliation is live through `191338b`: reconciliation search includes nonarchived offboarded profiles plus primary/secondary/tertiary emails; automatic call-summary and transcript matching prefers a unique active client, then a unique offboarded fallback. Archived profiles and ambiguous email reuse remain fail-closed. Production audit finds 16 of 23 open MM events safe for exact offboarded retry, 1 ambiguous active match, and 6 without an exact app-owned email match. Await Jay/Jhoyce authenticated UI QA. [qa]
 - `[~]` `[mixed]` `[priority: high]` Fixed and company-specific controlled prompts for sentiment, grading, summaries, and the agreed structured outputs.
 - `[~]` `[mixed]` `[priority: high]` On-demand analysis for specific call scenarios.
 - `[ ]` `[priority: later]` Call sharing between team members.
