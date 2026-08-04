@@ -2043,6 +2043,7 @@ Use this section as the “what good looks like” checklist before migrating re
 - `[~]` `[polish]` Dashboard includes active clients, upgrades, renewals, pauses, offboardings, churn percentage, retention, chart breakdowns, offboardings by CSM, and CSM workload where data is available.
   - 2026-07-23 correction: Churn Reasons is an event-period chart. Its aggregate, standard dashboard path, and client drilldown now require a real recorded offboard date inside the selected reporting period; contract end is never substituted. Migration `20260723120000` and source `a5b3a2b` are live; Jay/MM QA remains. [qa]
 - `[~]` `[polish]` Dashboard chart segments are clickable and can drill into the clients behind the number where wired.
+  - 2026-08-04 correction: the Active Clients Up For Renewal drawer now invokes the same canonical, actor-scoped renewal cohort as its headline card instead of replacing a valid fallback with an empty skipped-query result. Vince's MM August production cohort verifies 7 eligible / 1 retained / 6 active unresolved; source `f02f692` and public bundle `index-BiOWpdvE.js` are live. Jay/Vince drawer QA remains. [qa]
 - `[ ]` Dashboard supports CSM capacity if enabled for a company.
 - `[ ]` Dashboard includes Call AI rollups:
   - Total calls processed.
