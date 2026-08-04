@@ -39,6 +39,7 @@
     "dashboard:verify:mm-adam-renewals": "node scripts/verify-mm-adam-renewal-ticket.mjs",
     "dashboard:verify:churn-chart-period": "node scripts/verify-dashboard-churn-chart-period.mjs",
     "dashboard:verify:mm-lifecycle": "node scripts/verify-mm-dashboard-lifecycle.mjs",
+    "performance:verify:navigation": "node scripts/verify-navigation-performance.mjs",
     "advocacy:verify:note-history": "node scripts/verify-advocacy-note-history.mjs",
     "dashboard:verify:suspended-auto-offboard": "node scripts/verify-suspended-auto-offboard.mjs",
     "preview": "vite preview",

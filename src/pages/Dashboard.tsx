@@ -3237,19 +3237,20 @@ export function Dashboard() {
     }
 
     void (async () => {
-      if (!canUseDashboardDrilldowns || !appliedUsesAppClients) {
+      if (appliedUsesAppClients) {
         const loadedCanonical = await loadCanonicalKpis();
-        if (
-          cancelled ||
-          loadedCanonical ||
-          !canUseDashboardDrilldowns ||
-          !appliedUsesAppClients
-        ) return;
+        if (cancelled || loadedCanonical) return;
+
+        // Keep the existing client-side path as a fail-safe for roles that can
+        // drill into KPI detail. Normal app-owned loads should use the
+        // canonical aggregate RPC and defer client rows until a drawer opens.
+        if (canUseDashboardDrilldowns) {
+          await loadClientSideFilteredKpis();
+        }
+        return;
       }
 
-      if (appliedUsesAppClients) {
-        await loadClientSideFilteredKpis();
-      }
+      await loadCanonicalKpis();
     })();
 
     return () => {
@@ -3280,15 +3281,9 @@ export function Dashboard() {
   ]);
 
   useEffect(() => {
-    if (
-      canUseDashboardDrilldowns ||
-      !appliedUsesAppClients ||
-      !appliedFilters.companyId
-    ) {
-      if (!canUseDashboardDrilldowns) {
-        setAdvocacyLoading(false);
-        setTtvLoading(false);
-      }
+    if (!appliedUsesAppClients || !appliedFilters.companyId) {
+      setAdvocacyLoading(false);
+      if (!canUseDashboardDrilldowns) setTtvLoading(false);
       return;
     }
 
@@ -3296,7 +3291,7 @@ export function Dashboard() {
 
     async function loadViewerOverviewRollups() {
       setAdvocacyLoading(true);
-      setTtvLoading(true);
+      if (!canUseDashboardDrilldowns) setTtvLoading(true);
 
       const { data, error } = await supabase.rpc(
         "dashboard_overview_rollups_actor_scoped",
@@ -3327,15 +3322,17 @@ export function Dashboard() {
             received: 0,
           })),
         );
-        setTtvMetric({
-          averageDays: null,
-          reachedCount: 0,
-          configuredMilestones: 0,
-          reachedClients: [],
-          ttvMilestones: [],
-        });
+        if (!canUseDashboardDrilldowns) {
+          setTtvMetric({
+            averageDays: null,
+            reachedCount: 0,
+            configuredMilestones: 0,
+            reachedClients: [],
+            ttvMilestones: [],
+          });
+        }
         setAdvocacyLoading(false);
-        setTtvLoading(false);
+        if (!canUseDashboardDrilldowns) setTtvLoading(false);
         return;
       }
 
@@ -3354,20 +3351,22 @@ export function Dashboard() {
           };
         }),
       );
-      setTtvMetric({
-        averageDays:
-          row?.ttv?.average_days == null
-            ? null
-            : Number(row.ttv.average_days),
-        reachedCount: Number(row?.ttv?.reached_count ?? 0),
-        configuredMilestones: Number(
-          row?.ttv?.configured_milestones ?? 0,
-        ),
-        reachedClients: [],
-        ttvMilestones: [],
-      });
+      if (!canUseDashboardDrilldowns) {
+        setTtvMetric({
+          averageDays:
+            row?.ttv?.average_days == null
+              ? null
+              : Number(row.ttv.average_days),
+          reachedCount: Number(row?.ttv?.reached_count ?? 0),
+          configuredMilestones: Number(
+            row?.ttv?.configured_milestones ?? 0,
+          ),
+          reachedClients: [],
+          ttvMilestones: [],
+        });
+      }
       setAdvocacyLoading(false);
-      setTtvLoading(false);
+      if (!canUseDashboardDrilldowns) setTtvLoading(false);
     }
 
     void loadViewerOverviewRollups();
@@ -3388,7 +3387,7 @@ export function Dashboard() {
 
     async function loadAdvocacyMetrics() {
       const appCompany = appCompanyByLegacyId.get(appliedFilters.companyId);
-      if (!canUseDashboardDrilldowns && appCompany?.id) return;
+      if (appCompany?.id) return;
       if (!appCompany?.id) {
         setAdvocacyMetrics(
           advocacyDefinitions.map((definition) => ({

@@ -1,6 +1,6 @@
 # Performance Program - Releasable Phases
 
-**Status:** Planned
+**Status:** Local QA
 **Priority:** Medium
 **Owner:** Jay (product/QA) + Codex (implementation/release)
 **Start condition:** Schedule after the secure Beacon rebuild or during a clear
@@ -24,6 +24,30 @@ changes. Each phase must be independently testable, releasable, and reversible.
 
 The Advisor suggestions are investigation candidates, not instructions to
 change 40 indexes.
+
+## Local Candidate - 2026-08-04
+
+Branch `codex/mm-navigation-performance` contains the first bounded,
+frontend-only candidate. It has not been pushed or deployed.
+
+- Major authenticated pages are route-split behind one stable loading state.
+- App-owned Dashboard Overview uses the existing actor-scoped aggregate RPC
+  first; existing client-row calculations remain the error fallback and
+  drilldown data loads only when a drawer is opened.
+- Daily Pulse transfers only active/paused signal clients and open tasks, while
+  explicitly retaining task-linked automated-offboard follow-ups.
+- Tasks applies open/closed/overdue/due-soon filters before task rows are
+  transferred.
+- CSM Reports reads client-history chunks in bounded batches of four.
+- Clients Calendar fetches only client dates inside the visible period, plus
+  exact task-linked clients that pass the selected roster filters.
+- Company users receive only shared Help resources plus resources for their
+  active company.
+
+Local gates pass the production build, 11 navigation-performance assertions,
+the renewal reporting/consistency regressions, the churn-period regression, and
+UTC calendar-date verification. Authenticated MM browser QA by Jay is the
+release gate. This candidate includes no database migration or index change.
 
 ## Program Rules
 
@@ -136,4 +160,3 @@ behavior and database access remain unchanged.
 
 Do not hold all phases for one release. Close and ship each phase after its own
 QA gate, then re-measure before starting the next phase.
-

@@ -1534,6 +1534,41 @@ export function Tasks() {
             `task_name.ilike.${q},task_description.ilike.${q}`,
           );
         }
+
+        const closedStatuses =
+          "done,completed,complete,closed,dismissed,archived";
+        if (
+          statusMode === "open" ||
+          statusMode === "overdue" ||
+          statusMode === "due-soon"
+        ) {
+          tasksQuery = tasksQuery
+            .or(
+              `status_value.is.null,status_value.not.in.(${closedStatuses})`,
+            )
+            .is("completion_date", null)
+            .or(
+              "is_manually_archived.is.null,is_manually_archived.eq.false",
+            );
+        } else if (statusMode === "closed") {
+          tasksQuery = tasksQuery.or(
+            `status_value.in.(${closedStatuses}),completion_date.not.is.null,is_manually_archived.eq.true`,
+          );
+        }
+
+        if (statusMode === "overdue" || statusMode === "due-soon") {
+          const today = startOfLocalDay();
+          if (statusMode === "overdue") {
+            tasksQuery = tasksQuery.lt("task_due_date", today.toISOString());
+          } else {
+            const afterDueSoon = new Date(today);
+            afterDueSoon.setDate(afterDueSoon.getDate() + 4);
+            tasksQuery = tasksQuery
+              .gte("task_due_date", today.toISOString())
+              .lt("task_due_date", afterDueSoon.toISOString());
+          }
+        }
+
         return tasksQuery.order("task_due_date", {
           ascending: true,
           nullsFirst: false,

@@ -4312,7 +4312,17 @@ export function Clients() {
       .order("client_name", { ascending: true, nullsFirst: false })
       .range(0, 4999);
     if (useAppClients) {
-      query = query.is("archived_at", null);
+      const calendarStart = bounds.start.toISOString();
+      const calendarEnd = bounds.next.toISOString();
+      const calendarDateFilter = [
+        `and(client_age_date_onboarded.gte.${calendarStart},client_age_date_onboarded.lt.${calendarEnd})`,
+        `and(current_contract_end_date_for_filtering.gte.${calendarStart},current_contract_end_date_for_filtering.lt.${calendarEnd})`,
+        `and(csm_date_of_last_contact.gte.${calendarStart},csm_date_of_last_contact.lt.${calendarEnd})`,
+        `and(csm_date_of_next_contact.gte.${calendarStart},csm_date_of_next_contact.lt.${calendarEnd})`,
+      ].join(",");
+      query = query
+        .is("archived_at", null)
+        .or(calendarDateFilter);
     }
 
     if (appliedFilters.clientName.trim()) {
@@ -4432,10 +4442,9 @@ export function Clients() {
       setCalendarTasks([]);
       setCalendarError(error.message);
     } else {
-      const rows = useAppClients
+      let rows = useAppClients
         ? ((data ?? []) as Record<string, unknown>[]).map(mapAppClientRow)
         : ((data ?? []) as ClientRow[]);
-      setCalendarClients(rows);
       if (appTasksResult.error)
         console.error("Failed to load app calendar tasks:", appTasksResult.error);
       if (backupTasksResult.error)
@@ -4446,10 +4455,175 @@ export function Clients() {
       const appRows = (appTasksResult.data ?? []) as CalendarTaskRow[];
       const backupRows = (backupTasksResult.data ?? []) as CalendarTaskRow[];
       const appTaskIds = new Set(appRows.map((task) => task.glide_row_id));
-      setCalendarTasks([
+      const calendarTaskRows = [
         ...appRows,
         ...backupRows.filter((task) => !appTaskIds.has(task.glide_row_id)),
-      ]);
+      ];
+
+      if (useAppClients) {
+        const loadedClientIds = new Set(
+          rows.map((client) => client.glide_row_id),
+        );
+        const missingTaskClientIds = [
+          ...new Set(
+            calendarTaskRows
+              .map((task) => task.client_id)
+              .filter((clientId): clientId is string => Boolean(clientId)),
+          ),
+        ].filter((clientId) => !loadedClientIds.has(clientId));
+
+        const taskClientRows: ClientRow[] = [];
+        for (let offset = 0; offset < missingTaskClientIds.length; offset += 100) {
+          const clientIdChunk = missingTaskClientIds.slice(offset, offset + 100);
+          let taskClientsQuery = supabase
+            .from("clients")
+            .select("*")
+            .eq("company_glide_row_id", appliedFilters.companyId)
+            .is("archived_at", null)
+            .in("glide_row_id", clientIdChunk);
+          if (appliedFilters.clientName.trim()) {
+            const pattern = `%${appliedFilters.clientName.trim()}%`;
+            taskClientsQuery = taskClientsQuery.or(
+              `client_name.ilike.${pattern},client_business.ilike.${pattern}`,
+            );
+          }
+          if (assignedTeamMemberId) {
+            taskClientsQuery = taskClientsQuery.or(
+              `csm_team_member_id.eq.${assignedTeamMemberId},csm_secondary_assignee_id.eq.${assignedTeamMemberId}`,
+            );
+          } else if (appliedFilters.csmId) {
+            taskClientsQuery =
+              appliedFilters.csmId === UNASSIGNED_CSM_FILTER
+                ? taskClientsQuery.is("csm_team_member_id", null)
+                : taskClientsQuery.eq(
+                    "csm_team_member_id",
+                    appliedFilters.csmId,
+                  );
+          }
+          if (appliedFilters.secondaryAssigneeId) {
+            taskClientsQuery = taskClientsQuery.eq(
+              "csm_secondary_assignee_id",
+              appliedFilters.secondaryAssigneeId,
+            );
+          }
+          if (appliedFilters.offerId) {
+            taskClientsQuery = taskClientsQuery.eq(
+              "offer_milestones_current_offer_id",
+              appliedFilters.offerId,
+            );
+          }
+          if (appliedFilters.milestoneId) {
+            taskClientsQuery = taskClientsQuery.eq(
+              "offer_milestones_current_milestone_id",
+              appliedFilters.milestoneId,
+            );
+          }
+          if (appliedFilters.programs.length > 0) {
+            taskClientsQuery = taskClientsQuery.in(
+              "program_status_value",
+              appliedFilters.programs,
+            );
+          }
+          if (appliedFilters.renewalWindow === "overdue") {
+            taskClientsQuery = taskClientsQuery.lt(
+              "current_contract_end_date_for_filtering",
+              startOfTodayIso(),
+            );
+          } else if (appliedFilters.renewalWindow) {
+            const days = daysFromWindow(appliedFilters.renewalWindow);
+            if (days !== null) {
+              taskClientsQuery = taskClientsQuery
+                .gte(
+                  "current_contract_end_date_for_filtering",
+                  startOfTodayIso(),
+                )
+                .lte(
+                  "current_contract_end_date_for_filtering",
+                  endOfDayIso(days),
+                );
+            }
+          }
+          if (appliedFilters.lastContactAge === "never") {
+            taskClientsQuery = taskClientsQuery.is(
+              "csm_date_of_last_contact",
+              null,
+            );
+          } else if (appliedFilters.lastContactAge) {
+            const days = daysFromWindow(appliedFilters.lastContactAge);
+            if (days !== null) {
+              taskClientsQuery = taskClientsQuery.lt(
+                "csm_date_of_last_contact",
+                startOfDayIso(-days),
+              );
+            }
+          }
+          if (appliedFilters.nextContactWindow === "overdue") {
+            taskClientsQuery = taskClientsQuery.lt(
+              "csm_date_of_next_contact",
+              startOfTodayIso(),
+            );
+          } else if (appliedFilters.nextContactWindow === "none") {
+            taskClientsQuery = taskClientsQuery.is(
+              "csm_date_of_next_contact",
+              null,
+            );
+          } else if (appliedFilters.nextContactWindow) {
+            const days = daysFromWindow(appliedFilters.nextContactWindow);
+            if (days !== null) {
+              taskClientsQuery = taskClientsQuery
+                .gte("csm_date_of_next_contact", startOfTodayIso())
+                .lte("csm_date_of_next_contact", endOfDayIso(days));
+            }
+          }
+          if (appliedFilters.successStatus) {
+            taskClientsQuery = taskClientsQuery.eq(
+              "outcomes_success_value_for_filtering",
+              appliedFilters.successStatus,
+            );
+          }
+          if (appliedFilters.progressStatus) {
+            taskClientsQuery = taskClientsQuery.eq(
+              "outcomes_progress_for_filtering",
+              appliedFilters.progressStatus,
+            );
+          }
+          if (appliedFilters.buyInStatus) {
+            taskClientsQuery = taskClientsQuery.eq(
+              "outcomes_buy_in_for_filtering",
+              appliedFilters.buyInStatus,
+            );
+          }
+          taskClientsQuery = applyAdvocacyStatusFilters(
+            taskClientsQuery,
+            appliedFilters,
+            true,
+          );
+
+          const { data: taskClients, error: taskClientsError } =
+            await taskClientsQuery;
+          if (taskClientsError) {
+            console.error(
+              "Failed to load calendar task clients:",
+              taskClientsError,
+            );
+            break;
+          }
+          taskClientRows.push(
+            ...((taskClients ?? []) as Record<string, unknown>[]).map(
+              mapAppClientRow,
+            ),
+          );
+        }
+        rows = [
+          ...rows,
+          ...taskClientRows.filter(
+            (client) => !loadedClientIds.has(client.glide_row_id),
+          ),
+        ];
+      }
+
+      setCalendarClients(rows);
+      setCalendarTasks(calendarTaskRows);
     }
     setCalendarLoading(false);
   }, [

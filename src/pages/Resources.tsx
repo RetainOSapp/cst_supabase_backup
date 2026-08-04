@@ -1578,7 +1578,7 @@ export function Resources() {
   );
 
   async function loadResources() {
-    const query = supabase
+    let query = supabase
       .from("resources")
       .select(
         "id, slug, title, type, description, content, loom_embed_url, status, is_dynamic, dynamic_key, sort_order, scope, company_legacy_id",
@@ -1586,6 +1586,13 @@ export function Resources() {
       .neq("status", "archived")
       .order("sort_order", { ascending: true })
       .order("title", { ascending: true });
+    if (!isSuperAdmin) {
+      query = effectiveCompanyId
+        ? query.or(
+            `scope.eq.retainos_help,and(scope.eq.company,company_legacy_id.eq.${effectiveCompanyId})`,
+          )
+        : query.eq("scope", "retainos_help");
+    }
     const { data, error } = await query;
     let resourceRows = (data ?? []) as ResourceRow[];
     let loadError = error;

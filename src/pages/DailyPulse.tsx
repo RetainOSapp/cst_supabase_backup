@@ -129,6 +129,7 @@ interface AutoOffboardFollowUpConfig {
 }
 
 const ACTIVE_STATUSES = new Set(["front-end", "back-end"]);
+const PULSE_ROSTER_STATUSES = ["front-end", "back-end", "paused"];
 const DEFAULT_AUTO_OFFBOARD_FOLLOW_UP_CONFIG: AutoOffboardFollowUpConfig = {
   title: "Automated Offboards Requiring Follow-up",
   description:
@@ -1337,6 +1338,15 @@ export function DailyPulse() {
             effectiveCompanyId,
           )
           .limit(5000);
+        if (usesAppClients) {
+          // Daily Pulse only derives roster signals from active and paused
+          // clients. Task-linked offboarded clients are loaded explicitly
+          // below so automated follow-ups remain intact.
+          query = query
+            .eq("exclude_from_dashboard_analytics", false)
+            .is("archived_at", null)
+            .in("program_status_value", PULSE_ROSTER_STATUSES);
+        }
 
         const scopedCsmId =
           capabilities.canViewOnlyAssignedClients && teamMemberId
@@ -1375,6 +1385,14 @@ export function DailyPulse() {
             )
             .eq("company_glide_row_id", effectiveCompanyId)
             .not("task_due_date", "is", null)
+            .or(
+              "status_value.is.null,status_value.not.in.(done,completed,closed,dismissed,archived)",
+            )
+            .is("completion_date", null)
+            .or(
+              "is_manually_archived.is.null,is_manually_archived.eq.false",
+            )
+            .is("archived_at", null)
             .order("created_at", { ascending: false })
             .limit(5000);
 
@@ -1450,7 +1468,7 @@ export function DailyPulse() {
           ? visibleClients.map((client) => client.glide_row_id)
           : [];
 
-        if (clientIds.length > 0) {
+        if (clientIds.length > 0 && enabledTypes.has("quiet_profile")) {
           const { data: history, error: historyError } = await supabase
             .from("client_history_events")
             .select("legacy_client_glide_row_id, created_at")
@@ -1468,35 +1486,39 @@ export function DailyPulse() {
               }
             }
           }
+        }
 
-          if (company?.app_company_id) {
-            const { data: completions, error: completionsError } = await supabase
-              .from("client_timed_checkpoint_completions")
-              .select(
-                "id, legacy_client_id, checkpoint_type, due_at, completed_at, completed_by_name",
-              )
-              .eq("company_id", company.app_company_id)
-              .eq("checkpoint_type", "strategic_review")
-              .in("legacy_client_id", clientIds)
-              .is("archived_at", null)
-              .limit(5000);
+        if (
+          clientIds.length > 0 &&
+          enabledTypes.has("strategic_review_due") &&
+          company?.app_company_id
+        ) {
+          const { data: completions, error: completionsError } = await supabase
+            .from("client_timed_checkpoint_completions")
+            .select(
+              "id, legacy_client_id, checkpoint_type, due_at, completed_at, completed_by_name",
+            )
+            .eq("company_id", company.app_company_id)
+            .eq("checkpoint_type", "strategic_review")
+            .in("legacy_client_id", clientIds)
+            .is("archived_at", null)
+            .limit(5000);
 
-            if (completionsError) {
-              console.warn(
-                "Daily Pulse timed checkpoint completions unavailable:",
-                completionsError,
+          if (completionsError) {
+            console.warn(
+              "Daily Pulse timed checkpoint completions unavailable:",
+              completionsError,
+            );
+          } else {
+            for (const row of (completions ?? []) as TimedCheckpointCompletion[]) {
+              completionsByClientDue.set(
+                checkpointCompletionKey(
+                  row.legacy_client_id,
+                  row.checkpoint_type,
+                  row.due_at,
+                ),
+                row,
               );
-            } else {
-              for (const row of (completions ?? []) as TimedCheckpointCompletion[]) {
-                completionsByClientDue.set(
-                  checkpointCompletionKey(
-                    row.legacy_client_id,
-                    row.checkpoint_type,
-                    row.due_at,
-                  ),
-                  row,
-                );
-              }
             }
           }
         }
@@ -1533,6 +1555,7 @@ export function DailyPulse() {
   }, [
     capabilities.canViewOnlyAssignedClients,
     csmRelationshipFilter,
+    enabledTypes,
     effectiveCompanyId,
     selectedCsmId,
     teamMemberId,

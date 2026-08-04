@@ -817,55 +817,76 @@ export function CsmReports() {
     const historyEndDate =
       reportEndDate > upkeepEndDate ? reportEndDate : upkeepEndDate;
     if (appCompany && clientIds.length > 0) {
-      for (const clientIdChunk of chunkArray(clientIds, HISTORY_CLIENT_ID_CHUNK_SIZE)) {
-        const { data: historyData, error: historyError } = await supabase
-          .from("client_history_events")
-          .select(
-            [
-              "id",
-              "legacy_client_glide_row_id",
-              "actor_member_id",
-              "event_type",
-              "title",
-              "summary",
-              "notes",
-              "next_steps",
-              "last_contact_at",
-              "next_contact_at",
-              "progress_status",
-              "buy_in_status",
-              "created_at",
-            ].join(", "),
-          )
-          .eq("company_id", appCompany.id)
-          .in("legacy_client_glide_row_id", clientIdChunk)
-          .gte("created_at", historyStartDate.toISOString())
-          .lte("created_at", historyEndDate.toISOString())
-          .order("created_at", { ascending: false });
-
-        if (historyError) {
-          setError(historyError.message);
+      const historyChunks = chunkArray(clientIds, HISTORY_CLIENT_ID_CHUNK_SIZE);
+      for (let offset = 0; offset < historyChunks.length; offset += 4) {
+        const batchResults = await Promise.all(
+          historyChunks.slice(offset, offset + 4).map((clientIdChunk) =>
+            supabase
+              .from("client_history_events")
+              .select(
+                [
+                  "id",
+                  "legacy_client_glide_row_id",
+                  "actor_member_id",
+                  "event_type",
+                  "title",
+                  "summary",
+                  "notes",
+                  "next_steps",
+                  "last_contact_at",
+                  "next_contact_at",
+                  "progress_status",
+                  "buy_in_status",
+                  "created_at",
+                ].join(", "),
+              )
+              .eq("company_id", appCompany.id)
+              .in("legacy_client_glide_row_id", clientIdChunk)
+              .gte("created_at", historyStartDate.toISOString())
+              .lte("created_at", historyEndDate.toISOString())
+              .order("created_at", { ascending: false }),
+          ),
+        );
+        const failedResult = batchResults.find((result) => result.error);
+        if (failedResult?.error) {
+          setError(failedResult.error.message);
           break;
         }
-        historyRows.push(...((historyData ?? []) as unknown as HistoryEventRow[]));
+        for (const result of batchResults) {
+          historyRows.push(
+            ...((result.data ?? []) as unknown as HistoryEventRow[]),
+          );
+        }
       }
     } else if (clientIds.length > 0) {
       const mirrorRows: MirrorHistoryRow[] = [];
-      for (const clientIdChunk of chunkArray(clientIds, HISTORY_CLIENT_ID_CHUNK_SIZE)) {
-        const { data: mirrorHistoryData, error: mirrorHistoryError } = await supabase
-          .from("backup_company_clients_history")
-          .select("client_id, change_type_code, value, original_value, modified_date")
-          .in("client_id", clientIdChunk)
-          .gte("modified_date", historyStartDate.toISOString())
-          .lte("modified_date", historyEndDate.toISOString())
-          .order("modified_date", { ascending: false })
-          .limit(5000);
-
-        if (mirrorHistoryError) {
-          console.error("Failed to load mirror CSM report history:", mirrorHistoryError);
+      const historyChunks = chunkArray(clientIds, HISTORY_CLIENT_ID_CHUNK_SIZE);
+      for (let offset = 0; offset < historyChunks.length; offset += 4) {
+        const batchResults = await Promise.all(
+          historyChunks.slice(offset, offset + 4).map((clientIdChunk) =>
+            supabase
+              .from("backup_company_clients_history")
+              .select(
+                "client_id, change_type_code, value, original_value, modified_date",
+              )
+              .in("client_id", clientIdChunk)
+              .gte("modified_date", historyStartDate.toISOString())
+              .lte("modified_date", historyEndDate.toISOString())
+              .order("modified_date", { ascending: false })
+              .limit(5000),
+          ),
+        );
+        const failedResult = batchResults.find((result) => result.error);
+        if (failedResult?.error) {
+          console.error(
+            "Failed to load mirror CSM report history:",
+            failedResult.error,
+          );
           break;
         }
-        mirrorRows.push(...((mirrorHistoryData ?? []) as MirrorHistoryRow[]));
+        for (const result of batchResults) {
+          mirrorRows.push(...((result.data ?? []) as MirrorHistoryRow[]));
+        }
       }
       historyRows = mirrorRows
         .filter((row) => row.client_id && row.modified_date)
