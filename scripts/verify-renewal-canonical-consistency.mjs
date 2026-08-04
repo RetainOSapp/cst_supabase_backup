@@ -30,9 +30,12 @@ check(
 );
 check(
   "active renewal drawer uses the same canonical cohort and excludes retained clients",
-  /detailKey === "active-renewing"[\s\S]{0,450}retainedCohortClientIds\.has\(clientId\)[\s\S]{0,350}currentSummaryRenewingIds\.add\(clientId\)/.test(
+  /\["retained", "renewing", "active-renewing"\]\.includes\(detailKey\)[\s\S]{0,450}dashboard_renewal_cohort_counts_fast/.test(
     dashboard,
-  ),
+  ) &&
+    /detailKey === "active-renewing"[\s\S]{0,450}retainedCohortClientIds\.has\(clientId\)[\s\S]{0,350}currentSummaryRenewingIds\.add\(clientId\)/.test(
+      dashboard,
+    ),
 );
 check(
   "canonical KPI path resolves active rows from canonical unresolved ids",

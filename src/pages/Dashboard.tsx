@@ -4180,7 +4180,7 @@ export function Dashboard() {
         const renewalCohortQuery =
           appliedUsesAppClients &&
           hasExplicitRenewalPeriod &&
-          ["retained", "renewing"].includes(detailKey)
+          ["retained", "renewing", "active-renewing"].includes(detailKey)
             ? supabase.rpc("dashboard_renewal_cohort_counts_fast", {
                 p_company_id: appliedFilters.companyId,
                 p_csm_id: appliedFilters.csmId || null,
