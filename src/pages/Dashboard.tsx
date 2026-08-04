@@ -2919,6 +2919,19 @@ export function Dashboard() {
       if (renewalCohortResult.error) {
         console.error("Failed to load dashboard renewal cohort:", renewalCohortResult.error);
       }
+      if (
+        appliedUsesAppClients &&
+        hasExplicitRenewalPeriod &&
+        renewalCohortResult.error
+      ) {
+        setRetainedClients(null);
+        setRenewingClientsCount(null);
+        setRenewalCohortClients(null);
+        setRetentionPercentage(null);
+        setActiveRenewingClients(null);
+        setRetentionKpiLoading(false);
+        return;
+      }
 
       const retainedIds = new Set<string>();
       let retainedEventCount = 0;
@@ -3197,13 +3210,17 @@ export function Dashboard() {
             activeRenewingSetFromCohort = true;
           }
         }
+      } else if (hasExplicitRenewalPeriod) {
+        console.error(
+          "Failed to load canonical dashboard renewal cohort:",
+          renewalCohortResult.error,
+        );
+        setRetainedClients(null);
+        setRenewingClientsCount(null);
+        setRenewalCohortClients(null);
+        setRetentionPercentage(null);
+        setActiveRenewingClients(null);
       } else {
-        if (renewalCohortResult.error) {
-          console.error(
-            "Failed to load canonical dashboard renewal cohort:",
-            renewalCohortResult.error,
-          );
-        }
         setRetainedClients(Number(row?.retained_clients ?? 0));
         setRenewingClientsCount(Number(row?.renewing_clients ?? 0));
         setRenewalCohortClients(null);

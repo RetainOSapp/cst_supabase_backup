@@ -10,6 +10,10 @@ const migratedEvidenceCorrection = readFileSync(
   "supabase/migrations/20260723103000_dashboard_migrated_contract_source_evidence.sql",
   "utf8",
 );
+const activeAnalyticsScope = readFileSync(
+  "supabase/migrations/20260804193000_dashboard_renewal_active_analytics_scope.sql",
+  "utf8",
+);
 
 const checks = [];
 function check(label, passed) {
@@ -56,6 +60,18 @@ check(
   "internal cohort function stays service-role only",
   /revoke all on function public\._dashboard_renewal_cohort_counts_fast_unchecked[\s\S]*from public, anon, authenticated[\s\S]*grant execute[\s\S]*to service_role/i.test(
     migration,
+  ),
+);
+check(
+  "renewal cohort prunes archived and analytics-excluded clients before contract work",
+  /join selected_company company[\s\S]{0,80}company\.id = client\.company_id[\s\S]{0,160}client\.archived_at is null[\s\S]{0,160}client\.exclude_from_dashboard_analytics = false/i.test(
+    activeAnalyticsScope,
+  ),
+);
+check(
+  "renewal cohort is limited to active Front End and Back End statuses",
+  /client\.program_status_value in \('front-end', 'back-end'\)/i.test(
+    activeAnalyticsScope,
   ),
 );
 

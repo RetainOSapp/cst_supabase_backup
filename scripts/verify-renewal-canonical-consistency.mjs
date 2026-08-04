@@ -45,6 +45,15 @@ check(
     dashboard.includes("activeRenewingSetFromCohort = true"),
 );
 check(
+  "explicit-period renewal failures do not fall back to mixed legacy formulas",
+  /hasExplicitRenewalPeriod &&[\s\S]{0,100}renewalCohortResult\.error[\s\S]{0,240}setRetainedClients\(null\)[\s\S]{0,240}setRetentionPercentage\(null\)/.test(
+    dashboard,
+  ) &&
+    /else if \(hasExplicitRenewalPeriod\)[\s\S]{0,300}setRetainedClients\(null\)[\s\S]{0,240}setRetentionPercentage\(null\)/.test(
+      dashboard,
+    ),
+);
+check(
   "migrated current-summary contracts participate in summary refresh",
   /contract\.status[\s\S]{0,80}in \('active', 'current_summary'\)/i.test(
     migration,
