@@ -1,6 +1,6 @@
 # Performance Program - Releasable Phases
 
-**Status:** Local QA
+**Status:** Production Release
 **Priority:** Medium
 **Owner:** Jay (product/QA) + Codex (implementation/release)
 **Start condition:** Schedule after the secure Beacon rebuild or during a clear
@@ -28,7 +28,7 @@ change 40 indexes.
 ## Local Candidate - 2026-08-04
 
 Branch `codex/mm-navigation-performance` contains the first bounded,
-frontend-only candidate. It has not been pushed or deployed.
+frontend-only release.
 
 - Major authenticated pages are route-split behind one stable loading state.
 - App-owned Dashboard Overview uses the existing actor-scoped aggregate RPC
@@ -48,6 +48,9 @@ Local gates pass the production build, 11 navigation-performance assertions,
 the renewal reporting/consistency regressions, the churn-period regression, and
 UTC calendar-date verification. Authenticated MM browser QA by Jay is the
 release gate. This candidate includes no database migration or index change.
+
+Jay completed authenticated Moves Method QA on 2026-08-05 and reported the
+navigation was “way faster,” approving the candidate for production.
 
 ## Program Rules
 

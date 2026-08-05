@@ -251,11 +251,12 @@ Goal: define the Supabase-native source of truth before enabling real CRUD.
   - Source: `SECURITY_PERFORMANCE_AUDIT.md`.
   - Large blast radius; keep out of the security fork. Later scope should break up `ClientDetail`, `Clients`, `SaasClientDetail`, and `Dashboard` into tab/feature components and hooks.
   - 2026-07-13 planning correction: schedule incrementally through `PERFORMANCE_PROGRAM_RELEASABLE_PHASES.md`, never as a single rewrite.
-- `[~]` `[qa]` `[priority: medium]` Performance program - independently releasable phases.
+- `[x]` `[priority: medium]` Performance program - independently releasable phases.
   - Source of truth: `PERFORMANCE_PROGRAM_RELEASABLE_PHASES.md`.
   - Four releases: baseline/route splitting; Dashboard/Clients data paths; Client Detail/Tasks/Daily Pulse data paths; measured index and component maintenance.
   - Start after the secure Beacon rebuild or during a clear window between customer tickets and migration-critical work. Re-measure and QA each phase before starting the next.
   - 2026-08-04 local candidate on `codex/mm-navigation-performance`: route-splits major authenticated pages; moves app-owned Dashboard initial KPIs to the existing actor-scoped aggregate path; scopes Daily Pulse, Tasks, Clients Calendar, and Resources before transfer; and batches CSM Report history reads. Build, 11 focused performance assertions, renewal/churn regressions, and calendar-date verification pass. Nothing is pushed or deployed; Jay's authenticated MM navigation QA is the release gate.
+  - 2026-08-05 Jay completed authenticated Moves Method QA, confirmed the navigation is “way faster,” and approved the bounded frontend release for production.
 - `[~]` `[mixed]` Start write mode through controlled Edge Functions for first flows, then add direct RLS-backed writes only after policies are proven.
 - `[x]` Use Ethical Scaling as the first internal controlled pilot company.
   - Pilot schema/backfill/QA artifacts:
@@ -488,10 +489,11 @@ Next session lock:
   - Keep canonical KPI RPC as the source for card counts.
   - 2026-06-09 Moves Method demo optimization: mirror-only default Dashboard views use the lighter split KPI path unless offer/multi-program/app-owned filters require canonical calculations. This is a walkthrough-safe speed fix, not the final migration-grade reporting architecture.
   - Final migration-grade fix: move large-company dashboard counts, retention/renewal calculations, drill-throughs, and chart breakdowns into optimized canonical Supabase reporting RPCs/views with appropriate indexes or summaries before broad customer migration.
-- `[~]` `[qa]` `[priority: medium]` Post-migration frontend bundle/code-splitting pass.
+- `[x]` `[priority: medium]` Post-migration frontend bundle/code-splitting pass.
   - Current Vite build warns that the main JS chunk is larger than the default 500 kB threshold.
   - After migration-critical work stabilizes, split heavier pages/features with route-level lazy loading so first load stays fast as RetainOS grows.
   - 2026-08-04 local candidate splits Dashboard, Clients/Client Detail, Daily Pulse, Tasks, CSM Reports, Pipeline, Call AI, Resources, and SaaS Clients into route chunks. The shared entry chunk is 307.91 kB minified / 92.87 kB gzip and the largest page chunk is 178.09 kB minified / 37.75 kB gzip. Direct-route and role smoke QA remains before release.
+  - 2026-08-05 authenticated MM route navigation passed Jay QA and is approved for production.
 - `[x]` Ethical Scaling reconciliation pass before pilot rollout.
   - Command: `npm run pilot:reconcile:ethical-scaling`.
   - 2026-06-06 result: `rolloutGate.readyForPilot = true`, with no blockers.
