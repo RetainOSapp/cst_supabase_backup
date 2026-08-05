@@ -14,6 +14,14 @@ const followUpMigration = readFileSync(
   "supabase/migrations/20260727140000_mia_auto_offboard_followup_tasks.sql",
   "utf8",
 );
+const dropoffLabelMigration = readFileSync(
+  "supabase/migrations/20260805130000_mia_dropoff_churn_reason_label.sql",
+  "utf8",
+);
+const dropoffLabelRollback = readFileSync(
+  "supabase/rollbacks/20260805130000_mia_dropoff_churn_reason_label.sql",
+  "utf8",
+);
 const settingsPage = readFileSync("src/pages/SaasClientDetail.tsx", "utf8");
 const settingsFunction = readFileSync(
   "supabase/functions/manage-company-customization/index.ts",
@@ -22,6 +30,29 @@ const settingsFunction = readFileSync(
 const dashboard = readFileSync("src/pages/Dashboard.tsx", "utf8");
 const dailyPulse = readFileSync("src/pages/DailyPulse.tsx", "utf8");
 const clientDetail = readFileSync("src/pages/ClientDetail.tsx", "utf8");
+
+const workerPatchPairs = [
+  ...dropoffLabelMigration.matchAll(
+    /old_([a-z_]+) constant text := \$old\$\n([\s\S]*?)\$old\$;\n  new_\1 constant text := \$new\$\n([\s\S]*?)\$new\$;/g,
+  ),
+];
+let simulatedWorker = migration;
+let workerPatchSimulationPassed = workerPatchPairs.length === 4;
+for (const [, , oldText, newText] of workerPatchPairs) {
+  if (simulatedWorker.split(oldText).length - 1 !== 1) {
+    workerPatchSimulationPassed = false;
+    break;
+  }
+  simulatedWorker = simulatedWorker.replace(oldText, newText);
+}
+workerPatchSimulationPassed =
+  workerPatchSimulationPassed &&
+  [
+    "select nullif(btrim(reason.label)",
+    "Exit outcome Dropoff; churn reason %s",
+    "public.company_churn_reasons.label",
+    "exit_outcome",
+  ].every((marker) => simulatedWorker.includes(marker));
 
 const checks = [];
 function check(label, passed) {
@@ -85,6 +116,82 @@ check(
       migration,
     ) &&
     /client\.churn_reason_value !== "auto_suspended_timeout"/i.test(dashboard),
+);
+check(
+  "automatic MIA churn keeps one stable reason while preserving company labels",
+  /reason\.value = 'auto_suspended_timeout'/i.test(dropoffLabelMigration) &&
+    /label = coalesce\([\s\S]{0,160}public\.company_churn_reasons\.label/i.test(
+      dropoffLabelMigration,
+    ) &&
+    /'reason_label', v_churn_label[\s\S]{0,80}'exit_outcome', 'dropoff'/i.test(
+      dropoffLabelMigration,
+    ),
+);
+check(
+  "worker patch is fail-closed against the reviewed automation body",
+  workerPatchSimulationPassed &&
+    (migration.match(/v_churn_label := v_status_label \|\| ' auto-offboard';/g) ?? [])
+    .length === 1 &&
+    (
+      migration.match(
+        /Automatically changed from %s to Offboarded after %s days without returning\. Churn effective %s\./g,
+      ) ?? []
+    ).length === 1 &&
+    (migration.match(/label = excluded\.label,/g) ?? []).length === 1 &&
+    (
+      migration.match(
+        /'reason', 'auto_suspended_timeout',[\s\S]{0,80}'automation', 'suspended_timeout'/g,
+      ) ?? []
+    ).length === 1 &&
+    /Expected one MIA auto-offboard reason-label assignment/i.test(
+      dropoffLabelMigration,
+    ) &&
+    /Expected one MIA auto-offboard history summary/i.test(
+      dropoffLabelMigration,
+    ) &&
+    /Expected one MIA auto-offboard churn-reason upsert/i.test(
+      dropoffLabelMigration,
+    ) &&
+    /Expected one MIA auto-offboard history reason payload/i.test(
+      dropoffLabelMigration,
+    ),
+);
+check(
+  "Moves Method relabels the existing reason without rewriting client history",
+  /value = 'auto_suspended_timeout'/i.test(dropoffLabelMigration) &&
+    /label = 'Dropoff — MIA timeout'/i.test(dropoffLabelMigration) &&
+    /historical_client_rows_rewritten', false/i.test(dropoffLabelMigration) &&
+    !/update public\.clients/i.test(dropoffLabelMigration),
+);
+check(
+  "Churn Reasons chart resolves the company label and selected offboard period",
+  /from\("company_churn_reasons"\)[\s\S]{0,180}select\("value, label, position, status"\)/i.test(
+    dashboard,
+  ) &&
+    /churnReasonDistribution: countByOrdered\([\s\S]{0,180}churnReasonNameByValue/i.test(
+      dashboard,
+    ) &&
+    /title="Churn Reason"[\s\S]{0,1000}recordedOffboardedDate\(client\)/i.test(
+      dashboard,
+    ),
+);
+check(
+  "Client profile and automatic history visibly identify the dropoff reason",
+  /const offboardingInfoFields[\s\S]{0,120}"Exit Outcome"[\s\S]{0,80}"Churn Reason"/i.test(
+    clientDetail,
+  ) &&
+    /clientOffboardingOutcome\(client\)[\s\S]{0,180}clientChurnReasonLabel/i.test(
+      clientDetail,
+    ) &&
+    /event\.source === "suspended_auto_offboard"[\s\S]{0,260}churnReasonLabelByValue/i.test(
+      clientDetail,
+    ),
+);
+check(
+  "dropoff label release has a bounded rollback",
+  /label = 'MIA auto-offboard'/i.test(dropoffLabelRollback) &&
+    /label = 'Dropoff — MIA timeout'/i.test(dropoffLabelRollback) &&
+    /process_due_suspended_auto_offboards/i.test(dropoffLabelRollback),
 );
 check(
   "undated legacy offboards are not assigned a contract-end reporting date",

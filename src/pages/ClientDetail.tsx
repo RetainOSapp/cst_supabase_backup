@@ -340,6 +340,10 @@ const basicInfoFields: [string, string[]][] = [
   ["Date Onboarded", ["client_age_date_onboarded"]],
   ["Client Age", ["client_age_date_onboarded"]],
 ];
+const offboardingInfoFields: [string, string[]][] = [
+  ["Exit Outcome", []],
+  ["Churn Reason", ["churn_reason_value"]],
+];
 const offboardedDateCandidates = [
   "client_age_date_offboarded",
   "client_age_date_offboarded_for_filtering",
@@ -5245,12 +5249,14 @@ function FieldGrid({
   programChoices,
   relationLookup,
   latestRecordingUrl,
+  churnReasonLabelByValue,
 }: {
   fields: [string, string[]][];
   client: ClientRow;
   programChoices: ProgramChoice[];
   relationLookup?: Map<string, string>;
   latestRecordingUrl?: string | null;
+  churnReasonLabelByValue?: Map<string, string>;
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -5263,7 +5269,11 @@ function FieldGrid({
             {label}
           </div>
           <div className="mt-2 text-sm font-medium text-[#162b3e]">
-            {label === "Status" ? (
+            {label === "Exit Outcome" ? (
+              clientOffboardingOutcome(client)
+            ) : label === "Churn Reason" ? (
+              clientChurnReasonLabel(client, churnReasonLabelByValue)
+            ) : label === "Status" ? (
               <ProgramStatusPill
                 value={String(valueFrom(client, candidates) ?? "")}
                 choices={programChoices}
@@ -7781,6 +7791,24 @@ function stringFromUnknown(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function clientOffboardingOutcome(client: ClientRow) {
+  const metadata = recordFromUnknown(client.metadata);
+  const offboarding = recordFromUnknown(metadata.offboarding);
+  if (offboarding.churned === true) return "Dropoff";
+  if (offboarding.churned === false) return "Completed";
+  if (stringFromUnknown(client.churn_reason_value)) return "Dropoff";
+  return "--";
+}
+
+function clientChurnReasonLabel(
+  client: ClientRow,
+  churnReasonLabelByValue?: Map<string, string>,
+) {
+  const reasonValue = stringFromUnknown(client.churn_reason_value);
+  if (!reasonValue) return "--";
+  return churnReasonLabelByValue?.get(reasonValue) ?? displayValue(reasonValue);
+}
+
 type HistoryAdvocacyEntry = {
   key: string;
   label: string;
@@ -7948,12 +7976,14 @@ function historyActionEventId(event: ClientHistoryEventRow) {
 function HistorySection({
   events,
   teamMemberNameById,
+  churnReasonLabelByValue,
   canManageHistory,
   onChangeDate,
   onDelete,
 }: {
   events: ClientHistoryEventRow[];
   teamMemberNameById: Map<string, string>;
+  churnReasonLabelByValue: Map<string, string>;
   canManageHistory: boolean;
   onChangeDate: (event: ClientHistoryEventRow, eventDate: string) => Promise<void>;
   onDelete: (event: ClientHistoryEventRow) => Promise<void>;
@@ -8072,6 +8102,14 @@ function HistorySection({
         const recordingUrl = historyRecordingUrl(event);
         const modifiedBy = historyActorName(event, teamMemberNameById);
         const advocacyEntries = historyAdvocacyEntries(event);
+        const historyReasonValue =
+          event.source === "suspended_auto_offboard"
+            ? stringFromUnknown(event.payload?.reason)
+            : null;
+        const historyReasonLabel = historyReasonValue
+          ? churnReasonLabelByValue.get(historyReasonValue) ??
+            displayValue(historyReasonValue)
+          : null;
 
         return (
           <article
@@ -8103,6 +8141,11 @@ function HistorySection({
                 {sourceLabel ? (
                   <span className="w-fit rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
                     {sourceLabel}
+                  </span>
+                ) : null}
+                {historyReasonLabel ? (
+                  <span className="w-fit rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">
+                    {historyReasonLabel}
                   </span>
                 ) : null}
                 {recordingUrl ? (
@@ -8929,6 +8972,16 @@ export function ClientDetail() {
     }
     return next;
   }, [offers, offerMilestones, relationLookup]);
+  const churnReasonLabelByValue = useMemo(
+    () =>
+      new Map(
+        churnReasons.map((reason) => [
+          reason.value,
+          reason.label || displayValue(reason.value),
+        ]),
+      ),
+    [churnReasons],
+  );
   const latestFathomRecordingUrl = useMemo(
     () => latestCallSummaryRecordingUrl(historyEvents),
     [historyEvents],
@@ -8963,8 +9016,13 @@ export function ClientDetail() {
     { key: "outcomes", label: "Outcomes", fields: outcomeFields },
     { key: "pathways", label: "Pathways & Milestones", fields: pathwayFields },
   ];
-  const activeFields =
+  const selectedFields =
     tabs.find((tab) => tab.key === activeTab)?.fields ?? basicInfoFields;
+  const activeFields =
+    activeTab === "details" &&
+    isOffboardedStatus(client.program_status_value, programChoices)
+      ? [...selectedFields, ...offboardingInfoFields]
+      : selectedFields;
   const canEditProfile =
     capabilities.canEditClient && isAppOwnedClient;
   const canManageAssignment =
@@ -9324,6 +9382,7 @@ export function ClientDetail() {
         <HistorySection
           events={historyEvents}
           teamMemberNameById={teamMemberNameById}
+          churnReasonLabelByValue={churnReasonLabelByValue}
           canManageHistory={canManageHistory}
           onChangeDate={changeHistoryDate}
           onDelete={deleteHistoryEvent}
@@ -9433,6 +9492,7 @@ export function ClientDetail() {
               client={client}
               programChoices={programChoices}
               relationLookup={displayLookup}
+              churnReasonLabelByValue={churnReasonLabelByValue}
               latestRecordingUrl={
                 activeTab === "program" ? latestFathomRecordingUrl : null
               }
