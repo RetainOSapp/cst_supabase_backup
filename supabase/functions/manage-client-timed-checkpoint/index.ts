@@ -1,6 +1,10 @@
 /// <reference path="../_shared/deno.d.ts" />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  interactionLabel,
+  normalizeInteractionSettings,
+} from "../_shared/clientInteractions.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -26,6 +30,19 @@ function cleanText(value: unknown) {
 function nullableText(value: unknown) {
   const text = cleanText(value);
   return text || null;
+}
+
+function metadataRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function normalizeDateTime(value: unknown) {
+  const raw = cleanText(value);
+  if (!raw) return new Date().toISOString();
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
 function normalizeEmail(value: unknown) {
@@ -211,6 +228,16 @@ Deno.serve(async (req) => {
       }
     }
 
+    const { data: companySettings, error: companySettingsError } = await supabase
+      .from("company_settings")
+      .select("enable_pipeline, metadata")
+      .eq("company_id", company.id)
+      .maybeSingle();
+    if (companySettingsError) throw companySettingsError;
+    const interactionSettings = normalizeInteractionSettings(
+      companySettings?.metadata,
+    );
+    const occurredAt = normalizeDateTime(body.occurredAt);
     const completedAt = new Date().toISOString();
     const payload = {
       company_id: company.id,
@@ -245,16 +272,27 @@ Deno.serve(async (req) => {
 
     if (existingCompletionError) throw existingCompletionError;
 
+    const existingMetadata = metadataRecord(existingCompletion?.metadata);
+    const completionPayload = existingCompletion
+      ? {
+          ...payload,
+          completed_at: existingCompletion.completed_at,
+          metadata: {
+            ...existingMetadata,
+            ...payload.metadata,
+          },
+        }
+      : payload;
     const { data: completion, error: completionError } = existingCompletion
       ? await supabase
           .from("client_timed_checkpoint_completions")
-          .update(payload)
+          .update(completionPayload)
           .eq("id", existingCompletion.id)
           .select("*")
           .single()
       : await supabase
           .from("client_timed_checkpoint_completions")
-          .insert(payload)
+          .insert(completionPayload)
           .select("*")
           .single();
 
@@ -262,54 +300,277 @@ Deno.serve(async (req) => {
 
     const title = "Strategic review completed";
     const summary = `${actor.name} marked Strategic Review complete for ${client.client_name ?? "client"}.`;
+    let historyEvent: Record<string, unknown> | null = null;
+    const existingHistoryId = cleanText(existingMetadata.history_event_id);
+    if (existingHistoryId) {
+      const { data: existingHistory, error: existingHistoryError } = await supabase
+        .from("client_history_events")
+        .select("*")
+        .eq("id", existingHistoryId)
+        .maybeSingle();
+      if (existingHistoryError) throw existingHistoryError;
+      historyEvent = existingHistory as Record<string, unknown> | null;
+    }
+    if (!historyEvent) {
+      const { data: insertedHistory, error: historyError } = await supabase
+        .from("client_history_events")
+        .insert({
+          company_id: company.id,
+          legacy_client_glide_row_id: client.glide_row_id,
+          actor_auth_user_id: userData.user.id,
+          actor_member_id: actor.memberId,
+          event_type: "client_timed_checkpoint_completed",
+          source: "daily_pulse",
+          title,
+          summary,
+          last_contact_at: occurredAt,
+          notes: nullableText(body.notes),
+          payload: {
+            action,
+            checkpoint_type: checkpointType,
+            due_at: dueAt,
+            completion_id: completion.id,
+            client,
+          },
+        })
+        .select("*")
+        .single();
+      if (historyError) throw historyError;
+      historyEvent = insertedHistory as Record<string, unknown>;
+    }
 
-    const { data: historyEvent, error: historyError } = await supabase
-      .from("client_history_events")
-      .insert({
-        company_id: company.id,
-        legacy_client_glide_row_id: client.glide_row_id,
-        actor_auth_user_id: userData.user.id,
-        actor_member_id: actor.memberId,
-        event_type: "client_timed_checkpoint_completed",
-        source: "daily_pulse",
-        title,
-        summary,
-        notes: nullableText(body.notes),
-        payload: {
-          action,
-          checkpoint_type: checkpointType,
-          due_at: dueAt,
-          completion,
-          client,
-        },
-      })
+    let callAttendanceEvent: Record<string, unknown> | null = null;
+    const existingInteractionId = cleanText(existingMetadata.interaction_event_id);
+    if (existingInteractionId) {
+      const { data: existingInteraction, error: existingInteractionError } =
+        await supabase
+          .from("client_call_attendance_events")
+          .select("*")
+          .eq("id", existingInteractionId)
+          .maybeSingle();
+      if (existingInteractionError) throw existingInteractionError;
+      callAttendanceEvent = existingInteraction as Record<string, unknown> | null;
+    }
+    if (!callAttendanceEvent) {
+      const occurredTime = new Date(occurredAt).getTime();
+      const { data: compatibleInteraction, error: compatibleInteractionError } =
+        await supabase
+          .from("client_call_attendance_events")
+          .select("*")
+          .eq("company_id", company.id)
+          .eq("client_id", client.id)
+          .eq("attendance_status", "attended")
+          .gte(
+            "occurred_at",
+            new Date(occurredTime - 18 * 60 * 60 * 1000).toISOString(),
+          )
+          .lte(
+            "occurred_at",
+            new Date(occurredTime + 18 * 60 * 60 * 1000).toISOString(),
+          )
+          .contains("metadata", { interaction_type_key: "strategic_review" })
+          .order("occurred_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+      if (compatibleInteractionError) throw compatibleInteractionError;
+      callAttendanceEvent =
+        compatibleInteraction as Record<string, unknown> | null;
+    }
+    if (callAttendanceEvent) {
+      const { data: linkedInteraction, error: linkInteractionError } =
+        await supabase
+          .from("client_call_attendance_events")
+          .update({
+            metadata: {
+              ...metadataRecord(callAttendanceEvent.metadata),
+              checkpoint_completion_id: completion.id,
+              interaction_type_key: "strategic_review",
+              interaction_type_label: interactionLabel(
+                interactionSettings,
+                "strategic_review",
+              ),
+            },
+          })
+          .eq("id", callAttendanceEvent.id)
+          .select("*")
+          .single();
+      if (linkInteractionError) throw linkInteractionError;
+      callAttendanceEvent = linkedInteraction as Record<string, unknown>;
+    } else {
+      const { data: insertedInteraction, error: callAttendanceError } =
+        await supabase
+          .from("client_call_attendance_events")
+          .insert({
+            company_id: company.id,
+            client_id: client.id,
+            client_legacy_id: client.glide_row_id,
+            company_legacy_id: companyLegacyId,
+            attendance_status: "attended",
+            occurred_at: occurredAt,
+            source: "daily_pulse",
+            notes: nullableText(body.notes),
+            actor_member_id: actor.memberId,
+            actor_member_legacy_id: actor.legacyMemberId,
+            actor_auth_user_id: userData.user.id,
+            history_event_id: historyEvent.id,
+            metadata: {
+              actor_role: actor.role,
+              checkpoint_completion_id: completion.id,
+              interaction_type_key: "strategic_review",
+              interaction_type_label: interactionLabel(
+                interactionSettings,
+                "strategic_review",
+              ),
+            },
+          })
+          .select("*")
+          .single();
+      if (callAttendanceError) throw callAttendanceError;
+      callAttendanceEvent = insertedInteraction as Record<string, unknown>;
+    }
+
+    let pipelineItem: Record<string, unknown> | null = null;
+    let pipelineWarning: string | null = null;
+    const rule = interactionSettings.strategicReviewPipeline;
+    if (
+      companySettings?.enable_pipeline === true &&
+      rule.enabled &&
+      rule.pipelineId &&
+      rule.targetStageId
+    ) {
+      const { data: targetStage, error: targetStageError } = await supabase
+        .from("company_pipeline_stages")
+        .select("id, pipeline_id, position, stage_type, is_enabled, archived_at")
+        .eq("company_id", company.id)
+        .eq("pipeline_id", rule.pipelineId)
+        .eq("id", rule.targetStageId)
+        .maybeSingle();
+      if (targetStageError) throw targetStageError;
+      if (
+        !targetStage ||
+        targetStage.stage_type !== "open" ||
+        targetStage.is_enabled !== true ||
+        targetStage.archived_at
+      ) {
+        pipelineWarning =
+          "Strategic Review was saved, but its configured Pipeline stage is unavailable.";
+      } else {
+        const { data: candidateItems, error: candidateItemsError } = await supabase
+          .from("client_pipeline_items")
+          .select("*, current_stage:company_pipeline_stages!client_pipeline_items_stage_pipeline_company_fkey(position)")
+          .eq("company_id", company.id)
+          .eq("client_id", client.id)
+          .eq("pipeline_id", rule.pipelineId)
+          .eq("lifecycle_status", "open")
+          .is("archived_at", null)
+          .order("renewal_at", { ascending: true, nullsFirst: false })
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (candidateItemsError) throw candidateItemsError;
+        const candidate = (candidateItems ?? [])[0] as
+          | (Record<string, unknown> & {
+              current_stage?: { position?: number | null } | null;
+            })
+          | undefined;
+        if (!candidate) {
+          pipelineWarning =
+            "Strategic Review was saved. No open Pipeline item was available to move.";
+        } else if (
+          Number(candidate.current_stage?.position ?? 0) <
+          Number(targetStage.position)
+        ) {
+          const { data: movedItem, error: moveError } = await supabase.rpc(
+            "mutate_pipeline_item_with_evidence",
+            {
+              p_company_id: company.id,
+              p_item_id: candidate.id,
+              p_activity: "stage_changed",
+              p_patch: {
+                stage_id: targetStage.id,
+                lifecycle_status: "open",
+              },
+              p_actor_auth_user_id: userData.user.id,
+              p_actor_member_id: actor.memberId,
+              p_actor_role: actor.role,
+              p_note: nullableText(body.notes),
+            },
+          );
+          if (moveError) {
+            pipelineWarning = `Strategic Review was saved, but Pipeline could not move: ${moveError.message}`;
+          } else {
+            pipelineItem = (Array.isArray(movedItem)
+              ? movedItem[0]
+              : movedItem) as Record<string, unknown> | null;
+          }
+        } else {
+          pipelineItem = candidate;
+        }
+      }
+    }
+
+    const workflowMetadata = {
+      ...metadataRecord(completion.metadata),
+      history_event_id: historyEvent.id,
+      interaction_event_id: callAttendanceEvent.id,
+      pipeline_item_id: pipelineItem?.id ?? null,
+      pipeline_stage_id: pipelineItem?.stage_id ?? null,
+      pipeline_warning: pipelineWarning,
+      workflow_complete: true,
+    };
+    const { data: completedWorkflow, error: completionUpdateError } = await supabase
+      .from("client_timed_checkpoint_completions")
+      .update({ metadata: workflowMetadata })
+      .eq("id", completion.id)
       .select("*")
       .single();
+    if (completionUpdateError) throw completionUpdateError;
 
-    if (historyError) throw historyError;
+    if (!existingMetadata.audit_event_id) {
+      const { data: auditEvent, error: auditError } = await supabase
+        .from("app_audit_events")
+        .insert({
+          company_id: company.id,
+          actor_auth_user_id: userData.user.id,
+          actor_member_id: actor.memberId,
+          event_type: "client_timed_checkpoint_completed",
+          source: "daily_pulse",
+          entity_table: "client_timed_checkpoint_completions",
+          entity_id: completion.id,
+          legacy_glide_row_id: completion.legacy_client_id,
+          title,
+          summary,
+          before_data: existingCompletion,
+          after_data: completedWorkflow,
+          metadata: {
+            history_event_id: historyEvent.id,
+            interaction_event_id: callAttendanceEvent.id,
+            pipeline_item_id: pipelineItem?.id ?? null,
+            checkpoint_type: checkpointType,
+            due_at: dueAt,
+            actor_role: actor.role,
+          },
+        })
+        .select("id")
+        .single();
+      if (auditError) throw auditError;
+      await supabase
+        .from("client_timed_checkpoint_completions")
+        .update({
+          metadata: {
+            ...workflowMetadata,
+            audit_event_id: auditEvent.id,
+          },
+        })
+        .eq("id", completion.id);
+    }
 
-    await supabase.from("app_audit_events").insert({
-      company_id: company.id,
-      actor_auth_user_id: userData.user.id,
-      actor_member_id: actor.memberId,
-      event_type: "client_timed_checkpoint_completed",
-      source: "daily_pulse",
-      entity_table: "client_timed_checkpoint_completions",
-      entity_id: completion.id,
-      legacy_glide_row_id: completion.legacy_client_id,
-      title,
-      summary,
-      before_data: null,
-      after_data: completion,
-      metadata: {
-        history_event_id: historyEvent.id,
-        checkpoint_type: checkpointType,
-        due_at: dueAt,
-        actor_role: actor.role,
-      },
+    return jsonResponse({
+      completion: completedWorkflow,
+      historyEvent,
+      callAttendanceEvent,
+      pipelineItem,
+      pipelineWarning,
     });
-
-    return jsonResponse({ completion, historyEvent });
   } catch (error) {
     console.error("manage-client-timed-checkpoint error", error);
     return jsonResponse(

@@ -13,6 +13,11 @@ import {
   jsonResponse as sharedJsonResponse,
   optionsResponse,
 } from "../_shared/http.ts";
+import {
+  classifyInteractionTitle,
+  interactionLabel,
+  normalizeInteractionSettings,
+} from "../_shared/clientInteractions.ts";
 
 const ACTIONS = new Set(["match", "retry", "ignore"]);
 const ACTIVE_PROGRAM_STATUSES = new Set([
@@ -736,6 +741,19 @@ async function applyCallSummary(
     nullableText(payload.recording_url) ??
     nullableText(payload.recordingUrl) ??
     nullableText(payload.url);
+  const { data: companySettings, error: companySettingsError } = await supabase
+    .from("company_settings")
+    .select("metadata")
+    .eq("company_id", company.id)
+    .maybeSingle();
+  if (companySettingsError) throw companySettingsError;
+  const interactionSettings = normalizeInteractionSettings(
+    companySettings?.metadata,
+  );
+  const interactionTypeKey = classifyInteractionTitle(
+    interactionSettings,
+    payload.title ?? metadata.title,
+  );
   const clientUpdates: JsonRecord = { next_steps_value: summary };
   if (startedAt) clientUpdates.csm_date_of_last_contact = startedAt;
   const nextContactAt = await nextContactFromCompanySetting(
@@ -819,6 +837,57 @@ async function applyCallSummary(
     .maybeSingle();
   if (existingAttendanceError) throw existingAttendanceError;
   let callAttendanceEvent = existingAttendance as JsonRecord | null;
+  if (!callAttendanceEvent && interactionTypeKey === "strategic_review") {
+    const occurredAt = startedAt ?? new Date().toISOString();
+    const occurredTime = new Date(occurredAt).getTime();
+    const { data: existingReview, error: existingReviewError } = await supabase
+      .from("client_call_attendance_events")
+      .select("*")
+      .eq("company_id", company.id)
+      .eq("client_id", client.id)
+      .eq("source", "daily_pulse")
+      .gte(
+        "occurred_at",
+        new Date(occurredTime - 18 * 60 * 60 * 1000).toISOString(),
+      )
+      .lte(
+        "occurred_at",
+        new Date(occurredTime + 18 * 60 * 60 * 1000).toISOString(),
+      )
+      .contains("metadata", { interaction_type_key: "strategic_review" })
+      .order("occurred_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingReviewError) throw existingReviewError;
+    if (existingReview) {
+      const { data: updatedReview, error: updatedReviewError } = await supabase
+        .from("client_call_attendance_events")
+        .update({
+          occurred_at: occurredAt,
+          notes: summary,
+          history_event_id: historyEvent.id,
+          integration_intake_event_id: event.id,
+          metadata: {
+            ...getMetadata(existingReview as JsonRecord),
+            provider,
+            external_event_id: externalEventId,
+            recording_url: recordingUrl,
+            interaction_type_key: interactionTypeKey,
+            interaction_type_label: interactionLabel(
+              interactionSettings,
+              interactionTypeKey,
+            ),
+            reviewed_by: actorEmail,
+            enriched_from: "integration_review",
+          },
+        })
+        .eq("id", existingReview.id)
+        .select("*")
+        .single();
+      if (updatedReviewError) throw updatedReviewError;
+      callAttendanceEvent = updatedReview as JsonRecord;
+    }
+  }
   if (!callAttendanceEvent) {
     const { data, error: attendanceError } = await supabase
       .from("client_call_attendance_events")
@@ -836,10 +905,16 @@ async function applyCallSummary(
         metadata: {
           provider,
           external_event_id: externalEventId,
+          recording_url: recordingUrl,
           client_email: eventClientEmail(event),
           submitted_client_emails: eventClientEmails(event),
           reviewed_by: actorEmail,
           auto_recorded_from: "integration_review",
+          interaction_type_key: interactionTypeKey,
+          interaction_type_label: interactionLabel(
+            interactionSettings,
+            interactionTypeKey,
+          ),
         },
       })
       .select("*")

@@ -230,6 +230,72 @@ async function loadScopedClients(
   return rows;
 }
 
+async function loadInteractionSummaries(
+  supabase: SupabaseServiceClient,
+  companyId: string,
+  clientIds: string[],
+) {
+  const summaries = new Map<
+    string,
+    {
+      attended: number;
+      missed: number;
+      lastCallAt: string | null;
+      strategicReviewCount: number;
+      lastStrategicReviewAt: string | null;
+    }
+  >();
+  for (let offset = 0; offset < clientIds.length; offset += 150) {
+    const ids = clientIds.slice(offset, offset + 150);
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase
+        .from("client_call_attendance_events")
+        .select("client_id, attendance_status, occurred_at, metadata")
+        .eq("company_id", companyId)
+        .in("client_id", ids)
+        .order("occurred_at", { ascending: false })
+        .range(from, from + 999);
+      if (error) throw error;
+      const page = (data ?? []) as Record<string, unknown>[];
+      for (const event of page) {
+        const clientId = String(event.client_id ?? "");
+        if (!clientId) continue;
+        const current = summaries.get(clientId) ?? {
+          attended: 0,
+          missed: 0,
+          lastCallAt: null,
+          strategicReviewCount: 0,
+          lastStrategicReviewAt: null,
+        };
+        const occurredAt = String(event.occurred_at ?? "");
+        if (event.attendance_status === "attended") current.attended += 1;
+        if (event.attendance_status === "missed") current.missed += 1;
+        if (!current.lastCallAt || occurredAt > current.lastCallAt) {
+          current.lastCallAt = occurredAt || null;
+        }
+        const metadata =
+          event.metadata &&
+          typeof event.metadata === "object" &&
+          !Array.isArray(event.metadata)
+            ? (event.metadata as Record<string, unknown>)
+            : {};
+        if (metadata.interaction_type_key === "strategic_review") {
+          current.strategicReviewCount += 1;
+          if (
+            !current.lastStrategicReviewAt ||
+            occurredAt > current.lastStrategicReviewAt
+          ) {
+            current.lastStrategicReviewAt = occurredAt || null;
+          }
+        }
+        summaries.set(clientId, current);
+      }
+      if (page.length < 1000) break;
+    }
+  }
+  return summaries;
+}
+
 async function loadWorkspace(
   supabase: SupabaseServiceClient,
   company: Record<string, unknown>,
@@ -256,15 +322,30 @@ async function loadWorkspace(
   const offers = new Map(
     (offersResult.data ?? []).map((offer) => [String(offer.glide_row_id), offer.name]),
   );
-  const clientPayload = clients.map((client) => ({
-    ...client,
-    pathway_id: client.offer_milestones_current_offer_id ?? null,
-    pathway_name: offers.get(String(client.offer_milestones_current_offer_id ?? "")) ?? null,
-  }));
   const rawItems = (itemsResult.data ?? []) as Record<string, unknown>[];
   const items = actor.role === "csm"
     ? rawItems.filter((item) => allowedClientIds.has(String(item.client_id)))
     : rawItems;
+  const itemClientIds = [
+    ...new Set(items.map((item) => String(item.client_id ?? "")).filter(Boolean)),
+  ];
+  const interactionSummaries = await loadInteractionSummaries(
+    supabase,
+    companyId,
+    itemClientIds,
+  );
+  const clientPayload = clients.map((client) => ({
+    ...client,
+    pathway_id: client.offer_milestones_current_offer_id ?? null,
+    pathway_name: offers.get(String(client.offer_milestones_current_offer_id ?? "")) ?? null,
+    interaction_summary: interactionSummaries.get(String(client.id)) ?? {
+      attended: 0,
+      missed: 0,
+      lastCallAt: null,
+      strategicReviewCount: 0,
+      lastStrategicReviewAt: null,
+    },
+  }));
 
   return {
     enabled: true,

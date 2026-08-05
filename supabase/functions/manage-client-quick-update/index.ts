@@ -1,6 +1,11 @@
 /// <reference path="../_shared/deno.d.ts" />
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  interactionLabel,
+  normalizeInteractionSettings,
+  validateInteractionTypeKey,
+} from "../_shared/clientInteractions.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -443,6 +448,15 @@ Deno.serve(async (req) => {
     }
 
     const actor = await resolveActor(supabase, userEmail, company.id);
+    const { data: companySettings, error: companySettingsError } = await supabase
+      .from("company_settings")
+      .select("metadata")
+      .eq("company_id", company.id)
+      .maybeSingle();
+    if (companySettingsError) throw companySettingsError;
+    const interactionSettings = normalizeInteractionSettings(
+      companySettings?.metadata,
+    );
 
     const { data: client, error: clientError } = await supabase
       .from("clients")
@@ -480,6 +494,10 @@ Deno.serve(async (req) => {
     const nextSteps = hasNextSteps ? cleanText(body.nextSteps) : "";
     const notes = cleanText(body.notes);
     const callAttendanceStatus = parseCallAttendance(body.callAttendance);
+    const interactionTypeKey = validateInteractionTypeKey(
+      interactionSettings,
+      body.interactionTypeKey,
+    );
     let lastContactAt = hasLastContactAt
       ? parseDateTime(body.lastContactAt)
       : null;
@@ -503,13 +521,7 @@ Deno.serve(async (req) => {
     );
 
     if (lastContactAt && !hasNextContactAt) {
-      const { data: settings, error: settingsError } = await supabase
-        .from("company_settings")
-        .select("metadata")
-        .eq("company_id", company.id)
-        .maybeSingle();
-      if (settingsError) throw settingsError;
-      const metadata = metadataRecord(settings?.metadata);
+      const metadata = metadataRecord(companySettings?.metadata);
       if (metadata.contact_touch_sets_next_contact === true) {
         const days = boundedInteger(
           metadata.contact_touch_next_contact_days,
@@ -564,6 +576,7 @@ Deno.serve(async (req) => {
         advocacy_events: advocacyEvents,
         advocacy_notes: advocacyNotes,
         call_attendance: callAttendanceStatus,
+        interaction_type_key: callAttendanceStatus ? interactionTypeKey : null,
       },
     };
 
@@ -629,6 +642,11 @@ Deno.serve(async (req) => {
           metadata: {
             actor_role: actor.role,
             contact_touch: isContactTouch,
+            interaction_type_key: interactionTypeKey,
+            interaction_type_label: interactionLabel(
+              interactionSettings,
+              interactionTypeKey,
+            ),
           },
         })
         .select("*")

@@ -35,6 +35,15 @@ import {
   type ClientIdentityPreferences,
 } from "../lib/clientIdentity.ts";
 import { formatCalendarDate } from "../lib/calendarDate.ts";
+import {
+  DEFAULT_CLIENT_INTERACTION_TYPES,
+  interactionTypeKeyFromMetadata,
+  loadClientInteractionSettings,
+  normalizeClientInteractionSettings,
+  type ClientInteractionEvent,
+  type ClientInteractionSettings,
+  type ClientInteractionTypeKey,
+} from "../lib/clientInteractions.ts";
 
 const CLIENTS_ROSTER_REFRESH_KEY = "retainos.clientsRosterRefresh.v1";
 const clientArchetypeOptions = ["Doer", "Controller", "Worrier", "Follower"] as const;
@@ -1553,16 +1562,45 @@ async function loadCallAttendanceCounts(
   );
 }
 
+async function loadClientInteractionEventsForSummary(
+  companyId: string,
+  clientLegacyId: string,
+) {
+  const rows: Array<Record<string, unknown>> = [];
+  const pageSize = 500;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("client_call_attendance_events")
+      .select(
+        "id, attendance_status, occurred_at, source, notes, actor_member_id, metadata",
+      )
+      .eq("company_id", companyId)
+      .eq("client_legacy_id", clientLegacyId)
+      .order("occurred_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    rows.push(...((data ?? []) as Array<Record<string, unknown>>));
+    if (!data || data.length < pageSize) break;
+  }
+  return { data: rows, error: null };
+}
+
 function CallAttendanceControls({
   counts,
   value,
+  interactionTypes,
+  interactionTypeKey,
   disabled,
   onChange,
+  onInteractionTypeChange,
 }: {
   counts: CallAttendanceCounts;
   value: CallAttendanceStatus | "";
+  interactionTypes: ClientInteractionSettings["types"];
+  interactionTypeKey: ClientInteractionTypeKey;
   disabled: boolean;
   onChange: (value: CallAttendanceStatus | "") => void;
+  onInteractionTypeChange: (value: ClientInteractionTypeKey) => void;
 }) {
   const options: Array<{
     value: CallAttendanceStatus;
@@ -1613,6 +1651,183 @@ function CallAttendanceControls({
             );
           })}
         </div>
+      </div>
+      {value ? (
+        <label className="mt-3 block text-xs font-medium uppercase tracking-wider text-gray-500">
+          Call type
+          <select
+            value={interactionTypeKey}
+            disabled={disabled}
+            onChange={(event) =>
+              onInteractionTypeChange(
+                event.target.value as ClientInteractionTypeKey,
+              )
+            }
+            className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm normal-case tracking-normal text-gray-900 disabled:bg-gray-50"
+          >
+            {interactionTypes
+              .filter((type) => type.enabled)
+              .map((type) => (
+                <option key={type.key} value={type.key}>
+                  {type.label}
+                </option>
+              ))}
+          </select>
+        </label>
+      ) : null}
+    </section>
+  );
+}
+
+function CallsAndReviewsPanel({
+  events,
+  settings,
+  memberNameById,
+  onViewHistory,
+}: {
+  events: ClientInteractionEvent[];
+  settings: ClientInteractionSettings;
+  memberNameById: Map<string, string>;
+  onViewHistory: () => void;
+}) {
+  const attended = events.filter(
+    (event) => event.attendance_status === "attended",
+  );
+  const missed = events.filter((event) => event.attendance_status === "missed");
+  const latest = [...events]
+    .sort(
+      (left, right) =>
+        new Date(right.occurred_at).getTime() -
+        new Date(left.occurred_at).getTime(),
+    )
+    .slice(0, 5);
+  const typeCounts = settings.types.map((type) => ({
+    ...type,
+    count: attended.filter(
+      (event) => interactionTypeKeyFromMetadata(event.metadata) === type.key,
+    ).length,
+  }));
+
+  return (
+    <section className="mt-5 rounded-md border border-[#e4e9f0] bg-[#f8fafc] p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-700">
+            Calls & Reviews
+          </h3>
+          <p className="mt-1 text-sm text-gray-500">
+            Call activity from Quick Update, Daily Pulse, and connected meeting
+            tools.
+          </p>
+        </div>
+        <button type="button" onClick={onViewHistory} className="retainos-button-secondary">
+          View in history
+        </button>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+            Attended
+          </p>
+          <p className="mt-1 text-2xl font-semibold text-[#162b3e]">
+            {attended.length.toLocaleString()}
+          </p>
+        </div>
+        <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+            Missed
+          </p>
+          <p className="mt-1 text-2xl font-semibold text-[#162b3e]">
+            {missed.length.toLocaleString()}
+          </p>
+        </div>
+        {typeCounts
+          .filter((type) => type.enabled && type.key !== "general")
+          .map((type) => (
+            <div
+              key={type.key}
+              className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3"
+            >
+              <p className="truncate text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                {type.label}
+              </p>
+              <p className="mt-1 text-2xl font-semibold text-[#162b3e]">
+                {type.count.toLocaleString()}
+              </p>
+            </div>
+          ))}
+      </div>
+      <div className="mt-4 overflow-hidden rounded-md border border-[#e4e9f0] bg-white">
+        <div className="border-b border-[#e4e9f0] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-[#667085]">
+          Recent interactions
+        </div>
+        {latest.length > 0 ? (
+          <div className="divide-y divide-[#eef2f6]">
+            {latest.map((event) => {
+              const key = interactionTypeKeyFromMetadata(event.metadata);
+              const type =
+                settings.types.find((candidate) => candidate.key === key) ??
+                settings.types[0];
+              const recordingUrl =
+                typeof event.metadata.recording_url === "string"
+                  ? event.metadata.recording_url
+                  : null;
+              return (
+                <div
+                  key={event.id}
+                  className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto]"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold"
+                        style={{
+                          borderColor: `${type.color}55`,
+                          backgroundColor: `${type.color}12`,
+                          color: type.color,
+                        }}
+                      >
+                        {type.label}
+                      </span>
+                      <span className="text-xs font-medium text-[#667085]">
+                        {event.attendance_status === "attended"
+                          ? "Attended"
+                          : "Missed"}
+                      </span>
+                    </div>
+                    {event.notes ? (
+                      <p className="mt-1 line-clamp-2 text-[#475467]">
+                        {event.notes}
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-xs text-[#98a2b3]">
+                      {event.actor_member_id
+                        ? memberNameById.get(event.actor_member_id) ?? event.source
+                        : event.source}
+                    </p>
+                  </div>
+                  <div className="text-left text-xs text-[#667085] sm:text-right">
+                    <div>{new Date(event.occurred_at).toLocaleString()}</div>
+                    {recordingUrl ? (
+                      <a
+                        href={recordingUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block font-semibold text-[#2b79c4]"
+                      >
+                        Recording
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="px-4 py-6 text-center text-sm text-[#667085]">
+            No calls or reviews have been recorded for this client yet.
+          </p>
+        )}
       </div>
     </section>
   );
@@ -2235,7 +2450,11 @@ function ClientNextStepsModal({
   client: ClientRow;
   latestRecordingUrl?: string | null;
   onClose: () => void;
-  onSaved: (client: ClientRow, event: ClientHistoryEventRow | null) => void;
+  onSaved: (
+    client: ClientRow,
+    event: ClientHistoryEventRow | null,
+    interaction: ClientInteractionEvent | null,
+  ) => void;
 }) {
   const [nextSteps, setNextSteps] = useState(
     textInputValue(valueFrom(client, nextStepsFieldCandidates)),
@@ -2251,6 +2470,17 @@ function ClientNextStepsModal({
   const [callAttendance, setCallAttendance] = useState<CallAttendanceStatus | "">(
     "",
   );
+  const [interactionSettings, setInteractionSettings] =
+    useState<ClientInteractionSettings>({
+      types: DEFAULT_CLIENT_INTERACTION_TYPES,
+      strategicReviewPipeline: {
+        enabled: false,
+        pipelineId: null,
+        targetStageId: null,
+      },
+    });
+  const [interactionTypeKey, setInteractionTypeKey] =
+    useState<ClientInteractionTypeKey>("general");
   const [lastContactTouched, setLastContactTouched] = useState(false);
   const [nextContactTouched, setNextContactTouched] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2259,9 +2489,15 @@ function ClientNextStepsModal({
 
   useEffect(() => {
     let cancelled = false;
-    loadCallAttendanceCounts(companyLegacyId, client.glide_row_id)
-      .then((counts) => {
-        if (!cancelled) setCallAttendanceCounts(counts);
+    Promise.all([
+      loadCallAttendanceCounts(companyLegacyId, client.glide_row_id),
+      loadClientInteractionSettings(companyLegacyId),
+    ])
+      .then(([counts, settings]) => {
+        if (!cancelled) {
+          setCallAttendanceCounts(counts);
+          setInteractionSettings(settings);
+        }
       })
       .catch((error) => {
         console.error("Failed to load call attendance counts", error);
@@ -2295,6 +2531,7 @@ function ClientNextStepsModal({
           ...(lastContactTouched ? { lastContactAt } : {}),
           ...(nextContactTouched ? { nextContactAt } : {}),
           ...(callAttendance ? { callAttendance } : {}),
+          ...(callAttendance ? { interactionTypeKey } : {}),
         },
       },
     );
@@ -2321,6 +2558,16 @@ function ClientNextStepsModal({
       onSaved(
         mapAppClientRow(data.client as Record<string, unknown>),
         (data.event as ClientHistoryEventRow | undefined) ?? null,
+        data.callAttendanceEvent
+          ? ({
+              ...(data.callAttendanceEvent as Record<string, unknown>),
+              metadata:
+                data.callAttendanceEvent.metadata &&
+                typeof data.callAttendanceEvent.metadata === "object"
+                  ? data.callAttendanceEvent.metadata
+                  : {},
+            } as ClientInteractionEvent)
+          : null,
       );
       onClose();
     }
@@ -2409,8 +2656,11 @@ function ClientNextStepsModal({
             <CallAttendanceControls
               counts={callAttendanceCounts}
               value={callAttendance}
+              interactionTypes={interactionSettings.types}
+              interactionTypeKey={interactionTypeKey}
               disabled={saving}
               onChange={handleCallAttendanceChange}
+              onInteractionTypeChange={setInteractionTypeKey}
             />
             {saveError ? (
               <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:col-span-3">
@@ -8116,6 +8366,13 @@ export function ClientDetail() {
   const [secondaryAssigneeEnabled, setSecondaryAssigneeEnabled] = useState(false);
   const [allowStatusChangeRetention, setAllowStatusChangeRetention] =
     useState(false);
+  const [clientInteractionSettings, setClientInteractionSettings] =
+    useState<ClientInteractionSettings>(
+      normalizeClientInteractionSettings(null),
+    );
+  const [clientInteractionEvents, setClientInteractionEvents] = useState<
+    ClientInteractionEvent[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
@@ -8274,6 +8531,7 @@ export function ClientDetail() {
         customFieldsResult,
         customFieldValuesResult,
         companySettingsResult,
+        callAttendanceResult,
       ] = await Promise.all([
         useAppOwnedHistoricalActivity
           ? Promise.resolve({ data: [] })
@@ -8398,6 +8656,12 @@ export function ClientDetail() {
               .eq("company_id", appPathwayCompany.id)
               .maybeSingle()
           : Promise.resolve({ data: null, error: null }),
+        appPathwayCompany?.id
+          ? loadClientInteractionEventsForSummary(
+              appPathwayCompany.id,
+              nextClient.glide_row_id,
+            )
+          : Promise.resolve({ data: [], error: null }),
       ]);
       if (!cancelled) {
         if (!companySettingsResult.error) {
@@ -8459,6 +8723,30 @@ export function ClientDetail() {
           !Array.isArray(companySettingsResult.data.metadata)
             ? (companySettingsResult.data.metadata as Record<string, unknown>)
             : {};
+        setClientInteractionSettings(
+          normalizeClientInteractionSettings(settingsMetadata),
+        );
+        if (callAttendanceResult.error) {
+          console.error(
+            "Failed to load client calls and reviews:",
+            callAttendanceResult.error,
+          );
+          setClientInteractionEvents([]);
+        } else {
+          setClientInteractionEvents(
+            (callAttendanceResult.data ?? []).map((event) => ({
+              ...event,
+              attendance_status:
+                event.attendance_status === "missed" ? "missed" : "attended",
+              metadata:
+                event.metadata &&
+                typeof event.metadata === "object" &&
+                !Array.isArray(event.metadata)
+                  ? (event.metadata as Record<string, unknown>)
+                  : {},
+            })) as ClientInteractionEvent[],
+          );
+        }
         const companyMode = clientIdentityModeFromMetadata(settingsMetadata);
         const pathwayModes = (companyOfferRows ?? []).reduce<
           Record<string, ClientIdentityMode>
@@ -9109,6 +9397,12 @@ export function ClientDetail() {
               }
             }}
           />
+          <CallsAndReviewsPanel
+            events={clientInteractionEvents}
+            settings={clientInteractionSettings}
+            memberNameById={teamMemberNameById}
+            onViewHistory={() => setActiveTab("history")}
+          />
         </div>
       ) : (
         <>
@@ -9168,10 +9462,16 @@ export function ClientDetail() {
           client={client}
           latestRecordingUrl={latestFathomRecordingUrl}
           onClose={() => setEditingNextSteps(false)}
-          onSaved={(updatedClient, event) => {
+          onSaved={(updatedClient, event, interaction) => {
             setClient(updatedClient);
             if (event) {
               setHistoryEvents((current) => [event, ...current].slice(0, 25));
+            }
+            if (interaction) {
+              setClientInteractionEvents((current) => [
+                interaction,
+                ...current.filter((item) => item.id !== interaction.id),
+              ]);
             }
           }}
         />

@@ -6,6 +6,11 @@ import {
   jsonResponse as sharedJsonResponse,
   optionsResponse,
 } from "../_shared/http.ts";
+import {
+  classifyInteractionTitle,
+  interactionLabel,
+  normalizeInteractionSettings,
+} from "../_shared/clientInteractions.ts";
 
 const ACTIVE_PROGRAM_STATUSES = new Set(["front-end", "back-end", "paused", "suspended"]);
 const OFFBOARDED_PROGRAM_STATUSES = new Set(["off-boarded", "offboarded"]);
@@ -522,6 +527,19 @@ Deno.serve(async (req) => {
         400,
       );
     }
+    const { data: companySettings, error: companySettingsError } = await supabase
+      .from("company_settings")
+      .select("metadata")
+      .eq("company_id", company.id)
+      .maybeSingle();
+    if (companySettingsError) throw companySettingsError;
+    const interactionSettings = normalizeInteractionSettings(
+      companySettings?.metadata,
+    );
+    const interactionTypeKey = classifyInteractionTitle(
+      interactionSettings,
+      body.title,
+    );
 
     const authResult = await validateCompanyIntegrationSecret(
       supabase,
@@ -796,30 +814,88 @@ Deno.serve(async (req) => {
       .single();
     if (historyError) throw historyError;
 
-    const { data: callAttendanceEvent, error: callAttendanceError } = await supabase
-      .from("client_call_attendance_events")
-      .insert({
-        company_id: company.id,
-        client_id: client.id,
-        client_legacy_id: client.glide_row_id,
-        company_legacy_id: company.legacy_glide_row_id,
-        attendance_status: "attended",
-        occurred_at: startedAt ?? new Date().toISOString(),
-        source: provider,
-        notes: summary,
-        history_event_id: historyEvent.id,
-        integration_intake_event_id: intakeEvent.id,
-        metadata: {
-          provider,
-          external_event_id: externalEventId,
-          client_email: matchedEmail,
-          submitted_client_emails: clientEmails,
-          auto_recorded_from: "call_summary_ingest",
-        },
-      })
-      .select("*")
-      .single();
-    if (callAttendanceError) throw callAttendanceError;
+    const occurredAt = startedAt ?? new Date().toISOString();
+    let callAttendanceEvent: Record<string, unknown> | null = null;
+    if (interactionTypeKey === "strategic_review") {
+      const occurredTime = new Date(occurredAt).getTime();
+      const windowStart = new Date(occurredTime - 18 * 60 * 60 * 1000).toISOString();
+      const windowEnd = new Date(occurredTime + 18 * 60 * 60 * 1000).toISOString();
+      const { data: existingReview, error: existingReviewError } = await supabase
+        .from("client_call_attendance_events")
+        .select("*")
+        .eq("company_id", company.id)
+        .eq("client_id", client.id)
+        .eq("source", "daily_pulse")
+        .gte("occurred_at", windowStart)
+        .lte("occurred_at", windowEnd)
+        .contains("metadata", { interaction_type_key: "strategic_review" })
+        .order("occurred_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingReviewError) throw existingReviewError;
+      if (existingReview) {
+        const { data: updatedReview, error: updateReviewError } = await supabase
+          .from("client_call_attendance_events")
+          .update({
+            occurred_at: occurredAt,
+            notes: summary,
+            history_event_id: historyEvent.id,
+            integration_intake_event_id: intakeEvent.id,
+            metadata: {
+              ...metadataRecord(existingReview.metadata),
+              provider,
+              external_event_id: externalEventId,
+              recording_url: recordingUrl,
+              client_email: matchedEmail,
+              submitted_client_emails: clientEmails,
+              interaction_type_key: interactionTypeKey,
+              interaction_type_label: interactionLabel(
+                interactionSettings,
+                interactionTypeKey,
+              ),
+              enriched_from: "call_summary_ingest",
+            },
+          })
+          .eq("id", existingReview.id)
+          .select("*")
+          .single();
+        if (updateReviewError) throw updateReviewError;
+        callAttendanceEvent = updatedReview as Record<string, unknown>;
+      }
+    }
+    if (!callAttendanceEvent) {
+      const { data: insertedCall, error: callAttendanceError } = await supabase
+        .from("client_call_attendance_events")
+        .insert({
+          company_id: company.id,
+          client_id: client.id,
+          client_legacy_id: client.glide_row_id,
+          company_legacy_id: company.legacy_glide_row_id,
+          attendance_status: "attended",
+          occurred_at: occurredAt,
+          source: provider,
+          notes: summary,
+          history_event_id: historyEvent.id,
+          integration_intake_event_id: intakeEvent.id,
+          metadata: {
+            provider,
+            external_event_id: externalEventId,
+            recording_url: recordingUrl,
+            client_email: matchedEmail,
+            submitted_client_emails: clientEmails,
+            auto_recorded_from: "call_summary_ingest",
+            interaction_type_key: interactionTypeKey,
+            interaction_type_label: interactionLabel(
+              interactionSettings,
+              interactionTypeKey,
+            ),
+          },
+        })
+        .select("*")
+        .single();
+      if (callAttendanceError) throw callAttendanceError;
+      callAttendanceEvent = insertedCall as Record<string, unknown>;
+    }
 
     const { error: auditError } = await supabase.from("app_audit_events").insert({
       company_id: company.id,

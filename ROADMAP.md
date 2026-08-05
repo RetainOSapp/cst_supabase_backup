@@ -2185,6 +2185,13 @@ Use this section as the “what good looks like” checklist before migrating re
   - Canonical person/business fields remain separate for exports and integrations.
   - Clients, Client Detail, Dashboard drilldowns, Daily Pulse, Tasks, CSM Reports, and Pipeline use one fallback-safe display rule.
   - Clients roster search matches both the person and business name. Sales Kick production UI QA remains.
+- `[~]` `[qa]` Company-configurable client interactions and Strategic Review orchestration.
+  - Admin Hub Pipeline setup owns the four initial call types and the optional Strategic Review-to-Pipeline target; nothing is enabled or hard-coded for MM by this local commit.
+  - Quick Update and Fathom/reconciled calls share one typed attendance ledger. Matching Strategic Reviews within 18 hours enrich the Daily Pulse interaction instead of creating a duplicate.
+  - Daily Pulse completion records the confirmed time, notes, client history, an attended Strategic Review interaction, and moves only an earlier open Pipeline item to the configured Open stage. A missing item/stage warns without losing the completion.
+  - Client Outcomes shows call/review totals and recent evidence; Pipeline cards show attended-call totals and the latest Strategic Review.
+  - Local gates: new workflow verifier 12/12, existing Pipeline access/scoping verifier 14/14, Edge TypeScript parse, and production build pass. The MM historical preview found 12 completion records eligible for a separate interaction-link repair; preview made no writes and the repair never moves Pipeline items.
+  - Remaining: Jay local QA, then separately approve Edge/frontend rollout, per-company configuration, and optional 12-row MM historical repair.
 
 ## QA Checklist For Every Release
 

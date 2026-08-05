@@ -39,6 +39,12 @@ import {
   type AdvocacyType,
 } from "../lib/clientAdvocacy.ts";
 import { formatCalendarDate } from "../lib/calendarDate.ts";
+import {
+  DEFAULT_CLIENT_INTERACTION_TYPES,
+  loadClientInteractionSettings,
+  type ClientInteractionSettings,
+  type ClientInteractionTypeKey,
+} from "../lib/clientInteractions.ts";
 
 const DEFAULT_PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [12, 25, 50, 100] as const;
@@ -1494,13 +1500,19 @@ async function loadCallAttendanceCounts(
 function CallAttendanceControls({
   counts,
   value,
+  interactionTypes,
+  interactionTypeKey,
   disabled,
   onChange,
+  onInteractionTypeChange,
 }: {
   counts: CallAttendanceCounts;
   value: CallAttendanceStatus | "";
+  interactionTypes: ClientInteractionSettings["types"];
+  interactionTypeKey: ClientInteractionTypeKey;
   disabled: boolean;
   onChange: (value: CallAttendanceStatus | "") => void;
+  onInteractionTypeChange: (value: ClientInteractionTypeKey) => void;
 }) {
   const options: Array<{
     value: CallAttendanceStatus;
@@ -1552,6 +1564,29 @@ function CallAttendanceControls({
           })}
         </div>
       </div>
+      {value ? (
+        <label className="mt-3 block text-[11px] font-semibold uppercase text-[#586273]">
+          Call type
+          <select
+            value={interactionTypeKey}
+            disabled={disabled}
+            onChange={(event) =>
+              onInteractionTypeChange(
+                event.target.value as ClientInteractionTypeKey,
+              )
+            }
+            className="retainos-input mt-1 normal-case"
+          >
+            {interactionTypes
+              .filter((type) => type.enabled)
+              .map((type) => (
+                <option key={type.key} value={type.key}>
+                  {type.label}
+                </option>
+              ))}
+          </select>
+        </label>
+      ) : null}
     </section>
   );
 }
@@ -1646,6 +1681,17 @@ function QuickUpdateModal({
   const [callAttendance, setCallAttendance] = useState<CallAttendanceStatus | "">(
     "",
   );
+  const [interactionSettings, setInteractionSettings] =
+    useState<ClientInteractionSettings>({
+      types: DEFAULT_CLIENT_INTERACTION_TYPES,
+      strategicReviewPipeline: {
+        enabled: false,
+        pipelineId: null,
+        targetStageId: null,
+      },
+    });
+  const [interactionTypeKey, setInteractionTypeKey] =
+    useState<ClientInteractionTypeKey>("general");
   const [currentOfferName, setCurrentOfferName] = useState("");
   const [currentMilestoneName, setCurrentMilestoneName] = useState("");
   const [currentOfferMilestones, setCurrentOfferMilestones] = useState<
@@ -1672,11 +1718,14 @@ function QuickUpdateModal({
     let cancelled = false;
     async function loadCounts() {
       try {
-        const counts = await loadCallAttendanceCounts(
-          companyLegacyId,
-          client.glide_row_id,
-        );
-        if (!cancelled) setCallAttendanceCounts(counts);
+        const [counts, settings] = await Promise.all([
+          loadCallAttendanceCounts(companyLegacyId, client.glide_row_id),
+          loadClientInteractionSettings(companyLegacyId),
+        ]);
+        if (!cancelled) {
+          setCallAttendanceCounts(counts);
+          setInteractionSettings(settings);
+        }
       } catch (error) {
         console.error("Failed to load call attendance counts:", error);
       }
@@ -2045,6 +2094,7 @@ function QuickUpdateModal({
           advocacyEvents: buildAdvocacyEventDrafts(advocacyDrafts),
           advocacyNotes: buildStandaloneAdvocacyNoteDrafts(advocacyDrafts),
           ...(callAttendance ? { callAttendance } : {}),
+          ...(callAttendance ? { interactionTypeKey } : {}),
           notes,
         },
       },
@@ -2317,8 +2367,11 @@ function QuickUpdateModal({
               <CallAttendanceControls
                 counts={callAttendanceCounts}
                 value={callAttendance}
+                interactionTypes={interactionSettings.types}
+                interactionTypeKey={interactionTypeKey}
                 disabled={!isPilotCompany || saving}
                 onChange={handleCallAttendanceChange}
+                onInteractionTypeChange={setInteractionTypeKey}
               />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

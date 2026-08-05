@@ -908,6 +908,12 @@ function WindowButton({
   );
 }
 
+function localDateTimeInput(value = new Date()) {
+  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+}
+
 function PulseSectionCard({
   section,
   completingCheckpointKey,
@@ -1099,6 +1105,12 @@ export function DailyPulse() {
   const [completingCheckpointKey, setCompletingCheckpointKey] = useState<string | null>(
     null,
   );
+  const [pendingCheckpointItem, setPendingCheckpointItem] =
+    useState<PulseItem | null>(null);
+  const [checkpointOccurredAt, setCheckpointOccurredAt] = useState(
+    localDateTimeInput(),
+  );
+  const [checkpointNotes, setCheckpointNotes] = useState("");
   const [completingFollowUpTaskId, setCompletingFollowUpTaskId] = useState<
     string | null
   >(null);
@@ -1588,12 +1600,22 @@ export function DailyPulse() {
   const totalItems = sections.reduce((sum, section) => sum + section.items.length, 0);
   const enabledSignalCount = enabledTypes.size;
 
-  async function handleCompleteCheckpoint(item: PulseItem) {
-    if (!effectiveCompanyId || !item.client || !item.checkpoint) return;
+  function handleCompleteCheckpoint(item: PulseItem) {
+    setPendingCheckpointItem(item);
+    setCheckpointOccurredAt(localDateTimeInput());
+    setCheckpointNotes("");
+    setError(null);
+  }
+
+  async function confirmCompleteCheckpoint() {
+    const item = pendingCheckpointItem;
+    if (!effectiveCompanyId || !item?.client || !item.checkpoint) return;
+    const client = item.client;
+    const checkpoint = item.checkpoint;
     const key = checkpointCompletionKey(
-      item.client.glide_row_id,
-      item.checkpoint.type,
-      item.checkpoint.dueAt,
+      client.glide_row_id,
+      checkpoint.type,
+      checkpoint.dueAt,
     );
     setCompletingCheckpointKey(key);
     setError(null);
@@ -1604,9 +1626,11 @@ export function DailyPulse() {
           body: {
             action: "complete",
             companyLegacyId: effectiveCompanyId,
-            clientLegacyId: item.client.glide_row_id,
-            checkpointType: item.checkpoint.type,
-            dueAt: item.checkpoint.dueAt,
+            clientLegacyId: client.glide_row_id,
+            checkpointType: checkpoint.type,
+            dueAt: checkpoint.dueAt,
+            occurredAt: new Date(checkpointOccurredAt).toISOString(),
+            notes: checkpointNotes,
           },
         },
       );
@@ -1628,6 +1652,10 @@ export function DailyPulse() {
           );
           return next;
         });
+      }
+      setPendingCheckpointItem(null);
+      if (data?.pipelineWarning) {
+        setError(String(data.pipelineWarning));
       }
     } catch (completeError) {
       setError(
@@ -1811,6 +1839,80 @@ export function DailyPulse() {
           ))}
         </div>
       )}
+      {pendingCheckpointItem?.client && pendingCheckpointItem.checkpoint ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close Strategic Review confirmation"
+            onClick={() => setPendingCheckpointItem(null)}
+            className="absolute inset-0 bg-[#0e1b29]/55 backdrop-blur-[2px]"
+          />
+          <div className="relative w-full max-w-lg rounded-xl border border-[#d8e0ea] bg-white shadow-2xl">
+            <div className="border-b border-[#e2e8f0] px-5 py-4">
+              <h2 className="text-lg font-semibold text-[#162b3e]">
+                Complete Strategic Review
+              </h2>
+              <p className="mt-1 text-sm text-[#697586]">
+                This records an attended Strategic Review call, writes client
+                history, and moves the configured Pipeline item when available.
+              </p>
+            </div>
+            <div className="space-y-4 px-5 py-5">
+              <div className="rounded-md border border-[#d8e0ea] bg-[#f8fafc] px-4 py-3">
+                <p className="font-semibold text-[#162b3e]">
+                  {pendingCheckpointItem.client.client_name ?? "Client"}
+                </p>
+                <p className="mt-1 text-xs text-[#697586]">
+                  Due {pendingCheckpointItem.checkpoint.dueAt}
+                </p>
+              </div>
+              <label className="block text-sm font-semibold text-[#344054]">
+                Review date and time
+                <input
+                  type="datetime-local"
+                  value={checkpointOccurredAt}
+                  disabled={Boolean(completingCheckpointKey)}
+                  onChange={(event) => setCheckpointOccurredAt(event.target.value)}
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm font-semibold text-[#344054]">
+                Notes
+                <textarea
+                  value={checkpointNotes}
+                  disabled={Boolean(completingCheckpointKey)}
+                  onChange={(event) => setCheckpointNotes(event.target.value)}
+                  rows={4}
+                  placeholder="Optional review context or next step"
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-[#e2e8f0] px-5 py-4">
+              <button
+                type="button"
+                disabled={Boolean(completingCheckpointKey)}
+                onClick={() => setPendingCheckpointItem(null)}
+                className="rounded-md border border-[#d0d5dd] bg-white px-4 py-2 text-sm font-semibold text-[#344054]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={
+                  Boolean(completingCheckpointKey) || !checkpointOccurredAt
+                }
+                onClick={() => void confirmCompleteCheckpoint()}
+                className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {completingCheckpointKey
+                  ? "Completing..."
+                  : "Mark SR complete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

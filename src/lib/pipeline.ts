@@ -69,6 +69,13 @@ export interface PipelineClient {
   csm_team_member_id?: string | null;
   csm_secondary_assignee_id?: string | null;
   program_status_value?: string | null;
+  interaction_summary?: {
+    attended: number;
+    missed: number;
+    lastCallAt: string | null;
+    strategicReviewCount: number;
+    lastStrategicReviewAt: string | null;
+  };
 }
 
 export interface PipelineMember {

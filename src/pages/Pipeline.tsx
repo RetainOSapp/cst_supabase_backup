@@ -397,6 +397,17 @@ function PipelineCard({
             {owner?.name || "Unassigned"}
           </span>
         </div>
+        {client?.interaction_summary ? (
+          <div className="flex justify-between gap-2">
+            <span>Calls</span>
+            <span className="truncate font-medium text-[#344054]">
+              {client.interaction_summary.attended.toLocaleString()} attended
+              {client.interaction_summary.lastStrategicReviewAt
+                ? ` · SR ${formatDate(client.interaction_summary.lastStrategicReviewAt)}`
+                : ""}
+            </span>
+          </div>
+        ) : null}
         <div className="flex justify-between gap-2">
           <span>Follow-up</span>
           <span className={overdue ? "font-semibold text-rose-700" : "font-medium text-[#344054]"}>

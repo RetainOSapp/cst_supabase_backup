@@ -41,6 +41,8 @@
     "dashboard:verify:mm-lifecycle": "node scripts/verify-mm-dashboard-lifecycle.mjs",
     "performance:verify:navigation": "node scripts/verify-navigation-performance.mjs",
     "advocacy:verify:note-history": "node scripts/verify-advocacy-note-history.mjs",
+    "client-interactions:verify": "node scripts/verify-client-interaction-orchestration.mjs",
+    "pilot:backfill:strategic-reviews": "node scripts/backfill-strategic-review-interactions.mjs",
     "dashboard:verify:suspended-auto-offboard": "node scripts/verify-suspended-auto-offboard.mjs",
     "preview": "vite preview",
     "db:apply:sql": "node scripts/apply-sql-file.mjs",

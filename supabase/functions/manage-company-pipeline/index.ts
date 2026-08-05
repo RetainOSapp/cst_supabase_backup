@@ -13,6 +13,10 @@ import {
   jsonResponse as sharedJsonResponse,
   optionsResponse,
 } from "../_shared/http.ts";
+import {
+  DEFAULT_INTERACTION_TYPES,
+  normalizeInteractionSettings,
+} from "../_shared/clientInteractions.ts";
 
 const ACTIONS = new Set([
   "list_configuration",
@@ -27,6 +31,7 @@ const ACTIONS = new Set([
   "reorder_stages",
   "archive_stage",
   "update_role_access",
+  "update_interaction_settings",
 ]);
 const PIPELINE_TYPES = new Set(["renewal", "expansion"]);
 const VALUE_SOURCES = new Set(["current_contract", "fixed", "none"]);
@@ -399,7 +404,7 @@ async function listConfiguration(
   const [settingsResult, pipelinesResult, stagesResult] = await Promise.all([
     supabase
       .from("company_settings")
-      .select("enable_pipeline, enable_pipeline_director_access, enable_pipeline_support_access, enable_pipeline_csm_access, enable_pipeline_viewer_access")
+      .select("enable_pipeline, enable_pipeline_director_access, enable_pipeline_support_access, enable_pipeline_csm_access, enable_pipeline_viewer_access, metadata")
       .eq("company_id", companyId)
       .maybeSingle(),
     supabase
@@ -434,6 +439,7 @@ async function listConfiguration(
     supportAccessEnabled: settings.enable_pipeline_support_access !== false,
     csmAccessEnabled: settings.enable_pipeline_csm_access !== false,
     viewerAccessEnabled: settings.enable_pipeline_viewer_access === true,
+    interactionSettings: normalizeInteractionSettings(settings.metadata),
     pipelines: (pipelinesResult.data ?? []).map((pipeline) => ({
       ...pipeline,
       include_auto_renew:
@@ -546,6 +552,134 @@ Deno.serve(async (req) => {
       return respond({
         ok: true,
         settings: Array.isArray(data) ? data[0] : data,
+        ...(await listConfiguration(supabase, company.id)),
+      });
+    }
+
+    if (action === "update_interaction_settings") {
+      const submittedTypes = Array.isArray(body.interactionTypes)
+        ? body.interactionTypes
+        : [];
+      const submittedByKey = new Map(
+        submittedTypes
+          .map((value) => objectValue(value))
+          .map((value) => [cleanText(value.key), value]),
+      );
+      const interactionTypes = DEFAULT_INTERACTION_TYPES.map((fallback) => {
+        const submitted = submittedByKey.get(fallback.key);
+        const label = cleanText(submitted?.label) || fallback.label;
+        if (label.length > 80) {
+          throw new AuthError("Interaction type labels must be 80 characters or fewer.", 400);
+        }
+        if (
+          submitted?.enabled !== undefined &&
+          typeof submitted.enabled !== "boolean"
+        ) {
+          throw new AuthError("Interaction type enabled values must be true or false.", 400);
+        }
+        const titlePatterns = Array.isArray(submitted?.titlePatterns)
+          ? submitted.titlePatterns.map(cleanText).filter(Boolean).slice(0, 20)
+          : fallback.titlePatterns;
+        return {
+          key: fallback.key,
+          label,
+          enabled:
+            fallback.key === "general" ? true : submitted?.enabled !== false,
+          color: fallback.color,
+          title_patterns: titlePatterns,
+        };
+      });
+
+      const automation = objectValue(body.strategicReviewPipeline);
+      if (
+        automation.enabled !== undefined &&
+        typeof automation.enabled !== "boolean"
+      ) {
+        throw new AuthError("Strategic Review automation must be true or false.", 400);
+      }
+      const pipelineId = cleanText(automation.pipelineId);
+      const targetStageId = cleanText(automation.targetStageId);
+      if (automation.enabled === true && (!pipelineId || !targetStageId)) {
+        throw new AuthError(
+          "Choose a Pipeline and target stage before enabling Strategic Review automation.",
+          400,
+        );
+      }
+      if (automation.enabled === true) {
+        const { data: targetStage, error: targetStageError } = await supabase
+          .from("company_pipeline_stages")
+          .select("id, pipeline_id, stage_type, is_enabled, archived_at")
+          .eq("company_id", company.id)
+          .eq("pipeline_id", pipelineId)
+          .eq("id", targetStageId)
+          .maybeSingle();
+        if (targetStageError) throw targetStageError;
+        if (
+          !targetStage ||
+          targetStage.stage_type !== "open" ||
+          targetStage.is_enabled !== true ||
+          targetStage.archived_at
+        ) {
+          throw new AuthError(
+            "Choose an enabled Open stage from the selected Pipeline.",
+            400,
+          );
+        }
+      }
+
+      const { data: currentSettings, error: currentSettingsError } = await supabase
+        .from("company_settings")
+        .select("*")
+        .eq("company_id", company.id)
+        .maybeSingle();
+      if (currentSettingsError) throw currentSettingsError;
+      if (!currentSettings) {
+        throw new AuthError("Company settings were not found.", 404);
+      }
+      const nextMetadata = {
+        ...objectValue(currentSettings.metadata),
+        client_interaction_types: interactionTypes,
+        strategic_review_pipeline_automation: {
+          enabled: automation.enabled === true,
+          pipeline_id: pipelineId || null,
+          target_stage_id: targetStageId || null,
+        },
+      };
+      const { data: changedSettings, error: settingsError } = await supabase
+        .from("company_settings")
+        .update({ metadata: nextMetadata })
+        .eq("company_id", company.id)
+        .select("*")
+        .single();
+      if (settingsError) throw settingsError;
+      const { error: auditError } = await supabase.from("app_audit_events").insert({
+        company_id: company.id,
+        actor_auth_user_id: authenticatedActor.id,
+        actor_member_id: actor.memberId,
+        event_type: "company_interaction_settings_updated",
+        source: "company_pipeline_admin",
+        entity_table: "company_settings",
+        entity_id: changedSettings.id,
+        title: "Client interaction settings updated",
+        summary:
+          "Call labels and Strategic Review Pipeline automation were updated.",
+        before_data: {
+          client_interaction_types:
+            objectValue(currentSettings.metadata).client_interaction_types ?? null,
+          strategic_review_pipeline_automation:
+            objectValue(currentSettings.metadata)
+              .strategic_review_pipeline_automation ?? null,
+        },
+        after_data: {
+          client_interaction_types: interactionTypes,
+          strategic_review_pipeline_automation:
+            nextMetadata.strategic_review_pipeline_automation,
+        },
+        metadata: { actor_role: actor.role },
+      });
+      if (auditError) throw auditError;
+      return respond({
+        ok: true,
         ...(await listConfiguration(supabase, company.id)),
       });
     }

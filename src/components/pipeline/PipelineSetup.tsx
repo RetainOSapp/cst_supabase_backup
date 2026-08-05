@@ -8,6 +8,11 @@ import type {
   PipelineValueSource,
 } from "../../lib/pipeline.ts";
 import { loadPipelineAutomationStatus, type PipelineAutomationStatus } from "../../lib/pipeline.ts";
+import {
+  DEFAULT_CLIENT_INTERACTION_TYPES,
+  type ClientInteractionType,
+  type StrategicReviewPipelineAutomation,
+} from "../../lib/clientInteractions.ts";
 
 interface PipelineConfigurationPayload {
   masterEnabled: boolean;
@@ -17,6 +22,10 @@ interface PipelineConfigurationPayload {
   viewerAccessEnabled: boolean;
   pipelines: PipelineDefinition[];
   stages: PipelineStage[];
+  interactionSettings: {
+    types: ClientInteractionType[];
+    strategicReviewPipeline: StrategicReviewPipelineAutomation;
+  };
 }
 
 interface PipelineSetupProps {
@@ -360,6 +369,14 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
     viewerAccessEnabled: false,
     pipelines: [],
     stages: [],
+    interactionSettings: {
+      types: DEFAULT_CLIENT_INTERACTION_TYPES,
+      strategicReviewPipeline: {
+        enabled: false,
+        pipelineId: null,
+        targetStageId: null,
+      },
+    },
   });
   const [roleAccessDraft, setRoleAccessDraft] = useState({
     director: true,
@@ -368,6 +385,15 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
     viewer: false,
   });
   const [selectedPipelineId, setSelectedPipelineId] = useState("");
+  const [interactionTypesDraft, setInteractionTypesDraft] = useState<
+    ClientInteractionType[]
+  >(DEFAULT_CLIENT_INTERACTION_TYPES);
+  const [strategicReviewRuleDraft, setStrategicReviewRuleDraft] =
+    useState<StrategicReviewPipelineAutomation>({
+      enabled: false,
+      pipelineId: null,
+      targetStageId: null,
+    });
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("Expansion");
   const [newType, setNewType] = useState<PipelineType>("expansion");
@@ -391,6 +417,26 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
         viewerAccessEnabled: data.viewerAccessEnabled === true,
         pipelines: (data.pipelines ?? []) as PipelineDefinition[],
         stages: (data.stages ?? []) as PipelineStage[],
+        interactionSettings: {
+          types: Array.isArray(
+            (data.interactionSettings as { types?: unknown } | undefined)?.types,
+          )
+            ? ((data.interactionSettings as { types: ClientInteractionType[] })
+                .types)
+            : DEFAULT_CLIENT_INTERACTION_TYPES,
+          strategicReviewPipeline:
+            (
+              data.interactionSettings as
+                | {
+                    strategicReviewPipeline?: StrategicReviewPipelineAutomation;
+                  }
+                | undefined
+            )?.strategicReviewPipeline ?? {
+              enabled: false,
+              pipelineId: null,
+              targetStageId: null,
+            },
+        },
       });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Pipeline configuration failed to load.");
@@ -430,6 +476,13 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
     payload.supportAccessEnabled,
     payload.viewerAccessEnabled,
   ]);
+
+  useEffect(() => {
+    setInteractionTypesDraft(payload.interactionSettings.types);
+    setStrategicReviewRuleDraft(
+      payload.interactionSettings.strategicReviewPipeline,
+    );
+  }, [payload.interactionSettings]);
 
   useEffect(() => {
     if (payload.pipelines.length === 0) {
@@ -491,6 +544,13 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
   const starterButtonLabel = missingStarterTypes.length === 1
     ? `Add ${missingStarterTypes[0] === "renewal" ? "Renewal" : "Expansion"} starter`
     : "Add starter pipelines";
+  const interactionPipelineStages = payload.stages.filter(
+    (stage) =>
+      stage.pipeline_id === strategicReviewRuleDraft.pipelineId &&
+      stage.stage_type === "open" &&
+      stage.is_enabled !== false &&
+      !stage.archived_at,
+  );
 
   if (!isAppOwned) {
     return <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">Pipeline is unavailable until this company is moved to RetainOS app-owned write mode.</div>;
@@ -539,6 +599,160 @@ export function PipelineSetup({ companyLegacyId, canManage, canManageAccess, isA
 
       {error ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{error}</span><button type="button" onClick={() => void load()} disabled={loading || saving} className="rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold disabled:opacity-40">Retry</button></div> : null}
       {notice ? <div role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div> : null}
+
+      <section className="rounded-xl border border-[#dfe5ec] bg-white p-5 shadow-sm" aria-labelledby="client-interaction-settings">
+        <div>
+          <h3 id="client-interaction-settings" className="text-base font-semibold text-[#162b3e]">
+            Calls, reviews, and Pipeline movement
+          </h3>
+          <p className="mt-1 max-w-3xl text-sm text-[#667085]">
+            Name the interaction types used in Quick Update and client profiles.
+            Optionally move an open Pipeline item when a Strategic Review is
+            completed from Daily Pulse.
+          </p>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {interactionTypesDraft.map((type) => (
+            <div key={type.key} className="rounded-lg border border-[#d0d5dd] bg-[#f8fafc] p-3">
+              <label className="block text-xs font-semibold text-[#344054]">
+                {type.key === "general" ? "Default call label" : "Interaction label"}
+                <input
+                  value={type.label}
+                  disabled={!canManage || saving}
+                  maxLength={80}
+                  onChange={(event) =>
+                    setInteractionTypesDraft((current) =>
+                      current.map((candidate) =>
+                        candidate.key === type.key
+                          ? { ...candidate, label: event.target.value }
+                          : candidate,
+                      ),
+                    )
+                  }
+                  className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm disabled:bg-[#f2f4f7]"
+                />
+              </label>
+              <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-[#344054]">
+                <input
+                  type="checkbox"
+                  checked={type.enabled}
+                  disabled={!canManage || saving || type.key === "general"}
+                  onChange={(event) =>
+                    setInteractionTypesDraft((current) =>
+                      current.map((candidate) =>
+                        candidate.key === type.key
+                          ? { ...candidate, enabled: event.target.checked }
+                          : candidate,
+                      ),
+                    )
+                  }
+                />
+                Available to the team
+              </label>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50/60 p-4">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={strategicReviewRuleDraft.enabled}
+              disabled={!canManage || saving || !payload.masterEnabled}
+              onChange={(event) =>
+                setStrategicReviewRuleDraft((current) => ({
+                  ...current,
+                  enabled: event.target.checked,
+                }))
+              }
+            />
+            <span>
+              <span className="block text-sm font-semibold text-[#344054]">
+                Move Pipeline item when Strategic Review is completed
+              </span>
+              <span className="mt-1 block text-xs text-[#667085]">
+                Never moves an item backwards. Strategic Review completion still
+                saves if Pipeline is disabled or no matching open item exists.
+              </span>
+            </span>
+          </label>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="text-xs font-semibold text-[#344054]">
+              Pipeline
+              <select
+                value={strategicReviewRuleDraft.pipelineId ?? ""}
+                disabled={!canManage || saving}
+                onChange={(event) =>
+                  setStrategicReviewRuleDraft((current) => ({
+                    ...current,
+                    pipelineId: event.target.value || null,
+                    targetStageId: null,
+                  }))
+                }
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm disabled:bg-[#f2f4f7]"
+              >
+                <option value="">Choose a Pipeline</option>
+                {payload.pipelines
+                  .filter((pipeline) => pipeline.is_enabled && !pipeline.archived_at)
+                  .map((pipeline) => (
+                    <option key={pipeline.id} value={pipeline.id}>
+                      {pipeline.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-[#344054]">
+              Completion stage
+              <select
+                value={strategicReviewRuleDraft.targetStageId ?? ""}
+                disabled={
+                  !canManage ||
+                  saving ||
+                  !strategicReviewRuleDraft.pipelineId
+                }
+                onChange={(event) =>
+                  setStrategicReviewRuleDraft((current) => ({
+                    ...current,
+                    targetStageId: event.target.value || null,
+                  }))
+                }
+                className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm disabled:bg-[#f2f4f7]"
+              >
+                <option value="">Choose an Open stage</option>
+                {interactionPipelineStages.map((stage) => (
+                  <option key={stage.id} value={stage.id}>
+                    {stage.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            disabled={
+              !canManage ||
+              saving ||
+              interactionTypesDraft.some((type) => !type.label.trim()) ||
+              (strategicReviewRuleDraft.enabled &&
+                (!strategicReviewRuleDraft.pipelineId ||
+                  !strategicReviewRuleDraft.targetStageId))
+            }
+            onClick={() =>
+              void act("update_interaction_settings", {
+                interactionTypes: interactionTypesDraft,
+                strategicReviewPipeline: strategicReviewRuleDraft,
+              }).then((result) => {
+                if (result) setNotice("Calls and Strategic Review automation were saved.");
+              })
+            }
+            className="rounded-md bg-[#162b3e] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {saving ? "Saving..." : "Save interaction settings"}
+          </button>
+        </div>
+      </section>
 
       <section className="rounded-xl border border-[#dfe5ec] bg-white p-5 shadow-sm" aria-labelledby="pipeline-role-access">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
