@@ -1684,16 +1684,36 @@ function CallAttendanceControls({
 }
 
 function CallsAndReviewsPanel({
+  client,
   events,
   settings,
   memberNameById,
+  canRecord,
   onViewHistory,
+  onRecorded,
 }: {
+  client: ClientRow;
   events: ClientInteractionEvent[];
   settings: ClientInteractionSettings;
   memberNameById: Map<string, string>;
+  canRecord: boolean;
   onViewHistory: () => void;
+  onRecorded: (
+    client: ClientRow,
+    event: ClientHistoryEventRow | null,
+    interaction: ClientInteractionEvent,
+  ) => void;
 }) {
+  const enabledTypes = settings.types.filter((type) => type.enabled);
+  const [recording, setRecording] = useState(false);
+  const [attendance, setAttendance] = useState<CallAttendanceStatus | "">("");
+  const [interactionTypeKey, setInteractionTypeKey] =
+    useState<ClientInteractionTypeKey>(
+      enabledTypes[0]?.key ?? "general",
+    );
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const attended = events.filter(
     (event) => event.attendance_status === "attended",
   );
@@ -1712,6 +1732,85 @@ function CallsAndReviewsPanel({
     ).length,
   }));
 
+  useEffect(() => {
+    if (
+      enabledTypes.length > 0 &&
+      !enabledTypes.some((type) => type.key === interactionTypeKey)
+    ) {
+      setInteractionTypeKey(enabledTypes[0].key);
+    }
+  }, [enabledTypes, interactionTypeKey]);
+
+  function closeRecorder() {
+    if (saving) return;
+    setRecording(false);
+    setAttendance("");
+    setNotes("");
+    setSaveError(null);
+  }
+
+  async function recordCall(event: FormEvent) {
+    event.preventDefault();
+    if (saving || !attendance || enabledTypes.length === 0) return;
+    const companyLegacyId =
+      client.company_glide_row_id ?? client.company_id ?? "";
+    if (!companyLegacyId) {
+      setSaveError("This client is missing its company reference.");
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    const { data, error } = await supabase.functions.invoke(
+      "manage-client-quick-update",
+      {
+        body: {
+          companyLegacyId,
+          clientLegacyId: client.glide_row_id,
+          callAttendance: attendance,
+          interactionTypeKey,
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+        },
+      },
+    );
+    setSaving(false);
+
+    if (error) {
+      setSaveError(await functionErrorMessage(error));
+      return;
+    }
+    if (data?.error) {
+      setSaveError(data.error);
+      return;
+    }
+    if (!data?.client || !data?.callAttendanceEvent) {
+      setSaveError("The call was not returned after saving. Please try again.");
+      return;
+    }
+
+    const interaction = {
+      ...(data.callAttendanceEvent as Record<string, unknown>),
+      attendance_status:
+        data.callAttendanceEvent.attendance_status === "missed"
+          ? "missed"
+          : "attended",
+      metadata:
+        data.callAttendanceEvent.metadata &&
+        typeof data.callAttendanceEvent.metadata === "object" &&
+        !Array.isArray(data.callAttendanceEvent.metadata)
+          ? (data.callAttendanceEvent.metadata as Record<string, unknown>)
+          : {},
+    } as ClientInteractionEvent;
+    onRecorded(
+      mapAppClientRow(data.client as Record<string, unknown>),
+      (data.event as ClientHistoryEventRow | undefined) ?? null,
+      interaction,
+    );
+    setRecording(false);
+    setAttendance("");
+    setNotes("");
+  }
+
   return (
     <section className="mt-5 rounded-md border border-[#e4e9f0] bg-[#f8fafc] p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1724,10 +1823,136 @@ function CallsAndReviewsPanel({
             tools.
           </p>
         </div>
-        <button type="button" onClick={onViewHistory} className="retainos-button-secondary">
-          View in history
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {canRecord && !recording ? (
+            <button
+              type="button"
+              onClick={() => setRecording(true)}
+              className="retainos-button-primary"
+            >
+              Record call
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onViewHistory}
+            className="retainos-button-secondary"
+          >
+            View in history
+          </button>
+        </div>
       </div>
+      {recording ? (
+        <form
+          onSubmit={recordCall}
+          className="mt-4 rounded-md border border-[#d7e7f7] bg-white p-4 shadow-sm"
+        >
+          <div>
+            <h4 className="text-sm font-semibold text-[#162b3e]">
+              Record call attendance
+            </h4>
+            <p className="mt-1 text-sm text-[#667085]">
+              Uses the same attendance tracking and history as Quick Update.
+            </p>
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <fieldset>
+              <legend className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                Attendance
+              </legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(
+                  [
+                    {
+                      value: "attended",
+                      label: "Attended",
+                      selectedClass:
+                        "border-emerald-300 bg-emerald-50 text-emerald-700",
+                    },
+                    {
+                      value: "missed",
+                      label: "Missed",
+                      selectedClass: "border-red-300 bg-red-50 text-red-700",
+                    },
+                  ] as const
+                ).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    disabled={saving}
+                    onClick={() => setAttendance(option.value)}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      attendance === option.value
+                        ? option.selectedClass
+                        : "border-[#d0d5dd] bg-white text-[#475467] hover:bg-[#f8fafc]"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-[#667085]">
+              Call type
+              <select
+                value={interactionTypeKey}
+                disabled={saving || enabledTypes.length === 0}
+                onChange={(event) =>
+                  setInteractionTypeKey(
+                    event.target.value as ClientInteractionTypeKey,
+                  )
+                }
+                className="mt-2 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-[#162b3e] disabled:bg-[#f2f4f7]"
+              >
+                {enabledTypes.map((type) => (
+                  <option key={type.key} value={type.key}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-[#667085]">
+            Note <span className="font-normal normal-case">(optional)</span>
+            <textarea
+              value={notes}
+              disabled={saving}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={3}
+              placeholder="Add useful context or the next step from this call."
+              className="mt-2 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm font-normal normal-case tracking-normal text-[#162b3e] placeholder:text-[#98a2b3] disabled:bg-[#f2f4f7]"
+            />
+          </label>
+          {enabledTypes.length === 0 ? (
+            <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Enable at least one call type in Company Settings before recording
+              attendance.
+            </p>
+          ) : null}
+          {saveError ? (
+            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {saveError}
+            </p>
+          ) : null}
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={closeRecorder}
+              className="retainos-button-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !attendance || enabledTypes.length === 0}
+              className="retainos-button-primary"
+            >
+              {saving ? "Saving..." : "Save call"}
+            </button>
+          </div>
+        </form>
+      ) : null}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-md border border-[#e4e9f0] bg-white px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
@@ -9457,10 +9682,22 @@ export function ClientDetail() {
             }}
           />
           <CallsAndReviewsPanel
+            client={client}
             events={clientInteractionEvents}
             settings={clientInteractionSettings}
             memberNameById={teamMemberNameById}
+            canRecord={canEditProfile}
             onViewHistory={() => setActiveTab("history")}
+            onRecorded={(updatedClient, event, interaction) => {
+              setClient(updatedClient);
+              setClientInteractionEvents((current) => [
+                interaction,
+                ...current.filter((item) => item.id !== interaction.id),
+              ]);
+              if (event) {
+                setHistoryEvents((current) => [event, ...current].slice(0, 25));
+              }
+            }}
           />
         </div>
       ) : (

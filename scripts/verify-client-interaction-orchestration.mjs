@@ -103,6 +103,17 @@ check(
     /View in history/.test(clientDetail),
 );
 check(
+  "client Outcomes records attended or missed calls through the existing Quick Update boundary",
+  /Record call attendance/.test(clientDetail) &&
+    /Uses the same attendance tracking and history as Quick Update/.test(
+      clientDetail,
+    ) &&
+    /manage-client-quick-update/.test(clientDetail) &&
+    /callAttendance: attendance/.test(clientDetail) &&
+    /interactionTypeKey/.test(clientDetail) &&
+    /onRecorded/.test(clientDetail),
+);
+check(
   "Pipeline cards expose call and Strategic Review completion context",
   /interaction_summary/.test(workspace) &&
     /lastStrategicReviewAt/.test(pipeline) &&
