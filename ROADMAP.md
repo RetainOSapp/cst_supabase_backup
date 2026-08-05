@@ -354,7 +354,7 @@ Goal: one company can manage real clients in RetainOS without relying on Glide f
   - 2026-06-20 image upload follow-up: New Client and Edit Profile now support client image upload through `upload-client-image`, while keeping pasted image URLs as a fallback.
   - Client Status Lifecycle v1 is enabled through `manage-client-status`.
   - Status changes use existing program statuses: Front End, Back End, Paused, Suspended, Offboarded.
-  - Paused/Suspended/Offboarded require a typed reason; Paused requires a return date and extends app-owned contract dates.
+  - Paused/Suspended/Offboarded require a typed reason. The local pause-reconciliation candidate captures effective, planned-return, and actual-return dates; records one pause period; reconciles the bound contract; and preserves legacy ambiguity for review. It is not live until Jay QA and explicit rollout approval.
   - 2026-07-17 CSM membership repair applied `20260717100000`: duplicate archived CSM records for Lorcan Garvey and Ben Alfaro were empty and safely removed, their active memberships are Auth-linked, and a company+email CSM uniqueness index prevents future duplicates. `manage-client-status` now resolves only active memberships; Client Detail also shows the server's actual status-save error. Awaiting Lorcan pause QA. [qa]
   - Remaining CRUD gaps: richer field coverage, archive/delete beyond lifecycle statuses, and bulk import.
 - `[~]` `[polish]` Clients list/card views and filters exist; Ethical Scaling now reads app-owned client rows.
@@ -1022,6 +1022,7 @@ Use this section to connect feature work into operational flows. A feature is no
 - `[ ]` `[priority: medium]` Client at churn risk can be flagged from progress/buy-in/milestone delays and related signals.
 - `[x]` Client can be paused, suspended, or offboarded through controlled write flows.
   - 2026-06-17 lifecycle audit confirms Pause/Suspended/Offboarded status changes are live for app-owned pilot/migrated clients through `manage-client-status`; Jay QA passed with Josh Garvey assigned to Ben.
+  - `[~]` `[qa]` 2026-08-06 permanent pause reconciliation is released: the additive app-owned ledger binds one exact eligible contract, applies the planned calendar-day window provisionally, reconciles it to the actual return date, makes the behavior company-configurable, and sends ambiguous legacy pauses to review without silently changing dates. Production migration `20260805170000` (`f1b8672df74c56edbed860b301dfa6c51c0736a215c800eaeefa5cdc5a242be6`) and both JWT-protected management functions are live; the safe seed recorded 45 open periods without altering dates and left 79 incomplete/ambiguous current pauses untouched. Static contract 13/13, production build, and anonymous 401 probes pass. Historical cleanup remains workbook-gated; Jay UI QA remains.
 - `[ ]` `[priority: low]` Client archive flow.
   - Archive remains separate/future and is not part of the status lifecycle closeout.
 - `[~]` `[downstream]` Offboarding updates roster, dashboard, client history, notifications, and reporting.

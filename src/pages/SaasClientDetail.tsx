@@ -245,6 +245,7 @@ interface CompanySettingsRow {
   enable_embeds: boolean;
   enable_zapier_client_create: boolean;
   allow_status_change_retention: boolean;
+  extend_contract_for_pauses: boolean;
   enable_suspended_auto_offboard: boolean;
   suspended_auto_offboard_days: number;
   enable_pipeline: boolean;
@@ -2648,6 +2649,7 @@ function defaultCompanySettings(company: CompanyRow | null): CompanySettingsRow 
     enable_embeds: false,
     enable_zapier_client_create: false,
     allow_status_change_retention: false,
+    extend_contract_for_pauses: true,
     enable_suspended_auto_offboard: false,
     suspended_auto_offboard_days: 28,
     enable_pipeline: false,
@@ -4403,6 +4405,7 @@ function CompanySettingsSetup({
           enableEmbeds: draft.enable_embeds,
           enableZapierClientCreate: draft.enable_zapier_client_create,
           allowStatusChangeRetention: draft.allow_status_change_retention,
+          extendContractForPauses: draft.extend_contract_for_pauses,
           enableSuspendedAutoOffboard: draft.enable_suspended_auto_offboard,
           suspendedAutoOffboardDays: draft.suspended_auto_offboard_days,
           enablePipeline: draft.enable_pipeline,
@@ -4745,6 +4748,32 @@ function CompanySettingsSetup({
               />
             </label>
           ))}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#e4e9f0] bg-[#f7f9fc]">
+        <div className="border-b border-[#e4e9f0] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[#101828]">
+            Pause contract handling
+          </h3>
+          <p className="mt-1 text-xs text-[#667085]">
+            Choose whether approved client pauses extend the exact contract
+            that was active when the pause began.
+          </p>
+        </div>
+        <div className="p-4">
+          <SettingsFlag
+            label="Extend contracts for client pauses"
+            description="Apply the planned pause window provisionally, then reconcile the same contract to the actual return date when the client is reactivated. Turning this off keeps pause history without changing contract dates."
+            checked={draft.extend_contract_for_pauses}
+            disabled={disabled}
+            onChange={(checked) =>
+              setDraft((current) => ({
+                ...current,
+                extend_contract_for_pauses: checked,
+              }))
+            }
+          />
         </div>
       </section>
 
@@ -5977,7 +6006,7 @@ export function SaasClientDetail({
           supabase
             .from("company_settings")
             .select(
-              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, allow_status_change_retention, enable_suspended_auto_offboard, suspended_auto_offboard_days, enable_pipeline, enable_pipeline_viewer_access, metadata, updated_at",
+              "id, profile_upkeep_freshness_days, default_client_view, default_calendar_mode, enable_secondary_assignee, enable_secondary_offers, enable_archetypes, enable_call_ai_for_csms, enable_embeds, enable_zapier_client_create, allow_status_change_retention, extend_contract_for_pauses, enable_suspended_auto_offboard, suspended_auto_offboard_days, enable_pipeline, enable_pipeline_viewer_access, metadata, updated_at",
             )
             .eq("company_id", appCompany.id)
             .maybeSingle(),

@@ -490,6 +490,8 @@ Deno.serve(async (req) => {
         enable_suspended_auto_offboard: Boolean(
           body.enableSuspendedAutoOffboard,
         ),
+        extend_contract_for_pauses:
+          body.extendContractForPauses !== false,
         suspended_auto_offboard_days: requiredBoundedInteger(
           body.suspendedAutoOffboardDays,
           28,

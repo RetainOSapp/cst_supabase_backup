@@ -3455,6 +3455,7 @@ function ClientStatusModal({
   programChoices,
   churnReasons,
   allowStatusChangeRetention,
+  extendContractForPauses,
   onClose,
   onSaved,
 }: {
@@ -3462,6 +3463,7 @@ function ClientStatusModal({
   programChoices: ProgramChoice[];
   churnReasons: CompanyChurnReasonRow[];
   allowStatusChangeRetention: boolean;
+  extendContractForPauses: boolean;
   onClose: () => void;
   onSaved: (
     client: ClientRow,
@@ -3498,13 +3500,31 @@ function ClientStatusModal({
           { program_value: "suspended", program_label: "Suspended", program_emoji: null },
           { program_value: "off-boarded", program_label: "Offboarded", program_emoji: null },
         ];
+  const currentStatus = client.program_status_value ?? "";
   const [targetStatus, setTargetStatus] = useState(
-    fallbackOptions.find(
-      (choice) => choice.program_value !== client.program_status_value,
-    )?.program_value ?? "front-end",
+    currentStatus === "paused"
+      ? "paused"
+      : fallbackOptions.find(
+          (choice) => choice.program_value !== currentStatus,
+        )?.program_value ?? "front-end",
   );
-  const [reason, setReason] = useState("");
-  const [returnDate, setReturnDate] = useState("");
+  const [reason, setReason] = useState(
+    currentStatus === "paused"
+      ? textInputValue(client.program_status_reason)
+      : "",
+  );
+  const [returnDate, setReturnDate] = useState(
+    currentStatus === "paused"
+      ? dateInputValue(client.program_paused_return_date)
+      : "",
+  );
+  const [effectivePauseDate, setEffectivePauseDate] = useState(
+    currentStatus === "paused"
+      ? dateInputValue(client.program_latest_paused_date) || todayInputValue()
+      : todayInputValue(),
+  );
+  const [actualReturnDate, setActualReturnDate] = useState(todayInputValue());
+  const [operationKey] = useState(() => crypto.randomUUID());
   const [offboardedAt, setOffboardedAt] = useState(todayInputValue());
   const [churnReason, setChurnReason] = useState("");
   const [customChurnReason, setCustomChurnReason] = useState("");
@@ -3548,6 +3568,11 @@ function ClientStatusModal({
       : customChurnReason.trim();
   const requiresReason = ["paused", "suspended"].includes(targetStatus ?? "");
   const requiresReturnDate = targetStatus === "paused";
+  const isEditingPause =
+    currentStatus === "paused" && targetStatus === "paused";
+  const isReturningFromPause =
+    currentStatus === "paused" &&
+    (targetStatus === "front-end" || targetStatus === "back-end");
   const isReactivation =
     targetStatus === "front-end" || targetStatus === "back-end";
   const isRetentionStatusMove =
@@ -3558,6 +3583,25 @@ function ClientStatusModal({
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (saving) return;
+    if (targetStatus === "paused" && !effectivePauseDate) {
+      setSaveError("Add the date the pause takes effect.");
+      return;
+    }
+    if (targetStatus === "paused" && !returnDate) {
+      setSaveError("Add the planned return date.");
+      return;
+    }
+    if (
+      targetStatus === "paused" &&
+      returnDate < effectivePauseDate
+    ) {
+      setSaveError("Planned return date cannot be before the pause date.");
+      return;
+    }
+    if (isReturningFromPause && !actualReturnDate) {
+      setSaveError("Add the client's actual return date.");
+      return;
+    }
     if (isOffboarding) {
       if (!offboardedAt) {
         setSaveError("Add the client's actual end date.");
@@ -3591,8 +3635,15 @@ function ClientStatusModal({
               : churned === false
                 ? "Completed contract / did not churn"
                 : "Offboarded - churn status needs review"
-            : reason,
+            : isReturningFromPause
+              ? null
+              : reason,
           returnDate,
+          effectivePauseDate: targetStatus === "paused"
+            ? effectivePauseDate
+            : null,
+          actualReturnDate: isReturningFromPause ? actualReturnDate : null,
+          operationKey,
           offboardedAt: isOffboarding ? offboardedAt : null,
           churnReason: isOffboarding && churned === true ? offboardingReasonValue : null,
           churnReasonLabel:
@@ -3698,7 +3749,10 @@ function ClientStatusModal({
                   <option
                     key={choice.program_value ?? ""}
                     value={choice.program_value ?? ""}
-                    disabled={choice.program_value === client.program_status_value}
+                    disabled={
+                      choice.program_value === currentStatus &&
+                      choice.program_value !== "paused"
+                    }
                   >
                     {choice.program_label ?? choice.program_value}
                   </option>
@@ -3735,21 +3789,71 @@ function ClientStatusModal({
               </label>
             ) : null}
             {requiresReturnDate ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                    Effective Pause Date
+                  </span>
+                  <input
+                    type="date"
+                    value={effectivePauseDate}
+                    max={todayInputValue()}
+                    onChange={(event) =>
+                      setEffectivePauseDate(event.target.value)
+                    }
+                    required
+                    disabled={saving || isEditingPause}
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                  />
+                  {isEditingPause ? (
+                    <span className="mt-1 block text-xs text-gray-500">
+                      Locked after the pause begins.
+                    </span>
+                  ) : null}
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
+                    Planned Return Date
+                  </span>
+                  <input
+                    type="date"
+                    value={returnDate}
+                    min={effectivePauseDate}
+                    onChange={(event) => setReturnDate(event.target.value)}
+                    required
+                    disabled={saving}
+                    className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
+                  />
+                </label>
+                <p className="text-xs leading-5 text-gray-500 md:col-span-2">
+                  {extendContractForPauses
+                    ? "RetainOS provisionally extends the exact active contract for this window, then reconciles it to the actual return date."
+                    : "This company records pause dates without changing contract dates."}
+                </p>
+              </div>
+            ) : null}
+            {isReturningFromPause ? (
               <label className="block">
                 <span className="mb-1 block text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Return Date
+                  Actual Return Date
                 </span>
                 <input
                   type="date"
-                  value={returnDate}
-                  onChange={(event) => setReturnDate(event.target.value)}
+                  value={actualReturnDate}
+                  min={
+                    dateInputValue(client.program_latest_paused_date) ||
+                    undefined
+                  }
+                  max={todayInputValue()}
+                  onChange={(event) => setActualReturnDate(event.target.value)}
                   required
                   disabled={saving}
                   className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-50"
                 />
                 <span className="mt-1 block text-xs text-gray-500">
-                  Paused clients extend the app-owned contract by the approved
-                  pause window.
+                  RetainOS compares this with the original pause date and
+                  reconciles only the contract that was bound when the pause
+                  started.
                 </span>
               </label>
             ) : null}
@@ -3928,7 +4032,11 @@ function ClientStatusModal({
                 ? "Saving..."
                 : isOffboarding
                   ? "Finalize Offboarding"
-                  : "Save Status"}
+                  : isEditingPause
+                    ? "Update Pause"
+                    : isReturningFromPause
+                      ? "Reactivate Client"
+                      : "Save Status"}
             </button>
           </div>
         </form>
@@ -8634,6 +8742,8 @@ export function ClientDetail() {
   const [secondaryAssigneeEnabled, setSecondaryAssigneeEnabled] = useState(false);
   const [allowStatusChangeRetention, setAllowStatusChangeRetention] =
     useState(false);
+  const [extendContractForPauses, setExtendContractForPauses] =
+    useState(true);
   const [clientInteractionSettings, setClientInteractionSettings] =
     useState<ClientInteractionSettings>(
       normalizeClientInteractionSettings(null),
@@ -8919,7 +9029,7 @@ export function ClientDetail() {
           ? supabase
               .from("company_settings")
               .select(
-                "enable_secondary_assignee, enable_secondary_offers, allow_status_change_retention, metadata",
+                "enable_secondary_assignee, enable_secondary_offers, allow_status_change_retention, extend_contract_for_pauses, metadata",
               )
               .eq("company_id", appPathwayCompany.id)
               .maybeSingle()
@@ -8942,6 +9052,9 @@ export function ClientDetail() {
           setAllowStatusChangeRetention(
             companySettingsResult.data?.allow_status_change_retention === true,
           );
+          setExtendContractForPauses(
+            companySettingsResult.data?.extend_contract_for_pauses !== false,
+          );
         } else {
           console.error(
             "Failed to load company settings:",
@@ -8950,6 +9063,7 @@ export function ClientDetail() {
           setSecondaryPathwaysEnabled(false);
           setSecondaryAssigneeEnabled(false);
           setAllowStatusChangeRetention(false);
+          setExtendContractForPauses(true);
         }
         if (customFieldsResult.error) {
           console.error("Failed to load company custom fields:", customFieldsResult.error);
@@ -9834,6 +9948,7 @@ export function ClientDetail() {
           programChoices={programChoices}
           churnReasons={churnReasons}
           allowStatusChangeRetention={allowStatusChangeRetention}
+          extendContractForPauses={extendContractForPauses}
           onClose={() => setChangingStatus(false)}
           onSaved={(updatedClient, event, updatedContract) => {
             setClient(updatedClient);

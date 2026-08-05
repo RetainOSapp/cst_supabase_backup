@@ -2968,6 +2968,7 @@ export type Database = {
           enable_archetypes: boolean
           enable_call_ai_for_csms: boolean
           enable_embeds: boolean
+          extend_contract_for_pauses: boolean
           enable_suspended_auto_offboard: boolean
           enable_secondary_assignee: boolean
           enable_secondary_offers: boolean
@@ -2989,6 +2990,7 @@ export type Database = {
           enable_archetypes?: boolean
           enable_call_ai_for_csms?: boolean
           enable_embeds?: boolean
+          extend_contract_for_pauses?: boolean
           enable_suspended_auto_offboard?: boolean
           enable_secondary_assignee?: boolean
           enable_secondary_offers?: boolean
@@ -3010,6 +3012,7 @@ export type Database = {
           enable_archetypes?: boolean
           enable_call_ai_for_csms?: boolean
           enable_embeds?: boolean
+          extend_contract_for_pauses?: boolean
           enable_suspended_auto_offboard?: boolean
           enable_secondary_assignee?: boolean
           enable_secondary_offers?: boolean

@@ -2335,7 +2335,7 @@ to keep the startup router below 150 lines.
 ## Archived From Active Memory - 2026-08-04 performance compaction
 
 - 2026-07-28 active checkpoints: MM MIA auto-offboard follow-ups are live and Jay verified all 62. Client deletion tombstones are live; Shanique Messado is reconciled and hidden from search/churn. Configurable client identity display is release-ready: company default plus pathway override, person/business fallbacks, and dual-name search across the roster; Clients, detail, Dashboard, Daily Pulse, Tasks, CSM Reports, and Pipeline share the presentation rule. Build and resolver edge-case QA pass; Sales Kick live UI QA remains.
-
 ## Archived From Active Memory - 2026-08-06
 
 - 2026-08-04 MM renewal reporting is canonical and bounded: `f02f692` aligns the card/drawer; production migration `20260804193000` (`ae5bc2fc5e46f90f3ce3144c5e59c1addf335ba88c4511565af40b35ed54b8bc`) filters active, analytics-included clients before cohort work; explicit-period errors no longer fall back to mixed formulas. Gates: Vince August 7/1/6; Ben July All-programs equals Front/Back at 98 eligible / 46 retained / 47% in 899ms. Lisa Fuller still awaits date confirmation.
+- 2026-07-17 CSM membership repair `20260717100000` is production-applied: two empty archived Moves Method CSM duplicates were deleted after their active records were linked to the correct authenticated users; a same-company CSM email uniqueness index now prevents recurrence. `manage-client-status` was redeployed with active-membership-only resolution. Await Lorcan pause QA.

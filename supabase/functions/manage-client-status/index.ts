@@ -247,6 +247,9 @@ Deno.serve(async (req) => {
     const targetStatus = cleanText(body.targetStatus);
     const reason = nullableText(body.reason);
     const returnDate = normalizeDate(body.returnDate);
+    const effectivePauseDate = normalizeDate(body.effectivePauseDate);
+    const actualReturnDate = normalizeDate(body.actualReturnDate);
+    const operationKey = cleanText(body.operationKey) || crypto.randomUUID();
 
     if (!clientLegacyId) {
       return jsonResponse({ error: "Missing client id." }, 400);
@@ -267,6 +270,25 @@ Deno.serve(async (req) => {
     ) {
       return jsonResponse(
         { error: "Return date must be in the future for paused clients." },
+        400,
+      );
+    }
+    if (
+      targetStatus === "paused" &&
+      effectivePauseDate &&
+      new Date(effectivePauseDate).getTime() > Date.now()
+    ) {
+      return jsonResponse(
+        { error: "Effective pause date cannot be in the future." },
+        400,
+      );
+    }
+    if (
+      actualReturnDate &&
+      new Date(actualReturnDate).getTime() > Date.now()
+    ) {
+      return jsonResponse(
+        { error: "Actual return date cannot be in the future." },
         400,
       );
     }
@@ -318,6 +340,50 @@ Deno.serve(async (req) => {
           403,
         );
       }
+    }
+
+    const isPauseTransition =
+      targetStatus === "paused" ||
+      (client.program_status_value === "paused" &&
+        ["front-end", "back-end"].includes(targetStatus));
+
+    if (isPauseTransition) {
+      if (targetStatus === "paused" && !effectivePauseDate) {
+        return jsonResponse(
+          { error: "Add the date the pause takes effect." },
+          400,
+        );
+      }
+      if (
+        client.program_status_value === "paused" &&
+        ["front-end", "back-end"].includes(targetStatus) &&
+        !actualReturnDate
+      ) {
+        return jsonResponse(
+          { error: "Add the client's actual return date." },
+          400,
+        );
+      }
+
+      const { data: transition, error: transitionError } = await supabase.rpc(
+        "apply_client_pause_transition",
+        {
+          p_company_id: company.id,
+          p_client_id: client.id,
+          p_target_status: targetStatus,
+          p_reason: reason,
+          p_notes: nullableText(body.notes),
+          p_effective_pause_date: effectivePauseDate?.slice(0, 10) ?? null,
+          p_planned_return_date: returnDate?.slice(0, 10) ?? null,
+          p_actual_return_date: actualReturnDate?.slice(0, 10) ?? null,
+          p_operation_key: operationKey,
+          p_actor_auth_user_id: userData.user.id,
+          p_actor_member_id: actor.memberId,
+          p_actor_role: actor.role,
+        },
+      );
+      if (transitionError) throw transitionError;
+      return jsonResponse(transition);
     }
 
     if (client.program_status_value === targetStatus) {
