@@ -2190,8 +2190,9 @@ Use this section as the “what good looks like” checklist before migrating re
   - Quick Update and Fathom/reconciled calls share one typed attendance ledger. Matching Strategic Reviews within 18 hours enrich the Daily Pulse interaction instead of creating a duplicate.
   - Daily Pulse completion records the confirmed time, notes, client history, an attended Strategic Review interaction, and moves only an earlier open Pipeline item to the configured Open stage. A missing item/stage warns without losing the completion.
   - Client Outcomes shows call/review totals and recent evidence; Pipeline cards show attended-call totals and the latest Strategic Review.
+  - 2026-08-05 Jay approved the local Quick Update selector and Client Outcomes presentation. Six backward-compatible Edge Functions are live with their existing JWT/token boundaries preserved; anonymous probes deny all five management functions and the Fathom endpoint rejects a missing company integration token before intake storage.
   - Local gates: new workflow verifier 12/12, existing Pipeline access/scoping verifier 14/14, Edge TypeScript parse, and production build pass. The MM historical preview found 12 completion records eligible for a separate interaction-link repair; preview made no writes and the repair never moves Pipeline items.
-  - Remaining: Jay local QA, then separately approve Edge/frontend rollout, per-company configuration, and optional 12-row MM historical repair.
+  - Remaining: production UI/team QA for configuration, Daily Pulse completion, and Pipeline movement; then separately approve MM configuration and the optional 12-row historical repair.
 
 ## QA Checklist For Every Release
 
