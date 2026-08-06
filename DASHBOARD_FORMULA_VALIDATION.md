@@ -187,8 +187,11 @@ Validation notes:
 
 ### Clients Up For Renewal
 
-Formula: distinct non-paused, non-suspended, non-churned clients with any
-current or historical contract end date inside the selected reporting period.
+Formula: distinct analytics-included clients with any current or historical
+contract decision inside the selected reporting period, excluding paused,
+suspended/MIA, and early-churn records. A normally completed/offboarded client
+remains eligible when the recorded offboard date is on or after the relevant
+contract end.
 
 Sources:
 
@@ -203,9 +206,19 @@ Sources:
 
 Exclusions:
 
+- Archived clients and clients explicitly excluded from Dashboard analytics.
 - `paused`.
 - `suspended`.
-- Churned clients for the period.
+- Early offboards/drop-offs where the recorded offboard date is before the
+  relevant contract end.
+- Offboarded legacy records with no actual offboard date.
+
+The Up For Renewal card deliberately separates two values:
+
+- Numerator: currently active Front End/Back End clients in the cohort that
+  have not yet recorded a retained outcome.
+- Denominator: all eligible contracts in the period, including normally
+  completed/offboarded contracts and retained clients.
 
 Known weak spots:
 

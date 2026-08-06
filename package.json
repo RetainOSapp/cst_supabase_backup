@@ -35,6 +35,8 @@
     "pipeline:verify:owner-navigation": "node scripts/verify-pipeline-owner-navigation.mjs",
     "dashboard:verify:renewal-reporting": "node scripts/verify-dashboard-renewal-reporting.mjs",
     "dashboard:verify:renewal-consistency": "node scripts/verify-renewal-canonical-consistency.mjs",
+    "dashboard:verify:renewal-completed-scope": "node scripts/verify-renewal-completed-contract-scope.mjs",
+    "dashboard:audit:mm-july-retention": "node scripts/audit-mm-july-retention-denominator.mjs",
     "dashboard:test:calendar-dates": "node --experimental-strip-types scripts/test-calendar-date.mjs",
     "dashboard:verify:mm-adam-renewals": "node scripts/verify-mm-adam-renewal-ticket.mjs",
     "dashboard:verify:churn-chart-period": "node scripts/verify-dashboard-churn-chart-period.mjs",

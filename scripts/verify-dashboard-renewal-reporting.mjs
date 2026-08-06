@@ -14,6 +14,10 @@ const activeAnalyticsScope = readFileSync(
   "supabase/migrations/20260804193000_dashboard_renewal_active_analytics_scope.sql",
   "utf8",
 );
+const completedContractScope = readFileSync(
+  "supabase/migrations/20260806100000_dashboard_renewal_completed_contract_scope.sql",
+  "utf8",
+);
 
 const checks = [];
 function check(label, passed) {
@@ -69,10 +73,17 @@ check(
   ),
 );
 check(
-  "renewal cohort is limited to active Front End and Back End statuses",
+  "renewal cohort includes active clients and dated normal completions",
   /client\.program_status_value in \('front-end', 'back-end'\)/i.test(
-    activeAnalyticsScope,
-  ),
+    completedContractScope,
+  ) &&
+    /client\.program_status_value = 'off-boarded'/i.test(
+      completedContractScope,
+    ) &&
+    /client_age_date_offboarded_for_filtering[\s\S]{0,240}>= p_date_range_start - interval '120 days'/i.test(
+      completedContractScope,
+    ) &&
+    /::date >= candidate\.contract_end_date::date/i.test(migration),
 );
 
 const failures = checks.filter((item) => !item.passed);
