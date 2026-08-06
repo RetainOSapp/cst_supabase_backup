@@ -33,6 +33,7 @@
     "pipeline:verify:bounded-cohort-edge": "node scripts/verify-pipeline-bounded-cohort-edge.mjs",
     "pipeline:verify:safe-rollout": "node scripts/verify-pipeline-safe-production-rollout.mjs",
     "pipeline:verify:owner-navigation": "node scripts/verify-pipeline-owner-navigation.mjs",
+    "pipeline:verify:sam-feedback": "node scripts/verify-pipeline-sam-feedback.mjs",
     "dashboard:verify:renewal-reporting": "node scripts/verify-dashboard-renewal-reporting.mjs",
     "dashboard:verify:renewal-consistency": "node scripts/verify-renewal-canonical-consistency.mjs",
     "dashboard:verify:renewal-completed-scope": "node scripts/verify-renewal-completed-contract-scope.mjs",

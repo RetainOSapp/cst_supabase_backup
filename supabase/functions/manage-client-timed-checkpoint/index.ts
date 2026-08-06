@@ -438,73 +438,34 @@ Deno.serve(async (req) => {
       rule.pipelineId &&
       rule.targetStageId
     ) {
-      const { data: targetStage, error: targetStageError } = await supabase
-        .from("company_pipeline_stages")
-        .select("id, pipeline_id, position, stage_type, is_enabled, archived_at")
-        .eq("company_id", company.id)
-        .eq("pipeline_id", rule.pipelineId)
-        .eq("id", rule.targetStageId)
-        .maybeSingle();
-      if (targetStageError) throw targetStageError;
-      if (
-        !targetStage ||
-        targetStage.stage_type !== "open" ||
-        targetStage.is_enabled !== true ||
-        targetStage.archived_at
-      ) {
+      const { data: pipelineResult, error: pipelineError } = await supabase.rpc(
+        "ensure_strategic_review_pipeline_item",
+        {
+          p_company_id: company.id,
+          p_client_id: client.id,
+          p_pipeline_id: rule.pipelineId,
+          p_target_stage_id: rule.targetStageId,
+          p_actor_auth_user_id: userData.user.id,
+          p_actor_member_id: actor.memberId,
+          p_actor_role: actor.role,
+          p_note: nullableText(body.notes),
+        },
+      );
+      if (pipelineError) {
         pipelineWarning =
-          "Strategic Review was saved, but its configured Pipeline stage is unavailable.";
+          `Strategic Review was saved, but Pipeline could not update: ${pipelineError.message}`;
       } else {
-        const { data: candidateItems, error: candidateItemsError } = await supabase
-          .from("client_pipeline_items")
-          .select("*, current_stage:company_pipeline_stages!client_pipeline_items_stage_pipeline_company_fkey(position)")
-          .eq("company_id", company.id)
-          .eq("client_id", client.id)
-          .eq("pipeline_id", rule.pipelineId)
-          .eq("lifecycle_status", "open")
-          .is("archived_at", null)
-          .order("renewal_at", { ascending: true, nullsFirst: false })
-          .order("created_at", { ascending: false })
-          .limit(1);
-        if (candidateItemsError) throw candidateItemsError;
-        const candidate = (candidateItems ?? [])[0] as
-          | (Record<string, unknown> & {
-              current_stage?: { position?: number | null } | null;
-            })
-          | undefined;
-        if (!candidate) {
-          pipelineWarning =
-            "Strategic Review was saved. No open Pipeline item was available to move.";
-        } else if (
-          Number(candidate.current_stage?.position ?? 0) <
-          Number(targetStage.position)
-        ) {
-          const { data: movedItem, error: moveError } = await supabase.rpc(
-            "mutate_pipeline_item_with_evidence",
-            {
-              p_company_id: company.id,
-              p_item_id: candidate.id,
-              p_activity: "stage_changed",
-              p_patch: {
-                stage_id: targetStage.id,
-                lifecycle_status: "open",
-              },
-              p_actor_auth_user_id: userData.user.id,
-              p_actor_member_id: actor.memberId,
-              p_actor_role: actor.role,
-              p_note: nullableText(body.notes),
-            },
-          );
-          if (moveError) {
-            pipelineWarning = `Strategic Review was saved, but Pipeline could not move: ${moveError.message}`;
-          } else {
-            pipelineItem = (Array.isArray(movedItem)
-              ? movedItem[0]
-              : movedItem) as Record<string, unknown> | null;
-          }
-        } else {
-          pipelineItem = candidate;
-        }
+        const result = (
+          Array.isArray(pipelineResult) ? pipelineResult[0] : pipelineResult
+        ) as Record<string, unknown> | null;
+        pipelineItem =
+          result?.item &&
+          typeof result.item === "object" &&
+          !Array.isArray(result.item)
+            ? (result.item as Record<string, unknown>)
+            : null;
+        pipelineWarning =
+          typeof result?.warning === "string" ? result.warning : null;
       }
     }
 

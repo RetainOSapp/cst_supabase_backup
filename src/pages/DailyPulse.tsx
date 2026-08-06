@@ -26,6 +26,7 @@ import {
   resolveClientIdentity,
   type ClientIdentityPreferences,
 } from "../lib/clientIdentity.ts";
+import { formatCalendarDate } from "../lib/calendarDate.ts";
 
 type PulseWindow = "today" | "week" | "month";
 type CsmRelationshipFilter = "both" | "primary" | "secondary";
@@ -273,8 +274,33 @@ function parseDate(value: string | null | undefined) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function localCalendarDateKey(value: string | Date | null | undefined) {
+  if (!value) return "";
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  const key = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : "";
+}
+
+function parseCalendarDate(value: string | null | undefined) {
+  const key = localCalendarDateKey(value);
+  if (!key) return null;
+  const date = new Date(`${key}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function isWithin(value: string | null | undefined, start: Date, end: Date) {
   const date = parseDate(value);
+  return Boolean(date && date >= start && date < end);
+}
+
+function isCalendarDateWithin(
+  value: string | null | undefined,
+  start: Date,
+  end: Date,
+) {
+  const date = parseCalendarDate(value);
   return Boolean(date && date >= start && date < end);
 }
 
@@ -286,13 +312,12 @@ function daysBetween(later: Date, earlier: Date) {
 }
 
 function dateOnlyIso(date: Date) {
-  return startOfDay(date).toISOString();
+  return `${localCalendarDateKey(date)}T12:00:00`;
 }
 
 function dateOnlyKey(value: string | Date | null | undefined) {
-  const date = value instanceof Date ? value : parseDate(value);
-  if (!date) return "";
-  return date.toISOString().slice(0, 10);
+  if (value instanceof Date) return localCalendarDateKey(value);
+  return localCalendarDateKey(value) || localCalendarDateKey(parseDate(value));
 }
 
 function checkpointCompletionKey(
@@ -675,14 +700,18 @@ function buildPulseSections(
         "Active clients whose current contract/renewal date lands in this period.",
       items: activeClients
         .filter((client) =>
-          isWithin(client.current_contract_end_date_for_filtering, range.start, range.end),
+          isCalendarDateWithin(
+            client.current_contract_end_date_for_filtering,
+            range.start,
+            range.end,
+          ),
         )
         .map((client) =>
           makeItem(
             `renewals-${window}`,
             client,
             "Renewal",
-            `Renewal date is ${formatDate(client.current_contract_end_date_for_filtering)}`,
+            `Renewal date is ${formatCalendarDate(client.current_contract_end_date_for_filtering)}`,
             "amber",
             client.current_contract_end_date_for_filtering,
           ),
@@ -748,7 +777,9 @@ function buildPulseSections(
         `Active clients ${strategicReviewLeadDays} days before renewal or contract end for ${strategicReviewLabel} planning.`,
       items: activeClients
         .map((client) => {
-          const contractEnd = parseDate(client.current_contract_end_date_for_filtering);
+          const contractEnd = parseCalendarDate(
+            client.current_contract_end_date_for_filtering,
+          );
           if (!contractEnd) return null;
           const reviewDate = addDays(startOfDay(contractEnd), -strategicReviewLeadDays);
           if (reviewDate < range.start || reviewDate >= range.end) return null;
@@ -765,8 +796,8 @@ function buildPulseSections(
                   completion.completed_by_name
                     ? ` by ${completion.completed_by_name}`
                     : ""
-                }. Renewal date is ${formatDate(client.current_contract_end_date_for_filtering)}`
-              : `${strategicReviewLabel} due before renewal on ${formatDate(client.current_contract_end_date_for_filtering)}`,
+                }. Renewal date is ${formatCalendarDate(client.current_contract_end_date_for_filtering)}`
+              : `${strategicReviewLabel} due before renewal on ${formatCalendarDate(client.current_contract_end_date_for_filtering)}`,
             completion ? "green" : "amber",
             dueAt,
             undefined,

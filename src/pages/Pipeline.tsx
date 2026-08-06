@@ -43,6 +43,7 @@ type DateWindow =
   | "this_month"
   | "next_month"
   | "month"
+  | "custom"
   | "no_date";
 
 const PIPELINE_VIEW_KEY = "retainOS.pipeline.view.v1";
@@ -1034,6 +1035,8 @@ export function Pipeline() {
   const [dateKind, setDateKind] = useState<DateKind>("follow_up");
   const [dateWindow, setDateWindow] = useState<DateWindow>("all");
   const [selectedMonth, setSelectedMonth] = useState(monthFromToday(0));
+  const [customDateFrom, setCustomDateFrom] = useState("");
+  const [customDateTo, setCustomDateTo] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [newItemDefaults, setNewItemDefaults] = useState<{ pipelineId?: string; clientId?: string }>({});
@@ -1258,9 +1261,17 @@ export function Pipeline() {
       if (dateWindow === "this_month" && (!value || value.slice(0, 7) !== monthFromToday(0))) return false;
       if (dateWindow === "next_month" && (!value || value.slice(0, 7) !== monthFromToday(1))) return false;
       if (dateWindow === "month" && (!value || value.slice(0, 7) !== selectedMonth)) return false;
+      if (
+        dateWindow === "custom" &&
+        (!value ||
+          !customDateFrom ||
+          !customDateTo ||
+          value < customDateFrom ||
+          value > customDateTo)
+      ) return false;
       return true;
     });
-  }, [dateKind, dateWindow, ownerFilter, pathwayFilter, search, secondaryAssigneeFilter, selectedMonth, visiblePipelineIds, workspace]);
+  }, [customDateFrom, customDateTo, dateKind, dateWindow, ownerFilter, pathwayFilter, search, secondaryAssigneeFilter, selectedMonth, visiblePipelineIds, workspace]);
 
   const stageById = useMemo(
     () => new Map((workspace?.stages ?? []).map((stage) => [stage.id, stage])),
@@ -1513,9 +1524,16 @@ export function Pipeline() {
     setPreviewingRenewals(true);
     setActionError(null);
     try {
-      setRenewalPreview(
-        await previewPipelineRenewals(effectiveCompanyId, renewalScanPipeline.id, renewalCohort),
+      const result = await previewPipelineRenewals(
+        effectiveCompanyId,
+        renewalScanPipeline.id,
+        renewalCohort,
       );
+      setRenewalPreview(result);
+      setDateKind("renewal");
+      setDateWindow("custom");
+      setCustomDateFrom(renewalCohort.renewalDateFrom);
+      setCustomDateTo(renewalCohort.renewalDateTo);
     } catch (reason) {
       setActionError(reason instanceof Error ? reason.message : "Unable to preview renewals.");
     } finally {
@@ -1572,13 +1590,13 @@ export function Pipeline() {
         <section className="mb-4 rounded-md border border-sky-200 bg-sky-50 px-4 py-3" aria-labelledby="renewal-cohort-title">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h2 id="renewal-cohort-title" className="text-sm font-semibold text-sky-950">Bounded initial renewal cohort</h2>
-              <p className="mt-1 text-xs text-sky-800">Choose explicit inclusive renewal dates and a hard cap of 100. Directors can preview this cohort only; only a Super Admin can run a matching server-bound preview.</p>
+              <h2 id="renewal-cohort-title" className="text-sm font-semibold text-sky-950">Preview and add renewal cards</h2>
+              <p className="mt-1 text-xs text-sky-800">Choose inclusive renewal dates. Previewing also applies the same Renewal date range to the board below. The 100-item limit is a per-run write safeguard; larger cohorts can be added in repeated reviewed batches.</p>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <label className="text-xs font-semibold text-[#344054]">Renewal from<input type="date" value={renewalCohort.renewalDateFrom} onChange={(event) => { setRenewalPreview(null); setRenewalCohort((current) => ({ ...current, renewalDateFrom: event.target.value })); }} className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm" /></label>
               <label className="text-xs font-semibold text-[#344054]">Renewal through<input type="date" value={renewalCohort.renewalDateTo} onChange={(event) => { setRenewalPreview(null); setRenewalCohort((current) => ({ ...current, renewalDateTo: event.target.value })); }} className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm" /></label>
-              <label className="text-xs font-semibold text-[#344054]">Maximum items<input type="number" min="1" max="100" value={renewalCohort.maxItems} onChange={(event) => { const raw = Number(event.target.value); const maxItems = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.trunc(raw))) : 1; setRenewalPreview(null); setRenewalCohort((current) => ({ ...current, maxItems })); }} className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm" /></label>
+              <label className="text-xs font-semibold text-[#344054]">Maximum items per run<input type="number" min="1" max="100" value={renewalCohort.maxItems} onChange={(event) => { const raw = Number(event.target.value); const maxItems = Number.isFinite(raw) ? Math.min(100, Math.max(1, Math.trunc(raw))) : 1; setRenewalPreview(null); setRenewalCohort((current) => ({ ...current, maxItems })); }} className="mt-1 block w-full rounded-md border border-[#d0d5dd] bg-white px-3 py-2 text-sm" /></label>
             </div>
           </div>
           {!cohortIsValid(renewalCohort) ? <p className="mt-2 text-xs font-semibold text-amber-800">Enter a valid date range and a cap from 1 to 100 before previewing.</p> : null}
@@ -1598,8 +1616,13 @@ export function Pipeline() {
           </div>
           <p className="mt-2 text-xs text-sky-800">
             Requested cohort: <strong>{formatDate(renewalCohort.renewalDateFrom)}</strong> through <strong>{formatDate(renewalCohort.renewalDateTo)}</strong>, capped at <strong>{renewalCohort.maxItems}</strong>.
-            Eligibility still respects the Renewal pipeline’s configured lead time, catch-up period, contract cadence, and client status.
+            Eligibility still respects the Renewal pipeline’s configured lead time, catch-up period, contract cadence, and client status. The board is now filtered to this same Renewal date range and shows cards that already exist.
           </p>
+          {renewalPreview.eligibleCount > selectedRenewalCount ? (
+            <p className="mt-2 text-xs font-semibold text-amber-900">
+              {(renewalPreview.eligibleCount - selectedRenewalCount).toLocaleString()} additional eligible renewal{renewalPreview.eligibleCount - selectedRenewalCount === 1 ? "" : "s"} remain outside this safe write batch. After running it, preview the same dates again to select the next batch.
+            </p>
+          ) : null}
           {!previewMatchesCohort(renewalPreview, renewalScanPipeline?.id, renewalCohort) ? <p className="mt-2 text-xs font-semibold text-amber-900">This API response is not bound to the requested cohort, so materialization remains disabled. It is safe to review only.</p> : null}
           {renewalPreview.candidates.length > 0 ? (
             <details className="mt-3 rounded-md border border-sky-200 bg-white/70 px-3 py-2">
@@ -1657,7 +1680,7 @@ export function Pipeline() {
           <label className="xl:col-span-2"><span className="retainos-field-label">Secondary assignee</span><select value={secondaryAssigneeFilter} onChange={(event) => setSecondaryAssigneeFilter(event.target.value)} className="retainos-input"><option value="">All secondary assignees</option>{secondaryAssignees.map((member) => <option key={member.id} value={member.id}>{member.name || "Unnamed member"}</option>)}</select></label>
           <label className="xl:col-span-2"><span className="retainos-field-label">Search clients</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Client or business name" className="retainos-input" /></label>
           <div className="xl:col-span-2"><span className="retainos-field-label">Timing type</span><div className="flex min-h-10 flex-wrap items-center gap-1 rounded-md border border-[#d0d5dd] bg-white p-1" aria-label="Timing type">{([{ value: "follow_up", label: "Follow-up", visible: true }, { value: "renewal", label: "Renewal", visible: visiblePipelineTypes.has("renewal") }, { value: "expected_close", label: "Expansion close", visible: visiblePipelineTypes.has("expansion") }] as { value: DateKind; label: string; visible: boolean }[]).filter((option) => option.visible).map((option) => <button key={option.value} type="button" aria-pressed={dateKind === option.value} onClick={() => setDateKind(option.value)} className={`rounded px-2.5 py-1.5 text-xs font-semibold ${dateKind === option.value ? "bg-[#162b3e] text-white" : "text-[#586273] hover:bg-[#f2f4f7]"}`}>{option.label}</button>)}</div></div>
-          <label className="xl:col-span-2"><span className="retainos-field-label">Time window</span><select value={dateWindow} onChange={(event) => setDateWindow(event.target.value as DateWindow)} className="retainos-input"><option value="all">Any date</option><option value="overdue">Overdue</option><option value="next_30">Next 30 days</option><option value="this_month">This month</option><option value="next_month">Next month</option><option value="month">Choose month…</option><option value="no_date">No date</option></select>{dateWindow === "month" ? <input aria-label={`Selected ${dateKind === "follow_up" ? "follow-up" : dateKind === "renewal" ? "renewal" : "expansion close"} month`} type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} className="retainos-input mt-2" /> : null}</label>
+          <label className="xl:col-span-2"><span className="retainos-field-label">Time window</span><select value={dateWindow} onChange={(event) => setDateWindow(event.target.value as DateWindow)} className="retainos-input"><option value="all">Any date</option><option value="overdue">Overdue</option><option value="next_30">Next 30 days</option><option value="this_month">This month</option><option value="next_month">Next month</option><option value="month">Choose month…</option><option value="custom">Custom range…</option><option value="no_date">No date</option></select>{dateWindow === "month" ? <input aria-label={`Selected ${dateKind === "follow_up" ? "follow-up" : dateKind === "renewal" ? "renewal" : "expansion close"} month`} type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} className="retainos-input mt-2" /> : null}{dateWindow === "custom" ? <span className="mt-2 grid grid-cols-2 gap-2"><input aria-label="Custom date from" type="date" value={customDateFrom} onChange={(event) => setCustomDateFrom(event.target.value)} className="retainos-input" /><input aria-label="Custom date through" type="date" value={customDateTo} onChange={(event) => setCustomDateTo(event.target.value)} className="retainos-input" /></span> : null}</label>
         </div>
         <div className="mt-4 flex justify-end"><div className="inline-flex rounded-lg border border-[#dce5ef] bg-white p-1"><button type="button" onClick={() => setViewMode("board")} className={`rounded-md px-4 py-1.5 text-sm font-semibold ${viewMode === "board" ? "bg-[#162b3e] text-white" : "text-[#586273]"}`}>Board</button><button type="button" onClick={() => setViewMode("list")} className={`rounded-md px-4 py-1.5 text-sm font-semibold ${viewMode === "list" ? "bg-[#162b3e] text-white" : "text-[#586273]"}`}>List</button></div></div>
       </section>
