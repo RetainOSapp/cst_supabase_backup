@@ -73,6 +73,18 @@ function acceptedTransition(payload) {
   );
 }
 
+function countBy(values, keyFor) {
+  return Object.fromEntries(
+    [...values.reduce((counts, value) => {
+      const key = keyFor(value);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      return counts;
+    }, new Map()).entries()].sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  );
+}
+
 function appRetainedAt(event) {
   return (
     timestamp(event.payload?.contract?.start_date) ??
@@ -147,7 +159,7 @@ async function main() {
       supabase
         .from("clients")
         .select(
-          "glide_row_id,client_name,program_status_value,archived_at,exclude_from_dashboard_analytics,client_age_date_offboarded,client_age_date_offboarded_for_filtering,current_contract_start_date,current_contract_of_days,current_contract_end_date,current_contract_end_date_for_filtering",
+          "glide_row_id,client_name,program_status_value,churn_reason_value,program_latest_suspended_date,archived_at,exclude_from_dashboard_analytics,client_age_date_offboarded,client_age_date_offboarded_for_filtering,current_contract_start_date,current_contract_of_days,current_contract_end_date,current_contract_end_date_for_filtering",
         )
         .eq("company_id", companyId)
         .range(from, to),
@@ -185,6 +197,7 @@ async function main() {
       timestamp(client.client_age_date_offboarded_for_filtering);
     return (
       client.program_status_value === "off-boarded" &&
+      !String(client.churn_reason_value ?? "").trim() &&
       offboardedAt !== null &&
       offboardedAt >= offboardLookbackStart
     );
@@ -323,6 +336,9 @@ async function main() {
     addedCohort.push({
       client_id: clientId,
       client_name: client.client_name,
+      churn_reason: client.churn_reason_value,
+      suspended_at: isoDay(client.program_latest_suspended_date),
+      offboarded_at: isoDay(offboardedAt),
       retained: periodContracts.some((contract) => contract.retainedAt !== null),
       contract_end_dates: periodContracts.map((contract) =>
         isoDay(contract.contractEnd),
@@ -350,11 +366,48 @@ async function main() {
   );
   if (currentResult.error) throw currentResult.error;
   const current = currentResult.data?.[0] ?? {};
-  const addedRetained = addedCohort.filter((client) => client.retained).length;
-  const projectedEligible =
-    Number(current.renewal_cohort_clients ?? 0) + addedCohort.length;
-  const projectedRetained =
-    Number(current.retained_clients ?? 0) + addedRetained;
+  const currentCohortIds = new Set(current.renewal_cohort_client_ids ?? []);
+  const currentRetainedIds = new Set(current.retained_client_ids ?? []);
+  const missingCohort = addedCohort.filter(
+    (client) => !currentCohortIds.has(client.client_id),
+  );
+  const missingRetained = missingCohort.filter((client) => client.retained);
+  const expectedEligible =
+    Number(current.renewal_cohort_clients ?? 0) + missingCohort.length;
+  const expectedRetained =
+    Number(current.retained_clients ?? 0) + missingRetained.length;
+  const currentActiveUnresolved = [...currentCohortIds].filter((clientId) => {
+    const client = clientById.get(clientId);
+    return (
+      client &&
+      ["front-end", "back-end"].includes(client.program_status_value) &&
+      !currentRetainedIds.has(clientId)
+    );
+  }).length;
+  const reconstructedOffboardedIds = new Set(
+    addedCohort.map((client) => client.client_id),
+  );
+  const currentOffboardedNotReconstructed = [...currentCohortIds]
+    .map((clientId) => clientById.get(clientId))
+    .filter(
+      (client) =>
+        client?.program_status_value === "off-boarded" &&
+        !reconstructedOffboardedIds.has(client.glide_row_id),
+    )
+    .map((client) => ({
+      client_id: client.glide_row_id,
+      client_name: client.client_name,
+      churn_reason: client.churn_reason_value,
+      suspended_at: isoDay(client.program_latest_suspended_date),
+      offboarded_at: isoDay(
+        client.client_age_date_offboarded ??
+          client.client_age_date_offboarded_for_filtering,
+      ),
+      summary_contract_end: isoDay(
+        client.current_contract_end_date_for_filtering ??
+          client.current_contract_end_date,
+      ),
+    }));
 
   console.log(
     JSON.stringify(
@@ -366,21 +419,33 @@ async function main() {
           eligible: Number(current.renewal_cohort_clients ?? 0),
           retained: Number(current.retained_clients ?? 0),
         },
-        restored_normal_completions: {
+        reconstructed_normal_completions: {
           eligible: addedCohort.length,
-          retained: addedRetained,
+          retained: addedCohort.filter((client) => client.retained).length,
+          churn_reasons: countBy(
+            addedCohort,
+            (client) => client.churn_reason ?? "(none)",
+          ),
         },
-        projected: {
-          eligible: projectedEligible,
-          retained: projectedRetained,
-          active_unresolved:
-            Number(current.renewal_cohort_clients ?? 0) -
-            Number(current.retained_clients ?? 0),
+        missing_from_current_scope: {
+          eligible: missingCohort.length,
+          retained: missingRetained.length,
+        },
+        expected_after_fix: {
+          eligible: expectedEligible,
+          retained: expectedRetained,
+          active_unresolved: currentActiveUnresolved,
           retention_percentage:
-            projectedEligible === 0
+            expectedEligible === 0
               ? 0
-              : Math.round((projectedRetained / projectedEligible) * 100),
+              : Math.round((expectedRetained / expectedEligible) * 100),
         },
+        live_matches_expected:
+          missingCohort.length === 0 &&
+          missingRetained.length === 0,
+        missing_normal_completion_examples: missingCohort.slice(0, 20),
+        current_offboarded_not_reconstructed:
+          currentOffboardedNotReconstructed.slice(0, 20),
         retained_normal_completion_examples: addedCohort
           .filter((client) => client.retained)
           .slice(0, 20),

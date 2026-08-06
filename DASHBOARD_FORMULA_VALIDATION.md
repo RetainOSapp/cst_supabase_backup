@@ -211,6 +211,8 @@ Exclusions:
 - `suspended`.
 - Early offboards/drop-offs where the recorded offboard date is before the
   relevant contract end.
+- Offboarded clients with a recorded churn reason, including MIA
+  auto-offboards.
 - Offboarded legacy records with no actual offboard date.
 
 The Up For Renewal card deliberately separates two values:
